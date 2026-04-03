@@ -1,6 +1,7 @@
 service:
   endpoint_id: "host-dev-01"
   tick_interval: "1s"
+  pid_file: "./alerts/agent.pid"
 rules_file: "rules/baseline.yaml"
 
 logging:
@@ -10,6 +11,15 @@ logging:
 
 response:
   allow_kill: true
+  auto_kill_enabled: true
+  min_kill_score: 90
+  kill_rule_allowlist:
+    - "PROC-003"
+    - "PROC-004"
+    - "PROC-005"
+    - "PROC-007"
+    - "PROC-009"
+    - "PROC-012"
   protected_processes:
     - "systemd"
     - "launchd"

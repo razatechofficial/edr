@@ -11,6 +11,7 @@ type Config struct {
 	Service struct {
 		EndpointID   string        `yaml:"endpoint_id"`
 		TickInterval time.Duration `yaml:"tick_interval"`
+		PIDFile      string        `yaml:"pid_file"`
 	} `yaml:"service"`
 	Logging struct {
 		Level     string `yaml:"level"`
@@ -19,6 +20,9 @@ type Config struct {
 	} `yaml:"logging"`
 	Response struct {
 		AllowKill          bool     `yaml:"allow_kill"`
+		AutoKillEnabled    bool     `yaml:"auto_kill_enabled"`
+		MinKillScore       int      `yaml:"min_kill_score"`
+		KillRuleAllowlist  []string `yaml:"kill_rule_allowlist"`
 		ProtectedProcesses []string `yaml:"protected_processes"`
 	} `yaml:"response"`
 	Forwarder struct {
@@ -43,6 +47,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.RulesFile == "" {
 		cfg.RulesFile = "rules/baseline.yaml"
+	}
+	if cfg.Response.MinKillScore <= 0 {
+		cfg.Response.MinKillScore = 90
 	}
 	return cfg, nil
 }

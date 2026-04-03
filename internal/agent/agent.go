@@ -13,6 +13,7 @@ import (
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/detect"
 	"github.com/razatechofficial/edr/internal/forwarder"
+	"github.com/razatechofficial/edr/internal/pidfile"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/rules"
 	"github.com/razatechofficial/edr/internal/schema"
@@ -30,6 +31,7 @@ type Agent struct {
 	responder  *response.Responder
 	writer     *alert.Writer
 	forwarder  forwarder.Forwarder
+	killAllow  map[string]struct{}
 }
 
 func NewDefault() (*Agent, error) {
@@ -59,6 +61,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		detector:   detect.NewEngine(rs),
 		responder:  response.NewResponder(cfg.Response.AllowKill, cfg.Response.ProtectedProcesses),
 		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
+		killAllow:  makeRuleAllowlist(cfg.Response.KillRuleAllowlist),
 	}
 	if cfg.Forwarder.Enabled {
 		fw, err := forwarder.New(cfg.Forwarder.Mode, cfg.Forwarder.Endpoint, a.logger)
@@ -75,23 +78,37 @@ func NewForTesting(cfg config.Config, rs rules.RuleSet) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewForTestingWithCollectors(cfg, rs, []collector.Collector{pc}), nil
+}
+
+func NewForTestingWithCollectors(cfg config.Config, rs rules.RuleSet, collectors []collector.Collector) *Agent {
 	a := &Agent{
 		logger:     slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		cfg:        cfg,
-		collectors: []collector.Collector{pc},
+		collectors: collectors,
 		ruleSet:    rs,
 		eventSpool: spool.NewQueue[schema.ProcessEvent](),
 		alertSpool: spool.NewQueue[schema.Alert](),
 		detector:   detect.NewEngine(rs),
 		responder:  response.NewResponder(cfg.Response.AllowKill, cfg.Response.ProtectedProcesses),
 		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),
+		killAllow:  makeRuleAllowlist(cfg.Response.KillRuleAllowlist),
 	}
-	return a, nil
+	return a
 }
 
 func (a *Agent) Run(ctx context.Context) error {
 	if len(a.collectors) == 0 {
 		return errors.New("no collectors configured")
+	}
+	if a.cfg.Service.PIDFile != "" {
+		if err := pidfile.Write(a.cfg.Service.PIDFile); err != nil {
+			a.logger.Error("pidfile write failed", "path", a.cfg.Service.PIDFile, "error", err)
+		} else {
+			defer func() {
+				_ = pidfile.Remove(a.cfg.Service.PIDFile)
+			}()
+		}
 	}
 	a.logger.Info("agent started")
 	a.logger.Info("rules loaded", "count", len(a.ruleSet.Rules))
@@ -131,12 +148,12 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 						a.logger.Error("forward alert failed", "error", err)
 					}
 				}
-				if al.Severity == schema.SeverityCritical {
+				if a.shouldAutoKill(al) {
 					res := a.responder.Execute(schema.ResponseCommand{
 						SchemaVersion: schema.SchemaVersionV1,
 						Action:        schema.ResponseKillProcess,
 						ProcessPID:    al.ProcessPID,
-						FilePath:      al.ProcessName,
+						ProcessName:   al.ProcessName,
 					})
 					_ = a.writer.WriteAudit(schema.AuditRecord{
 						SchemaVersion: schema.SchemaVersionV1,
@@ -151,4 +168,26 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func makeRuleAllowlist(ruleIDs []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(ruleIDs))
+	for _, id := range ruleIDs {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+func (a *Agent) shouldAutoKill(al schema.Alert) bool {
+	if !a.cfg.Response.AllowKill || !a.cfg.Response.AutoKillEnabled {
+		return false
+	}
+	if al.Score < a.cfg.Response.MinKillScore {
+		return false
+	}
+	if len(a.killAllow) == 0 {
+		return true
+	}
+	_, ok := a.killAllow[al.RuleID]
+	return ok
 }

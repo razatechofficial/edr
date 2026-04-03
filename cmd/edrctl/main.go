@@ -6,15 +6,18 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"strconv"
+	"syscall"
 
+	"github.com/razatechofficial/edr/internal/pidfile"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/schema"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: edrctl <alerts|kill>")
+		log.Fatal("usage: edrctl <alerts|kill|stop>")
 	}
 	switch os.Args[1] {
 	case "alerts":
@@ -38,9 +41,36 @@ func main() {
 			SchemaVersion: schema.SchemaVersionV1,
 			Action:        schema.ResponseKillProcess,
 			ProcessPID:    pid,
-			FilePath:      "manual",
+			ProcessName:   "manual",
 		})
 		fmt.Printf("kill result: success=%t message=%s\n", res.Success, res.Message)
+	case "stop":
+		pidPath := "./alerts/agent.pid"
+		if len(os.Args) >= 3 {
+			pidPath = os.Args[2]
+		}
+		pid, err := pidfile.ReadPID(pidPath)
+		if err != nil {
+			log.Fatalf("read pidfile: %v", err)
+		}
+		p, err := os.FindProcess(pid)
+		if err != nil {
+			log.Fatalf("find process: %v", err)
+		}
+		var stopErr error
+		if runtime.GOOS == "windows" {
+			stopErr = p.Kill()
+		} else {
+			stopErr = p.Signal(syscall.SIGTERM)
+		}
+		if stopErr != nil {
+			log.Fatalf("stop: %v", stopErr)
+		}
+		if runtime.GOOS == "windows" {
+			fmt.Printf("terminated pid %d (from %s)\n", pid, pidPath)
+		} else {
+			fmt.Printf("sent SIGTERM to pid %d (from %s)\n", pid, pidPath)
+		}
 	default:
 		log.Fatalf("unknown command: %s", os.Args[1])
 	}
