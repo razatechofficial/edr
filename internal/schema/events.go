@@ -28,6 +28,7 @@ type ProcessEvent struct {
 	BaseEvent
 	PID         int      `json:"pid"`
 	PPID        int      `json:"ppid"`
+	ParentName  string   `json:"parent_name,omitempty"`
 	ProcessName string   `json:"process_name"`
 	ProcessPath string   `json:"process_path"`
 	CommandLine string   `json:"command_line"`

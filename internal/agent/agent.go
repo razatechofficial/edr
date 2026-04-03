@@ -8,6 +8,7 @@ import (
 
 	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/detect"
 	"github.com/razatechofficial/edr/internal/rules"
 	"github.com/razatechofficial/edr/internal/schema"
 	"github.com/razatechofficial/edr/internal/spool"
@@ -19,6 +20,8 @@ type Agent struct {
 	collectors []collector.Collector
 	ruleSet    rules.RuleSet
 	eventSpool *spool.Queue[schema.ProcessEvent]
+	alertSpool *spool.Queue[schema.Alert]
+	detector   *detect.Engine
 }
 
 func NewDefault() (*Agent, error) {
@@ -40,6 +43,8 @@ func NewDefault() (*Agent, error) {
 		collectors: []collector.Collector{pc},
 		ruleSet:    rs,
 		eventSpool: spool.NewQueue[schema.ProcessEvent](),
+		alertSpool: spool.NewQueue[schema.Alert](),
+		detector:   detect.NewEngine(rs),
 	}, nil
 }
 
@@ -67,6 +72,10 @@ func (a *Agent) Run(ctx context.Context) error {
 				}
 				for _, ev := range events {
 					a.eventSpool.Push(ev)
+					alerts := a.detector.EvaluateProcess(ev)
+					for _, al := range alerts {
+						a.alertSpool.Push(al)
+					}
 				}
 			}
 		}

@@ -42,6 +42,7 @@ func (c *ProcessCollector) Collect(context.Context) ([]schema.ProcessEvent, erro
 		},
 		PID:         os.Getpid(),
 		PPID:        os.Getppid(),
+		ParentName:  "",
 		ProcessName: "edr-agent",
 		ProcessPath: os.Args[0],
 		CommandLine: "",
