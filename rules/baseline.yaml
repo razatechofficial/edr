@@ -1,0 +1,13 @@
+version: "1"
+rules:
+  - id: "PROC-001"
+    name: "Suspicious shell child"
+    severity: "high"
+    when:
+      parent_in: ["cmd.exe", "powershell.exe", "bash", "sh"]
+      child_in: ["powershell.exe", "curl", "wget"]
+  - id: "PROC-002"
+    name: "Temp directory execution"
+    severity: "high"
+    when:
+      process_path_contains: ["/tmp/", "\\AppData\\Local\\Temp\\"]

@@ -1,0 +1,20 @@
+service:
+  endpoint_id: "host-dev-01"
+  tick_interval: "1s"
+
+logging:
+  level: "info"
+  alert_file: "./alerts/alerts.jsonl"
+  audit_file: "./alerts/audit.jsonl"
+
+response:
+  allow_kill: true
+  protected_processes:
+    - "systemd"
+    - "launchd"
+    - "wininit.exe"
+
+forwarder:
+  enabled: false
+  mode: "http"
+  endpoint: "http://localhost:8080/ingest"
