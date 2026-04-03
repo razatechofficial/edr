@@ -6,9 +6,12 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/detect"
+	"github.com/razatechofficial/edr/internal/forwarder"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/rules"
 	"github.com/razatechofficial/edr/internal/schema"
@@ -24,6 +27,8 @@ type Agent struct {
 	alertSpool *spool.Queue[schema.Alert]
 	detector   *detect.Engine
 	responder  *response.Responder
+	writer     *alert.Writer
+	forwarder  forwarder.Forwarder
 }
 
 func NewDefault() (*Agent, error) {
@@ -39,7 +44,7 @@ func NewDefault() (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Agent{
+	a := &Agent{
 		logger:     slog.Default(),
 		cfg:        cfg,
 		collectors: []collector.Collector{pc},
@@ -48,7 +53,16 @@ func NewDefault() (*Agent, error) {
 		alertSpool: spool.NewQueue[schema.Alert](),
 		detector:   detect.NewEngine(rs),
 		responder:  response.NewResponder(cfg.Response.AllowKill, cfg.Response.ProtectedProcesses),
-	}, nil
+		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
+	}
+	if cfg.Forwarder.Enabled {
+		fw, err := forwarder.New(cfg.Forwarder.Mode, cfg.Forwarder.Endpoint, a.logger)
+		if err != nil {
+			return nil, err
+		}
+		a.forwarder = fw
+	}
+	return a, nil
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -78,6 +92,14 @@ func (a *Agent) Run(ctx context.Context) error {
 					alerts := a.detector.EvaluateProcess(ev)
 					for _, al := range alerts {
 						a.alertSpool.Push(al)
+						if err := a.writer.WriteAlert(al); err != nil {
+							a.logger.Error("write alert failed", "error", err)
+						}
+						if a.forwarder != nil {
+							if err := a.forwarder.Send(al); err != nil {
+								a.logger.Error("forward alert failed", "error", err)
+							}
+						}
 						if al.Severity == schema.SeverityCritical {
 							res := a.responder.Execute(schema.ResponseCommand{
 								SchemaVersion: schema.SchemaVersionV1,
@@ -86,6 +108,14 @@ func (a *Agent) Run(ctx context.Context) error {
 								FilePath:      al.ProcessName,
 							})
 							a.logger.Info("response executed", "success", res.Success, "msg", res.Message)
+							_ = a.writer.WriteAudit(schema.AuditRecord{
+								SchemaVersion: schema.SchemaVersionV1,
+								RecordID:      uuid.NewString(),
+								Action:        "kill_process",
+								Outcome:       map[bool]string{true: "success", false: "failure"}[res.Success],
+								Message:       res.Message,
+								Timestamp:     time.Now().UTC(),
+							})
 						}
 					}
 				}
