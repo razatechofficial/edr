@@ -9,6 +9,7 @@ import (
 	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/detect"
+	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/rules"
 	"github.com/razatechofficial/edr/internal/schema"
 	"github.com/razatechofficial/edr/internal/spool"
@@ -22,6 +23,7 @@ type Agent struct {
 	eventSpool *spool.Queue[schema.ProcessEvent]
 	alertSpool *spool.Queue[schema.Alert]
 	detector   *detect.Engine
+	responder  *response.Responder
 }
 
 func NewDefault() (*Agent, error) {
@@ -45,6 +47,7 @@ func NewDefault() (*Agent, error) {
 		eventSpool: spool.NewQueue[schema.ProcessEvent](),
 		alertSpool: spool.NewQueue[schema.Alert](),
 		detector:   detect.NewEngine(rs),
+		responder:  response.NewResponder(cfg.Response.AllowKill, cfg.Response.ProtectedProcesses),
 	}, nil
 }
 
@@ -75,6 +78,15 @@ func (a *Agent) Run(ctx context.Context) error {
 					alerts := a.detector.EvaluateProcess(ev)
 					for _, al := range alerts {
 						a.alertSpool.Push(al)
+						if al.Severity == schema.SeverityCritical {
+							res := a.responder.Execute(schema.ResponseCommand{
+								SchemaVersion: schema.SchemaVersionV1,
+								Action:        schema.ResponseKillProcess,
+								ProcessPID:    al.ProcessPID,
+								FilePath:      al.ProcessName,
+							})
+							a.logger.Info("response executed", "success", res.Success, "msg", res.Message)
+						}
 					}
 				}
 			}
