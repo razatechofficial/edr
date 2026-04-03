@@ -1,6 +1,7 @@
 service:
   endpoint_id: "host-dev-01"
   tick_interval: "1s"
+rules_file: "rules/baseline.yaml"
 
 logging:
   level: "info"

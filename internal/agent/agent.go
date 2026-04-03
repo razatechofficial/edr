@@ -2,20 +2,73 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"time"
+
+	"github.com/razatechofficial/edr/internal/collector"
+	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/rules"
+	"github.com/razatechofficial/edr/internal/schema"
+	"github.com/razatechofficial/edr/internal/spool"
 )
 
 type Agent struct {
-	logger *slog.Logger
+	logger     *slog.Logger
+	cfg        config.Config
+	collectors []collector.Collector
+	ruleSet    rules.RuleSet
+	eventSpool *spool.Queue[schema.ProcessEvent]
 }
 
 func NewDefault() (*Agent, error) {
-	return &Agent{logger: slog.Default()}, nil
+	cfg, err := config.Load("configs/agent.example.yaml")
+	if err != nil {
+		return nil, err
+	}
+	pc, err := collector.NewProcessCollector(cfg.Service.EndpointID)
+	if err != nil {
+		return nil, err
+	}
+	rs, err := rules.Load(cfg.RulesFile)
+	if err != nil {
+		return nil, err
+	}
+	return &Agent{
+		logger:     slog.Default(),
+		cfg:        cfg,
+		collectors: []collector.Collector{pc},
+		ruleSet:    rs,
+		eventSpool: spool.NewQueue[schema.ProcessEvent](),
+	}, nil
 }
 
 func (a *Agent) Run(ctx context.Context) error {
+	if len(a.collectors) == 0 {
+		return errors.New("no collectors configured")
+	}
 	a.logger.Info("agent started")
-	<-ctx.Done()
-	a.logger.Info("agent stopped")
-	return nil
+	a.logger.Info("rules loaded", "count", len(a.ruleSet.Rules))
+
+	ticker := time.NewTicker(a.cfg.Service.TickInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			a.logger.Info("agent stopped")
+			return nil
+		case <-ticker.C:
+			for _, c := range a.collectors {
+				events, err := c.Collect(ctx)
+				if err != nil {
+					a.logger.Error("collect failed", "collector", c.Name(), "error", err)
+					continue
+				}
+				for _, ev := range events {
+					a.eventSpool.Push(ev)
+				}
+			}
+		}
+	}
 }
