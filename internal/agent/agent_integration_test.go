@@ -1,0 +1,51 @@
+package agent
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/rules"
+)
+
+func TestProcessCycleWritesAlertFile(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{}
+	cfg.Service.EndpointID = "ep-test"
+	cfg.Service.TickInterval = time.Millisecond * 50
+	cfg.Logging.AlertFile = filepath.Join(dir, "alerts.jsonl")
+	cfg.Logging.AuditFile = filepath.Join(dir, "audit.jsonl")
+	cfg.Response.AllowKill = false
+
+	rs := rules.RuleSet{
+		Version: "1",
+		Rules: []rules.Rule{
+			{
+				ID:       "PROC-TEST",
+				Name:     "Any agent process",
+				Severity: "high",
+				When: struct {
+					ParentIn            []string "yaml:\"parent_in\""
+					ChildIn             []string "yaml:\"child_in\""
+					ProcessPathContains []string "yaml:\"process_path_contains\""
+				}{
+					ChildIn: []string{"edr-agent"},
+				},
+			},
+		},
+	}
+
+	a, err := NewForTesting(cfg, rs)
+	if err != nil {
+		t.Fatalf("new test agent: %v", err)
+	}
+	if err := a.ProcessCycle(context.Background()); err != nil {
+		t.Fatalf("process cycle: %v", err)
+	}
+	if _, err := os.Stat(cfg.Logging.AlertFile); err != nil {
+		t.Fatalf("expected alert file to exist: %v", err)
+	}
+}

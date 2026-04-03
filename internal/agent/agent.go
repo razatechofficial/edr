@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,7 +33,11 @@ type Agent struct {
 }
 
 func NewDefault() (*Agent, error) {
-	cfg, err := config.Load("configs/agent.example.yaml")
+	return NewWithFiles("configs/agent.example.yaml")
+}
+
+func NewWithFiles(configPath string) (*Agent, error) {
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +70,25 @@ func NewDefault() (*Agent, error) {
 	return a, nil
 }
 
+func NewForTesting(cfg config.Config, rs rules.RuleSet) (*Agent, error) {
+	pc, err := collector.NewProcessCollector(cfg.Service.EndpointID)
+	if err != nil {
+		return nil, err
+	}
+	a := &Agent{
+		logger:     slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		cfg:        cfg,
+		collectors: []collector.Collector{pc},
+		ruleSet:    rs,
+		eventSpool: spool.NewQueue[schema.ProcessEvent](),
+		alertSpool: spool.NewQueue[schema.Alert](),
+		detector:   detect.NewEngine(rs),
+		responder:  response.NewResponder(cfg.Response.AllowKill, cfg.Response.ProtectedProcesses),
+		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),
+	}
+	return a, nil
+}
+
 func (a *Agent) Run(ctx context.Context) error {
 	if len(a.collectors) == 0 {
 		return errors.New("no collectors configured")
@@ -81,45 +105,50 @@ func (a *Agent) Run(ctx context.Context) error {
 			a.logger.Info("agent stopped")
 			return nil
 		case <-ticker.C:
-			for _, c := range a.collectors {
-				events, err := c.Collect(ctx)
-				if err != nil {
-					a.logger.Error("collect failed", "collector", c.Name(), "error", err)
-					continue
+			if err := a.ProcessCycle(ctx); err != nil {
+				a.logger.Error("process cycle failed", "error", err)
+			}
+		}
+	}
+}
+
+func (a *Agent) ProcessCycle(ctx context.Context) error {
+	for _, c := range a.collectors {
+		events, err := c.Collect(ctx)
+		if err != nil {
+			return err
+		}
+		for _, ev := range events {
+			a.eventSpool.Push(ev)
+			alerts := a.detector.EvaluateProcess(ev)
+			for _, al := range alerts {
+				a.alertSpool.Push(al)
+				if err := a.writer.WriteAlert(al); err != nil {
+					return err
 				}
-				for _, ev := range events {
-					a.eventSpool.Push(ev)
-					alerts := a.detector.EvaluateProcess(ev)
-					for _, al := range alerts {
-						a.alertSpool.Push(al)
-						if err := a.writer.WriteAlert(al); err != nil {
-							a.logger.Error("write alert failed", "error", err)
-						}
-						if a.forwarder != nil {
-							if err := a.forwarder.Send(al); err != nil {
-								a.logger.Error("forward alert failed", "error", err)
-							}
-						}
-						if al.Severity == schema.SeverityCritical {
-							res := a.responder.Execute(schema.ResponseCommand{
-								SchemaVersion: schema.SchemaVersionV1,
-								Action:        schema.ResponseKillProcess,
-								ProcessPID:    al.ProcessPID,
-								FilePath:      al.ProcessName,
-							})
-							a.logger.Info("response executed", "success", res.Success, "msg", res.Message)
-							_ = a.writer.WriteAudit(schema.AuditRecord{
-								SchemaVersion: schema.SchemaVersionV1,
-								RecordID:      uuid.NewString(),
-								Action:        "kill_process",
-								Outcome:       map[bool]string{true: "success", false: "failure"}[res.Success],
-								Message:       res.Message,
-								Timestamp:     time.Now().UTC(),
-							})
-						}
+				if a.forwarder != nil {
+					if err := a.forwarder.Send(al); err != nil {
+						a.logger.Error("forward alert failed", "error", err)
 					}
+				}
+				if al.Severity == schema.SeverityCritical {
+					res := a.responder.Execute(schema.ResponseCommand{
+						SchemaVersion: schema.SchemaVersionV1,
+						Action:        schema.ResponseKillProcess,
+						ProcessPID:    al.ProcessPID,
+						FilePath:      al.ProcessName,
+					})
+					_ = a.writer.WriteAudit(schema.AuditRecord{
+						SchemaVersion: schema.SchemaVersionV1,
+						RecordID:      uuid.NewString(),
+						Action:        "kill_process",
+						Outcome:       map[bool]string{true: "success", false: "failure"}[res.Success],
+						Message:       res.Message,
+						Timestamp:     time.Now().UTC(),
+					})
 				}
 			}
 		}
 	}
+	return nil
 }
