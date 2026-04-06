@@ -18,7 +18,7 @@ func TestProcessCycleWritesAlertFile(t *testing.T) {
 	cfg.Service.TickInterval = time.Millisecond * 50
 	cfg.Logging.AlertFile = filepath.Join(dir, "alerts.jsonl")
 	cfg.Logging.AuditFile = filepath.Join(dir, "audit.jsonl")
-	cfg.Response.AllowKill = false
+	cfg.LegacyResponse.AllowKill = false
 
 	rs := rules.RuleSet{
 		Version: "1",

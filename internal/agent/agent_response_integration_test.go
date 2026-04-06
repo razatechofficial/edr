@@ -35,11 +35,11 @@ func TestProcessCycleMonitoringResponseAndAudit(t *testing.T) {
 	cfg.Service.EndpointID = "ep-test"
 	cfg.Logging.AlertFile = filepath.Join(dir, "alerts.jsonl")
 	cfg.Logging.AuditFile = filepath.Join(dir, "audit.jsonl")
-	cfg.Response.AllowKill = true
-	cfg.Response.AutoKillEnabled = true
-	cfg.Response.MinKillScore = 90
-	cfg.Response.KillRuleAllowlist = []string{"PROC-CRIT"}
-	cfg.Response.ProtectedProcesses = []string{"systemd"}
+	cfg.LegacyResponse.AllowKill = true
+	cfg.LegacyResponse.AutoKillEnabled = true
+	cfg.LegacyResponse.MinKillScore = 90
+	cfg.LegacyResponse.KillRuleAllowlist = []string{"PROC-CRIT"}
+	cfg.LegacyResponse.ProtectedProcesses = []string{"systemd"}
 
 	rs := rules.RuleSet{
 		Version: "1",
