@@ -32,7 +32,7 @@ BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror
 .PHONY: test test-detection test-response test-race test-coverage
 .PHONY: rules-update intel-update models-update
 .PHONY: install-linux install-darwin
-.PHONY: package clean fmt lint vet
+.PHONY: package package-deb package-rpm package-pkg package-msi clean fmt lint vet
 
 # ============================================================================
 # Build targets
@@ -176,24 +176,36 @@ install-darwin: build-darwin
 package: build-all
 	@echo "==> Creating release packages"
 	@mkdir -p $(PACKAGE_DIR)
-	@# Linux amd64
 	tar czf $(PACKAGE_DIR)/edr-$(VERSION)-linux-amd64.tar.gz \
 		-C $(BIN_DIR) edr-agent-linux-amd64 edr-installer-linux-amd64 edrctl-linux-amd64 \
 		-C .. configs/agent.yaml configs/agent.gov.yaml configs/agent.airgap.yaml \
 		scripts/install.sh
-	@# macOS amd64
 	tar czf $(PACKAGE_DIR)/edr-$(VERSION)-darwin-amd64.tar.gz \
 		-C $(BIN_DIR) edr-agent-darwin-amd64 edrctl-darwin-amd64 \
 		-C .. configs/agent.yaml scripts/install.sh
-	@# macOS arm64
 	tar czf $(PACKAGE_DIR)/edr-$(VERSION)-darwin-arm64.tar.gz \
 		-C $(BIN_DIR) edr-agent-darwin-arm64 edrctl-darwin-arm64 \
 		-C .. configs/agent.yaml scripts/install.sh
-	@# Windows amd64
 	cd $(BIN_DIR) && zip ../$(PACKAGE_DIR)/edr-$(VERSION)-windows-amd64.zip \
 		edr-agent-windows-amd64.exe edrctl-windows-amd64.exe
 	@echo "==> Packages created in $(PACKAGE_DIR)/"
 	@ls -lh $(PACKAGE_DIR)/
+
+package-deb: build-linux
+	@echo "==> Creating .deb package"
+	./scripts/package_linux.sh
+
+package-rpm: build-linux
+	@echo "==> Creating .rpm package"
+	EDR_SKIP_DEB=1 ./scripts/package_linux.sh
+
+package-pkg: build-darwin
+	@echo "==> Creating macOS .pkg installer"
+	./scripts/package_macos.sh
+
+package-msi: build-windows
+	@echo "==> Creating Windows installer zip"
+	./scripts/package_windows.sh
 
 # ============================================================================
 # Code quality
