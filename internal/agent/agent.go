@@ -3,21 +3,28 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
+
 	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/detect"
+	"github.com/razatechofficial/edr/internal/detection"
+	"github.com/razatechofficial/edr/internal/detection/llm"
+	"github.com/razatechofficial/edr/internal/detection/llm/providers"
 	"github.com/razatechofficial/edr/internal/forwarder"
 	"github.com/razatechofficial/edr/internal/pidfile"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/rules"
 	"github.com/razatechofficial/edr/internal/schema"
 	"github.com/razatechofficial/edr/internal/spool"
+	"github.com/razatechofficial/edr/pkg/events"
 )
 
 type Agent struct {
@@ -28,11 +35,14 @@ type Agent struct {
 	eventSpool *spool.Queue[schema.ProcessEvent]
 	alertSpool *spool.Queue[schema.Alert]
 	detector   *detect.Engine
+	advEngine  *detection.Engine
+	llmEngine  *llm.Engine
 	responder  *response.Responder
 	writer     *alert.Writer
 	forwarder  forwarder.Forwarder
 	forwardDrain forwarder.Drainer
 	killAllow  map[string]struct{}
+	zapLogger  *zap.Logger
 }
 
 func NewDefault() (*Agent, error) {
@@ -57,6 +67,9 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	zapLogger, _ := zap.NewProduction()
+
 	a := &Agent{
 		logger:     slog.Default(),
 		cfg:        cfg,
@@ -68,7 +81,13 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		responder:  response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
 		killAllow:  makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		zapLogger:  zapLogger,
 	}
+
+	if err := a.initAdvancedDetection(); err != nil {
+		a.logger.Warn("advanced detection engine init failed, using basic rules only", "error", err)
+	}
+
 	if cfg.Forwarder.Enabled {
 		fw, dr, err := forwarder.New(forwarder.Config{
 			Mode:         cfg.Forwarder.Mode,
@@ -86,6 +105,59 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		a.forwardDrain = dr
 	}
 	return a, nil
+}
+
+func (a *Agent) initAdvancedDetection() error {
+	ecfg := detection.EngineConfig{
+		BehavioralEnabled: true,
+		SigmaEnabled:      a.cfg.Detection.Sigma.Enabled,
+		YARAEnabled:       a.cfg.Detection.YARA.Enabled,
+		IOCEnabled:        a.cfg.Detection.IOC.Enabled,
+		MLEnabled:         a.cfg.ML.Enabled,
+		LLMEnabled:        a.cfg.LLM.Enabled,
+		SigmaRulesDir:     a.cfg.Detection.Sigma.RulesDir,
+		YARARulesDir:      a.cfg.Detection.YARA.RulesDir,
+		IOCHashDBPath:     a.cfg.Detection.IOC.HashDBPath,
+		IOCIPDBPath:       a.cfg.Detection.IOC.IPDBPath,
+		IOCDomainDBPath:   a.cfg.Detection.IOC.DomainDBPath,
+		MLModelsDir:       a.cfg.ML.ModelsDir,
+		WorkerCount:       4,
+	}
+
+	eng, err := detection.NewEngine(ecfg, a.zapLogger)
+	if err != nil {
+		return fmt.Errorf("detection engine: %w", err)
+	}
+	a.advEngine = eng
+
+	grokKey := os.Getenv("GROK_API_KEY")
+	if grokKey == "" {
+		grokKey = a.cfg.LLM.Grok.APIKey
+	}
+
+	if grokKey != "" {
+		grokModel := a.cfg.LLM.Grok.Model
+		if grokModel == "" {
+			grokModel = "grok-3-mini-fast"
+		}
+		grokProvider := providers.NewGrokProvider(grokKey, grokModel, "", 4096)
+
+		llmEng, err := llm.NewEngine(llm.EngineConfig{
+			Primary:       grokProvider,
+			MaxConcurrent: 2,
+		}, a.zapLogger)
+		if err != nil {
+			a.logger.Warn("llm engine init failed", "error", err)
+		} else {
+			a.llmEngine = llmEng
+			a.advEngine.SetLLMEngine(llmEng)
+			a.logger.Info("LLM analysis enabled", "provider", "grok", "model", grokModel)
+		}
+	} else {
+		a.logger.Info("LLM analysis disabled (no GROK_API_KEY set)")
+	}
+
+	return nil
 }
 
 func NewForTesting(cfg config.Config, rs rules.RuleSet) (*Agent, error) {
@@ -125,6 +197,20 @@ func (a *Agent) Run(ctx context.Context) error {
 			}()
 		}
 	}
+
+	if a.advEngine != nil {
+		if err := a.advEngine.Start(ctx); err != nil {
+			a.logger.Error("advanced detection engine start failed", "error", err)
+		} else {
+			a.logger.Info("advanced detection engine started",
+				"llm_enabled", a.llmEngine != nil,
+				"behavioral", true)
+			defer func() { _ = a.advEngine.Stop() }()
+
+			go a.drainAdvancedAlerts(ctx)
+		}
+	}
+
 	a.logger.Info("agent started")
 	a.logger.Info("rules loaded", "count", len(a.ruleSet.Rules))
 
@@ -141,6 +227,56 @@ func (a *Agent) Run(ctx context.Context) error {
 				a.logger.Error("process cycle failed", "error", err)
 			}
 		}
+	}
+}
+
+func (a *Agent) drainAdvancedAlerts(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case advAlert, ok := <-a.advEngine.Alerts():
+			if !ok {
+				return
+			}
+			al := schema.Alert{
+				SchemaVersion: schema.SchemaVersionV1,
+				AlertID:       advAlert.ID,
+				RuleID:        advAlert.RuleID,
+				EndpointID:    a.cfg.Service.EndpointID,
+				Severity:      schema.Severity(advAlert.Severity),
+				Score:         severityToScore(advAlert.Severity),
+				Title:         advAlert.Title,
+				Description:   advAlert.Description,
+				Timestamp:     advAlert.Timestamp,
+			}
+			if pe, ok := advAlert.RawEvent.(*schema.ProcessEvent); ok {
+				al.ProcessPID = pe.PID
+				al.ProcessName = pe.ProcessName
+				al.ProcessPath = pe.ProcessPath
+				al.CommandLine = pe.CommandLine
+			}
+			_ = a.writer.WriteAlert(al)
+			a.alertSpool.Push(al)
+			a.logger.Info("advanced detection alert",
+				"rule", al.RuleID, "severity", al.Severity,
+				"title", al.Title, "pid", al.ProcessPID)
+		}
+	}
+}
+
+func severityToScore(s events.Severity) int {
+	switch s {
+	case events.SeverityCritical:
+		return 100
+	case events.SeverityHigh:
+		return 80
+	case events.SeverityMedium:
+		return 60
+	case events.SeverityLow:
+		return 30
+	default:
+		return 10
 	}
 }
 
@@ -162,10 +298,17 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 				if err := a.handleAlerts(a.detector.EvaluateProcess(ev)); err != nil {
 					return err
 				}
+				if a.advEngine != nil {
+					a.advEngine.Evaluate(ctx, &ev)
+				}
 			}
 			if tel.Network != nil {
 				if err := a.handleAlerts(a.detector.EvaluateNetwork(*tel.Network)); err != nil {
 					return err
+				}
+				if a.advEngine != nil {
+					ne := *tel.Network
+					a.advEngine.Evaluate(ctx, &ne)
 				}
 			}
 			if tel.Auth != nil {
@@ -176,6 +319,10 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 			if tel.File != nil {
 				if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
 					return err
+				}
+				if a.advEngine != nil {
+					fe := *tel.File
+					a.advEngine.Evaluate(ctx, &fe)
 				}
 			}
 		}
