@@ -1,0 +1,255 @@
+# =============================================================================
+# EDR Agent Configuration — Air-Gapped Network Profile
+# =============================================================================
+# Designed for environments with zero internet connectivity. All detection,
+# analysis, and storage happens locally. LLM inference is forced through
+# Ollama, threat intelligence comes from pre-loaded local databases, and
+# telemetry is spooled to disk for manual extraction.
+# =============================================================================
+
+agent:
+  id: ""
+  name: ""
+  environment: "airgap"
+  log_level: "info"
+  data_dir: "/var/lib/edr"
+  temp_dir: "/tmp/edr"
+
+# No cloud connectivity — air-gap mode disables all outbound connections.
+server:
+  endpoint: ""
+  grpc_port: 0
+  tls_cert: ""
+  tls_key: ""
+  ca_cert: ""
+  mutual_tls: false
+  heartbeat_sec: 0
+  reconnect_sec: 0
+  airgap_mode: true
+
+# Force local LLM via Ollama — no cloud API calls.
+llm:
+  enabled: true
+  primary_provider: "ollama"
+  fallback_provider: "llamacpp"
+  local_provider: "ollama"
+  force_local: true
+  local_threshold: 0.0
+  min_severity_llm: "medium"
+  max_concurrent: 2
+  timeout_sec: 120
+
+  # Cloud providers disabled (no API keys needed).
+  openai:
+    api_key: ""
+    model: ""
+    base_url: ""
+    org_id: ""
+    max_tokens: 0
+    temperature: 0.0
+
+  anthropic:
+    api_key: ""
+    model: ""
+    max_tokens: 0
+
+  grok:
+    api_key: ""
+    model: ""
+    base_url: ""
+    max_tokens: 0
+
+  gemini:
+    api_key: ""
+    model: ""
+    project_id: ""
+    location: ""
+
+  azure:
+    tenant_id: ""
+    client_id: ""
+    client_secret: ""
+    endpoint: ""
+    deployment_name: ""
+    api_version: ""
+
+  bedrock:
+    region: ""
+    access_key_id: ""
+    secret_access_key: ""
+    model_id: ""
+
+  # Ollama running on the local host or a dedicated inference node on the
+  # air-gapped network.
+  ollama:
+    endpoint: "http://localhost:11434"
+    model: "phi3"
+    keep_alive: "24h"
+    num_ctx: 2048
+    num_gpu: -1
+    num_thread: 4
+
+  llamacpp:
+    endpoint: "http://localhost:8080"
+    model_path: "/var/lib/edr/models/phi3-mini-q4.gguf"
+    context_size: 2048
+    gpu_layers: 0
+    threads: 4
+
+  rag:
+    enabled: true
+    vectordb_path: "/var/lib/edr/vectordb"
+    embedding_model: "nomic-embed-text"
+    chunk_size: 512
+    top_k: 5
+    knowledge_bases:
+      - "mitre_attack"
+      - "malware_families"
+
+# ML models loaded from local disk — no auto-update in air-gapped mode.
+ml:
+  enabled: true
+  models_dir: "/var/lib/edr/models"
+  auto_update: false
+  update_interval_hours: 0
+
+  models:
+    pe_classifier: "pe_classifier_v3.onnx"
+    behavior_lstm: "behavior_lstm_v2.onnx"
+    network_anomaly: "network_anomaly_v2.onnx"
+    ransomware: "ransomware_v3.onnx"
+
+  thresholds:
+    pe_malicious: 0.80
+    behavior_anomaly: 0.75
+    ransomware_score: 0.85
+    network_anomaly: 0.70
+
+  onnx:
+    num_threads: 4
+    use_gpu: false
+    gpu_device_id: 0
+
+# All detection engines enabled with local-only data sources.
+detection:
+  sigma:
+    enabled: true
+    rules_dir: "/etc/edr/rules/sigma"
+    auto_update: false
+    update_source: ""
+
+  yara:
+    enabled: true
+    rules_dir: "/etc/edr/rules/yara"
+    scan_on_write: true
+    scan_on_exec: true
+    max_file_size_mb: 50
+
+  ioc:
+    enabled: true
+    hash_db_path: "/var/lib/edr/ioc/hashes.db"
+    ip_db_path: "/var/lib/edr/ioc/ips.db"
+    domain_db_path: "/var/lib/edr/ioc/domains.db"
+    # No auto-update — IOC databases are loaded manually via sneakernet.
+    update_interval_hours: 0
+
+  behavioral:
+    baseline_days: 7
+    sensitivity: "high"
+    ransomware_detect: true
+    rat_detect: true
+    exfil_detect: true
+    lateral_movement_detect: true
+
+response:
+  auto_response: true
+
+  actions:
+    kill_process: true
+    quarantine_file: true
+    network_isolate: true
+    block_hash: true
+    disable_user: false
+    collect_forensics: true
+    take_snapshot: true
+
+  auto_response_rules:
+    kill_on_critical: true
+    isolate_on_ransomware: true
+    isolate_on_apt: true
+
+  quarantine:
+    dir: "/var/lib/edr/quarantine"
+    encrypt_files: true
+    max_size_mb: 5120
+
+  forensics:
+    auto_collect: true
+    include_memory_dump: true
+    output_dir: "/var/lib/edr/forensics"
+    chain_of_custody: true
+
+# Threat intel — local only, no network feeds.
+threat_intel:
+  misp:
+    enabled: false
+    url: ""
+    api_key: ""
+    verify_ssl: false
+    update_interval_hours: 0
+
+  otx:
+    enabled: false
+    api_key: ""
+    update_interval_hours: 0
+
+  custom_feeds: []
+
+self_protect:
+  enabled: true
+  watchdog: true
+  anti_debug: true
+  integrity_check: true
+  protected_process: true
+
+performance:
+  max_cpu_percent: 10
+  max_memory_mb: 300
+  event_buffer_size: 65536
+  worker_count: 0
+  batch_size: 50
+  batch_interval_ms: 10000
+
+service:
+  endpoint_id: ""
+  tick_interval: "1s"
+  pid_file: "/var/run/edr-agent.pid"
+
+logging:
+  level: "info"
+  alert_file: "/var/log/edr/alerts.jsonl"
+  audit_file: "/var/log/edr/audit.jsonl"
+
+response_legacy:
+  allow_kill: true
+  auto_kill_enabled: true
+  min_kill_score: 85
+  kill_rule_allowlist: []
+  protected_processes:
+    - "systemd"
+    - "launchd"
+    - "wininit.exe"
+
+# Disk-based telemetry spool for manual extraction via removable media.
+forwarder:
+  enabled: true
+  mode: "http"
+  endpoint: ""
+  syslog_addr: ""
+  kafka_brokers: []
+  kafka_topic: ""
+  retry_max: 0
+  spool_path: "/var/lib/edr/forward_spool.jsonl"
+
+rules_file: "rules/baseline.yaml"
+rules_verify_pubkey_path: "/etc/edr/certs/edr-rules.pub.pem"

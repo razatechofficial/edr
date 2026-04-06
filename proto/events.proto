@@ -1,0 +1,115 @@
+// Event definitions for the EDR agent telemetry pipeline.
+// These types mirror the Go structs in internal/schema/events.go and
+// pkg/events/types.go for wire-format compatibility over gRPC.
+
+syntax = "proto3";
+
+package edr;
+
+option go_package = "github.com/razatechofficial/edr/pkg/protocol";
+
+import "google/protobuf/timestamp.proto";
+
+// EventType identifies the category of a kernel or system event.
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_PROCESS     = 1;
+  EVENT_TYPE_FILE        = 2;
+  EVENT_TYPE_NETWORK     = 3;
+  EVENT_TYPE_REGISTRY    = 4;
+  EVENT_TYPE_MEMORY      = 5;
+  EVENT_TYPE_DNS         = 6;
+  EVENT_TYPE_AUTH         = 7;
+  EVENT_TYPE_MODULE      = 8;
+  EVENT_TYPE_MOUNT       = 9;
+  EVENT_TYPE_PTRACE      = 10;
+  EVENT_TYPE_SIGNAL      = 11;
+}
+
+// BaseEvent contains fields common to all event types.
+message BaseEvent {
+  string                    schema_version = 1;
+  EventType                 event_type     = 2;
+  string                    endpoint_id    = 3;
+  google.protobuf.Timestamp timestamp      = 4;
+  string                    hostname       = 5;
+  string                    os             = 6;
+}
+
+// ProcessEvent represents a process creation, termination, or modification event.
+message ProcessEvent {
+  BaseEvent base          = 1;
+  int32     pid           = 2;
+  int32     ppid          = 3;
+  string    parent_name   = 4;
+  string    process_name  = 5;
+  string    process_path  = 6;
+  string    command_line  = 7;
+  string    user          = 8;
+  repeated string hashes  = 9;
+}
+
+// FileEvent represents a file system operation event.
+message FileEvent {
+  BaseEvent base      = 1;
+  string    path      = 2;
+  string    operation = 3;
+  int32     actor_pid = 4;
+  string    hash      = 5;
+}
+
+// NetworkEvent represents a network connection or communication event.
+message NetworkEvent {
+  BaseEvent base        = 1;
+  int32     pid         = 2;
+  string    protocol    = 3;
+  string    source_ip   = 4;
+  int32     source_port = 5;
+  string    dest_ip     = 6;
+  int32     dest_port   = 7;
+  string    domain      = 8;
+}
+
+// AuthEvent represents an authentication event.
+message AuthEvent {
+  BaseEvent base       = 1;
+  string    user       = 2;
+  string    outcome    = 3;
+  string    auth_type  = 4;
+  string    source_ip  = 5;
+  string    session_id = 6;
+}
+
+// DNSEvent represents a DNS query/response event.
+message DNSEvent {
+  BaseEvent       base        = 1;
+  int32           pid         = 2;
+  string          query_name  = 3;
+  string          query_type  = 4;
+  repeated string answers     = 5;
+  string          response_code = 6;
+}
+
+// RegistryEvent represents a Windows registry operation.
+message RegistryEvent {
+  BaseEvent base       = 1;
+  int32     pid        = 2;
+  string    key_path   = 3;
+  string    value_name = 4;
+  string    operation  = 5;
+  bytes     data       = 6;
+}
+
+// EventBatch holds a batch of events for efficient streaming to the control plane.
+message EventBatch {
+  string                    agent_id   = 1;
+  google.protobuf.Timestamp batch_time = 2;
+  int32                     sequence   = 3;
+
+  repeated ProcessEvent  process_events  = 10;
+  repeated FileEvent     file_events     = 11;
+  repeated NetworkEvent  network_events  = 12;
+  repeated AuthEvent     auth_events     = 13;
+  repeated DNSEvent      dns_events      = 14;
+  repeated RegistryEvent registry_events = 15;
+}

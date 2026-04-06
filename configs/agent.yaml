@@ -1,0 +1,379 @@
+# =============================================================================
+# EDR Agent Configuration — Default Enterprise Profile
+# =============================================================================
+# This is the production-ready default configuration for the EDR agent.
+# All values reflect the defaults from config.Defaults(). Override individual
+# settings via environment variables (noted in comments) or a .env file.
+#
+# Profiles available:
+#   agent.yaml          — Standard enterprise deployment (this file)
+#   agent.gov.yaml      — Government/high-security hardened profile
+#   agent.airgap.yaml   — Air-gapped network profile
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Agent identity and general settings
+# -----------------------------------------------------------------------------
+agent:
+  # Unique agent identifier, generated at install time.
+  # Env: AGENT_ID
+  id: ""
+
+  # Human-readable name for this endpoint (defaults to hostname).
+  # Env: AGENT_NAME
+  name: ""
+
+  # Agent version — set at build time via ldflags.
+  version: ""
+
+  # Deployment environment: government | enterprise | airgap
+  # Env: AGENT_ENV
+  environment: "enterprise"
+
+  # Logging verbosity: debug | info | warn | error
+  # Env: LOG_LEVEL
+  log_level: "info"
+
+  # Root directory for agent data (baselines, IOC DBs, quarantine, etc.).
+  # Env: DATA_DIR
+  data_dir: "/var/lib/edr"
+
+  # Temporary directory for transient files.
+  temp_dir: "/tmp/edr"
+
+# -----------------------------------------------------------------------------
+# Control plane server connectivity
+# -----------------------------------------------------------------------------
+server:
+  # Control plane gRPC endpoint.
+  # Env: SERVER_ENDPOINT
+  endpoint: ""
+
+  # gRPC port.
+  # Env: SERVER_GRPC_PORT
+  grpc_port: 50051
+
+  # TLS certificate paths for mutual TLS authentication.
+  # Env: TLS_CERT_PATH, TLS_KEY_PATH, CA_CERT_PATH
+  tls_cert: ""
+  tls_key: ""
+  ca_cert: ""
+
+  # Enable mutual TLS (client certificate authentication).
+  # Env: MUTUAL_TLS
+  mutual_tls: true
+
+  # Heartbeat interval in seconds.
+  heartbeat_sec: 30
+
+  # Reconnect backoff base interval in seconds.
+  reconnect_sec: 5
+
+  # Enable air-gap mode (disables all cloud connectivity).
+  # Env: AIRGAP_MODE
+  airgap_mode: false
+
+# -----------------------------------------------------------------------------
+# LLM-powered threat analysis
+# -----------------------------------------------------------------------------
+llm:
+  # Enable LLM-based alert enrichment and analysis.
+  # Env: LLM_ENABLED
+  enabled: false
+
+  # Primary cloud LLM provider: openai | anthropic | grok | gemini | azure | bedrock | ollama | llamacpp
+  # Env: LLM_PRIMARY
+  primary_provider: "grok"
+
+  # Fallback provider if primary is unavailable.
+  # Env: LLM_FALLBACK
+  fallback_provider: ""
+
+  # Local LLM provider for on-device inference: ollama | llamacpp
+  # Env: LLM_LOCAL
+  local_provider: "ollama"
+
+  # Force all LLM inference to run locally (no cloud API calls).
+  # Env: LLM_FORCE_LOCAL
+  force_local: false
+
+  # Confidence threshold below which local LLM is preferred over cloud.
+  local_threshold: 0.0
+
+  # Minimum alert severity to trigger LLM analysis: medium | high | critical
+  min_severity_llm: "medium"
+
+  # Maximum concurrent LLM requests.
+  max_concurrent: 4
+
+  # LLM request timeout in seconds.
+  timeout_sec: 30
+
+  # --- Provider-specific settings ---
+
+  openai:
+    # Env: OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL, OPENAI_ORG_ID
+    api_key: ""
+    model: ""
+    base_url: ""
+    org_id: ""
+    max_tokens: 0
+    temperature: 0.0
+
+  anthropic:
+    # Env: ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+    api_key: ""
+    model: ""
+    max_tokens: 0
+
+  grok:
+    # Env: GROK_API_KEY, GROK_MODEL
+    api_key: ""
+    model: ""
+    base_url: "https://api.x.ai/v1"
+    max_tokens: 0
+
+  gemini:
+    # Env: GEMINI_API_KEY, GEMINI_MODEL, GEMINI_PROJECT_ID
+    api_key: ""
+    model: ""
+    project_id: ""
+    location: ""
+
+  azure:
+    # Env: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+    #      AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_NAME
+    tenant_id: ""
+    client_id: ""
+    client_secret: ""
+    endpoint: ""
+    deployment_name: ""
+    api_version: ""
+
+  bedrock:
+    # Env: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, BEDROCK_MODEL_ID
+    region: ""
+    access_key_id: ""
+    secret_access_key: ""
+    model_id: ""
+
+  ollama:
+    # Env: OLLAMA_ENDPOINT, OLLAMA_MODEL
+    endpoint: "http://localhost:11434"
+    model: ""
+    keep_alive: ""
+    num_ctx: 0
+    num_gpu: 0
+    num_thread: 0
+
+  llamacpp:
+    # Env: LLAMACPP_ENDPOINT, LLAMACPP_MODEL
+    endpoint: ""
+    model_path: ""
+    context_size: 0
+    gpu_layers: 0
+    threads: 0
+
+  # Retrieval-Augmented Generation for contextual threat analysis.
+  rag:
+    enabled: false
+    vectordb_path: ""
+    embedding_model: ""
+    chunk_size: 0
+    top_k: 0
+    knowledge_bases: []
+
+# -----------------------------------------------------------------------------
+# ML-based detection models (ONNX Runtime)
+# -----------------------------------------------------------------------------
+ml:
+  # Enable ML model inference.
+  # Env: ML_ENABLED
+  enabled: false
+
+  # Directory containing ONNX model files.
+  # Env: ML_MODELS_DIR
+  models_dir: ""
+
+  # Automatically download model updates.
+  auto_update: false
+
+  # Model update check interval in hours.
+  update_interval_hours: 0
+
+  models:
+    pe_classifier: ""
+    behavior_lstm: ""
+    network_anomaly: ""
+    ransomware: ""
+
+  # Detection confidence thresholds (0.0–1.0).
+  thresholds:
+    pe_malicious: 0.80
+    behavior_anomaly: 0.75
+    ransomware_score: 0.85
+    network_anomaly: 0.70
+
+  onnx:
+    num_threads: 0
+    use_gpu: false
+    gpu_device_id: 0
+
+# -----------------------------------------------------------------------------
+# Detection engines
+# -----------------------------------------------------------------------------
+detection:
+  # Sigma rule-based detection.
+  sigma:
+    enabled: true
+    rules_dir: ""
+    auto_update: false
+    update_source: ""
+
+  # YARA pattern matching.
+  yara:
+    enabled: true
+    rules_dir: ""
+    scan_on_write: false
+    scan_on_exec: false
+    max_file_size_mb: 0
+
+  # Indicator of Compromise matching (hash, IP, domain).
+  ioc:
+    enabled: true
+    hash_db_path: ""
+    ip_db_path: ""
+    domain_db_path: ""
+    update_interval_hours: 0
+
+  # Behavioral anomaly detection.
+  behavioral:
+    baseline_days: 7
+    sensitivity: "high"
+    ransomware_detect: true
+    rat_detect: true
+    exfil_detect: true
+    lateral_movement_detect: true
+
+# -----------------------------------------------------------------------------
+# Automated response
+# -----------------------------------------------------------------------------
+response:
+  # Enable automated response actions.
+  # Env: AUTO_RESPONSE
+  auto_response: false
+
+  # Permitted response actions.
+  actions:
+    kill_process: false
+    quarantine_file: false
+    network_isolate: false
+    block_hash: false
+    disable_user: false
+    collect_forensics: false
+    take_snapshot: false
+
+  # Rules for automatic response escalation.
+  auto_response_rules:
+    kill_on_critical: false
+    isolate_on_ransomware: false
+    isolate_on_apt: false
+
+  # File quarantine settings.
+  quarantine:
+    dir: ""
+    encrypt_files: false
+    max_size_mb: 0
+
+  # Forensic artifact collection.
+  forensics:
+    auto_collect: false
+    include_memory_dump: false
+    output_dir: ""
+    chain_of_custody: false
+
+# -----------------------------------------------------------------------------
+# Threat intelligence feeds
+# -----------------------------------------------------------------------------
+threat_intel:
+  misp:
+    enabled: false
+    url: ""
+    api_key: ""
+    verify_ssl: false
+    update_interval_hours: 0
+
+  otx:
+    enabled: false
+    api_key: ""
+    update_interval_hours: 0
+
+  custom_feeds: []
+
+# -----------------------------------------------------------------------------
+# Self-protection
+# -----------------------------------------------------------------------------
+self_protect:
+  enabled: false
+  watchdog: false
+  anti_debug: false
+  integrity_check: false
+  protected_process: false
+
+# -----------------------------------------------------------------------------
+# Performance tuning
+# -----------------------------------------------------------------------------
+performance:
+  # Maximum CPU usage percentage (agent will throttle above this).
+  max_cpu_percent: 5
+
+  # Maximum resident memory in MB.
+  max_memory_mb: 200
+
+  # Internal event ring buffer size.
+  event_buffer_size: 65536
+
+  # Number of processing workers (0 = NumCPU).
+  worker_count: 0
+
+  # Batch size for event processing.
+  batch_size: 50
+
+  # Batch flush interval in milliseconds.
+  batch_interval_ms: 15000
+
+# =============================================================================
+# Legacy compatibility fields
+# =============================================================================
+# These fields support older agent.example.yaml configurations. New deployments
+# should use the structured sections above.
+
+service:
+  endpoint_id: ""
+  tick_interval: "1s"
+  pid_file: ""
+
+logging:
+  level: "info"
+  alert_file: ""
+  audit_file: ""
+
+response_legacy:
+  allow_kill: false
+  auto_kill_enabled: false
+  min_kill_score: 90
+  kill_rule_allowlist: []
+  protected_processes: []
+
+forwarder:
+  enabled: false
+  mode: "http"
+  endpoint: ""
+  syslog_addr: ""
+  kafka_brokers: []
+  kafka_topic: ""
+  retry_max: 3
+  spool_path: ""
+
+rules_file: "rules/baseline.yaml"
+rules_verify_pubkey_path: ""

@@ -1,0 +1,143 @@
+// EDR gRPC service definitions.
+// This is the primary interface between EDR agents and the control plane.
+
+syntax = "proto3";
+
+package edr;
+
+option go_package = "github.com/razatechofficial/edr/pkg/protocol";
+
+import "google/protobuf/timestamp.proto";
+import "events.proto";
+import "alerts.proto";
+import "commands.proto";
+
+// EDRService is the bidirectional gRPC interface between EDR agents and
+// the control plane server. Agents stream telemetry and alerts upstream,
+// while the server pushes commands and policy updates downstream.
+service EDRService {
+  // StreamEvents establishes a bidirectional stream: the agent sends event
+  // batches and receives commands (isolation, kill, scan, etc.) in return.
+  rpc StreamEvents(stream EventBatch) returns (stream Command);
+
+  // Register performs initial agent enrollment with the control plane.
+  rpc Register(RegistrationRequest) returns (RegistrationResponse);
+
+  // Heartbeat sends periodic health reports and receives any pending commands.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // GetPolicy retrieves the current detection and response policy for this agent.
+  rpc GetPolicy(PolicyRequest) returns (PolicyResponse);
+
+  // ReportAlert sends a single high-priority alert for immediate processing.
+  rpc ReportAlert(Alert) returns (AlertAck);
+
+  // UploadForensics streams forensic artifact data to the control plane.
+  rpc UploadForensics(stream ForensicsChunk) returns (UploadResult);
+}
+
+// RegistrationRequest is sent by a new agent to enroll with the control plane.
+message RegistrationRequest {
+  string agent_id   = 1;
+  string hostname   = 2;
+  string os         = 3;
+  string arch       = 4;
+  string version    = 5;
+  string commit     = 6;
+
+  // Agent capabilities advertised during registration.
+  repeated string capabilities = 10;
+
+  // Labels for policy targeting (e.g., "env:production", "dept:engineering").
+  map<string, string> labels   = 11;
+}
+
+// RegistrationResponse is returned by the control plane upon successful enrollment.
+message RegistrationResponse {
+  bool   accepted       = 1;
+  string agent_id       = 2;
+  string message        = 3;
+  int32  heartbeat_sec  = 4;
+
+  // Initial policy to apply before the first GetPolicy call.
+  PolicyResponse initial_policy = 10;
+}
+
+// HeartbeatRequest is the periodic health report from an agent.
+message HeartbeatRequest {
+  string                    agent_id          = 1;
+  google.protobuf.Timestamp timestamp         = 2;
+  string                    version           = 3;
+  string                    status            = 4;
+  double                    cpu_percent       = 5;
+  double                    memory_mb         = 6;
+  uint64                    events_processed  = 7;
+  uint64                    alerts_generated  = 8;
+  int32                     rules_loaded      = 9;
+  bool                      isolated          = 10;
+  google.protobuf.Timestamp uptime_since      = 11;
+}
+
+// HeartbeatResponse carries any pending commands for the agent.
+message HeartbeatResponse {
+  bool              accepted         = 1;
+  repeated Command  pending_commands = 2;
+  int32             next_heartbeat_sec = 3;
+}
+
+// PolicyRequest asks for the current policy for a specific agent.
+message PolicyRequest {
+  string agent_id = 1;
+  string current_policy_hash = 2;
+}
+
+// PolicyResponse contains the full detection and response policy.
+message PolicyResponse {
+  string policy_hash     = 1;
+  bool   changed         = 2;
+
+  // Detection configuration.
+  DetectionPolicy detection = 10;
+
+  // Response configuration.
+  ResponsePolicy response   = 11;
+
+  // Rule bundles to apply.
+  repeated RuleBundle rule_bundles = 12;
+}
+
+// DetectionPolicy configures what the agent should detect.
+message DetectionPolicy {
+  bool   sigma_enabled         = 1;
+  bool   yara_enabled          = 2;
+  bool   ioc_enabled           = 3;
+  bool   behavioral_enabled    = 4;
+  string sensitivity_level     = 5;
+  bool   ransomware_detect     = 6;
+  bool   rat_detect            = 7;
+  bool   exfil_detect          = 8;
+  bool   lateral_detect        = 9;
+}
+
+// ResponsePolicy configures what automated actions the agent may take.
+message ResponsePolicy {
+  bool auto_response         = 1;
+  bool kill_process          = 2;
+  bool quarantine_file       = 3;
+  bool network_isolate       = 4;
+  bool block_hash            = 5;
+  bool collect_forensics     = 6;
+  bool kill_on_critical      = 7;
+  bool isolate_on_ransomware = 8;
+  bool isolate_on_apt        = 9;
+}
+
+// RuleBundle is a signed bundle of detection rules.
+message RuleBundle {
+  string name       = 1;
+  string version    = 2;
+  string format     = 3;
+  bytes  data       = 4;
+  string signature  = 5;
+  string hash       = 6;
+}

@@ -1,0 +1,217 @@
+# =============================================================================
+# EDR Agent Configuration — Government / High-Security Hardened Profile
+# =============================================================================
+# This profile enables maximum detection coverage with paranoid sensitivity,
+# forces all LLM inference to run locally, enables full automated response,
+# and activates comprehensive audit logging. Designed for FedRAMP, CMMC, and
+# NIST 800-171 compliance environments.
+# =============================================================================
+
+agent:
+  id: ""
+  name: ""
+  environment: "government"
+  log_level: "debug"
+  data_dir: "/var/lib/edr"
+  temp_dir: "/tmp/edr"
+
+server:
+  endpoint: ""
+  grpc_port: 50051
+  tls_cert: "/etc/edr/certs/agent.crt"
+  tls_key: "/etc/edr/certs/agent.key"
+  ca_cert: "/etc/edr/certs/ca.crt"
+  mutual_tls: true
+  heartbeat_sec: 15
+  reconnect_sec: 3
+  airgap_mode: false
+
+# Force local LLM to prevent sensitive telemetry from reaching cloud APIs.
+llm:
+  enabled: true
+  primary_provider: "ollama"
+  fallback_provider: "llamacpp"
+  local_provider: "ollama"
+  force_local: true
+  local_threshold: 0.0
+  min_severity_llm: "low"
+  max_concurrent: 2
+  timeout_sec: 60
+
+  ollama:
+    endpoint: "http://localhost:11434"
+    model: "llama3"
+    keep_alive: "24h"
+    num_ctx: 4096
+    num_gpu: -1
+    num_thread: 4
+
+  llamacpp:
+    endpoint: "http://localhost:8080"
+    model_path: "/var/lib/edr/models/llama3-8b-q4.gguf"
+    context_size: 4096
+    gpu_layers: 32
+    threads: 4
+
+  rag:
+    enabled: true
+    vectordb_path: "/var/lib/edr/vectordb"
+    embedding_model: "nomic-embed-text"
+    chunk_size: 512
+    top_k: 5
+    knowledge_bases:
+      - "mitre_attack"
+      - "malware_families"
+      - "threat_reports"
+      - "cve_db"
+
+# Enable all ML models with strict thresholds.
+ml:
+  enabled: true
+  models_dir: "/var/lib/edr/models"
+  auto_update: false
+  update_interval_hours: 0
+
+  models:
+    pe_classifier: "pe_classifier_v3.onnx"
+    behavior_lstm: "behavior_lstm_v2.onnx"
+    network_anomaly: "network_anomaly_v2.onnx"
+    ransomware: "ransomware_v3.onnx"
+
+  thresholds:
+    pe_malicious: 0.60
+    behavior_anomaly: 0.55
+    ransomware_score: 0.65
+    network_anomaly: 0.50
+
+  onnx:
+    num_threads: 4
+    use_gpu: true
+    gpu_device_id: 0
+
+# All detection engines enabled at maximum sensitivity.
+detection:
+  sigma:
+    enabled: true
+    rules_dir: "/etc/edr/rules/sigma"
+    auto_update: false
+    update_source: ""
+
+  yara:
+    enabled: true
+    rules_dir: "/etc/edr/rules/yara"
+    scan_on_write: true
+    scan_on_exec: true
+    max_file_size_mb: 100
+
+  ioc:
+    enabled: true
+    hash_db_path: "/var/lib/edr/ioc/hashes.db"
+    ip_db_path: "/var/lib/edr/ioc/ips.db"
+    domain_db_path: "/var/lib/edr/ioc/domains.db"
+    update_interval_hours: 1
+
+  behavioral:
+    baseline_days: 14
+    sensitivity: "paranoid"
+    ransomware_detect: true
+    rat_detect: true
+    exfil_detect: true
+    lateral_movement_detect: true
+
+# Full automated response enabled for government environments.
+response:
+  auto_response: true
+
+  actions:
+    kill_process: true
+    quarantine_file: true
+    network_isolate: true
+    block_hash: true
+    disable_user: true
+    collect_forensics: true
+    take_snapshot: true
+
+  auto_response_rules:
+    kill_on_critical: true
+    isolate_on_ransomware: true
+    isolate_on_apt: true
+
+  quarantine:
+    dir: "/var/lib/edr/quarantine"
+    encrypt_files: true
+    max_size_mb: 10240
+
+  forensics:
+    auto_collect: true
+    include_memory_dump: true
+    output_dir: "/var/lib/edr/forensics"
+    chain_of_custody: true
+
+# Threat intel feeds (configure API keys via environment or .env).
+threat_intel:
+  misp:
+    enabled: true
+    url: ""
+    api_key: ""
+    verify_ssl: true
+    update_interval_hours: 1
+
+  otx:
+    enabled: true
+    api_key: ""
+    update_interval_hours: 1
+
+  custom_feeds: []
+
+# Full self-protection suite.
+self_protect:
+  enabled: true
+  watchdog: true
+  anti_debug: true
+  integrity_check: true
+  protected_process: true
+
+# Conservative resource limits; government endpoints are typically well-provisioned.
+performance:
+  max_cpu_percent: 15
+  max_memory_mb: 512
+  event_buffer_size: 131072
+  worker_count: 0
+  batch_size: 100
+  batch_interval_ms: 5000
+
+service:
+  endpoint_id: ""
+  tick_interval: "500ms"
+  pid_file: "/var/run/edr-agent.pid"
+
+logging:
+  level: "debug"
+  alert_file: "/var/log/edr/alerts.jsonl"
+  audit_file: "/var/log/edr/audit.jsonl"
+
+response_legacy:
+  allow_kill: true
+  auto_kill_enabled: true
+  min_kill_score: 70
+  kill_rule_allowlist: []
+  protected_processes:
+    - "systemd"
+    - "launchd"
+    - "wininit.exe"
+    - "sshd"
+    - "auditd"
+
+forwarder:
+  enabled: true
+  mode: "http"
+  endpoint: ""
+  syslog_addr: ""
+  kafka_brokers: []
+  kafka_topic: "edr-alerts-gov"
+  retry_max: 10
+  spool_path: "/var/lib/edr/forward_spool.jsonl"
+
+rules_file: "rules/baseline.yaml"
+rules_verify_pubkey_path: "/etc/edr/certs/edr-rules.pub.pem"

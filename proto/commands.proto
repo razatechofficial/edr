@@ -1,0 +1,80 @@
+// Command and response definitions for the EDR control plane.
+// These types mirror the Go structs in internal/schema/response.go.
+
+syntax = "proto3";
+
+package edr;
+
+option go_package = "github.com/razatechofficial/edr/pkg/protocol";
+
+import "google/protobuf/timestamp.proto";
+
+// ResponseAction enumerates the actions the control plane can instruct
+// an agent to perform.
+enum ResponseAction {
+  RESPONSE_ACTION_UNSPECIFIED      = 0;
+  RESPONSE_ACTION_KILL_PROCESS     = 1;
+  RESPONSE_ACTION_QUARANTINE_FILE  = 2;
+  RESPONSE_ACTION_HOST_ISOLATE     = 3;
+  RESPONSE_ACTION_HOST_RELEASE     = 4;
+  RESPONSE_ACTION_BLOCK_HASH       = 5;
+  RESPONSE_ACTION_DISABLE_USER     = 6;
+  RESPONSE_ACTION_COLLECT_FORENSIC = 7;
+  RESPONSE_ACTION_TAKE_SNAPSHOT    = 8;
+  RESPONSE_ACTION_UPDATE_RULES     = 9;
+  RESPONSE_ACTION_UPDATE_CONFIG    = 10;
+  RESPONSE_ACTION_SCAN_FILE        = 11;
+}
+
+// Command represents an instruction from the control plane to an agent.
+message Command {
+  string                    command_id    = 1;
+  string                    endpoint_id   = 2;
+  ResponseAction            action        = 3;
+  string                    requested_by  = 4;
+  string                    reason        = 5;
+  google.protobuf.Timestamp created_at    = 6;
+  google.protobuf.Timestamp expires_at    = 7;
+  string                    nonce         = 8;
+  string                    signature     = 9;
+
+  // Action-specific parameters.
+  int32  process_pid   = 20;
+  string process_name  = 21;
+  string file_path     = 22;
+  string hash_value    = 23;
+  string username      = 24;
+  bytes  config_data   = 25;
+}
+
+// CommandResult reports the outcome of executing a command.
+message CommandResult {
+  string                    command_id   = 1;
+  string                    endpoint_id  = 2;
+  ResponseAction            action       = 3;
+  bool                      success      = 4;
+  string                    message      = 5;
+  google.protobuf.Timestamp timestamp    = 6;
+  bytes                     result_data  = 7;
+}
+
+// ForensicsChunk is a chunk of forensic data streamed from agent to server.
+message ForensicsChunk {
+  string agent_id     = 1;
+  string collection_id = 2;
+  string artifact_type = 3;
+  string artifact_name = 4;
+  int64  total_size   = 5;
+  int64  offset       = 6;
+  bytes  data         = 7;
+  string sha256       = 8;
+  bool   final_chunk  = 9;
+}
+
+// UploadResult acknowledges receipt of a forensics upload stream.
+message UploadResult {
+  string collection_id = 1;
+  bool   success       = 2;
+  string message       = 3;
+  int64  bytes_received = 4;
+}
