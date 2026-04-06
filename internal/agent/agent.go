@@ -31,6 +31,7 @@ type Agent struct {
 	responder  *response.Responder
 	writer     *alert.Writer
 	forwarder  forwarder.Forwarder
+	forwardDrain forwarder.Drainer
 	killAllow  map[string]struct{}
 }
 
@@ -43,18 +44,23 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	pc, err := collector.NewProcessCollector(cfg.Service.EndpointID)
+	cols, err := collector.DefaultCollectors(cfg.Service.EndpointID)
 	if err != nil {
 		return nil, err
 	}
-	rs, err := rules.Load(cfg.RulesFile)
+	var rs rules.RuleSet
+	if cfg.RulesVerifyPubKeyPath != "" {
+		rs, err = rules.LoadVerified(cfg.RulesFile, cfg.RulesVerifyPubKeyPath)
+	} else {
+		rs, err = rules.Load(cfg.RulesFile)
+	}
 	if err != nil {
 		return nil, err
 	}
 	a := &Agent{
 		logger:     slog.Default(),
 		cfg:        cfg,
-		collectors: []collector.Collector{pc},
+		collectors: cols,
 		ruleSet:    rs,
 		eventSpool: spool.NewQueue[schema.ProcessEvent](),
 		alertSpool: spool.NewQueue[schema.Alert](),
@@ -64,11 +70,20 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		killAllow:  makeRuleAllowlist(cfg.Response.KillRuleAllowlist),
 	}
 	if cfg.Forwarder.Enabled {
-		fw, err := forwarder.New(cfg.Forwarder.Mode, cfg.Forwarder.Endpoint, a.logger)
+		fw, dr, err := forwarder.New(forwarder.Config{
+			Mode:         cfg.Forwarder.Mode,
+			HTTPEndpoint: cfg.Forwarder.Endpoint,
+			SyslogAddr:   cfg.Forwarder.SyslogAddr,
+			KafkaBrokers: cfg.Forwarder.KafkaBrokers,
+			KafkaTopic:   cfg.Forwarder.KafkaTopic,
+			RetryMax:     cfg.Forwarder.RetryMax,
+			SpoolPath:    cfg.Forwarder.SpoolPath,
+		}, a.logger)
 		if err != nil {
 			return nil, err
 		}
 		a.forwarder = fw
+		a.forwardDrain = dr
 	}
 	return a, nil
 }
@@ -130,41 +145,70 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 func (a *Agent) ProcessCycle(ctx context.Context) error {
+	if a.forwardDrain != nil {
+		if err := a.forwardDrain.DrainPending(); err != nil {
+			a.logger.Error("forwarder spool drain failed", "error", err)
+		}
+	}
 	for _, c := range a.collectors {
-		events, err := c.Collect(ctx)
+		telemetries, err := c.Collect(ctx)
 		if err != nil {
 			return err
 		}
-		for _, ev := range events {
-			a.eventSpool.Push(ev)
-			alerts := a.detector.EvaluateProcess(ev)
-			for _, al := range alerts {
-				a.alertSpool.Push(al)
-				if err := a.writer.WriteAlert(al); err != nil {
+		for _, tel := range telemetries {
+			if tel.Process != nil {
+				ev := *tel.Process
+				a.eventSpool.Push(ev)
+				if err := a.handleAlerts(a.detector.EvaluateProcess(ev)); err != nil {
 					return err
 				}
-				if a.forwarder != nil {
-					if err := a.forwarder.Send(al); err != nil {
-						a.logger.Error("forward alert failed", "error", err)
-					}
-				}
-				if a.shouldAutoKill(al) {
-					res := a.responder.Execute(schema.ResponseCommand{
-						SchemaVersion: schema.SchemaVersionV1,
-						Action:        schema.ResponseKillProcess,
-						ProcessPID:    al.ProcessPID,
-						ProcessName:   al.ProcessName,
-					})
-					_ = a.writer.WriteAudit(schema.AuditRecord{
-						SchemaVersion: schema.SchemaVersionV1,
-						RecordID:      uuid.NewString(),
-						Action:        "kill_process",
-						Outcome:       map[bool]string{true: "success", false: "failure"}[res.Success],
-						Message:       res.Message,
-						Timestamp:     time.Now().UTC(),
-					})
+			}
+			if tel.Network != nil {
+				if err := a.handleAlerts(a.detector.EvaluateNetwork(*tel.Network)); err != nil {
+					return err
 				}
 			}
+			if tel.Auth != nil {
+				if err := a.handleAlerts(a.detector.EvaluateAuth(*tel.Auth)); err != nil {
+					return err
+				}
+			}
+			if tel.File != nil {
+				if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (a *Agent) handleAlerts(alerts []schema.Alert) error {
+	for _, al := range alerts {
+		a.alertSpool.Push(al)
+		if err := a.writer.WriteAlert(al); err != nil {
+			return err
+		}
+		if a.forwarder != nil {
+			if err := a.forwarder.Send(al); err != nil {
+				a.logger.Error("forward alert failed", "error", err)
+			}
+		}
+		if a.shouldAutoKill(al) {
+			res := a.responder.Execute(schema.ResponseCommand{
+				SchemaVersion: schema.SchemaVersionV1,
+				Action:        schema.ResponseKillProcess,
+				ProcessPID:    al.ProcessPID,
+				ProcessName:   al.ProcessName,
+			})
+			_ = a.writer.WriteAudit(schema.AuditRecord{
+				SchemaVersion: schema.SchemaVersionV1,
+				RecordID:      uuid.NewString(),
+				Action:        "kill_process",
+				Outcome:       map[bool]string{true: "success", false: "failure"}[res.Success],
+				Message:       res.Message,
+				Timestamp:     time.Now().UTC(),
+			})
 		}
 	}
 	return nil

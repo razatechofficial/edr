@@ -25,14 +25,16 @@ func TestProcessCycleWritesAlertFile(t *testing.T) {
 		Rules: []rules.Rule{
 			{
 				ID:       "PROC-TEST",
-				Name:     "Any agent process",
+				Name:     "Any process with path",
 				Severity: "high",
 				When: struct {
 					ParentIn            []string "yaml:\"parent_in\""
 					ChildIn             []string "yaml:\"child_in\""
 					ProcessPathContains []string "yaml:\"process_path_contains\""
+					CommandLineContains []string "yaml:\"command_line_contains\""
+					CommandLineAll      []string "yaml:\"command_line_all_contains\""
 				}{
-					ChildIn: []string{"edr-agent"},
+					ProcessPathContains: []string{"/"},
 				},
 			},
 		},

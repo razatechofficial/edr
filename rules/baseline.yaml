@@ -1,13 +1,78 @@
 version: "1"
 rules:
+  # Sigma-inspired baseline process behavior detections.
   - id: "PROC-001"
     name: "Suspicious shell child"
     severity: "high"
     when:
       parent_in: ["cmd.exe", "powershell.exe", "bash", "sh"]
       child_in: ["powershell.exe", "curl", "wget"]
-  - id: "PROC-002"
-    name: "Temp directory execution"
+  - id: "PROC-002A"
+    name: "Temp directory execution by process path"
     severity: "high"
     when:
       process_path_contains: ["/tmp/", "\\AppData\\Local\\Temp\\"]
+  - id: "PROC-002B"
+    name: "Temp directory execution by command line"
+    severity: "high"
+    when:
+      command_line_contains: ["/tmp/", "\\AppData\\Local\\Temp\\"]
+  - id: "PROC-003"
+    name: "Critical temp interpreter execution"
+    severity: "critical"
+    when:
+      child_in: ["sh", "bash", "zsh", "python", "python3"]
+      command_line_contains: ["/tmp/"]
+  - id: "PROC-004"
+    name: "PowerShell encoded command"
+    severity: "critical"
+    when:
+      child_in: ["powershell.exe", "pwsh.exe"]
+      command_line_contains: ["-enc", "-encodedcommand"]
+  - id: "PROC-005"
+    name: "MSHTA suspicious execution"
+    severity: "critical"
+    when:
+      child_in: ["mshta.exe"]
+      command_line_contains: ["http", ".hta"]
+  - id: "PROC-006"
+    name: "Certutil download usage"
+    severity: "high"
+    when:
+      child_in: ["certutil.exe"]
+      command_line_contains: ["-urlcache", "-split", "-f", "http"]
+  - id: "PROC-007"
+    name: "Rundll32 remote script pattern"
+    severity: "critical"
+    when:
+      child_in: ["rundll32.exe"]
+      command_line_contains: ["javascript:", "http"]
+  - id: "PROC-008"
+    name: "Bitsadmin transfer usage"
+    severity: "high"
+    when:
+      child_in: ["bitsadmin.exe"]
+      command_line_contains: ["/transfer", "http"]
+  - id: "PROC-009"
+    name: "Wget or curl to script pipe"
+    severity: "critical"
+    when:
+      command_line_all_contains: ["curl", "| sh"]
+  - id: "PROC-010"
+    name: "Bash base64 decode execution"
+    severity: "high"
+    when:
+      child_in: ["bash", "sh", "zsh"]
+      command_line_contains: ["base64", "-d"]
+  - id: "PROC-011"
+    name: "Python inline command execution"
+    severity: "medium"
+    when:
+      child_in: ["python", "python3"]
+      command_line_contains: ["-c "]
+  - id: "PROC-012"
+    name: "Regsvr32 remote scriptlet"
+    severity: "critical"
+    when:
+      child_in: ["regsvr32.exe"]
+      command_line_contains: ["/i:http", "scrobj.dll"]

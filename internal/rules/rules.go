@@ -19,6 +19,8 @@ type Rule struct {
 		ParentIn            []string `yaml:"parent_in"`
 		ChildIn             []string `yaml:"child_in"`
 		ProcessPathContains []string `yaml:"process_path_contains"`
+		CommandLineContains []string `yaml:"command_line_contains"`
+		CommandLineAll      []string `yaml:"command_line_all_contains"`
 	} `yaml:"when"`
 }
 

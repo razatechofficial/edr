@@ -2,29 +2,83 @@ package forwarder
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
+	"github.com/segmentio/kafka-go"
 )
 
+// Config selects how alerts are delivered to upstream SIEM/XDR.
+type Config struct {
+	Mode         string
+	HTTPEndpoint string
+	SyslogAddr   string
+	KafkaBrokers []string
+	KafkaTopic   string
+	RetryMax     int
+	SpoolPath    string
+}
+
+// Forwarder delivers alerts upstream.
 type Forwarder interface {
 	Send(alert schema.Alert) error
 }
 
-func New(mode, endpoint string, logger *slog.Logger) (Forwarder, error) {
-	switch mode {
-	case "http":
-		return &httpForwarder{endpoint: endpoint, cli: &http.Client{}}, nil
-	case "syslog":
-		return &noopForwarder{logger: logger, mode: "syslog"}, nil
-	case "kafka":
-		return &noopForwarder{logger: logger, mode: "kafka"}, nil
-	default:
-		return nil, errors.New("unsupported forwarder mode")
+// Drainer replays spooled alerts (when retry wrapper is used).
+type Drainer interface {
+	DrainPending() error
+}
+
+// New builds a forwarder from config. Returns optional Drainer for spool replay.
+func New(cfg Config, logger *slog.Logger) (Forwarder, Drainer, error) {
+	if cfg.RetryMax <= 0 {
+		cfg.RetryMax = 3
 	}
+	if cfg.SpoolPath == "" {
+		cfg.SpoolPath = "./alerts/forward_spool.jsonl"
+	}
+
+	var inner Forwarder
+	switch strings.ToLower(strings.TrimSpace(cfg.Mode)) {
+	case "http", "":
+		if cfg.HTTPEndpoint == "" {
+			return nil, nil, errors.New("http forwarder: endpoint required")
+		}
+		inner = &httpForwarder{endpoint: cfg.HTTPEndpoint, cli: &http.Client{Timeout: 15 * time.Second}}
+	case "syslog":
+		addr := cfg.SyslogAddr
+		if addr == "" {
+			return nil, nil, errors.New("syslog forwarder: syslog_addr required")
+		}
+		inner = &syslogForwarder{addr: addr, logger: logger}
+	case "kafka":
+		if len(cfg.KafkaBrokers) == 0 || cfg.KafkaTopic == "" {
+			return nil, nil, errors.New("kafka forwarder: kafka_brokers and kafka_topic required")
+		}
+		w := &kafka.Writer{
+			Addr:     kafka.TCP(cfg.KafkaBrokers...),
+			Topic:    cfg.KafkaTopic,
+			Balancer: &kafka.LeastBytes{},
+		}
+		inner = &kafkaForwarder{w: w}
+	default:
+		return nil, nil, fmt.Errorf("unsupported forwarder mode: %s", cfg.Mode)
+	}
+
+	rf := &retrySpoolForwarder{
+		inner:  inner,
+		cfg:    cfg,
+		logger: logger,
+	}
+	return rf, rf, nil
 }
 
 type httpForwarder struct {
@@ -53,12 +107,72 @@ func (h *httpForwarder) Send(alert schema.Alert) error {
 	return nil
 }
 
-type noopForwarder struct {
+type syslogForwarder struct {
+	addr   string
 	logger *slog.Logger
-	mode   string
 }
 
-func (n *noopForwarder) Send(alert schema.Alert) error {
-	n.logger.Info("forwarder stub send", "mode", n.mode, "alert_id", alert.AlertID)
-	return nil
+func (s *syslogForwarder) Send(alert schema.Alert) error {
+	b, err := json.Marshal(alert)
+	if err != nil {
+		return err
+	}
+	conn, err := net.Dial("udp", s.addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	// RFC5424-ish: facility 16 (local0), severity 6 (info)
+	msg := fmt.Sprintf("<134>1 %s - edr - - - %s", time.Now().UTC().Format(time.RFC3339), string(b))
+	_, err = conn.Write([]byte(msg))
+	return err
+}
+
+type kafkaForwarder struct {
+	w *kafka.Writer
+}
+
+func (k *kafkaForwarder) Send(alert schema.Alert) error {
+	b, err := json.Marshal(alert)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return k.w.WriteMessages(ctx, kafka.Message{Value: b})
+}
+
+type retrySpoolForwarder struct {
+	inner  Forwarder
+	cfg    Config
+	logger *slog.Logger
+}
+
+func (r *retrySpoolForwarder) Send(alert schema.Alert) error {
+	var last error
+	for i := 0; i < r.cfg.RetryMax; i++ {
+		if err := r.inner.Send(alert); err == nil {
+			return nil
+		} else {
+			last = err
+		}
+		time.Sleep(time.Duration(i+1) * 200 * time.Millisecond)
+	}
+	if r.cfg.SpoolPath != "" {
+		if err := AppendSpool(r.cfg.SpoolPath, alert); err != nil {
+			return err
+		}
+		r.logger.Warn("forwarder spooled alert after retries", "error", last)
+		return nil
+	}
+	return last
+}
+
+func (r *retrySpoolForwarder) DrainPending() error {
+	if r.cfg.SpoolPath == "" {
+		return nil
+	}
+	return DrainSpool(r.cfg.SpoolPath, func(a schema.Alert) error {
+		return r.inner.Send(a)
+	})
 }

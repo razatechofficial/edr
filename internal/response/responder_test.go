@@ -2,8 +2,11 @@ package response
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
 )
@@ -37,4 +40,48 @@ func TestQuarantineFile(t *testing.T) {
 	if !res.Success {
 		t.Fatalf("expected quarantine success, got: %s", res.Message)
 	}
+}
+
+func TestKillSpawnedProcess(t *testing.T) {
+	r := NewResponder(true, nil)
+	cmd := spawnSleepProcess(t)
+	pid := cmd.Process.Pid
+
+	res := r.Execute(schema.ResponseCommand{
+		Action:      schema.ResponseKillProcess,
+		ProcessPID:  pid,
+		ProcessName: "sleep",
+	})
+	if !res.Success {
+		t.Fatalf("expected kill success, got: %s", res.Message)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-time.After(2 * time.Second):
+		t.Fatalf("expected pid %d to exit after kill", pid)
+	case <-done:
+		return
+	}
+}
+
+func spawnSleepProcess(t *testing.T) *exec.Cmd {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("spawn/kill test is unix-only")
+	}
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child process: %v", err)
+	}
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	})
+	return cmd
 }

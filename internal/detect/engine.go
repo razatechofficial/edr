@@ -42,6 +42,24 @@ func (e *Engine) EvaluateProcess(ev schema.ProcessEvent) []schema.Alert {
 	return out
 }
 
+// EvaluateNetwork evaluates network-domain rules (reserved for IOC / C2 patterns).
+func (e *Engine) EvaluateNetwork(ev schema.NetworkEvent) []schema.Alert {
+	_ = ev
+	return nil
+}
+
+// EvaluateAuth evaluates authentication events (reserved for brute-force / token abuse).
+func (e *Engine) EvaluateAuth(ev schema.AuthEvent) []schema.Alert {
+	_ = ev
+	return nil
+}
+
+// EvaluateFile evaluates file integrity / sensitive path rules (reserved).
+func (e *Engine) EvaluateFile(ev schema.FileEvent) []schema.Alert {
+	_ = ev
+	return nil
+}
+
 func matchRule(r rules.Rule, ev schema.ProcessEvent) bool {
 	if len(r.When.ParentIn) > 0 && !containsAnyFold(ev.ParentName, r.When.ParentIn) {
 		return false
@@ -50,6 +68,12 @@ func matchRule(r rules.Rule, ev schema.ProcessEvent) bool {
 		return false
 	}
 	if len(r.When.ProcessPathContains) > 0 && !containsPath(ev.ProcessPath, r.When.ProcessPathContains) {
+		return false
+	}
+	if len(r.When.CommandLineContains) > 0 && !containsPath(ev.CommandLine, r.When.CommandLineContains) {
+		return false
+	}
+	if len(r.When.CommandLineAll) > 0 && !containsAllPath(ev.CommandLine, r.When.CommandLineAll) {
 		return false
 	}
 	return true
@@ -73,6 +97,16 @@ func containsPath(v string, parts []string) bool {
 		}
 	}
 	return false
+}
+
+func containsAllPath(v string, parts []string) bool {
+	v = strings.ToLower(v)
+	for _, p := range parts {
+		if !strings.Contains(v, strings.ToLower(p)) {
+			return false
+		}
+	}
+	return true
 }
 
 func mapSeverity(v string) schema.Severity {

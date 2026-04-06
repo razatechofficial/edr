@@ -18,6 +18,7 @@ type ResponseCommand struct {
 	RequestedBy   string         `json:"requested_by"`
 	Reason        string         `json:"reason"`
 	ProcessPID    int            `json:"process_pid,omitempty"`
+	ProcessName   string         `json:"process_name,omitempty"`
 	FilePath      string         `json:"file_path,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
 	ExpiresAt     time.Time      `json:"expires_at"`

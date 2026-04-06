@@ -26,11 +26,17 @@ type Config struct {
 		ProtectedProcesses []string `yaml:"protected_processes"`
 	} `yaml:"response"`
 	Forwarder struct {
-		Enabled  bool   `yaml:"enabled"`
-		Mode     string `yaml:"mode"`
-		Endpoint string `yaml:"endpoint"`
+		Enabled      bool     `yaml:"enabled"`
+		Mode         string   `yaml:"mode"`
+		Endpoint     string   `yaml:"endpoint"`
+		SyslogAddr   string   `yaml:"syslog_addr"`
+		KafkaBrokers []string `yaml:"kafka_brokers"`
+		KafkaTopic   string   `yaml:"kafka_topic"`
+		RetryMax     int      `yaml:"retry_max"`
+		SpoolPath    string   `yaml:"spool_path"`
 	} `yaml:"forwarder"`
-	RulesFile string `yaml:"rules_file"`
+	RulesFile              string `yaml:"rules_file"`
+	RulesVerifyPubKeyPath  string `yaml:"rules_verify_pubkey_path"`
 }
 
 func Load(path string) (Config, error) {

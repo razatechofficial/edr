@@ -3,6 +3,8 @@ service:
   tick_interval: "1s"
   pid_file: "./alerts/agent.pid"
 rules_file: "rules/baseline.yaml"
+# Optional: Ed25519 public key PEM to verify detached signature file rules/baseline.yaml.sig
+# rules_verify_pubkey_path: "./rules/edr-rules.pub.pem"
 
 logging:
   level: "info"
@@ -11,14 +13,13 @@ logging:
 
 response:
   allow_kill: true
-  auto_kill_enabled: true
+  auto_kill_enabled: false
   min_kill_score: 90
   kill_rule_allowlist:
     - "PROC-003"
     - "PROC-004"
     - "PROC-005"
     - "PROC-007"
-    - "PROC-009"
     - "PROC-012"
   protected_processes:
     - "systemd"
@@ -29,3 +30,8 @@ forwarder:
   enabled: false
   mode: "http"
   endpoint: "http://localhost:8080/ingest"
+  syslog_addr: "127.0.0.1:514"
+  kafka_brokers: ["localhost:9092"]
+  kafka_topic: "edr-alerts"
+  retry_max: 3
+  spool_path: "./alerts/forward_spool.jsonl"

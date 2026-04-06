@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 
 	"github.com/razatechofficial/edr/internal/schema"
 )
@@ -45,14 +44,25 @@ func (r *Responder) killProcess(cmd schema.ResponseCommand) schema.ResponseResul
 	if cmd.ProcessPID <= 0 {
 		return fail(cmd, "invalid process pid")
 	}
-	nameKey := strings.ToLower(filepath.Base(cmd.FilePath))
+	nameKey := strings.ToLower(strings.TrimSpace(filepath.Base(cmd.ProcessName)))
+	if nameKey == "" {
+		nameKey = strings.ToLower(strings.TrimSpace(filepath.Base(cmd.FilePath)))
+	}
+	if nameKey == "" {
+		nameKey = strings.ToLower(strings.TrimSpace(filepath.Base(cmd.Reason)))
+	}
 	if _, ok := r.protected[nameKey]; ok {
 		return fail(cmd, "target process is protected")
 	}
 	if cmd.ProcessPID == os.Getpid() {
 		return fail(cmd, "refusing self-termination")
 	}
-	if err := syscall.Kill(cmd.ProcessPID, syscall.SIGKILL); err != nil {
+
+	proc, err := os.FindProcess(cmd.ProcessPID)
+	if err != nil {
+		return fail(cmd, fmt.Sprintf("process lookup failed: %v", err))
+	}
+	if err := proc.Kill(); err != nil {
 		return fail(cmd, fmt.Sprintf("kill failed: %v", err))
 	}
 	return ok(cmd, "process terminated")
