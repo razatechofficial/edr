@@ -81,9 +81,9 @@ llm:
   # Env: LLM_ENABLED
   enabled: false
 
-  # Primary cloud LLM provider: openai | anthropic | grok | gemini | azure | bedrock | ollama | llamacpp
+  # Primary cloud LLM provider: openai | anthropic | grok | groq | gemini | azure | bedrock | ollama | llamacpp
   # Env: LLM_PRIMARY
-  primary_provider: "grok"
+  primary_provider: "groq"
 
   # Fallback provider if primary is unavailable.
   # Env: LLM_FALLBACK
@@ -131,6 +131,13 @@ llm:
     api_key: ""
     model: ""
     base_url: "https://api.x.ai/v1"
+
+  groq:
+    # Env: GROQ_API_KEY, GROQ_MODEL
+    api_key: ""
+    model: "llama-3.1-8b-instant"
+    base_url: "https://api.groq.com/openai/v1"
+    max_tokens: 1024
     max_tokens: 0
 
   gemini:

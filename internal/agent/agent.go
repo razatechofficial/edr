@@ -130,20 +130,40 @@ func (a *Agent) initAdvancedDetection() error {
 	}
 	a.advEngine = eng
 
-	grokKey := os.Getenv("GROK_API_KEY")
-	if grokKey == "" {
-		grokKey = a.cfg.LLM.Grok.APIKey
+	var llmProvider llm.Provider
+
+	groqKey := os.Getenv("GROQ_API_KEY")
+	if groqKey != "" {
+		groqModel := a.cfg.LLM.Groq.Model
+		if groqModel == "" {
+			groqModel = "llama-3.1-8b-instant"
+		}
+		groqMaxTokens := a.cfg.LLM.Groq.MaxTokens
+		if groqMaxTokens <= 0 {
+			groqMaxTokens = 1024
+		}
+		llmProvider = providers.NewGroqProvider(groqKey, groqModel, "", groqMaxTokens)
+		a.logger.Info("LLM provider configured", "provider", "groq", "model", groqModel, "max_tokens", groqMaxTokens)
 	}
 
-	if grokKey != "" {
-		grokModel := a.cfg.LLM.Grok.Model
-		if grokModel == "" {
-			grokModel = "grok-3-mini-fast"
+	if llmProvider == nil {
+		grokKey := os.Getenv("GROK_API_KEY")
+		if grokKey == "" {
+			grokKey = a.cfg.LLM.Grok.APIKey
 		}
-		grokProvider := providers.NewGrokProvider(grokKey, grokModel, "", 4096)
+		if grokKey != "" {
+			grokModel := a.cfg.LLM.Grok.Model
+			if grokModel == "" {
+				grokModel = "grok-3-mini-fast"
+			}
+			llmProvider = providers.NewGrokProvider(grokKey, grokModel, "", 4096)
+			a.logger.Info("LLM provider configured", "provider", "grok", "model", grokModel)
+		}
+	}
 
+	if llmProvider != nil {
 		llmEng, err := llm.NewEngine(llm.EngineConfig{
-			Primary:       grokProvider,
+			Primary:       llmProvider,
 			MaxConcurrent: 2,
 		}, a.zapLogger)
 		if err != nil {
@@ -151,10 +171,10 @@ func (a *Agent) initAdvancedDetection() error {
 		} else {
 			a.llmEngine = llmEng
 			a.advEngine.SetLLMEngine(llmEng)
-			a.logger.Info("LLM analysis enabled", "provider", "grok", "model", grokModel)
+			a.logger.Info("LLM analysis enabled", "provider", llmProvider.Name())
 		}
 	} else {
-		a.logger.Info("LLM analysis disabled (no GROK_API_KEY set)")
+		a.logger.Info("LLM analysis disabled (no GROQ_API_KEY or GROK_API_KEY set)")
 	}
 
 	return nil

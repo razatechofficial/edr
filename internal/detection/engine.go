@@ -502,6 +502,12 @@ func (e *Engine) escalateToLLM(event interface{}) {
 			return
 		}
 		if res.Verdict == nil || !res.Verdict.ThreatDetected {
+			if res.Verdict != nil {
+				e.logger.Info("engine: llm verdict benign",
+					zap.String("action", res.Verdict.RecommendedAction),
+					zap.Float64("confidence", res.Verdict.Confidence),
+					zap.String("fp_risk", res.Verdict.FalsePositiveRisk))
+			}
 			return
 		}
 		alert := &events.Alert{

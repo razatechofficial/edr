@@ -58,7 +58,7 @@ func Validate(cfg *Config) error {
 	}
 
 	llmProviders := []string{
-		"openai", "anthropic", "grok", "gemini",
+		"openai", "anthropic", "grok", "groq", "gemini",
 		"azure", "bedrock", "ollama", "llamacpp",
 	}
 	if cfg.LLM.PrimaryProvider != "" {

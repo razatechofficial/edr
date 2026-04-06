@@ -39,7 +39,7 @@ type Config struct {
 
 	LLM struct {
 		Enabled          bool    `yaml:"enabled" env:"LLM_ENABLED"`
-		PrimaryProvider  string  `yaml:"primary_provider" env:"LLM_PRIMARY"`   // openai|anthropic|grok|gemini|azure|bedrock|ollama|llamacpp
+		PrimaryProvider  string  `yaml:"primary_provider" env:"LLM_PRIMARY"`   // openai|anthropic|grok|groq|gemini|azure|bedrock|ollama|llamacpp
 		FallbackProvider string  `yaml:"fallback_provider" env:"LLM_FALLBACK"`
 		LocalProvider    string  `yaml:"local_provider" env:"LLM_LOCAL"`       // ollama|llamacpp
 		ForceLocal       bool    `yaml:"force_local" env:"LLM_FORCE_LOCAL"`
@@ -66,9 +66,16 @@ type Config struct {
 		Grok struct {
 			APIKey    string `yaml:"api_key" env:"GROK_API_KEY"`
 			Model     string `yaml:"model" env:"GROK_MODEL"`
-			BaseURL   string `yaml:"base_url"` // https://api.x.ai/v1
+			BaseURL   string `yaml:"base_url"`
 			MaxTokens int    `yaml:"max_tokens"`
 		} `yaml:"grok"`
+
+		Groq struct {
+			APIKey    string `yaml:"api_key" env:"GROQ_API_KEY"`
+			Model     string `yaml:"model" env:"GROQ_MODEL"`
+			BaseURL   string `yaml:"base_url"`
+			MaxTokens int    `yaml:"max_tokens"`
+		} `yaml:"groq"`
 
 		Gemini struct {
 			APIKey    string `yaml:"api_key" env:"GEMINI_API_KEY"`
