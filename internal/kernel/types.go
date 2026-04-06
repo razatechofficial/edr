@@ -1,0 +1,90 @@
+package kernel
+
+import (
+	"context"
+	"time"
+
+	"github.com/razatechofficial/edr/pkg/events"
+)
+
+// EventCallback is invoked for each kernel event received from the driver.
+type EventCallback func(event interface{})
+
+// EventPolicy configures which events the kernel driver should capture.
+type EventPolicy struct {
+	ProcessEvents  bool
+	FileEvents     bool
+	NetworkEvents  bool
+	RegistryEvents bool
+	MemoryEvents   bool
+	DNSEvents      bool
+	AuthEvents     bool
+	ModuleEvents   bool
+	MountEvents    bool
+	PtraceEvents   bool
+	SignalEvents   bool
+
+	// MutePaths lists process paths that should be silently ignored.
+	MutePaths []string
+
+	// MutePIDs lists PIDs whose events should be dropped.
+	MutePIDs []uint32
+}
+
+// DefaultPolicy returns an EventPolicy with all event types enabled.
+func DefaultPolicy() EventPolicy {
+	return EventPolicy{
+		ProcessEvents:  true,
+		FileEvents:     true,
+		NetworkEvents:  true,
+		RegistryEvents: true,
+		MemoryEvents:   true,
+		DNSEvents:      true,
+		AuthEvents:     true,
+		ModuleEvents:   true,
+		MountEvents:    true,
+		PtraceEvents:   true,
+		SignalEvents:   true,
+	}
+}
+
+// Driver is the interface all platform-specific kernel drivers implement.
+type Driver interface {
+	// Start begins kernel event collection. Events are written to the ring buffer.
+	Start(ctx context.Context, buf *RingBuffer) error
+
+	// Stop cleanly detaches from all kernel hooks and releases resources.
+	Stop() error
+
+	// SetPolicy updates the event collection policy without restarting.
+	SetPolicy(policy EventPolicy) error
+
+	// Name returns the driver implementation name (e.g., "ebpf", "esf", "etw").
+	Name() string
+
+	// Capabilities reports which event types this driver supports.
+	Capabilities() []events.EventType
+}
+
+// AuthDecision represents a kernel authorization decision (macOS ESF, Linux LSM).
+type AuthDecision uint8
+
+const (
+	// AuthAllow permits the operation to proceed.
+	AuthAllow AuthDecision = iota
+	// AuthDeny blocks the operation.
+	AuthDeny
+)
+
+// AuthHandler is called for authorization events that can block operations.
+type AuthHandler func(event interface{}) AuthDecision
+
+// DriverStats contains runtime statistics for a kernel driver.
+type DriverStats struct {
+	EventsReceived  uint64
+	EventsDropped   uint64
+	EventsProcessed uint64
+	LastEventTime   time.Time
+	UptimeSeconds   float64
+	ErrorCount      uint64
+}

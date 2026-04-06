@@ -65,9 +65,9 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		eventSpool: spool.NewQueue[schema.ProcessEvent](),
 		alertSpool: spool.NewQueue[schema.Alert](),
 		detector:   detect.NewEngine(rs),
-		responder:  response.NewResponder(cfg.Response.AllowKill, cfg.Response.ProtectedProcesses),
+		responder:  response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
-		killAllow:  makeRuleAllowlist(cfg.Response.KillRuleAllowlist),
+		killAllow:  makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
 	}
 	if cfg.Forwarder.Enabled {
 		fw, dr, err := forwarder.New(forwarder.Config{
@@ -105,9 +105,9 @@ func NewForTestingWithCollectors(cfg config.Config, rs rules.RuleSet, collectors
 		eventSpool: spool.NewQueue[schema.ProcessEvent](),
 		alertSpool: spool.NewQueue[schema.Alert](),
 		detector:   detect.NewEngine(rs),
-		responder:  response.NewResponder(cfg.Response.AllowKill, cfg.Response.ProtectedProcesses),
+		responder:  response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),
-		killAllow:  makeRuleAllowlist(cfg.Response.KillRuleAllowlist),
+		killAllow:  makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
 	}
 	return a
 }
@@ -223,10 +223,10 @@ func makeRuleAllowlist(ruleIDs []string) map[string]struct{} {
 }
 
 func (a *Agent) shouldAutoKill(al schema.Alert) bool {
-	if !a.cfg.Response.AllowKill || !a.cfg.Response.AutoKillEnabled {
+	if !a.cfg.LegacyResponse.AllowKill || !a.cfg.LegacyResponse.AutoKillEnabled {
 		return false
 	}
-	if al.Score < a.cfg.Response.MinKillScore {
+	if al.Score < a.cfg.LegacyResponse.MinKillScore {
 		return false
 	}
 	if len(a.killAllow) == 0 {
