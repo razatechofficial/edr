@@ -3,9 +3,14 @@ module github.com/razatechofficial/edr
 go 1.25.0
 
 require (
+	github.com/bradleyjkemp/sigma-go v0.6.6
 	github.com/cilium/ebpf v0.21.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
+	github.com/google/cel-go v0.27.0
 	github.com/google/uuid v1.6.0
+	github.com/philippgille/chromem-go v0.7.0
+	github.com/sashabaranov/go-openai v1.41.2
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -22,9 +27,6 @@ require (
 	github.com/PaesslerAG/jsonpath v0.1.1 // indirect
 	github.com/alecthomas/participle v0.7.1 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
-	github.com/bradleyjkemp/sigma-go v0.6.6 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/google/cel-go v0.27.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
@@ -36,6 +38,7 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
+	github.com/yalue/onnxruntime_go v1.27.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 // indirect
