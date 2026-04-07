@@ -68,6 +68,21 @@ func TestResponseEngineExecute(t *testing.T) {
 	}
 }
 
+func TestResponseEngineExecuteRequiresApproval(t *testing.T) {
+	t.Parallel()
+	engine := newTestEngine(t)
+	engine.RegisterHandler(ActionKillProcess, &mockHandler{})
+
+	_, err := engine.Execute(context.Background(), ActionKillProcess, map[string]interface{}{
+		"pid":               1234,
+		"requires_approval": true,
+		"approved":          false,
+	})
+	if err == nil {
+		t.Fatal("expected approval-required execution to fail")
+	}
+}
+
 func TestResponseEnginePlaybookRollback(t *testing.T) {
 	t.Parallel()
 	engine := newTestEngine(t)

@@ -102,6 +102,26 @@ func (e *ResponseEngine) RegisterHandler(action Action, handler ActionHandler) {
 
 // Execute runs a single response action, logs the result, and returns the step outcome.
 func (e *ResponseEngine) Execute(ctx context.Context, action Action, params map[string]interface{}) (*StepResult, error) {
+	if requiresExplicitApproval(params) && !isApproved(params) {
+		msg := "action blocked: explicit approval required"
+		result := &StepResult{
+			Action:    action,
+			Success:   false,
+			Message:   msg,
+			Timestamp: time.Now(),
+			Params:    params,
+		}
+		_ = e.auditLog.Log(AuditEntry{
+			Timestamp: time.Now(),
+			Action:    action,
+			Params:    params,
+			Success:   false,
+			Message:   msg,
+			Operator:  "engine",
+		})
+		return result, fmt.Errorf("response engine: %s", msg)
+	}
+
 	e.mu.RLock()
 	handler, ok := e.actions[action]
 	e.mu.RUnlock()
@@ -349,4 +369,28 @@ func pathDir(path string) string {
 		}
 	}
 	return "."
+}
+
+func requiresExplicitApproval(params map[string]interface{}) bool {
+	if params == nil {
+		return false
+	}
+	v, ok := params["requires_approval"]
+	if !ok {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
+func isApproved(params map[string]interface{}) bool {
+	if params == nil {
+		return false
+	}
+	v, ok := params["approved"]
+	if !ok {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
 }

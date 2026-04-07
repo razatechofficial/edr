@@ -28,7 +28,8 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 				Required: true,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
-						"action": "isolate",
+						"action":            "isolate",
+						"requires_approval": true,
 					}
 				},
 			},
@@ -78,6 +79,7 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 						"process_name": ExtractProcessName(alert),
 						"mode":         "kill",
 						"tree":         true,
+						"requires_approval": true,
 					}
 				},
 			},

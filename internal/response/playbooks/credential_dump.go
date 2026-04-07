@@ -56,6 +56,7 @@ func NewCredentialDumpPlaybook() *BasePlaybook {
 						"process_name": ExtractProcessName(alert),
 						"mode":         "kill",
 						"tree":         true,
+						"requires_approval": true,
 					}
 				},
 			},
