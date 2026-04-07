@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/observability"
 	"go.uber.org/zap"
 
 	"github.com/razatechofficial/edr/internal/detection/ioc"
@@ -268,6 +269,7 @@ func (m *Manager) ingestIndicators(source string, indicators []Indicator) {
 		}
 	}
 	if added > 0 {
+		observability.ThreatIntelIngested.WithLabelValues(source).Add(float64(added))
 		m.logger.Info("ingested indicators",
 			zap.String("source", source),
 			zap.Int("count", added),
