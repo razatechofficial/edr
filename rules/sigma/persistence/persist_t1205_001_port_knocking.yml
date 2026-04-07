@@ -1,0 +1,50 @@
+title: Port Knocking Persistence Mechanism
+id: 8f9a0b1c-2d3e-4f4a-5b6c-7d8e9f0a1b2c
+status: experimental
+description: Detects configuration of port knocking mechanisms or traffic-triggered backdoors using iptables rules or custom daemons
+references:
+    - https://attack.mitre.org/techniques/T1205/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.defense_evasion
+    - attack.t1205.001
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection_knockd:
+        CommandLine|contains:
+            - 'knockd'
+            - '/etc/knockd.conf'
+            - 'knock '
+    selection_iptables_trigger:
+        CommandLine|contains:
+            - 'iptables'
+            - 'ip6tables'
+        CommandLine|contains:
+            - '--tcp-flags'
+            - '-m recent --set'
+            - '-m recent --rcheck'
+            - '--hitcount'
+            - 'KNOCKING'
+    selection_nftables:
+        CommandLine|contains:
+            - 'nft add rule'
+            - 'nft insert rule'
+        CommandLine|contains:
+            - 'ct state new'
+            - 'tcp flags'
+    selection_raw_socket:
+        CommandLine|contains:
+            - 'raw_socket'
+            - 'AF_PACKET'
+            - 'pcap_open_live'
+            - 'libpcap'
+            - 'tcpdump -w'
+    condition: selection_knockd or selection_iptables_trigger or selection_nftables or selection_raw_socket
+falsepositives:
+    - Legitimate port knocking daemons for server hardening
+    - Network monitoring and packet capture tools
+level: medium

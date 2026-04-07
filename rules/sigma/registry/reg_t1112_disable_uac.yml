@@ -1,0 +1,34 @@
+title: UAC Registry Disabling
+id: 7a8b9c0d-1e2f-4a3b-4c5d-6e7f8a9b0c1d
+status: experimental
+description: Detects registry modifications that disable User Account Control (UAC)
+references:
+    - https://attack.mitre.org/techniques/T1548/002/
+    - https://attack.mitre.org/techniques/T1112/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.privilege_escalation
+    - attack.t1548.002
+    - attack.t1112
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection_disable:
+        TargetObject|contains: '\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+        TargetObject|endswith: '\EnableLUA'
+        Details: 'DWORD (0x00000000)'
+    selection_consent:
+        TargetObject|contains: '\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+        TargetObject|endswith: '\ConsentPromptBehaviorAdmin'
+        Details: 'DWORD (0x00000000)'
+    selection_filter:
+        TargetObject|contains: '\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+        TargetObject|endswith: '\FilterAdministratorToken'
+        Details: 'DWORD (0x00000000)'
+    condition: selection_disable or selection_consent or selection_filter
+falsepositives:
+    - Enterprise GPO disabling UAC for kiosks or specific workstations
+level: high

@@ -1,0 +1,42 @@
+title: WMI Process Creation
+id: 2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e
+status: experimental
+description: Detects use of WMI to create processes remotely or locally, a common technique for lateral movement and execution
+references:
+    - https://attack.mitre.org/techniques/T1047/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1047
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_wmic:
+        CommandLine|contains:
+            - 'wmic process call create'
+            - 'wmic /node:'
+    selection_powershell:
+        CommandLine|contains:
+            - 'Invoke-WmiMethod'
+            - 'Invoke-CimMethod'
+            - 'Win32_Process'
+            - 'Create('
+            - 'New-CimSession'
+            - 'Set-WmiInstance'
+    selection_wmiprvse:
+        ParentImage|endswith: '\WmiPrvSE.exe'
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+            - '\pwsh.exe'
+            - '\mshta.exe'
+            - '\rundll32.exe'
+            - '\regsvr32.exe'
+    condition: selection_wmic or selection_powershell or selection_wmiprvse
+falsepositives:
+    - SCCM and other systems management tools
+    - Legitimate WMI-based monitoring
+    - Administrative remote management scripts
+level: high

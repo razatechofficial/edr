@@ -1,0 +1,40 @@
+title: DLL Created Adjacent to Legitimate Executable
+id: 5d7e9f13-b4c6-4980-a215-0a8e3b5c9d42
+status: experimental
+description: Detects DLL files created in the same directory as known legitimate executables, potentially indicating DLL side-loading attacks
+references:
+    - https://attack.mitre.org/techniques/T1574/002/
+    - https://attack.mitre.org/techniques/T1055/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.defense_evasion
+    - attack.t1574.002
+    - attack.t1055.001
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_dll:
+        TargetFilename|endswith: '.dll'
+    selection_app_dirs:
+        TargetFilename|contains:
+            - '\Microsoft\Teams\'
+            - '\Google\Chrome\Application\'
+            - '\Mozilla Firefox\'
+            - '\Microsoft Office\'
+            - '\Adobe\'
+            - '\Zoom\'
+            - '\Slack\'
+            - '\Microsoft\Edge\Application\'
+    filter_updates:
+        SourceFilename|contains:
+            - '\Installer\'
+            - '\Update\'
+            - 'setup'
+    condition: selection_dll and selection_app_dirs and not filter_updates
+falsepositives:
+    - Application updates and patches
+    - Plugin installations
+level: high

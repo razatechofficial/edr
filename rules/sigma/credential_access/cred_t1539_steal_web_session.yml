@@ -1,0 +1,47 @@
+title: Web Session Cookie Theft
+id: c5e9f3a2-4b7d-4f1c-9e3a-2d6b8c4f1a08
+status: experimental
+description: Detects attempts to steal web session cookies from browsers or web applications, which attackers use to hijack authenticated sessions without needing credentials.
+references:
+    - https://attack.mitre.org/techniques/T1539/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1539
+logsource:
+    category: process_creation
+detection:
+    selection_cookie_files:
+        CommandLine|contains:
+            - '\Google\Chrome\User Data\Default\Cookies'
+            - '\Google\Chrome\User Data\Default\Network\Cookies'
+            - '\Mozilla\Firefox\Profiles\'
+            - '\Microsoft\Edge\User Data\Default\Cookies'
+            - '/google-chrome/Default/Cookies'
+    selection_cookie_tools:
+        CommandLine|contains:
+            - 'SharpChrome'
+            - 'SharpCookieMonster'
+            - 'Invoke-CookieKatz'
+            - 'CookieKatz'
+            - 'ChromePass'
+            - 'WebBrowserPassView'
+    selection_sqlite_cookies:
+        CommandLine|contains:
+            - 'sqlite3'
+            - '.sqlite'
+        CommandLine|contains:
+            - 'cookies'
+            - 'moz_cookies'
+    selection_dpapi:
+        CommandLine|contains:
+            - 'mimikatz'
+            - 'dpapi::chrome'
+            - 'sekurlsa::dpapi'
+    condition: selection_cookie_files or selection_cookie_tools or selection_sqlite_cookies or selection_dpapi
+falsepositives:
+    - Browser diagnostic utilities
+    - Forensic analysis tools
+    - Browser data migration tools
+level: high

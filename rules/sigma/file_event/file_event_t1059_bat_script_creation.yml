@@ -1,0 +1,30 @@
+title: BAT/CMD Script Created in Temporary Directory
+id: f4a2d6e8-9c15-4b37-8d62-5a7c3e1f0b94
+status: experimental
+description: Detects creation of batch or command script files in temporary directories, often indicative of malware staging
+references:
+    - https://attack.mitre.org/techniques/T1059/003/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1059.003
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_ext:
+        TargetFilename|endswith:
+            - '.bat'
+            - '.cmd'
+    selection_path:
+        TargetFilename|contains:
+            - '\Temp\'
+            - '\AppData\Local\Temp\'
+            - '\Windows\Temp\'
+            - '\Users\Public\'
+    condition: selection_ext and selection_path
+falsepositives:
+    - Software installers using temporary batch scripts
+    - Administrative automation scripts
+level: medium

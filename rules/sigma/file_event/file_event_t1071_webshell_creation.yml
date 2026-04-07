@@ -1,0 +1,40 @@
+title: Web Shell File Creation in Web Root
+id: 4c6d8e02-a3b5-4879-f104-9f7d2a4b8c31
+status: experimental
+description: Detects creation of script files in web server root directories that may indicate web shell deployment
+references:
+    - https://attack.mitre.org/techniques/T1505/003/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1505.003
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_webroot:
+        TargetFilename|contains:
+            - '\inetpub\wwwroot\'
+            - '\xampp\htdocs\'
+            - '\nginx\html\'
+            - '/var/www/'
+            - '/srv/www/'
+            - '/usr/share/nginx/'
+            - '/var/lib/tomcat'
+            - '\Apache\htdocs\'
+    selection_script:
+        TargetFilename|endswith:
+            - '.asp'
+            - '.aspx'
+            - '.php'
+            - '.jsp'
+            - '.jspx'
+            - '.cfm'
+            - '.war'
+    condition: selection_webroot and selection_script
+falsepositives:
+    - Legitimate web application deployments
+    - CMS plugin installations
+    - Web development activities
+level: high

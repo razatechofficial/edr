@@ -1,0 +1,44 @@
+title: Process Injection Indicators via Command Line
+id: c7fb12e5-6ab7-4ce9-fa01-ba7bcdec6e8f
+status: experimental
+description: Detects execution of tools and commands commonly associated with process injection techniques including DLL injection and memory manipulation utilities.
+references:
+    - https://attack.mitre.org/techniques/T1055/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1055
+    - attack.privilege_escalation
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_injection_tools:
+        CommandLine|contains:
+            - 'Invoke-DllInjection'
+            - 'Invoke-Shellcode'
+            - 'Invoke-ReflectivePEInjection'
+            - 'Set-RemoteThreadContext'
+            - 'CreateRemoteThread'
+            - 'NtCreateThreadEx'
+            - 'RtlCreateUserThread'
+            - 'WriteProcessMemory'
+            - 'VirtualAllocEx'
+            - 'NtAllocateVirtualMemory'
+            - 'QueueUserAPC'
+            - 'NtQueueApcThread'
+            - 'ZwMapViewOfSection'
+    selection_known_tools:
+        Image|endswith:
+            - '\mInjector.exe'
+            - '\Injector.exe'
+            - '\RemoteInject.exe'
+        OriginalFileName|contains:
+            - 'Injector'
+            - 'inject'
+    condition: selection_injection_tools or selection_known_tools
+falsepositives:
+    - Security testing tools like Cobalt Strike in authorized penetration tests
+    - Debugging tools that inspect process memory
+level: critical

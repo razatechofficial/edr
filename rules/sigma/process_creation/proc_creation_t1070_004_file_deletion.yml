@@ -1,0 +1,68 @@
+title: Suspicious File Deletion Patterns
+id: ef3d5a69-0cd1-4eab-bc45-dcb1dcbd0a23
+status: experimental
+description: Detects suspicious file deletion patterns that may indicate an attacker removing malware artifacts, covering tracks, or performing destructive operations.
+references:
+    - https://attack.mitre.org/techniques/T1070/004/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1070.004
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_del_suspicious:
+        Image|endswith:
+            - '\cmd.exe'
+        CommandLine|contains:
+            - 'del /f'
+            - 'del /q'
+            - 'erase /f'
+            - 'rmdir /s'
+        CommandLine|contains:
+            - '\Temp\'
+            - '\tmp\'
+            - '\AppData\'
+            - '*.log'
+            - '*.evt'
+            - '*.evtx'
+            - 'prefetch'
+            - '*.bat'
+            - '*.ps1'
+            - '*.vbs'
+    selection_powershell_remove:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Remove-Item'
+            - 'ri '
+            - 'rm '
+            - 'del '
+        CommandLine|contains:
+            - '-Force'
+            - '-Recurse'
+    selection_sdelete:
+        Image|endswith: '\sdelete.exe'
+    selection_cipher:
+        Image|endswith: '\cipher.exe'
+        CommandLine|contains: '/w:'
+    selection_linux_rm:
+        Image|endswith:
+            - '/rm'
+            - '/shred'
+        CommandLine|contains:
+            - '/var/log'
+            - '/tmp/'
+            - '.bash_history'
+            - '.zsh_history'
+            - '.log'
+            - '-rf /'
+    condition: selection_del_suspicious or selection_powershell_remove or selection_sdelete or selection_cipher or selection_linux_rm
+falsepositives:
+    - Legitimate cleanup scripts during software uninstallation
+    - Disk space management operations
+    - Temporary file cleanup by system maintenance tools
+level: medium

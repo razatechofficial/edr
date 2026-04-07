@@ -1,0 +1,31 @@
+title: Systemd Unit File Creation
+id: 6a8b0c24-e5f7-4091-d326-1d9b4e6f0a53
+status: experimental
+description: Detects creation of systemd unit files which can be used for persistence on Linux systems
+references:
+    - https://attack.mitre.org/techniques/T1543/003/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1543.003
+logsource:
+    category: file_event
+    product: linux
+detection:
+    selection:
+        TargetFilename|contains:
+            - '/etc/systemd/system/'
+            - '/usr/lib/systemd/system/'
+            - '/lib/systemd/system/'
+            - '/etc/systemd/user/'
+            - '/.config/systemd/user/'
+        TargetFilename|endswith:
+            - '.service'
+            - '.timer'
+            - '.socket'
+    condition: selection
+falsepositives:
+    - Legitimate package installations
+    - System administrator creating services
+level: high

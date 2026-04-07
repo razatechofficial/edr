@@ -1,0 +1,56 @@
+title: Process Name Masquerading
+id: de6c89f2-3bc4-4dfa-ab78-cbf4cbfd3f56
+status: experimental
+description: Detects processes masquerading as legitimate system binaries by running from unexpected directories. For example, svchost.exe should only run from System32, and legitimate Windows binaries should not spawn from user-writable paths.
+references:
+    - https://attack.mitre.org/techniques/T1036/
+    - https://attack.mitre.org/techniques/T1036/005/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1036
+    - attack.t1036.005
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_svchost_wrong_path:
+        OriginalFileName: 'svchost.exe'
+        Image|not|endswith:
+            - '\Windows\System32\svchost.exe'
+            - '\Windows\SysWOW64\svchost.exe'
+    selection_lsass_wrong_path:
+        OriginalFileName: 'lsass.exe'
+        Image|not|endswith: '\Windows\System32\lsass.exe'
+    selection_csrss_wrong_path:
+        OriginalFileName: 'csrss.exe'
+        Image|not|endswith: '\Windows\System32\csrss.exe'
+    selection_smss_wrong_path:
+        OriginalFileName: 'smss.exe'
+        Image|not|endswith: '\Windows\System32\smss.exe'
+    selection_services_wrong_path:
+        OriginalFileName: 'services.exe'
+        Image|not|endswith: '\Windows\System32\services.exe'
+    selection_explorer_wrong_path:
+        OriginalFileName: 'explorer.exe'
+        Image|not|endswith: '\Windows\explorer.exe'
+    selection_user_dir_system_names:
+        Image|endswith:
+            - '\svchost.exe'
+            - '\csrss.exe'
+            - '\lsass.exe'
+            - '\services.exe'
+            - '\smss.exe'
+        Image|contains:
+            - '\Users\'
+            - '\Temp\'
+            - '\AppData\'
+            - '\Downloads\'
+            - '\Desktop\'
+            - '\ProgramData\'
+    condition: selection_svchost_wrong_path or selection_lsass_wrong_path or selection_csrss_wrong_path or selection_smss_wrong_path or selection_services_wrong_path or selection_explorer_wrong_path or selection_user_dir_system_names
+falsepositives:
+    - Portable versions of legitimate tools with coincidental naming
+    - Software that bundles helper executables with system-like names
+level: high

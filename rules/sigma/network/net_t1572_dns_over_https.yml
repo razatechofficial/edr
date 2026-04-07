@@ -1,0 +1,46 @@
+title: DNS over HTTPS to Known DoH Provider
+id: e5f6a7b8-c9d0-4123-e456-f7a8b9c0d1e2
+status: experimental
+description: Detects connections to known DNS-over-HTTPS providers which can be used to bypass DNS monitoring and filtering
+references:
+    - https://attack.mitre.org/techniques/T1572/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1572
+    - attack.defense_evasion
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection:
+        DestinationHostname:
+            - 'dns.google'
+            - 'dns.google.com'
+            - 'cloudflare-dns.com'
+            - '1dot1dot1dot1.cloudflare-dns.com'
+            - 'dns.quad9.net'
+            - 'doh.opendns.com'
+            - 'doh.cleanbrowsing.org'
+            - 'dns.nextdns.io'
+            - 'doh.xfinity.com'
+            - 'dns.adguard.com'
+            - 'dns.mullvad.net'
+        DestinationPort: 443
+    selection_ip:
+        DestinationIp:
+            - '8.8.8.8'
+            - '8.8.4.4'
+            - '1.1.1.1'
+            - '1.0.0.1'
+            - '9.9.9.9'
+            - '149.112.112.112'
+            - '208.67.222.222'
+            - '208.67.220.220'
+        DestinationPort: 443
+    condition: selection or selection_ip
+falsepositives:
+    - Browsers with DoH enabled by default (Firefox, Chrome)
+    - Privacy-focused DNS configuration
+level: medium

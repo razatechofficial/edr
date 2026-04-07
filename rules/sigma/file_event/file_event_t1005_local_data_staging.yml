@@ -1,0 +1,39 @@
+title: Data Staging in Temporary Directories
+id: 0e2f4a68-c9d1-4435-b760-5b3f8c0d4e97
+status: experimental
+description: Detects creation of archive or data collection files in temporary directories, potentially indicating data staging for exfiltration
+references:
+    - https://attack.mitre.org/techniques/T1005/
+    - https://attack.mitre.org/techniques/T1074/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.collection
+    - attack.t1005
+    - attack.t1074.001
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_staging_path:
+        TargetFilename|contains:
+            - '\Temp\'
+            - '\AppData\Local\Temp\'
+            - '\Users\Public\'
+            - '\Recycle'
+    selection_collection_ext:
+        TargetFilename|endswith:
+            - '.zip'
+            - '.rar'
+            - '.7z'
+            - '.tar'
+            - '.gz'
+            - '.cab'
+            - '.dat'
+            - '.dmp'
+    condition: selection_staging_path and selection_collection_ext
+falsepositives:
+    - Legitimate compression tools
+    - Software creating temporary archives
+    - System crash dumps
+level: medium

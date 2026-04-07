@@ -1,0 +1,21 @@
+title: Double Extension File Created
+id: 8b6f2d14-e5a3-49c7-b812-6e3a1d8f5c70
+status: experimental
+description: Detects creation of files with double extensions commonly used to trick users into executing malicious files
+references:
+    - https://attack.mitre.org/techniques/T1036/005/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1036.005
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection:
+        TargetFilename|re: '.*\.(pdf|doc|docx|xls|xlsx|jpg|png|txt|csv)\.(exe|scr|bat|cmd|vbs|js|wsf|hta|ps1|pif|com)$'
+    condition: selection
+falsepositives:
+    - Very rare legitimate use cases
+level: high

@@ -1,0 +1,47 @@
+title: Office Application Add-in Persistence
+id: 7e8f9a0b-1c2d-4e3f-4a5b-6c7d8e9f0a1b
+status: experimental
+description: Detects creation or registration of Office add-ins in startup locations used for persistence
+references:
+    - https://attack.mitre.org/techniques/T1137/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1137
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_word_startup:
+        TargetFilename|contains:
+            - '\Microsoft\Word\STARTUP\'
+            - '\AppData\Roaming\Microsoft\Word\STARTUP\'
+    selection_excel_startup:
+        TargetFilename|contains:
+            - '\Microsoft\Excel\XLSTART\'
+            - '\AppData\Roaming\Microsoft\Excel\XLSTART\'
+    selection_outlook:
+        TargetFilename|contains:
+            - '\Microsoft\Outlook\'
+            - '\Microsoft\Addins\'
+        TargetFilename|endswith:
+            - '.dll'
+            - '.xll'
+            - '.xlam'
+            - '.dotm'
+            - '.ppam'
+            - '.com'
+    selection_addin_ext:
+        TargetFilename|endswith:
+            - '.wll'
+            - '.xll'
+            - '.xlam'
+            - '.dotm'
+            - '.ppam'
+            - '.vsto'
+    condition: selection_word_startup or selection_excel_startup or selection_outlook or selection_addin_ext
+falsepositives:
+    - Legitimate Office add-in installations
+    - Enterprise document template deployments
+level: medium

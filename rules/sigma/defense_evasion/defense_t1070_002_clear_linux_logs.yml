@@ -1,0 +1,53 @@
+title: Linux Log File Clearing or Truncation
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d02
+status: experimental
+description: Detects attempts to clear, truncate, or destroy Linux system log files, which may indicate an attacker covering their tracks after compromising a system.
+references:
+    - https://attack.mitre.org/techniques/T1070/002/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1070.002
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection_truncate:
+        CommandLine|contains:
+            - 'truncate -s 0 /var/log'
+            - '> /var/log/'
+            - 'cat /dev/null > /var/log'
+            - 'echo > /var/log'
+            - 'dd if=/dev/null of=/var/log'
+    selection_remove:
+        Image|endswith:
+            - '/rm'
+            - '/shred'
+        CommandLine|contains:
+            - '/var/log/'
+            - '/var/log/syslog'
+            - '/var/log/auth.log'
+            - '/var/log/secure'
+            - '/var/log/messages'
+            - '/var/log/audit/'
+            - '/var/log/wtmp'
+            - '/var/log/btmp'
+            - '/var/log/lastlog'
+    selection_journalctl:
+        Image|endswith: '/journalctl'
+        CommandLine|contains:
+            - '--vacuum-time'
+            - '--vacuum-size'
+            - '--rotate'
+            - '--flush'
+    selection_overwrite:
+        CommandLine|contains:
+            - 'shred /var/log'
+            - 'wipe /var/log'
+    condition: selection_truncate or selection_remove or selection_journalctl or selection_overwrite
+falsepositives:
+    - Legitimate log rotation via logrotate
+    - System administrators manually managing disk space
+    - Automated cleanup scripts in CI/CD environments
+level: high

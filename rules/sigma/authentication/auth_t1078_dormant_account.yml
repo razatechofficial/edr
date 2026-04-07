@@ -1,0 +1,35 @@
+title: Dormant Account Activation
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a14
+status: experimental
+description: Detects successful authentication by accounts that have not been used for an extended period, which may indicate an attacker activating a compromised dormant account to avoid detection by blending in with legitimate but inactive users.
+references:
+    - https://attack.mitre.org/techniques/T1078/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.initial_access
+    - attack.persistence
+    - attack.t1078
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection:
+        EventID: 4624
+        LogonType:
+            - 2
+            - 3
+            - 10
+    selection_reactivation:
+        EventID: 4722
+    selection_password_reset:
+        EventID: 4724
+    filter_machine:
+        TargetUserName|endswith: '$'
+    condition: (selection or selection_reactivation or selection_password_reset) and not filter_machine
+falsepositives:
+    - Employees returning from extended leave
+    - Seasonal workers logging in after off-season
+    - Shared accounts used infrequently for specific tasks
+    - IT reactivating accounts for returning personnel
+level: medium

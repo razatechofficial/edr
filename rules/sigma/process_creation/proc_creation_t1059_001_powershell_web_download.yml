@@ -1,0 +1,45 @@
+title: PowerShell Web Download Activity
+id: b4e8c9d2-3f5a-4b7c-8d2e-4f6a9c1b3d5e
+status: experimental
+description: Detects PowerShell commands that download content from the internet using various cmdlets and .NET classes, a common technique for staging payloads.
+references:
+    - https://attack.mitre.org/techniques/T1059/001/
+    - https://attack.mitre.org/techniques/T1105/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1059.001
+    - attack.command_and_control
+    - attack.t1105
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_image:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+    selection_download:
+        CommandLine|contains:
+            - 'Invoke-WebRequest'
+            - 'iwr '
+            - 'wget '
+            - 'curl '
+            - 'Net.WebClient'
+            - 'Start-BitsTransfer'
+            - 'Invoke-RestMethod'
+            - 'irm '
+            - 'DownloadFile('
+            - 'DownloadString('
+            - 'DownloadData('
+            - 'OpenRead('
+            - 'Net.HttpWebRequest'
+            - 'System.Net.Http.HttpClient'
+            - 'WebRequest::Create'
+    condition: selection_image and selection_download
+falsepositives:
+    - Legitimate PowerShell scripts downloading updates or packages
+    - System administrators fetching resources during maintenance
+    - Package managers like Chocolatey or NuGet
+level: medium

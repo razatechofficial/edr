@@ -1,0 +1,27 @@
+title: Unusually Long DNS Subdomain Query - Potential DNS Tunneling
+id: d4e5f6a7-b8c9-4012-d345-e6f7a8b9c0d1
+status: experimental
+description: Detects DNS queries with unusually long subdomain labels that may indicate DNS tunneling for C2 or data exfiltration
+references:
+    - https://attack.mitre.org/techniques/T1071/004/
+    - https://attack.mitre.org/techniques/T1572/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1071.004
+    - attack.t1572
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection:
+        DestinationHostname|re: '^[a-zA-Z0-9]{30,}\.'
+    selection_long_total:
+        DestinationHostname|re: '^.{60,}$'
+    condition: selection or selection_long_total
+falsepositives:
+    - CDN hostnames with long encoded paths
+    - Some legitimate SaaS services with long subdomain names
+    - DKIM DNS records
+level: high

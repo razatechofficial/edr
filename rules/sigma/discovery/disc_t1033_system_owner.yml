@@ -1,0 +1,73 @@
+title: System Owner and User Discovery
+id: e3ab8f6b-c2ea-4c29-b08e-9fdeb1fa0c27
+status: experimental
+description: Detects commands used to discover the current user identity, logged-in users, or system owner
+references:
+    - https://attack.mitre.org/techniques/T1033/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1033
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_whoami:
+        Image|endswith:
+            - '\whoami.exe'
+    selection_query:
+        Image|endswith:
+            - '\query.exe'
+            - '\quser.exe'
+            - '\qwinsta.exe'
+        CommandLine|contains:
+            - 'user'
+            - 'session'
+    selection_env:
+        CommandLine|contains:
+            - 'echo %username%'
+            - 'echo %userdomain%'
+            - '$env:USERNAME'
+            - '$env:USERDOMAIN'
+            - '[Environment]::UserName'
+            - '[System.Security.Principal.WindowsIdentity]'
+    selection_wmic:
+        CommandLine|contains:
+            - 'wmic computersystem get username'
+            - 'wmic /node: computersystem get username'
+    condition: selection_whoami or selection_query or selection_env or selection_wmic
+falsepositives:
+    - Shell startup scripts running whoami
+    - Login scripts and session management
+level: low
+---
+title: System Owner Discovery on Linux/macOS
+id: e3ab8f6b-c2ea-4c29-b08e-9fdeb1fa0c28
+status: experimental
+description: Detects user identity and session enumeration on Unix systems
+references:
+    - https://attack.mitre.org/techniques/T1033/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1033
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection:
+        Image|endswith:
+            - '/whoami'
+            - '/id'
+            - '/w'
+            - '/who'
+            - '/users'
+            - '/last'
+            - '/finger'
+    condition: selection
+falsepositives:
+    - Shell initialization scripts
+    - Terminal multiplexer session management
+level: low

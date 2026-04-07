@@ -1,0 +1,59 @@
+title: UAC Bypass Techniques
+id: fa6e8b92-3df9-4ecd-de78-efa9efab3b56
+status: experimental
+description: Detects known User Account Control bypass techniques including fodhelper, eventvwr, computerdefaults, and other auto-elevating binaries abused to execute code with elevated privileges.
+references:
+    - https://attack.mitre.org/techniques/T1548/002/
+    - https://github.com/hfiref0x/UACME
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.privilege_escalation
+    - attack.t1548.002
+    - attack.defense_evasion
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_fodhelper:
+        ParentImage|endswith: '\fodhelper.exe'
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+            - '\pwsh.exe'
+    selection_eventvwr:
+        ParentImage|endswith: '\eventvwr.exe'
+        Image|not|endswith:
+            - '\mmc.exe'
+    selection_computerdefaults:
+        ParentImage|endswith: '\computerdefaults.exe'
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+            - '\pwsh.exe'
+    selection_sdclt:
+        ParentImage|endswith: '\sdclt.exe'
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+    selection_cmstp:
+        ParentImage|endswith: '\cmstp.exe'
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+    selection_reg_uac:
+        Image|endswith: '\reg.exe'
+        CommandLine|contains:
+            - 'ms-settings\shell\open\command'
+            - 'mscfile\shell\open\command'
+            - 'Classes\exefile\shell'
+    selection_dism:
+        ParentImage|endswith: '\DismHost.exe'
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+    condition: selection_fodhelper or selection_eventvwr or selection_computerdefaults or selection_sdclt or selection_cmstp or selection_reg_uac or selection_dism
+falsepositives:
+    - Very unlikely in normal operations
+    - Software that legitimately uses auto-elevation features
+level: high

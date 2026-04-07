@@ -1,0 +1,46 @@
+title: Account Permission or Group Membership Change
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a08
+status: experimental
+description: Detects modifications to account permissions, group memberships, or security-relevant account attributes that could indicate privilege escalation or persistence by an attacker.
+references:
+    - https://attack.mitre.org/techniques/T1098/
+    - https://docs.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4728
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1098
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection_group_add:
+        EventID:
+            - 4728
+            - 4732
+            - 4756
+    selection_privileged_groups:
+        TargetUserName:
+            - 'Domain Admins'
+            - 'Enterprise Admins'
+            - 'Schema Admins'
+            - 'Administrators'
+            - 'Account Operators'
+            - 'Backup Operators'
+            - 'Server Operators'
+            - 'DnsAdmins'
+            - 'Group Policy Creator Owners'
+    selection_account_mod:
+        EventID:
+            - 4738
+            - 4670
+    selection_rights:
+        EventID:
+            - 4704
+            - 4717
+    condition: (selection_group_add and selection_privileged_groups) or selection_account_mod or selection_rights
+falsepositives:
+    - Legitimate IT administration adding users to groups
+    - Automated provisioning/deprovisioning systems
+    - Service account management by authorized tools
+level: high

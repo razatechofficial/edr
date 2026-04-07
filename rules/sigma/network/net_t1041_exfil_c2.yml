@@ -1,0 +1,45 @@
+title: Data Exfiltration Over C2 Channel Pattern
+id: b4c5d6e7-f8a9-4012-b345-c6d7e8f9a0b1
+status: experimental
+description: Detects patterns of repeated outbound connections to uncommon destinations with consistent intervals suggesting C2-based data exfiltration
+references:
+    - https://attack.mitre.org/techniques/T1041/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.exfiltration
+    - attack.t1041
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_suspicious_ports:
+        DestinationPort:
+            - 443
+            - 8443
+            - 4443
+            - 1443
+            - 8080
+    filter_known_services:
+        DestinationHostname|endswith:
+            - '.microsoft.com'
+            - '.windows.com'
+            - '.windowsupdate.com'
+            - '.google.com'
+            - '.googleapis.com'
+            - '.apple.com'
+            - '.amazon.com'
+            - '.amazonaws.com'
+            - '.cloudfront.net'
+            - '.akamai.net'
+    filter_internal:
+        DestinationIp|startswith:
+            - '10.'
+            - '172.16.'
+            - '192.168.'
+    condition: selection_suspicious_ports and not filter_known_services and not filter_internal
+falsepositives:
+    - Legitimate SaaS applications
+    - VPN connections
+    - Cloud service communications
+level: low

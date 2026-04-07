@@ -1,0 +1,45 @@
+title: Indirect Command Execution via System Utilities
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d06
+status: experimental
+description: Detects indirect command execution through legitimate Windows utilities such as forfiles, pcalua, SyncAppvPublishingServer, and others that can be abused to bypass application whitelisting and command-line logging.
+references:
+    - https://attack.mitre.org/techniques/T1202/
+    - https://lolbas-project.github.io/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1202
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_forfiles:
+        Image|endswith: '\forfiles.exe'
+        CommandLine|contains:
+            - '/c '
+            - '-c '
+    selection_pcalua:
+        Image|endswith: '\pcalua.exe'
+        CommandLine|contains: '-a '
+    selection_syncappv:
+        Image|endswith: '\SyncAppvPublishingServer.exe'
+    selection_scriptrunner:
+        Image|endswith: '\ScriptRunner.exe'
+        CommandLine|contains: '-appvscript'
+    selection_bash_wsl:
+        Image|endswith:
+            - '\bash.exe'
+            - '\wsl.exe'
+        ParentImage|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+    selection_conhost:
+        Image|endswith: '\conhost.exe'
+        CommandLine|contains: '--headless'
+    condition: selection_forfiles or selection_pcalua or selection_syncappv or selection_scriptrunner or selection_bash_wsl or selection_conhost
+falsepositives:
+    - Administrative scripts using forfiles for batch file operations
+    - Application compatibility assessments using pcalua
+    - Legitimate WSL usage by developers
+level: medium

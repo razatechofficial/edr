@@ -1,0 +1,41 @@
+title: RDP Session Hijacking
+id: d6f0a4b3-5c8e-4a2d-bf4b-3e7c9d5a2b02
+status: experimental
+description: Detects RDP session hijacking where an attacker uses tscon.exe to connect to an existing disconnected RDP session without credentials, or suspicious RDP configuration changes enabling shadowing.
+references:
+    - https://attack.mitre.org/techniques/T1021/001/
+    - https://medium.com/@networksecurity/rdp-hijacking-how-to-hijack-rds-and-remoteapp-sessions-transparently-to-move-through-an-da2a1e73a5f6
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.lateral_movement
+    - attack.t1021.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_tscon:
+        Image|endswith: '\tscon.exe'
+        CommandLine|re: '\d+\s+/dest:'
+    selection_service_tscon:
+        ParentImage|endswith: '\services.exe'
+        Image|endswith: '\tscon.exe'
+    selection_rdp_shadow:
+        TargetObject|contains:
+            - '\Terminal Server\fSingleSessionPerUser'
+            - '\Terminal Server\Shadow'
+            - '\Terminal Server\AllowRemoteRPC'
+    selection_mstsc_shadow:
+        Image|endswith: '\mstsc.exe'
+        CommandLine|contains: '/shadow:'
+    selection_qwinsta:
+        Image|endswith:
+            - '\qwinsta.exe'
+            - '\query.exe'
+        CommandLine|contains: 'session'
+    condition: selection_tscon or selection_service_tscon or selection_rdp_shadow or selection_mstsc_shadow or selection_qwinsta
+falsepositives:
+    - IT helpdesk using Remote Desktop shadowing for user support
+    - Legitimate session management in terminal server environments
+    - RDP session reconnection by administrators
+level: high

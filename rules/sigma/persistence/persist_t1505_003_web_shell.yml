@@ -1,0 +1,76 @@
+title: Web Shell Deployment Indicators
+id: 3a4b5c6d-7e8f-4a9b-0c1d-2e3f4a5b6c7d
+status: experimental
+description: Detects web server processes writing suspicious script files or spawning command shells, indicating potential web shell deployment
+references:
+    - https://attack.mitre.org/techniques/T1505/003/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1505.003
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_webserver_parent:
+        ParentImage|endswith:
+            - '\w3wp.exe'
+            - '\httpd.exe'
+            - '\nginx.exe'
+            - '\tomcat.exe'
+            - '\php-cgi.exe'
+            - '\java.exe'
+    selection_child:
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+            - '\pwsh.exe'
+            - '\certutil.exe'
+            - '\whoami.exe'
+            - '\net.exe'
+            - '\net1.exe'
+            - '\ipconfig.exe'
+            - '\systeminfo.exe'
+    condition: selection_webserver_parent and selection_child
+falsepositives:
+    - Web applications legitimately executing system commands
+    - CGI scripts performing system operations
+level: critical
+---
+title: Web Shell File Creation
+id: 3a4b5c6d-7e8f-4a9b-0c1d-2e3f4a5b6c7e
+status: experimental
+description: Detects creation of script files in web server directories indicating web shell deployment
+references:
+    - https://attack.mitre.org/techniques/T1505/003/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1505.003
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_path:
+        TargetFilename|contains:
+            - '\inetpub\wwwroot\'
+            - '\htdocs\'
+            - '\www\'
+            - '\webapps\'
+            - '\html\'
+    selection_ext:
+        TargetFilename|endswith:
+            - '.asp'
+            - '.aspx'
+            - '.jsp'
+            - '.jspx'
+            - '.php'
+            - '.cfm'
+            - '.war'
+    condition: selection_path and selection_ext
+falsepositives:
+    - Legitimate web application deployments
+    - CMS plugin installations
+level: high

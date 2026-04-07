@@ -1,0 +1,38 @@
+title: SMB Lateral Movement Connection
+id: f8a9b0c1-d2e3-4456-f789-a0b1c2d3e4f5
+status: experimental
+description: Detects SMB connections to internal hosts that may indicate lateral movement
+references:
+    - https://attack.mitre.org/techniques/T1021/002/
+    - https://attack.mitre.org/techniques/T1570/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.lateral_movement
+    - attack.t1021.002
+    - attack.t1570
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection:
+        DestinationPort:
+            - 445
+            - 139
+    filter_dc:
+        DestinationHostname|contains:
+            - 'dc'
+            - 'domain'
+            - 'fileserver'
+            - 'nas'
+            - 'backup'
+    filter_expected:
+        SourceFilename|endswith:
+            - '\explorer.exe'
+            - '\svchost.exe'
+    condition: selection and not filter_dc and not filter_expected
+falsepositives:
+    - Legitimate file sharing
+    - Network drives and printers
+    - Domain controller communications
+level: medium

@@ -1,0 +1,48 @@
+title: Tor Network Connection
+id: e1f2a3b4-c5d6-4789-e012-f3a4b5c6d7e8
+status: experimental
+description: Detects connections to the Tor network including known directory authorities, relay ports, and .onion-related traffic
+references:
+    - https://attack.mitre.org/techniques/T1090/003/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1090.003
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_ports:
+        DestinationPort:
+            - 9001
+            - 9030
+            - 9040
+            - 9050
+            - 9051
+            - 9150
+    selection_hostname:
+        DestinationHostname|contains:
+            - '.torproject.org'
+            - '.onion'
+            - 'tor2web'
+            - 'onion.to'
+            - 'onion.cab'
+            - 'onion.ws'
+    selection_known_dir_auth:
+        DestinationIp:
+            - '128.31.0.34'
+            - '86.59.21.38'
+            - '194.109.206.212'
+            - '82.94.251.227'
+            - '131.188.40.189'
+            - '193.23.244.244'
+            - '171.25.193.9'
+            - '154.35.175.225'
+            - '199.58.81.140'
+            - '204.13.164.118'
+    condition: selection_ports or selection_hostname or selection_known_dir_auth
+falsepositives:
+    - Security researchers
+    - Legitimate privacy-focused browsing (may need organizational exception)
+level: high

@@ -1,0 +1,27 @@
+title: macOS LaunchAgent or LaunchDaemon Plist Creation
+id: 7b9c1d35-f6a8-4102-e437-2e0c5f7a1b64
+status: experimental
+description: Detects creation of plist files in LaunchAgent or LaunchDaemon directories used for persistence on macOS
+references:
+    - https://attack.mitre.org/techniques/T1543/004/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1543.004
+logsource:
+    category: file_event
+    product: macos
+detection:
+    selection:
+        TargetFilename|contains:
+            - '/Library/LaunchAgents/'
+            - '/Library/LaunchDaemons/'
+            - '/System/Library/LaunchAgents/'
+            - '/System/Library/LaunchDaemons/'
+        TargetFilename|endswith: '.plist'
+    condition: selection
+falsepositives:
+    - Legitimate software installations
+    - macOS system updates
+level: high

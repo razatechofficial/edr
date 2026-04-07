@@ -1,0 +1,42 @@
+title: Windows Event Log Clearing
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d01
+status: experimental
+description: Detects attempts to clear Windows event logs using wevtutil, PowerShell Clear-EventLog, or the event log service recording a log clear event, which is a common defense evasion technique.
+references:
+    - https://attack.mitre.org/techniques/T1070/001/
+    - https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/wevtutil
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1070.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_wevtutil:
+        Image|endswith: '\wevtutil.exe'
+        CommandLine|contains:
+            - ' cl '
+            - ' clear-log '
+    selection_powershell:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Clear-EventLog'
+            - 'Remove-EventLog'
+            - 'Limit-EventLog'
+            - '[System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.ClearLog'
+    selection_event:
+        EventID: 1102
+        Channel: Security
+    selection_event_system:
+        EventID: 104
+        Channel: System
+    condition: selection_wevtutil or selection_powershell or selection_event or selection_event_system
+falsepositives:
+    - Legitimate log maintenance by system administrators
+    - Automated log rotation scripts
+    - System recovery operations
+level: high

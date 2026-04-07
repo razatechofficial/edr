@@ -1,0 +1,27 @@
+title: Domain Generation Algorithm Pattern Detection
+id: f4a5b6c7-d8e9-4012-f345-a6b7c8d9e0f1
+status: experimental
+description: Detects DNS queries matching domain generation algorithm patterns with high entropy or random-appearing domain names
+references:
+    - https://attack.mitre.org/techniques/T1568/002/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1568.002
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_random_pattern:
+        DestinationHostname|re: '^[a-z]{8,15}\.(com|net|org|info|biz|top|xyz|tk|ml|ga|cf|gq)$'
+    selection_consonant_heavy:
+        DestinationHostname|re: '^[bcdfghjklmnpqrstvwxz]{4,}'
+    selection_mixed_alnum:
+        DestinationHostname|re: '^[a-z0-9]{10,20}\.(com|net|org)$'
+    condition: selection_random_pattern or selection_consonant_heavy or selection_mixed_alnum
+falsepositives:
+    - Legitimate short domain names
+    - CDN and cloud service generated hostnames
+    - URL shortener services
+level: high

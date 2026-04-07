@@ -1,0 +1,51 @@
+title: Obfuscated Command Line Patterns
+id: ef7d9a03-4cd5-4eab-bc89-dcf5dcae4a67
+status: experimental
+description: Detects various command-line obfuscation techniques including character insertion, caret escaping, environment variable substitution, and string concatenation used to evade static detection.
+references:
+    - https://attack.mitre.org/techniques/T1027/
+    - https://www.fireeye.com/blog/threat-research/2017/06/obfuscation-in-the-wild.html
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1027
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_caret_obfuscation:
+        CommandLine|re: '(\^.){5,}'
+    selection_env_var_obfuscation:
+        CommandLine|contains:
+            - '%COMSPEC%'
+            - '%PUBLIC%'
+            - '%APPDATA%'
+        CommandLine|contains:
+            - 'cmd'
+            - 'powershell'
+    selection_char_concat:
+        CommandLine|re: '(\w\+){5,}'
+    selection_tick_obfuscation:
+        CommandLine|contains:
+            - "p`o`w`e`r`s`h`e`l`l"
+            - "i`n`v`o`k`e"
+            - "i`e`x"
+    selection_string_replace:
+        CommandLine|contains:
+            - '.Replace('
+            - '-replace '
+            - '-join '
+            - '[char]'
+            - '-f '
+        CommandLine|contains:
+            - 'powershell'
+            - 'cmd'
+            - 'iex'
+    selection_excessive_special:
+        CommandLine|re: '[+@{}\[\]]{10,}'
+    condition: selection_caret_obfuscation or selection_tick_obfuscation or selection_excessive_special or (selection_env_var_obfuscation) or (selection_string_replace)
+falsepositives:
+    - Legitimate batch scripts using caret escaping for multiline commands
+    - Build systems using environment variable expansions
+level: high

@@ -1,0 +1,39 @@
+title: Suspicious File Created After Download
+id: 3a8d9e72-f1b4-4c6e-a923-7d5e8b1c0f42
+status: experimental
+description: Detects files created in suspicious locations commonly used after downloading payloads from remote servers
+references:
+    - https://attack.mitre.org/techniques/T1105/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1105
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_paths:
+        TargetFilename|contains:
+            - '\Users\Public\'
+            - '\ProgramData\'
+            - '\Windows\Temp\'
+            - '\AppData\Local\Temp\'
+            - '\Downloads\'
+    selection_extensions:
+        TargetFilename|endswith:
+            - '.exe'
+            - '.dll'
+            - '.scr'
+            - '.hta'
+            - '.vbs'
+            - '.js'
+            - '.wsf'
+            - '.ps1'
+            - '.bat'
+            - '.cmd'
+    condition: selection_paths and selection_extensions
+falsepositives:
+    - Legitimate software installers downloaded by users
+    - Software update mechanisms
+level: medium

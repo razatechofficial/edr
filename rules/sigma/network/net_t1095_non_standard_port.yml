@@ -1,0 +1,38 @@
+title: Known Protocol on Non-Standard Port
+id: a7b8c9d0-e1f2-4345-a678-b9c0d1e2f3a4
+status: experimental
+description: Detects use of well-known protocols on non-standard ports, which may indicate tunneling or evasion of network controls
+references:
+    - https://attack.mitre.org/techniques/T1095/
+    - https://attack.mitre.org/techniques/T1571/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1095
+    - attack.t1571
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_http_nonstandard:
+        DestinationPort|gt: 1024
+        HttpMethod|contains:
+            - 'GET'
+            - 'POST'
+            - 'PUT'
+            - 'DELETE'
+            - 'CONNECT'
+    filter_common_http:
+        DestinationPort:
+            - 8080
+            - 8443
+            - 3128
+            - 8888
+            - 9090
+    condition: selection_http_nonstandard and not filter_common_http
+falsepositives:
+    - Development servers on high ports
+    - Legitimate web services on non-standard ports
+    - Proxy servers
+level: medium

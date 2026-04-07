@@ -1,0 +1,32 @@
+title: Impossible Travel - Login From Geographically Distant Locations
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a04
+status: experimental
+description: Detects successful authentication for the same user account from multiple geographically distant IP addresses within a short time window, suggesting credential compromise or VPN misuse.
+references:
+    - https://attack.mitre.org/techniques/T1078/
+    - https://docs.microsoft.com/en-us/azure/active-directory/identity-protection/howto-identity-protection-configure-risk-policies
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.initial_access
+    - attack.t1078
+logsource:
+    category: authentication
+detection:
+    selection:
+        action: 'success'
+        event_type: 'login'
+    filter_internal:
+        src_ip|cidr:
+            - '10.0.0.0/8'
+            - '172.16.0.0/12'
+            - '192.168.0.0/16'
+            - '127.0.0.0/8'
+    condition: selection and not filter_internal | count(src_geo.country) by user > 1
+    timeframe: 1h
+falsepositives:
+    - Users on VPN services that rotate exit nodes
+    - Corporate VPN split-tunnel configurations
+    - Mobile users traveling between countries rapidly (airports)
+    - Cloud-based proxy or CASB services
+level: high

@@ -1,0 +1,59 @@
+title: Network Configuration Discovery
+id: ab5f7c81-2ea3-4fcd-de67-fab8facd2c45
+status: experimental
+description: Detects execution of network configuration discovery commands used during reconnaissance to map the target network environment.
+references:
+    - https://attack.mitre.org/techniques/T1016/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1016
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_windows:
+        Image|endswith:
+            - '\ipconfig.exe'
+            - '\nslookup.exe'
+            - '\route.exe'
+            - '\arp.exe'
+            - '\getmac.exe'
+            - '\nbtstat.exe'
+    selection_windows_flags:
+        Image|endswith: '\ipconfig.exe'
+        CommandLine|contains:
+            - '/all'
+            - '/displaydns'
+    selection_powershell_net:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Get-NetIPConfiguration'
+            - 'Get-NetIPAddress'
+            - 'Get-DnsClientCache'
+            - 'Get-NetRoute'
+            - 'Get-NetAdapter'
+            - 'Get-NetNeighbor'
+    selection_linux:
+        Image|endswith:
+            - '/ifconfig'
+            - '/ip'
+            - '/route'
+            - '/arp'
+            - '/dig'
+        CommandLine|contains:
+            - 'ifconfig'
+            - 'ip addr'
+            - 'ip route'
+            - 'ip neigh'
+            - 'route -n'
+            - 'arp -a'
+    condition: selection_windows or selection_windows_flags or selection_powershell_net or selection_linux
+falsepositives:
+    - Network troubleshooting by administrators
+    - Network monitoring scripts
+    - DHCP client operations
+level: low

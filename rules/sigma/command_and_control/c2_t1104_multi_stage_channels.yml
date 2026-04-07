@@ -1,0 +1,59 @@
+title: Multi-Stage C2 Channel Indicators
+id: c5d6e7f8-a9b0-4c1d-2e3f-4a5b6c7d8e9a
+status: experimental
+description: Detects indicators of multi-stage command and control where initial access downloads subsequent stages or pivots between C2 infrastructure
+references:
+    - https://attack.mitre.org/techniques/T1104/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1104
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_download_exec:
+        CommandLine|contains:
+            - 'DownloadString'
+            - 'DownloadFile'
+            - 'Invoke-WebRequest'
+            - 'Net.WebClient'
+            - 'Start-BitsTransfer'
+        CommandLine|contains:
+            - 'IEX'
+            - 'Invoke-Expression'
+            - 'Start-Process'
+            - '| iex'
+            - '| powershell'
+    selection_stager:
+        CommandLine|contains:
+            - 'mshta http'
+            - 'mshta https'
+            - 'mshta vbscript'
+            - 'rundll32.exe javascript:'
+            - 'regsvr32 /s /n /u /i:http'
+            - 'certutil -urlcache -split -f'
+    selection_reflective_load:
+        CommandLine|contains:
+            - 'Reflection.Assembly'
+            - 'Load(('
+            - 'LoadFrom('
+            - 'Assembly.Load'
+            - 'MemoryStream'
+            - 'IO.Compression'
+    selection_payload_decode:
+        CommandLine|contains:
+            - 'certutil -decode'
+            - 'FromBase64String'
+            - '-decodehex'
+        CommandLine|contains:
+            - '.exe'
+            - '.dll'
+            - '.ps1'
+            - '.hta'
+    condition: selection_download_exec or selection_stager or selection_reflective_load or selection_payload_decode
+falsepositives:
+    - Software deployment tools downloading and executing packages
+    - Script-based software installers
+level: high

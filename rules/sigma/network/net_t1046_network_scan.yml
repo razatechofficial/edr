@@ -1,0 +1,54 @@
+title: Network Service Scanning Pattern
+id: c1d2e3f4-a5b6-4789-c012-d3e4f5a6b7c8
+status: experimental
+description: Detects patterns of network service scanning across multiple ports or hosts
+references:
+    - https://attack.mitre.org/techniques/T1046/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1046
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_common_scan_ports:
+        DestinationPort:
+            - 21
+            - 22
+            - 23
+            - 25
+            - 53
+            - 80
+            - 110
+            - 111
+            - 135
+            - 139
+            - 143
+            - 443
+            - 445
+            - 993
+            - 995
+            - 1433
+            - 1521
+            - 3306
+            - 3389
+            - 5432
+            - 5900
+            - 5985
+            - 6379
+            - 8080
+            - 8443
+            - 9200
+            - 27017
+    filter_known:
+        DestinationHostname|endswith:
+            - '.microsoft.com'
+            - '.google.com'
+    condition: selection_common_scan_ports and not filter_known
+falsepositives:
+    - Authorized vulnerability scanning
+    - Network monitoring tools
+    - Service health checks
+level: low

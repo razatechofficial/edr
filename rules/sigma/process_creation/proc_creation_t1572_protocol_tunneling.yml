@@ -1,0 +1,71 @@
+title: Protocol Tunneling Detection
+id: bc2a4d58-9fb5-4aef-fa34-abc5abcd9d12
+status: experimental
+description: Detects execution of tools commonly used for protocol tunneling including SSH tunneling, DNS tunneling, ICMP tunneling, and other covert channel tools.
+references:
+    - https://attack.mitre.org/techniques/T1572/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1572
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_ssh_tunnel:
+        CommandLine|contains:
+            - 'ssh -D'
+            - 'ssh -L'
+            - 'ssh -R'
+            - 'ssh -N'
+            - 'ssh.*-f.*-N'
+            - 'plink -D'
+            - 'plink -L'
+            - 'plink -R'
+            - 'plink -N'
+    selection_dns_tunnel:
+        Image|endswith:
+            - '\iodine.exe'
+            - '\dnscat2.exe'
+            - '\dns2tcp.exe'
+            - '/iodine'
+            - '/dnscat'
+            - '/dns2tcpc'
+    selection_dns_tunnel_cmd:
+        CommandLine|contains:
+            - 'iodine'
+            - 'dnscat'
+            - 'dns2tcp'
+    selection_icmp_tunnel:
+        CommandLine|contains:
+            - 'ptunnel'
+            - 'icmpsh'
+            - 'icmp_tunnel'
+    selection_proxy_tools:
+        Image|endswith:
+            - '\chisel.exe'
+            - '\ngrok.exe'
+            - '\frpc.exe'
+            - '\reGeorg.exe'
+            - '/chisel'
+            - '/ngrok'
+            - '/frpc'
+        OriginalFileName|contains:
+            - 'chisel'
+            - 'ngrok'
+            - 'frpc'
+    selection_socat:
+        Image|endswith:
+            - '/socat'
+            - '\socat.exe'
+        CommandLine|contains:
+            - 'TCP:'
+            - 'tcp-listen'
+            - 'EXEC:'
+    condition: selection_ssh_tunnel or selection_dns_tunnel or selection_dns_tunnel_cmd or selection_icmp_tunnel or selection_proxy_tools or selection_socat
+falsepositives:
+    - Legitimate SSH tunneling for development access
+    - Authorized use of ngrok for demo environments
+    - Network testing and diagnostics
+level: high

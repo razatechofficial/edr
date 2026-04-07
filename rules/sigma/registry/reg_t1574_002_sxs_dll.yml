@@ -1,0 +1,27 @@
+title: SxS DLL Redirection via Registry
+id: 7e8f9a0b-1c2d-4e3f-4a5b-6c7d8e9f0a1b
+status: experimental
+description: Detects modification of Side-by-Side (WinSxS) DLL redirection registry entries that may be used for DLL hijacking
+references:
+    - https://attack.mitre.org/techniques/T1574/002/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.defense_evasion
+    - attack.t1574.002
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains:
+            - '\SOFTWARE\Microsoft\Windows\CurrentVersion\SideBySide'
+            - '\WinSxS\'
+    selection_redirect:
+        TargetObject|contains: '\SOFTWARE\Microsoft\Windows\CurrentVersion\SideBySide\Winners'
+    condition: selection or selection_redirect
+falsepositives:
+    - Windows servicing stack updates
+    - .NET Framework installations
+level: medium

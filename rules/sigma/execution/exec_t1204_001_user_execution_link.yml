@@ -1,0 +1,40 @@
+title: User Execution via Malicious Link
+id: 7a8b9c0d-1e2f-4a3b-4c5d-6e7f8a9b0c1d
+status: experimental
+description: Detects browser or mail client spawning suspicious child processes after a user clicks a link, indicating potential drive-by or phishing
+references:
+    - https://attack.mitre.org/techniques/T1204/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1204.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_parent:
+        ParentImage|endswith:
+            - '\chrome.exe'
+            - '\msedge.exe'
+            - '\firefox.exe'
+            - '\iexplore.exe'
+            - '\outlook.exe'
+            - '\thunderbird.exe'
+    selection_child:
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+            - '\pwsh.exe'
+            - '\wscript.exe'
+            - '\cscript.exe'
+            - '\mshta.exe'
+            - '\rundll32.exe'
+            - '\regsvr32.exe'
+            - '\certutil.exe'
+            - '\bitsadmin.exe'
+    condition: selection_parent and selection_child
+falsepositives:
+    - Browser extensions that legitimately spawn shell processes
+    - Web-based administrative tools
+level: high

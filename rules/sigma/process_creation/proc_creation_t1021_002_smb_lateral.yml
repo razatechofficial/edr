@@ -1,0 +1,50 @@
+title: SMB and Windows Admin Share Lateral Movement
+id: de8c0f14-5bd6-4cfa-ab90-cde1cdef5f78
+status: experimental
+description: Detects use of SMB/Windows administrative shares for lateral movement including net use, PsExec, and remote service creation targeting C$, ADMIN$, and IPC$ shares.
+references:
+    - https://attack.mitre.org/techniques/T1021/002/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.lateral_movement
+    - attack.t1021.002
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_net_share:
+        Image|endswith:
+            - '\net.exe'
+            - '\net1.exe'
+        CommandLine|contains:
+            - 'use \\\\'
+            - 'share'
+            - 'view \\\\'
+    selection_admin_shares:
+        CommandLine|contains:
+            - '\\C$'
+            - '\\ADMIN$'
+            - '\\IPC$'
+    selection_psexec:
+        Image|endswith:
+            - '\PsExec.exe'
+            - '\PsExec64.exe'
+        CommandLine|contains: '\\\\'
+    selection_wmic_remote:
+        Image|endswith: '\wmic.exe'
+        CommandLine|contains:
+            - '/node:'
+            - '/NODE:'
+    selection_copy_remote:
+        Image|endswith:
+            - '\xcopy.exe'
+            - '\robocopy.exe'
+            - '\copy.exe'
+        CommandLine|contains: '\\\\'
+    condition: (selection_net_share and selection_admin_shares) or selection_psexec or selection_wmic_remote or selection_copy_remote
+falsepositives:
+    - Legitimate file sharing and network drive mapping
+    - System administrators using PsExec for remote management
+    - Backup solutions accessing administrative shares
+level: medium

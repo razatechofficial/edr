@@ -1,0 +1,48 @@
+title: macOS Keychain Access by Unusual Process
+id: c5e9f3a2-4b7d-4f1c-9e3a-2d6b8c4f1a01
+status: experimental
+description: Detects access to the macOS Keychain using the security command-line tool or direct access to Keychain database files by processes other than expected system services.
+references:
+    - https://attack.mitre.org/techniques/T1555/001/
+    - https://support.apple.com/guide/keychain-access/what-is-keychain-access-kyca1083/mac
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1555.001
+logsource:
+    category: process_creation
+    product: macos
+detection:
+    selection_security_tool:
+        Image|endswith: '/security'
+        CommandLine|contains:
+            - 'find-generic-password'
+            - 'find-internet-password'
+            - 'dump-keychain'
+            - 'find-certificate'
+            - 'export'
+            - 'find-key'
+            - 'dump-trust-settings'
+    selection_keychain_files:
+        CommandLine|contains:
+            - 'login.keychain'
+            - 'System.keychain'
+            - '/Library/Keychains/'
+            - '~/Library/Keychains/'
+            - 'login.keychain-db'
+    selection_password_extract:
+        Image|endswith: '/security'
+        CommandLine|contains:
+            - '-w'
+            - '-p'
+            - '-a'
+        CommandLine|contains:
+            - 'find-generic-password'
+            - 'find-internet-password'
+    condition: selection_security_tool or selection_keychain_files or selection_password_extract
+falsepositives:
+    - Legitimate applications accessing their own Keychain entries
+    - System administration scripts managing certificates
+    - Password managers interacting with the Keychain
+level: high

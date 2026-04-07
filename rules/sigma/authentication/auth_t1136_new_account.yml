@@ -1,0 +1,39 @@
+title: New User Account Creation
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a09
+status: experimental
+description: Detects the creation of new user accounts via Windows Security events or command-line tools, which may indicate an attacker establishing persistence through new accounts.
+references:
+    - https://attack.mitre.org/techniques/T1136/
+    - https://attack.mitre.org/techniques/T1136/001/
+    - https://attack.mitre.org/techniques/T1136/002/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1136.001
+    - attack.t1136.002
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection_event:
+        EventID:
+            - 4720
+            - 4741
+    selection_cmd:
+        CommandLine|contains:
+            - 'net user'
+            - 'net localgroup'
+            - 'New-LocalUser'
+            - 'New-ADUser'
+            - 'dsadd user'
+    selection_linux:
+        CommandLine|contains:
+            - 'useradd'
+            - 'adduser'
+    condition: selection_event or selection_cmd or selection_linux
+falsepositives:
+    - Legitimate account provisioning by IT administrators
+    - Automated onboarding systems
+    - Software installers that create service accounts
+level: medium

@@ -1,0 +1,39 @@
+title: Windows Defender Registry Disabling
+id: 5e6f7a8b-9c0d-4e1f-2a3b-4c5d6e7f8a9b
+status: experimental
+description: Detects registry modifications that disable Windows Defender features
+references:
+    - https://attack.mitre.org/techniques/T1562/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1562.001
+    - attack.t1112
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection_realtime:
+        TargetObject|contains: '\SOFTWARE\Policies\Microsoft\Windows Defender'
+        TargetObject|endswith:
+            - '\DisableAntiSpyware'
+            - '\DisableAntiVirus'
+            - '\DisableRealtimeMonitoring'
+            - '\DisableBehaviorMonitoring'
+            - '\DisableIOAVProtection'
+            - '\DisableOnAccessProtection'
+            - '\DisableScanOnRealtimeEnable'
+            - '\DisableBlockAtFirstSeen'
+        Details: 'DWORD (0x00000001)'
+    selection_tamper:
+        TargetObject|contains: '\SOFTWARE\Microsoft\Windows Defender'
+        TargetObject|endswith:
+            - '\TamperProtection'
+            - '\DisableAntiSpyware'
+        Details: 'DWORD (0x00000000)'
+    condition: selection_realtime or selection_tamper
+falsepositives:
+    - Enterprise GPO configurations disabling Defender for third-party AV
+    - Testing environments
+level: high

@@ -1,0 +1,55 @@
+title: WMI Remote Command Execution
+id: d6f0a4b3-5c8e-4a2d-bf4b-3e7c9d5a2b03
+status: experimental
+description: Detects remote command execution via Windows Management Instrumentation (WMI), a technique commonly used for lateral movement to execute commands on remote systems without deploying additional tools.
+references:
+    - https://attack.mitre.org/techniques/T1047/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.lateral_movement
+    - attack.execution
+    - attack.t1047
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_wmic_remote:
+        Image|endswith: '\wmic.exe'
+        CommandLine|contains:
+            - '/node:'
+            - '-node:'
+        CommandLine|contains:
+            - 'process call create'
+            - 'os get'
+            - 'service'
+    selection_wmi_tools:
+        CommandLine|contains:
+            - 'wmiexec'
+            - 'Invoke-WMIExec'
+            - 'Invoke-WmiCommand'
+            - 'Invoke-WMIMethod'
+            - 'SharpWMI'
+    selection_wmiprvse_child:
+        ParentImage|endswith: '\WmiPrvSE.exe'
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+            - '\pwsh.exe'
+            - '\mshta.exe'
+            - '\rundll32.exe'
+    selection_powershell_wmi:
+        CommandLine|contains:
+            - 'Invoke-WmiMethod'
+            - 'Get-WmiObject'
+            - 'Invoke-CimMethod'
+            - 'New-CimSession'
+        CommandLine|contains:
+            - '-ComputerName'
+            - '-CimSession'
+    condition: selection_wmic_remote or selection_wmi_tools or selection_wmiprvse_child or selection_powershell_wmi
+falsepositives:
+    - Legitimate WMI-based management tools (SCCM, SCOM)
+    - IT automation scripts using WMI for remote management
+    - Monitoring solutions querying remote systems via WMI
+level: high

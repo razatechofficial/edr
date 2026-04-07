@@ -1,0 +1,30 @@
+title: Image File Execution Options Injection
+id: 4d5e6f7a-8b9c-4d0e-1f2a-3b4c5d6e7f8a
+status: experimental
+description: Detects modification of Image File Execution Options registry keys used for debugger injection and silent process exit monitoring
+references:
+    - https://attack.mitre.org/techniques/T1546/012/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.privilege_escalation
+    - attack.t1546.012
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains: '\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\'
+        TargetObject|endswith:
+            - '\Debugger'
+            - '\GlobalFlag'
+    filter_vscode:
+        Details|contains:
+            - 'vsjitdebugger'
+            - 'ntsd'
+    condition: selection and not filter_vscode
+falsepositives:
+    - Debugging and development tools
+    - Application compatibility fixes
+level: high

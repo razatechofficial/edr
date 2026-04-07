@@ -1,0 +1,46 @@
+title: C2 Communication via Legitimate Web Service
+id: f2a3b4c5-d6e7-4890-f123-a4b5c6d7e8f9
+status: experimental
+description: Detects network connections to legitimate web services frequently abused for command and control communication
+references:
+    - https://attack.mitre.org/techniques/T1102/
+    - https://attack.mitre.org/techniques/T1567/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1102
+    - attack.t1567
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection:
+        DestinationHostname|contains:
+            - 'pastebin.com'
+            - 'paste.ee'
+            - 'hastebin.com'
+            - 'ghostbin.co'
+            - 'raw.githubusercontent.com'
+            - 'gist.githubusercontent.com'
+            - 'discord.com/api/webhooks'
+            - 'discordapp.com/api/webhooks'
+            - 'api.telegram.org'
+            - 'slack.com/api'
+            - 'hooks.slack.com'
+            - 'notion.so/api'
+            - 'trello.com'
+            - 'docs.google.com/forms'
+            - 'script.google.com'
+            - 'firebase.googleapis.com'
+            - 'ngrok.io'
+            - 'ngrok-free.app'
+            - 'serveo.net'
+            - 'localhost.run'
+            - 'pipedream.net'
+    condition: selection
+falsepositives:
+    - Legitimate use of these web services
+    - Developer workflows using GitHub/GitLab APIs
+    - Team communication tools
+level: medium

@@ -1,0 +1,38 @@
+title: Sensitive Authentication File Access
+id: 8c0d2e46-a7b9-4213-f548-3f1d6a8b2c75
+status: experimental
+description: Detects access or modification of sensitive Linux authentication files such as /etc/shadow and /etc/passwd
+references:
+    - https://attack.mitre.org/techniques/T1003/008/
+    - https://attack.mitre.org/techniques/T1552/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1003.008
+    - attack.t1552.001
+logsource:
+    category: file_access
+    product: linux
+detection:
+    selection:
+        TargetFilename:
+            - '/etc/shadow'
+            - '/etc/shadow-'
+            - '/etc/passwd'
+            - '/etc/gshadow'
+            - '/etc/master.passwd'
+            - '/etc/security/opasswd'
+    filter_expected:
+        SourceFilename|contains:
+            - '/usr/sbin/useradd'
+            - '/usr/sbin/userdel'
+            - '/usr/sbin/usermod'
+            - '/usr/bin/passwd'
+            - '/usr/sbin/groupadd'
+    condition: selection and not filter_expected
+falsepositives:
+    - System administration user management tasks
+    - PAM authentication modules
+    - Backup software
+level: high

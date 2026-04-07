@@ -1,0 +1,49 @@
+title: macOS Launch Daemon or Agent Creation
+id: cd1b3e47-8ab9-4cef-fa23-bac9bacb8e01
+status: experimental
+description: Detects creation or loading of macOS Launch Daemons and Launch Agents, which provide persistence by executing programs at boot or user login.
+references:
+    - https://attack.mitre.org/techniques/T1543/004/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1543.004
+    - attack.privilege_escalation
+logsource:
+    category: process_creation
+    product: macos
+detection:
+    selection_launchctl:
+        Image|endswith: '/launchctl'
+        CommandLine|contains:
+            - 'load'
+            - 'bootstrap'
+            - 'enable'
+            - 'submit'
+    selection_plist_locations:
+        CommandLine|contains:
+            - '/Library/LaunchDaemons/'
+            - '/Library/LaunchAgents/'
+            - '~/Library/LaunchAgents/'
+            - '/System/Library/LaunchDaemons/'
+            - '/System/Library/LaunchAgents/'
+    selection_plist_write:
+        CommandLine|contains:
+            - 'ProgramArguments'
+            - 'RunAtLoad'
+            - 'KeepAlive'
+            - 'StartInterval'
+            - 'WatchPaths'
+            - 'com.apple.loginwindow'
+    selection_plutil:
+        Image|endswith: '/plutil'
+        CommandLine|contains:
+            - 'LaunchDaemons'
+            - 'LaunchAgents'
+    condition: (selection_launchctl and selection_plist_locations) or (selection_plist_locations and selection_plist_write) or selection_plutil
+falsepositives:
+    - Legitimate application installations configuring launch services
+    - System administration tools managing services
+    - macOS system updates
+level: medium

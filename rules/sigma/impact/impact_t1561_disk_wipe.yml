@@ -1,0 +1,66 @@
+title: Disk Wipe or Data Destruction
+id: f8b2c6d5-7e0a-4c4f-b06d-5f9e1a7c4d05
+status: experimental
+description: Detects disk wiping and data destruction activities including overwriting disk sectors, using destructive formatting tools, or deploying known wiper malware techniques that render systems unbootable.
+references:
+    - https://attack.mitre.org/techniques/T1561/
+    - https://attack.mitre.org/techniques/T1561/001/
+    - https://attack.mitre.org/techniques/T1561/002/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.impact
+    - attack.t1561
+    - attack.t1561.001
+    - attack.t1561.002
+logsource:
+    category: process_creation
+detection:
+    selection_format:
+        Image|endswith: '\format.com'
+        CommandLine|contains:
+            - '/fs:'
+            - '/y'
+            - '/q'
+    selection_dd_wipe:
+        CommandLine|contains:
+            - 'dd if=/dev/zero of=/dev/sd'
+            - 'dd if=/dev/urandom of=/dev/sd'
+            - 'dd if=/dev/null of=/dev/sd'
+            - 'dd if=/dev/zero of=/dev/nvme'
+    selection_shred:
+        Image|endswith:
+            - '/shred'
+            - '/wipe'
+            - '/scrub'
+        CommandLine|contains:
+            - '/dev/sd'
+            - '/dev/nvme'
+            - '/dev/hd'
+    selection_diskpart:
+        Image|endswith: '\diskpart.exe'
+        CommandLine|contains:
+            - 'clean all'
+            - 'clean'
+    selection_cipher_wipe:
+        Image|endswith: '\cipher.exe'
+        CommandLine|contains: '/w:'
+    selection_sdelete:
+        Image|endswith: '\sdelete.exe'
+        CommandLine|contains:
+            - '-z'
+            - '-c'
+            - '-p'
+    selection_mbr_overwrite:
+        CommandLine|contains:
+            - '\\.\PhysicalDrive'
+            - '\\.\PHYSICALDRIVE'
+            - 'CreateFile.*PhysicalDrive'
+            - 'WriteFile.*PhysicalDrive'
+    condition: selection_format or selection_dd_wipe or selection_shred or selection_diskpart or selection_cipher_wipe or selection_sdelete or selection_mbr_overwrite
+falsepositives:
+    - Disk decommissioning and secure disposal
+    - Drive formatting during OS installation
+    - Secure file deletion for compliance
+    - SSD TRIM operations
+level: critical

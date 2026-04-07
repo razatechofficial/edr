@@ -1,0 +1,79 @@
+title: Suspicious File and Directory Enumeration
+id: 9e5c3a16-7fab-4d84-cb39-4a8f6bae5d72
+status: experimental
+description: Detects broad or recursive file and directory enumeration commonly performed during reconnaissance
+references:
+    - https://attack.mitre.org/techniques/T1083/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1083
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_dir:
+        CommandLine|contains:
+            - 'dir /s /b'
+            - 'dir /s /a'
+            - 'dir /s /o'
+            - 'dir C:\ /s'
+            - 'dir C:\Users /s'
+    selection_tree:
+        Image|endswith: '\tree.com'
+        CommandLine|contains:
+            - 'C:\'
+            - '/f'
+    selection_powershell:
+        CommandLine|contains:
+            - 'Get-ChildItem -Recurse'
+            - 'Get-ChildItem -Path C:\'
+            - 'gci -Recurse'
+            - 'ls -Recurse'
+            - 'dir -Recurse'
+    condition: selection_dir or selection_tree or selection_powershell
+falsepositives:
+    - File indexing services
+    - Backup software performing directory scans
+    - Developers searching for files
+level: low
+---
+title: Suspicious File and Directory Enumeration on Linux
+id: 9e5c3a16-7fab-4d84-cb39-4a8f6bae5d73
+status: experimental
+description: Detects broad recursive file enumeration on Linux/macOS systems
+references:
+    - https://attack.mitre.org/techniques/T1083/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1083
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection_find:
+        CommandLine|contains:
+            - 'find / -name'
+            - 'find / -type'
+            - 'find /home -name'
+            - 'find /etc -name'
+            - 'find /var -name'
+    selection_ls:
+        CommandLine|contains:
+            - 'ls -laR /'
+            - 'ls -R /home'
+            - 'ls -R /etc'
+    selection_tree:
+        Image|endswith: '/tree'
+        CommandLine|contains:
+            - '/home'
+            - '/etc'
+            - '/var'
+    condition: selection_find or selection_ls or selection_tree
+falsepositives:
+    - System administration and auditing
+    - Backup software
+level: low

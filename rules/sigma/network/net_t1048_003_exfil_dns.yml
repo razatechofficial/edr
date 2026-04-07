@@ -1,0 +1,26 @@
+title: DNS Data Exfiltration Pattern
+id: c9d0e1f2-a3b4-4567-c890-d1e2f3a4b5c6
+status: experimental
+description: Detects patterns consistent with DNS-based data exfiltration including high-frequency DNS queries and encoded subdomain data
+references:
+    - https://attack.mitre.org/techniques/T1048/003/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.exfiltration
+    - attack.t1048.003
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_encoded_subdomain:
+        DestinationHostname|re: '^[a-zA-Z0-9+/=]{20,}\.'
+    selection_hex_subdomain:
+        DestinationHostname|re: '^[0-9a-f]{16,}\.'
+    selection_base32:
+        DestinationHostname|re: '^[A-Z2-7]{16,}\.'
+    condition: selection_encoded_subdomain or selection_hex_subdomain or selection_base32
+falsepositives:
+    - Some CDN and anti-spam services use long encoded hostnames
+    - DKIM and email authentication records
+level: high

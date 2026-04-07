@@ -1,0 +1,41 @@
+title: Office Application Dropping Executable
+id: 4e6f8a02-c3d5-4e79-b104-9b7f2c4d8e31
+status: experimental
+description: Detects executable files created by Microsoft Office applications, indicating potential macro-based malware execution
+references:
+    - https://attack.mitre.org/techniques/T1204/002/
+    - https://attack.mitre.org/techniques/T1059/005/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1204.002
+    - attack.initial_access
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_office_source:
+        SourceFilename|endswith:
+            - '\WINWORD.EXE'
+            - '\EXCEL.EXE'
+            - '\POWERPNT.EXE'
+            - '\MSACCESS.EXE'
+            - '\OUTLOOK.EXE'
+    selection_dropped_ext:
+        TargetFilename|endswith:
+            - '.exe'
+            - '.dll'
+            - '.scr'
+            - '.hta'
+            - '.vbs'
+            - '.js'
+            - '.wsf'
+            - '.bat'
+            - '.cmd'
+            - '.ps1'
+    condition: selection_office_source and selection_dropped_ext
+falsepositives:
+    - Legitimate Office add-in installations
+    - Office application auto-update processes
+level: high

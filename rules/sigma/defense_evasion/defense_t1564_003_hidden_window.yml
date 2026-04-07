@@ -1,0 +1,46 @@
+title: Hidden Window Execution
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d11
+status: experimental
+description: Detects process execution with hidden window styles, which attackers use to run malicious commands without visible windows to avoid alerting the user.
+references:
+    - https://attack.mitre.org/techniques/T1564/003/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1564.003
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_powershell_hidden:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - '-WindowStyle Hidden'
+            - '-WindowStyle h'
+            - '-w hidden'
+            - '-w h'
+            - '-win h'
+            - '-window h'
+    selection_vbs_hidden:
+        Image|endswith:
+            - '\wscript.exe'
+            - '\cscript.exe'
+        CommandLine|contains: '//B'
+    selection_start_hidden:
+        CommandLine|contains:
+            - 'start /min'
+            - 'Start-Process -WindowStyle Hidden'
+            - 'ProcessStartInfo'
+            - 'WindowStyle = ProcessWindowStyle.Hidden'
+    selection_mshta:
+        Image|endswith: '\mshta.exe'
+        CommandLine|contains: 'javascript:'
+    condition: selection_powershell_hidden or selection_vbs_hidden or selection_start_hidden or selection_mshta
+falsepositives:
+    - Legitimate scheduled tasks running with hidden windows
+    - Background service management scripts
+    - Software updaters running silently
+level: medium

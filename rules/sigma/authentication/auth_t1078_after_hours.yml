@@ -1,0 +1,39 @@
+title: Login Outside Business Hours
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a13
+status: experimental
+description: Detects successful interactive logon events that occur outside normal business hours (before 6 AM or after 10 PM local time, and on weekends), which may indicate unauthorized access or compromised credentials being used by remote attackers in different time zones.
+references:
+    - https://attack.mitre.org/techniques/T1078/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.initial_access
+    - attack.t1078
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection:
+        EventID: 4624
+        LogonType:
+            - 2
+            - 10
+            - 11
+    filter_machine:
+        TargetUserName|endswith: '$'
+    filter_system:
+        TargetUserName:
+            - 'SYSTEM'
+            - 'LOCAL SERVICE'
+            - 'NETWORK SERVICE'
+    timeframe_off_hours:
+        TimeCreated|time:
+            - '>= 22:00'
+            - '<= 06:00'
+    condition: selection and not filter_machine and not filter_system and timeframe_off_hours
+falsepositives:
+    - Night-shift employees or on-call personnel
+    - Scheduled tasks running under user accounts
+    - Administrators performing after-hours maintenance
+    - Users in different time zones
+level: low

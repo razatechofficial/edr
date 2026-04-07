@@ -1,0 +1,44 @@
+title: DCOM-Based Lateral Movement Authentication
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a15
+status: experimental
+description: Detects authentication events associated with DCOM (Distributed Component Object Model) lateral movement, where attackers abuse DCOM objects like MMC20.Application, ShellWindows, or ShellBrowserWindow to execute commands on remote systems.
+references:
+    - https://attack.mitre.org/techniques/T1021/003/
+    - https://enigma0x3.net/2017/01/23/lateral-movement-via-dcom-round-2/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.lateral_movement
+    - attack.t1021.003
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection_logon:
+        EventID: 4624
+        LogonType: 3
+    selection_dcom_process:
+        ProcessName|contains:
+            - '\mmc.exe'
+            - '\excel.exe'
+            - '\outlook.exe'
+            - '\svchost.exe'
+    selection_source_port:
+        SourcePort|range:
+            - 49152
+            - 65535
+    selection_process_creation:
+        ParentImage|endswith:
+            - '\svchost.exe'
+            - '\mmc.exe'
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+            - '\mshta.exe'
+        ParentCommandLine|contains: '-k DcomLaunch'
+    condition: (selection_logon and selection_dcom_process and selection_source_port) or selection_process_creation
+falsepositives:
+    - Legitimate DCOM applications used for administration (e.g., MMC snap-ins)
+    - SCOM or other monitoring tools using DCOM
+    - Distributed applications relying on DCOM for inter-process communication
+level: high

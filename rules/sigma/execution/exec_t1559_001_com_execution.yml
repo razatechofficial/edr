@@ -1,0 +1,52 @@
+title: COM/DCOM Execution Patterns
+id: 6f7a8b9c-0d1e-4f2a-3b4c-5d6e7f8a9b0c
+status: experimental
+description: Detects suspicious COM and DCOM object instantiation commonly used for lateral movement, execution, or defense evasion
+references:
+    - https://attack.mitre.org/techniques/T1559/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1559.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_dcom_lateral:
+        CommandLine|contains:
+            - 'MMC20.Application'
+            - 'ShellWindows'
+            - 'ShellBrowserWindow'
+            - 'Excel.Application'
+            - 'Outlook.Application'
+            - '{9BA05972-F6A8-11CF-A442-00A0C90A8F39}'
+            - 'DCOMConnectionManager'
+    selection_com_scriptlet:
+        CommandLine|contains:
+            - 'GetObject("new:'
+            - 'CreateObject('
+            - '-ComObject'
+            - 'New-Object -Com'
+            - 'Activator.CreateInstance'
+            - '[Type]::GetTypeFromCLSID'
+            - '[Type]::GetTypeFromProgID'
+    selection_com_suspicious:
+        CommandLine|contains:
+            - 'ScriptControl'
+            - 'WScript.Shell'
+            - 'Shell.Application'
+            - 'MMC20'
+            - 'InternetExplorer.Application'
+    filter_normal:
+        ParentImage|endswith:
+            - '\svchost.exe'
+            - '\explorer.exe'
+        Image|endswith:
+            - '\explorer.exe'
+    condition: (selection_dcom_lateral or selection_com_scriptlet or selection_com_suspicious) and not filter_normal
+falsepositives:
+    - Legitimate COM automation by administrative scripts
+    - Microsoft Office automation
+    - SCCM or SCOM operations
+level: high

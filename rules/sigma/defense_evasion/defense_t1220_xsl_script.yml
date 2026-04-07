@@ -1,0 +1,41 @@
+title: XSL Script Processing
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d07
+status: experimental
+description: Detects the use of msxsl.exe or WMIC with XSL stylesheets to execute arbitrary scripts, which is a technique used to bypass application whitelisting and execute malicious code.
+references:
+    - https://attack.mitre.org/techniques/T1220/
+    - https://lolbas-project.github.io/lolbas/OtherMSBinaries/Msxsl/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1220
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_msxsl:
+        Image|endswith: '\msxsl.exe'
+    selection_wmic_xsl:
+        Image|endswith: '\wmic.exe'
+        CommandLine|contains:
+            - '/format:'
+            - '-format:'
+        CommandLine|contains:
+            - '.xsl'
+            - 'http://'
+            - 'https://'
+    selection_dotnet_xsl:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Xml.Xsl.XslCompiledTransform'
+            - 'Xml.Xsl.XslTransform'
+            - 'New-Object System.Xml.Xsl'
+    condition: selection_msxsl or selection_wmic_xsl or selection_dotnet_xsl
+falsepositives:
+    - Legitimate XSL transformations for data processing
+    - WMIC queries with standard output formatting
+    - Web development tools using XSLT
+level: high

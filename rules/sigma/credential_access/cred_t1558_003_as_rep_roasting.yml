@@ -1,0 +1,38 @@
+title: AS-REP Roasting Attack
+id: c5e9f3a2-4b7d-4f1c-9e3a-2d6b8c4f1a06
+status: experimental
+description: Detects AS-REP roasting attacks targeting accounts with Kerberos pre-authentication disabled, allowing attackers to request authentication data that can be cracked offline.
+references:
+    - https://attack.mitre.org/techniques/T1558/004/
+    - https://www.harmj0y.net/blog/activedirectory/roasting-as-reps/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1558.004
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection_event:
+        EventID: 4768
+        PreAuthType: '0'
+        TicketEncryptionType:
+            - '0x17'
+            - '0x18'
+        Status: '0x0'
+    selection_tools:
+        CommandLine|contains:
+            - 'Rubeus asreproast'
+            - 'GetNPUsers'
+            - 'ASREPRoast'
+            - 'Get-ASREPHash'
+    selection_ldap_query:
+        CommandLine|contains:
+            - 'userAccountControl:1.2.840.113556.1.4.803:=4194304'
+            - 'DONT_REQ_PREAUTH'
+    condition: selection_event or selection_tools or selection_ldap_query
+falsepositives:
+    - Accounts legitimately configured without pre-authentication (legacy compatibility)
+    - Kerberos troubleshooting activities
+level: high

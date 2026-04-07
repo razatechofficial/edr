@@ -1,0 +1,14 @@
+# Custom detection rules: YAML list of rules; each `expression` is CEL
+# against variables declared in internal/detection/rules/custom.go (event_type,
+# process_name, command_line, etc.). Use .yaml/.yml files under rules_path.
+rules:
+  - id: SAMPLE-CEL-001
+    name: Sample CEL rule (never matches)
+    description: >
+      Template rule with a valid CEL expression. Replace or set enabled false
+      before production; expression "false" matches nothing.
+    severity: low
+    expression: "false"
+    mitre: []
+    tags: ["sample", "custom-cel"]
+    enabled: true

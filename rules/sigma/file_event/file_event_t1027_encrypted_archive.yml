@@ -1,0 +1,37 @@
+title: Encrypted or Password-Protected Archive Creation
+id: 5c2e7a91-d3f8-4b1a-8e56-2c9d4f7b3a10
+status: experimental
+description: Detects creation of encrypted or password-protected archives which may indicate data staging for exfiltration or payload delivery
+references:
+    - https://attack.mitre.org/techniques/T1027/
+    - https://attack.mitre.org/techniques/T1560/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1027
+    - attack.collection
+    - attack.t1560.001
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_archive:
+        TargetFilename|endswith:
+            - '.7z'
+            - '.zip'
+            - '.rar'
+            - '.gpg'
+            - '.pgp'
+            - '.enc'
+    selection_location:
+        TargetFilename|contains:
+            - '\Temp\'
+            - '\AppData\'
+            - '\Users\Public\'
+            - '\ProgramData\'
+    condition: selection_archive and selection_location
+falsepositives:
+    - Legitimate backup software
+    - Users creating encrypted archives for valid purposes
+level: medium

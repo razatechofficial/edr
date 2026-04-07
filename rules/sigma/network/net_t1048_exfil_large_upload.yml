@@ -1,0 +1,44 @@
+title: Large Outbound Data Transfer - Potential Exfiltration
+id: b8c9d0e1-f2a3-4456-b789-c0d1e2f3a4b5
+status: experimental
+description: Detects large outbound data transfers to external destinations that may indicate data exfiltration
+references:
+    - https://attack.mitre.org/techniques/T1048/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.exfiltration
+    - attack.t1048
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_cloud_storage:
+        DestinationHostname|contains:
+            - 'mega.nz'
+            - 'mega.co.nz'
+            - 'anonfiles.com'
+            - 'file.io'
+            - 'transfer.sh'
+            - 'gofile.io'
+            - 'wetransfer.com'
+            - 'sendspace.com'
+            - 'mediafire.com'
+            - 'uploadfiles.io'
+            - 'catbox.moe'
+            - 'pixeldrain.com'
+    selection_ftp_external:
+        DestinationPort:
+            - 20
+            - 21
+    filter_internal_ftp:
+        DestinationIp|startswith:
+            - '10.'
+            - '172.16.'
+            - '192.168.'
+    condition: selection_cloud_storage or (selection_ftp_external and not filter_internal_ftp)
+falsepositives:
+    - Legitimate use of file sharing services
+    - Authorized large file transfers
+    - Business use of cloud storage
+level: high

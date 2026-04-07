@@ -1,0 +1,50 @@
+title: Registry Permission Weakness Exploitation
+id: c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7a
+status: experimental
+description: Detects modification of registry key permissions or values in service-related keys that may allow privilege escalation
+references:
+    - https://attack.mitre.org/techniques/T1574/011/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.privilege_escalation
+    - attack.persistence
+    - attack.t1574.011
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_regini:
+        Image|endswith: '\regini.exe'
+        CommandLine|contains:
+            - 'HKLM\SYSTEM\CurrentControlSet\Services'
+    selection_reg_acl:
+        CommandLine|contains:
+            - 'reg add'
+            - 'Set-ItemProperty'
+            - 'New-ItemProperty'
+        CommandLine|contains:
+            - 'HKLM\SYSTEM\CurrentControlSet\Services'
+            - 'ImagePath'
+            - 'ServiceDll'
+            - 'FailureCommand'
+    selection_powershell_acl:
+        CommandLine|contains:
+            - 'Set-Acl'
+            - 'Get-Acl'
+        CommandLine|contains:
+            - 'Registry::'
+            - 'HKLM:'
+            - 'HKCU:'
+    selection_subinacl:
+        CommandLine|contains:
+            - 'subinacl'
+            - 'SetACL'
+        CommandLine|contains:
+            - '/keyreg'
+            - '/grant'
+    condition: selection_regini or selection_reg_acl or selection_powershell_acl or selection_subinacl
+falsepositives:
+    - Legitimate service configuration changes by administrators
+    - Software installation modifying service registry entries
+level: high

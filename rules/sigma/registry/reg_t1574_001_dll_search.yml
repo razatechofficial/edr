@@ -1,0 +1,29 @@
+title: DLL Search Order Hijacking via KnownDLLs Registry
+id: 6d7e8f9a-0b1c-4d2e-3f4a-5b6c7d8e9f0a
+status: experimental
+description: Detects modification of the KnownDLLs registry key or CWDIllegalInDLLSearch which can be used for DLL search order hijacking
+references:
+    - https://attack.mitre.org/techniques/T1574/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.privilege_escalation
+    - attack.t1574.001
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection_knowndlls:
+        TargetObject|contains: '\SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs'
+    selection_cwdilegal:
+        TargetObject|contains: '\SYSTEM\CurrentControlSet\Control\Session Manager'
+        TargetObject|endswith: '\CWDIllegalInDllSearch'
+    selection_safeSearch:
+        TargetObject|contains: '\SYSTEM\CurrentControlSet\Control\Session Manager'
+        TargetObject|endswith: '\SafeDllSearchMode'
+        Details: 'DWORD (0x00000000)'
+    condition: selection_knowndlls or selection_cwdilegal or selection_safeSearch
+falsepositives:
+    - Rare legitimate modifications by installers
+level: high

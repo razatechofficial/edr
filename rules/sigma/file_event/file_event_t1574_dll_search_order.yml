@@ -1,0 +1,45 @@
+title: DLL Planted in PATH Directory for Search Order Hijacking
+id: 8a0b2c46-e7f9-4213-d548-3d1b6e8f2a75
+status: experimental
+description: Detects DLL files created in common PATH directories that may be used for DLL search order hijacking
+references:
+    - https://attack.mitre.org/techniques/T1574/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.privilege_escalation
+    - attack.defense_evasion
+    - attack.t1574.001
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_dll:
+        TargetFilename|endswith: '.dll'
+    selection_path_dirs:
+        TargetFilename|startswith:
+            - 'C:\Windows\'
+            - 'C:\Windows\System32\'
+            - 'C:\Windows\SysWOW64\'
+    selection_common_names:
+        TargetFilename|endswith:
+            - '\version.dll'
+            - '\winmm.dll'
+            - '\dwmapi.dll'
+            - '\uxtheme.dll'
+            - '\propsys.dll'
+            - '\profapi.dll'
+            - '\secur32.dll'
+            - '\dbghelp.dll'
+            - '\wtsapi32.dll'
+            - '\crypt32.dll'
+            - '\IPHLPAPI.DLL'
+            - '\userenv.dll'
+            - '\msimg32.dll'
+            - '\msi.dll'
+    condition: selection_dll and selection_path_dirs and selection_common_names
+falsepositives:
+    - Windows updates replacing system DLLs
+    - Legitimate software installations
+level: high

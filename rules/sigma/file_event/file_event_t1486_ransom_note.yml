@@ -1,0 +1,44 @@
+title: Ransomware Note File Creation
+id: 2a4b6c80-e1f3-4657-d982-7d5b0e2f6a19
+status: experimental
+description: Detects creation of files matching common ransomware note naming patterns
+references:
+    - https://attack.mitre.org/techniques/T1486/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.impact
+    - attack.t1486
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_common_names:
+        TargetFilename|contains:
+            - 'HOW_TO_DECRYPT'
+            - 'HOW_TO_RECOVER'
+            - 'DECRYPT_INSTRUCTIONS'
+            - 'RECOVER_FILES'
+            - 'README_LOCKED'
+            - 'RANSOM_NOTE'
+            - 'YOUR_FILES_ARE_ENCRYPTED'
+            - 'RESTORE_FILES'
+            - '!README!'
+            - '_readme.txt'
+            - 'DECRYPT_INFO'
+            - 'HELP_DECRYPT'
+            - 'HOW_TO_RESTORE'
+            - 'RECOVERY_INSTRUCTIONS'
+    selection_extension_pattern:
+        TargetFilename|endswith:
+            - '.hta'
+            - '.html'
+            - '.txt'
+            - '.bmp'
+            - '.png'
+            - '.wallpaper'
+    condition: selection_common_names and selection_extension_pattern
+falsepositives:
+    - Security training or awareness simulations
+    - Security research environments
+level: critical

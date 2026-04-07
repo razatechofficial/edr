@@ -1,0 +1,52 @@
+title: Data Exfiltration Over Encrypted Channel
+id: e7a1b5c4-6d9f-4b3e-af5c-4e8d0a6b3c01
+status: experimental
+description: Detects potential data exfiltration over encrypted channels including suspicious use of encryption tools before network transfers, or unusual encrypted connections to external destinations.
+references:
+    - https://attack.mitre.org/techniques/T1048/001/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.exfiltration
+    - attack.t1048.001
+logsource:
+    category: process_creation
+detection:
+    selection_encrypt_and_send:
+        CommandLine|contains:
+            - 'openssl enc'
+            - 'gpg -c'
+            - 'gpg --encrypt'
+            - '7z a -p'
+            - 'zip -e'
+            - 'rar a -hp'
+    selection_curl_upload:
+        Image|endswith:
+            - '\curl.exe'
+            - '/curl'
+        CommandLine|contains:
+            - '--upload-file'
+            - '-T '
+            - '--data-binary'
+            - '-X POST'
+            - '-X PUT'
+    selection_ssh_tunnel:
+        CommandLine|contains:
+            - 'ssh -L'
+            - 'ssh -R'
+            - 'ssh -D'
+            - 'ssh -N'
+            - 'plink -L'
+            - 'plink -R'
+            - 'plink -D'
+    selection_openssl_connect:
+        CommandLine|contains:
+            - 'openssl s_client -connect'
+            - 'ncat --ssl'
+    condition: selection_encrypt_and_send or selection_curl_upload or selection_ssh_tunnel or selection_openssl_connect
+falsepositives:
+    - Legitimate encrypted file transfers (SFTP, SCP)
+    - Developers uploading encrypted artifacts
+    - Backup solutions using encryption
+    - SSH tunneling for remote development
+level: medium

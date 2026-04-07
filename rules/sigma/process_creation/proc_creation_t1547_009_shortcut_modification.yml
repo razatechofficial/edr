@@ -1,0 +1,44 @@
+title: Shortcut File Modification for Persistence
+id: a5d9b0c3-4ef5-4ac7-d8e9-fe5fabca4c6d
+status: experimental
+description: Detects suspicious creation or modification of shortcut (LNK) files in startup folders or common locations, used to achieve persistence by executing malicious code when users log in.
+references:
+    - https://attack.mitre.org/techniques/T1547/009/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1547.009
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_powershell_lnk:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'New-Object -ComObject WScript.Shell'
+            - '.CreateShortcut'
+            - 'Shell.Application'
+            - 'lnk'
+    selection_startup_path:
+        CommandLine|contains:
+            - '\Start Menu\Programs\Startup'
+            - '\Startup\'
+            - 'shell:startup'
+            - 'shell:common startup'
+    selection_copy_lnk:
+        Image|endswith:
+            - '\cmd.exe'
+            - '\xcopy.exe'
+            - '\robocopy.exe'
+        CommandLine|contains: '.lnk'
+        CommandLine|contains:
+            - '\Startup'
+            - 'Start Menu'
+    condition: (selection_powershell_lnk and selection_startup_path) or selection_copy_lnk
+falsepositives:
+    - Legitimate application installations placing startup shortcuts
+    - User-configured autostart applications
+level: medium

@@ -1,0 +1,39 @@
+title: Large File Created in Staging Directory
+id: 1f3a5b79-d0e2-4546-c871-6c4a9d1e5f08
+status: experimental
+description: Detects creation of unusually large files in staging directories that may indicate data collection prior to exfiltration
+references:
+    - https://attack.mitre.org/techniques/T1074/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.collection
+    - attack.t1074.001
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_path:
+        TargetFilename|contains:
+            - '\Users\Public\'
+            - '\ProgramData\'
+            - '\Temp\'
+            - '\AppData\Local\Temp\'
+            - '\Recycle'
+    selection_ext:
+        TargetFilename|endswith:
+            - '.zip'
+            - '.rar'
+            - '.7z'
+            - '.tar.gz'
+            - '.cab'
+            - '.dat'
+            - '.bin'
+            - '.tmp'
+            - '.bak'
+    condition: selection_path and selection_ext
+falsepositives:
+    - Legitimate large file operations
+    - Database backups
+    - System image creation
+level: medium

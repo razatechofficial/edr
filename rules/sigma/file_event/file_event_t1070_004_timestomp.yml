@@ -1,0 +1,32 @@
+title: File Timestamp Modification Indicator
+id: 2c4d6e8f-a1b3-4c57-9e82-7f5d3a1b6c09
+status: experimental
+description: Detects indicators of file timestamp modification (timestomping) used to evade forensic analysis
+references:
+    - https://attack.mitre.org/techniques/T1070/004/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1070.004
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_tools:
+        TargetFilename|endswith:
+            - '\timestomp.exe'
+            - '\NirCmd.exe'
+            - '\BulkFileChanger.exe'
+            - '\NewFileTime.exe'
+            - '\SetMACE.exe'
+    selection_suspicious_pattern:
+        TargetFilename|contains:
+            - 'timestomp'
+            - 'setmace'
+            - 'filetouch'
+    condition: selection_tools or selection_suspicious_pattern
+falsepositives:
+    - Forensic tools used by incident responders
+    - Build systems modifying timestamps
+level: high

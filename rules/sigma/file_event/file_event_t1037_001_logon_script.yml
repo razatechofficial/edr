@@ -1,0 +1,34 @@
+title: Logon Script Modification
+id: 7f9a1b35-d6e8-4102-c437-2c0a5d7e1f64
+status: experimental
+description: Detects modification of logon scripts used for persistence during user or system logon
+references:
+    - https://attack.mitre.org/techniques/T1037/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1037.001
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_windows:
+        TargetFilename|contains:
+            - '\NETLOGON\'
+            - '\Group Policy\User\Scripts\Logon\'
+            - '\Group Policy\Machine\Scripts\Startup\'
+            - '\Windows\System32\GroupPolicy\User\Scripts\'
+            - '\Windows\System32\GroupPolicy\Machine\Scripts\'
+    selection_script_ext:
+        TargetFilename|endswith:
+            - '.bat'
+            - '.cmd'
+            - '.vbs'
+            - '.js'
+            - '.ps1'
+    condition: selection_windows and selection_script_ext
+falsepositives:
+    - Legitimate Group Policy script deployments
+    - System administration logon scripts
+level: high

@@ -1,0 +1,38 @@
+title: Unix Shell Configuration File Modification
+id: 6e8f0a24-c5d7-4091-b326-1b9f4c6d0e53
+status: experimental
+description: Detects modification of Unix shell profile and configuration files used for persistence
+references:
+    - https://attack.mitre.org/techniques/T1546/004/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1546.004
+logsource:
+    category: file_event
+    product: linux
+detection:
+    selection:
+        TargetFilename|endswith:
+            - '/.bashrc'
+            - '/.bash_profile'
+            - '/.bash_login'
+            - '/.bash_logout'
+            - '/.profile'
+            - '/.zshrc'
+            - '/.zprofile'
+            - '/.zshenv'
+            - '/.zlogin'
+            - '/.cshrc'
+            - '/.tcshrc'
+            - '/etc/profile'
+            - '/etc/bash.bashrc'
+            - '/etc/zsh/zshrc'
+            - '/etc/environment'
+    condition: selection
+falsepositives:
+    - Users customizing their shell environment
+    - Package manager post-install scripts
+    - System configuration management
+level: medium

@@ -1,0 +1,54 @@
+title: System Recovery Inhibition
+id: de4c6f70-1bd7-4cab-bc56-cde7cdef1f34
+status: experimental
+description: Detects commands that disable or delete system recovery features, backup catalogs, and restore points, commonly executed by ransomware prior to encryption.
+references:
+    - https://attack.mitre.org/techniques/T1490/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.impact
+    - attack.t1490
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_vssadmin_delete:
+        Image|endswith: '\vssadmin.exe'
+        CommandLine|contains: 'delete shadows /all'
+    selection_bcdedit_recovery:
+        Image|endswith: '\bcdedit.exe'
+        CommandLine|contains:
+            - 'recoveryenabled no'
+            - 'bootstatuspolicy ignoreallfailures'
+    selection_wbadmin_delete:
+        Image|endswith: '\wbadmin.exe'
+        CommandLine|contains:
+            - 'delete catalog -quiet'
+            - 'delete systemstatebackup'
+    selection_disable_repair:
+        Image|endswith: '\reagentc.exe'
+        CommandLine|contains: '/disable'
+    selection_sysrestore:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Disable-ComputerRestore'
+            - 'vssadmin.exe Delete Shadows'
+            - 'Get-WmiObject Win32_ShadowCopy | ForEach-Object'
+    selection_wmic_delete:
+        Image|endswith: '\wmic.exe'
+        CommandLine|contains: 'shadowcopy delete'
+    selection_linux_recovery:
+        CommandLine|contains:
+            - 'rm -rf /boot'
+            - 'dd if=/dev/zero of=/dev/sd'
+            - 'shred /dev/sd'
+            - 'mkfs.'
+    condition: selection_vssadmin_delete or selection_bcdedit_recovery or selection_wbadmin_delete or selection_disable_repair or selection_sysrestore or selection_wmic_delete or selection_linux_recovery
+falsepositives:
+    - Legitimate disk maintenance and reformatting
+    - System administrators managing backup policies
+    - OS reinstallation procedures
+level: critical

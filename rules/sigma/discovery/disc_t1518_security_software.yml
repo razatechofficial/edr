@@ -1,0 +1,62 @@
+title: Security Software Discovery
+id: b07e5c38-9fbd-4fa6-ed5b-6cab8dcf7f94
+status: experimental
+description: Detects attempts to discover installed security software such as antivirus, EDR, or firewall products
+references:
+    - https://attack.mitre.org/techniques/T1518/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1518.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_tasklist:
+        CommandLine|contains:
+            - 'tasklist /svc'
+            - 'tasklist /v'
+        CommandLine|contains:
+            - 'MsMpEng'
+            - 'avp'
+            - 'avgnt'
+            - 'bdagent'
+            - 'ekrn'
+            - 'fsav'
+            - 'mcshield'
+            - 'savservice'
+            - 'ccSvcHst'
+            - 'mbam'
+    selection_sc:
+        CommandLine|contains:
+            - 'sc query WinDefend'
+            - 'sc query MBAMService'
+            - 'sc query avpsus'
+            - 'sc query ekrn'
+            - 'sc query SAVService'
+            - 'sc qc WinDefend'
+    selection_wmic:
+        CommandLine|contains:
+            - 'wmic /namespace:\\\\root\\SecurityCenter2'
+            - 'AntiVirusProduct'
+            - 'AntiSpywareProduct'
+            - 'FirewallProduct'
+    selection_powershell:
+        CommandLine|contains:
+            - 'Get-MpComputerStatus'
+            - 'Get-MpPreference'
+            - 'SecurityCenter2'
+            - 'Get-CimInstance -Namespace root/SecurityCenter2'
+    selection_reg:
+        CommandLine|contains:
+            - 'reg query "HKLM\SOFTWARE\Microsoft\Windows Defender"'
+            - 'reg query "HKLM\SOFTWARE\Symantec"'
+            - 'reg query "HKLM\SOFTWARE\McAfee"'
+            - 'reg query "HKLM\SOFTWARE\ESET"'
+            - 'reg query "HKLM\SOFTWARE\Kaspersky'
+    condition: selection_tasklist or selection_sc or selection_wmic or selection_powershell or selection_reg
+falsepositives:
+    - IT administrators verifying security software status
+    - Security compliance scanning tools
+level: medium

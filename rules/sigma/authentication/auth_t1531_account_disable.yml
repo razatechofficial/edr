@@ -1,0 +1,44 @@
+title: Account Deletion or Disabling
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a10
+status: experimental
+description: Detects user account deletion or disabling events that may indicate an attacker destroying access or covering tracks by removing accounts used during an intrusion.
+references:
+    - https://attack.mitre.org/techniques/T1531/
+    - https://docs.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4726
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.impact
+    - attack.t1531
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection_delete:
+        EventID:
+            - 4726
+            - 4743
+    selection_disable:
+        EventID: 4725
+    selection_cmd_delete:
+        CommandLine|contains:
+            - 'net user /delete'
+            - 'Remove-LocalUser'
+            - 'Remove-ADUser'
+            - 'dsrm'
+    selection_cmd_disable:
+        CommandLine|contains:
+            - 'net user /active:no'
+            - 'Disable-ADAccount'
+    selection_linux:
+        CommandLine|contains:
+            - 'userdel'
+            - 'deluser'
+            - 'passwd -l'
+            - 'usermod -L'
+    condition: selection_delete or selection_disable or selection_cmd_delete or selection_cmd_disable or selection_linux
+falsepositives:
+    - IT offboarding processes
+    - Automated account lifecycle management
+    - Cleanup of temporary or test accounts
+level: medium

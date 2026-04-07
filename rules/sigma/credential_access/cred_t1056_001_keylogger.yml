@@ -1,0 +1,55 @@
+title: Keylogger Indicators
+id: c5e9f3a2-4b7d-4f1c-9e3a-2d6b8c4f1a10
+status: experimental
+description: Detects indicators of keylogging activity including suspicious API calls, known keylogger tools, and processes hooking keyboard input to capture user keystrokes.
+references:
+    - https://attack.mitre.org/techniques/T1056/001/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.collection
+    - attack.t1056.001
+logsource:
+    category: process_creation
+detection:
+    selection_api_calls:
+        CommandLine|contains:
+            - 'SetWindowsHookEx'
+            - 'GetAsyncKeyState'
+            - 'GetKeyState'
+            - 'GetKeyboardState'
+            - 'MapVirtualKey'
+            - 'RegisterRawInputDevices'
+    selection_powershell_keylog:
+        CommandLine|contains:
+            - 'Get-Keystrokes'
+            - 'Invoke-KeyLogger'
+            - 'Start-KeyLogger'
+            - '[Windows.Forms.Keys]'
+            - 'System.Windows.Forms.Keys'
+            - 'Add-Type -TypeDefinition'
+        CommandLine|contains:
+            - 'GetAsyncKeyState'
+            - 'user32.dll'
+    selection_known_tools:
+        Image|endswith:
+            - '\keyscan.exe'
+            - '\keylogger.exe'
+            - '\kl.exe'
+    selection_file_indicators:
+        TargetFilename|contains:
+            - 'keylog'
+            - 'keystroke'
+            - 'keystrokes'
+            - 'typedkeys'
+        TargetFilename|endswith:
+            - '.log'
+            - '.txt'
+    condition: selection_api_calls or selection_powershell_keylog or selection_known_tools or selection_file_indicators
+falsepositives:
+    - Accessibility software that monitors keyboard input
+    - Legitimate input monitoring for parental controls
+    - Hotkey management software
+    - Gaming macro tools
+level: high

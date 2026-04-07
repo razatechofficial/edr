@@ -1,0 +1,47 @@
+title: SSH Authorized Keys Modification
+id: 1e2f3a4b-5c6d-4e7f-8a9b-0c1d2e3f4a5b
+status: experimental
+description: Detects modification of SSH authorized_keys files, which can be used to maintain persistent access to a system
+references:
+    - https://attack.mitre.org/techniques/T1098/004/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1098.004
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection_write:
+        CommandLine|contains:
+            - '>> ~/.ssh/authorized_keys'
+            - '>> /root/.ssh/authorized_keys'
+            - '> ~/.ssh/authorized_keys'
+            - '> /root/.ssh/authorized_keys'
+            - 'tee -a ~/.ssh/authorized_keys'
+            - 'tee ~/.ssh/authorized_keys'
+    selection_echo:
+        CommandLine|contains:
+            - 'echo'
+            - 'printf'
+            - 'cat'
+        CommandLine|contains:
+            - 'ssh-rsa'
+            - 'ssh-ed25519'
+            - 'ssh-dss'
+            - 'ecdsa-sha2'
+            - 'authorized_keys'
+    selection_ssh_copy:
+        Image|endswith:
+            - '/ssh-copy-id'
+    selection_chmod:
+        CommandLine|contains:
+            - 'chmod'
+            - '.ssh/authorized_keys'
+    condition: selection_write or selection_echo or selection_ssh_copy or selection_chmod
+falsepositives:
+    - System administrators adding SSH keys for legitimate access
+    - Automated deployment tools (Ansible, Chef, Puppet)
+    - User self-service key management
+level: medium

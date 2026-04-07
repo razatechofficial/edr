@@ -1,0 +1,88 @@
+title: Compromised Client Software Binary
+id: 0b1c2d3e-4f5a-4b6c-7d8e-9f0a1b2c3d4e
+status: experimental
+description: Detects indicators of legitimate client software binaries being replaced or modified for persistence, including hash mismatches and unusual write activity to program directories
+references:
+    - https://attack.mitre.org/techniques/T1554/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1554
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_program_files:
+        TargetFilename|startswith:
+            - 'C:\Program Files\'
+            - 'C:\Program Files (x86)\'
+        TargetFilename|endswith:
+            - '.exe'
+            - '.dll'
+    filter_trusted:
+        SourceFilename|contains:
+            - 'TrustedInstaller'
+            - 'msiexec'
+            - 'setup'
+            - 'install'
+            - 'update'
+            - 'patch'
+    selection_common_targets:
+        TargetFilename|contains:
+            - '\PuTTY\'
+            - '\WinSCP\'
+            - '\FileZilla\'
+            - '\7-Zip\'
+            - '\Notepad++\'
+            - '\KeePass\'
+            - '\VNC\'
+            - '\TeamViewer\'
+    condition: (selection_program_files and not filter_trusted) or selection_common_targets
+falsepositives:
+    - Legitimate software updates not through standard installer
+    - Application self-updaters
+    - Portable application updates
+level: medium
+---
+title: Compromised Client Software on Linux
+id: 0b1c2d3e-4f5a-4b6c-7d8e-9f0a1b2c3d4f
+status: experimental
+description: Detects modification of common client software binaries on Linux systems
+references:
+    - https://attack.mitre.org/techniques/T1554/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1554
+logsource:
+    category: file_event
+    product: linux
+detection:
+    selection_bins:
+        TargetFilename|startswith:
+            - '/usr/bin/'
+            - '/usr/sbin/'
+            - '/usr/local/bin/'
+        TargetFilename|endswith:
+            - 'ssh'
+            - 'sshd'
+            - 'sudo'
+            - 'su'
+            - 'curl'
+            - 'wget'
+            - 'openssl'
+            - 'git'
+    filter_package_manager:
+        SourceFilename|contains:
+            - 'dpkg'
+            - 'rpm'
+            - 'apt'
+            - 'yum'
+            - 'pacman'
+    condition: selection_bins and not filter_package_manager
+falsepositives:
+    - Manual compilation and installation of software
+    - Software builds from source
+level: high

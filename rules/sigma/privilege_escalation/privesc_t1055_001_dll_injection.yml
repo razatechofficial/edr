@@ -1,0 +1,51 @@
+title: DLL Injection for Privilege Escalation
+id: a7b8c9d0-e1f2-4a3b-4c5d-6e7f8a9b0c1e
+status: experimental
+description: Detects indicators of DLL injection techniques including process hollowing, reflective loading, and classic injection methods
+references:
+    - https://attack.mitre.org/techniques/T1055/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.privilege_escalation
+    - attack.defense_evasion
+    - attack.t1055.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_injection_api:
+        CommandLine|contains:
+            - 'VirtualAllocEx'
+            - 'WriteProcessMemory'
+            - 'CreateRemoteThread'
+            - 'NtCreateThreadEx'
+            - 'RtlCreateUserThread'
+            - 'QueueUserAPC'
+            - 'NtQueueApcThread'
+            - 'SetWindowsHookEx'
+    selection_tools:
+        CommandLine|contains:
+            - 'Invoke-DllInjection'
+            - 'Invoke-ReflectivePEInjection'
+            - 'Invoke-Shellcode'
+            - 'RemoteInject'
+    selection_mavinject:
+        Image|endswith: '\mavinject.exe'
+        CommandLine|contains:
+            - '/INJECTRUNNING'
+            - '.dll'
+    selection_unusual_dll_load:
+        Image|endswith:
+            - '\rundll32.exe'
+            - '\regsvr32.exe'
+        CommandLine|contains:
+            - '\AppData\Local\Temp\'
+            - '\Users\Public\'
+            - 'C:\ProgramData\'
+            - '\Downloads\'
+    condition: selection_injection_api or selection_tools or selection_mavinject or selection_unusual_dll_load
+falsepositives:
+    - Legitimate debugging tools using injection APIs
+    - Application compatibility shims
+level: critical

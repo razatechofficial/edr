@@ -1,0 +1,46 @@
+title: DCSync Attack - Directory Replication Request
+id: c5e9f3a2-4b7d-4f1c-9e3a-2d6b8c4f1a09
+status: experimental
+description: Detects DCSync attacks where an attacker impersonates a domain controller to request password hash replication via the Directory Replication Service (DRS), allowing extraction of all domain credentials.
+references:
+    - https://attack.mitre.org/techniques/T1003/006/
+    - https://www.ired.team/offensive-security-experiments/active-directory-kerberos-abuse/dump-password-hashes-from-domain-controller-with-dcsync
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1003.006
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection_event:
+        EventID: 4662
+        Properties|contains:
+            - '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'
+            - '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2'
+            - '89e95b76-444d-4c62-991a-0facbeda640c'
+    filter_dc:
+        SubjectUserName|endswith: '$'
+        SubjectUserName|contains:
+            - 'DC'
+            - 'DOMAIN'
+    selection_tools:
+        CommandLine|contains:
+            - 'lsadump::dcsync'
+            - 'Invoke-DCSync'
+            - 'secretsdump'
+            - 'Get-ADReplAccount'
+            - 'mimikatz'
+            - 'SharpKatz'
+    selection_replication:
+        CommandLine|contains:
+            - 'DsGetNCChanges'
+            - 'DRSGetNCChanges'
+            - 'repadmin /syncall'
+    condition: (selection_event and not filter_dc) or selection_tools or selection_replication
+falsepositives:
+    - Legitimate domain controller replication
+    - Azure AD Connect synchronization
+    - Authorized directory replication monitoring tools
+level: critical

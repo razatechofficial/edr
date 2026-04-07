@@ -1,0 +1,41 @@
+title: Kerberoasting - Suspicious Kerberos Service Ticket Request
+id: c5e9f3a2-4b7d-4f1c-9e3a-2d6b8c4f1a05
+status: experimental
+description: Detects Kerberoasting attacks where an attacker requests Kerberos service tickets (TGS) for service accounts with the intent to offline brute-force the service account passwords from the encrypted ticket data.
+references:
+    - https://attack.mitre.org/techniques/T1558/003/
+    - https://www.ired.team/offensive-security-experiments/active-directory-kerberos-abuse/t1208-kerberoasting
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1558.003
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection_event:
+        EventID: 4769
+        TicketEncryptionType:
+            - '0x17'
+            - '0x18'
+        Status: '0x0'
+    filter_machine:
+        ServiceName|endswith: '$'
+    filter_krbtgt:
+        ServiceName: 'krbtgt'
+    selection_tools:
+        CommandLine|contains:
+            - 'Invoke-Kerberoast'
+            - 'Get-SPNUsers'
+            - 'Rubeus'
+            - 'kerberoast'
+            - 'GetUserSPNs'
+            - 'setspn'
+    condition: (selection_event and not filter_machine and not filter_krbtgt) or selection_tools
+    timeframe: 5m
+falsepositives:
+    - Legitimate service ticket requests for RC4-encrypted services
+    - Legacy applications requiring older encryption types
+    - Service account enumeration by IT management tools
+level: high

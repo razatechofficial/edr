@@ -1,0 +1,68 @@
+title: System Location and Timezone Discovery
+id: d29a7e5a-b1df-4b18-af7d-8ecda0ea9b16
+status: experimental
+description: Detects commands used to discover system geographic location, timezone, or locale settings often used for geo-fencing or targeting
+references:
+    - https://attack.mitre.org/techniques/T1614/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1614
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_tz:
+        CommandLine|contains:
+            - 'tzutil /g'
+            - 'w32tm /tz'
+            - 'systeminfo | findstr /i "time zone"'
+            - 'Get-TimeZone'
+            - '[System.TimeZoneInfo]::Local'
+    selection_locale:
+        CommandLine|contains:
+            - 'Get-WinSystemLocale'
+            - 'Get-Culture'
+            - 'Get-WinHomeLocation'
+            - 'Get-WinUserLanguageList'
+    selection_reg:
+        CommandLine|contains:
+            - 'reg query "HKLM\SYSTEM\CurrentControlSet\Control\TimeZoneInformation"'
+            - 'reg query "HKCU\Control Panel\International"'
+    condition: selection_tz or selection_locale or selection_reg
+falsepositives:
+    - Legitimate locale configuration scripts
+    - Time synchronization tools
+    - Software installers checking system locale
+level: low
+---
+title: System Location Discovery on Linux/macOS
+id: d29a7e5a-b1df-4b18-af7d-8ecda0ea9b17
+status: experimental
+description: Detects timezone and locale enumeration on Unix systems
+references:
+    - https://attack.mitre.org/techniques/T1614/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1614
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection:
+        CommandLine|contains:
+            - 'timedatectl'
+            - 'cat /etc/timezone'
+            - 'date +%Z'
+            - 'readlink /etc/localtime'
+            - 'locale'
+            - 'cat /etc/locale.conf'
+            - 'systemsetup -gettimezone'
+    condition: selection
+falsepositives:
+    - System administration scripts
+    - NTP synchronization checks
+level: low

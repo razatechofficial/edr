@@ -1,0 +1,50 @@
+title: HTTP Request to Raw IP Address
+id: b2c3d4e5-f6a7-4890-b123-c4d5e6f7a8b9
+status: experimental
+description: Detects HTTP connections made directly to IP addresses rather than hostnames, often associated with C2 or malicious infrastructure
+references:
+    - https://attack.mitre.org/techniques/T1071/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1071.001
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection:
+        DestinationPort:
+            - 80
+            - 443
+            - 8080
+            - 8443
+    selection_ip:
+        DestinationHostname|re: '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
+    filter_private:
+        DestinationIp|startswith:
+            - '10.'
+            - '172.16.'
+            - '172.17.'
+            - '172.18.'
+            - '172.19.'
+            - '172.20.'
+            - '172.21.'
+            - '172.22.'
+            - '172.23.'
+            - '172.24.'
+            - '172.25.'
+            - '172.26.'
+            - '172.27.'
+            - '172.28.'
+            - '172.29.'
+            - '172.30.'
+            - '172.31.'
+            - '192.168.'
+            - '127.'
+    condition: selection and selection_ip and not filter_private
+falsepositives:
+    - Legitimate services accessed directly by IP
+    - CDN health checks
+    - Internal infrastructure monitoring
+level: medium

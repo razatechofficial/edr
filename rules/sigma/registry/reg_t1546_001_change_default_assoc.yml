@@ -1,0 +1,36 @@
+title: File Association Registry Hijacking
+id: 9c0d1e2f-3a4b-4c5d-6e7f-8a9b0c1d2e3f
+status: experimental
+description: Detects modification of file association registry keys that may be used to hijack default file handlers for persistence or execution
+references:
+    - https://attack.mitre.org/techniques/T1546/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1546.001
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains:
+            - '\SOFTWARE\Classes\exefile\shell\open\command'
+            - '\SOFTWARE\Classes\batfile\shell\open\command'
+            - '\SOFTWARE\Classes\cmdfile\shell\open\command'
+            - '\SOFTWARE\Classes\comfile\shell\open\command'
+            - '\SOFTWARE\Classes\htafile\shell\open\command'
+            - '\SOFTWARE\Classes\piffile\shell\open\command'
+            - '\SOFTWARE\Classes\VBSFile\shell\open\command'
+            - '\SOFTWARE\Classes\JSFile\shell\open\command'
+            - '\SOFTWARE\Classes\WSFFile\shell\open\command'
+            - '\SOFTWARE\Classes\mscfile\shell\open\command'
+    filter_default:
+        Details|contains:
+            - '"%1" %*'
+            - '"%1"'
+    condition: selection and not filter_default
+falsepositives:
+    - Custom file association changes by administrators
+    - Third-party file manager tools
+level: high

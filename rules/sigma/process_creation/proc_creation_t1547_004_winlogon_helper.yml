@@ -1,0 +1,31 @@
+title: Winlogon Helper DLL Registry Modification
+id: f4c8a9b2-3de4-4fb6-c7d8-ed4e9abf3b5c
+status: experimental
+description: Detects modification of Winlogon helper registry values (Shell, Userinit, Notify) via reg.exe, which can be abused to load malicious DLLs during the Windows logon process.
+references:
+    - https://attack.mitre.org/techniques/T1547/004/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1547.004
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_reg:
+        Image|endswith: '\reg.exe'
+        CommandLine|contains: 'add'
+    selection_winlogon:
+        CommandLine|contains: '\Microsoft\Windows NT\CurrentVersion\Winlogon'
+    selection_values:
+        CommandLine|contains:
+            - 'Shell'
+            - 'Userinit'
+            - 'Notify'
+            - 'Taskman'
+    condition: selection_reg and selection_winlogon and selection_values
+falsepositives:
+    - Very rare legitimate modifications to Winlogon registry keys
+    - Third-party authentication solutions modifying credential providers
+level: high

@@ -1,0 +1,50 @@
+title: Remote System Discovery Network Scan
+id: b0c1d2e3-f4a5-4678-b901-c2d3e4f5a6b7
+status: experimental
+description: Detects network scanning activity indicative of remote system discovery for lateral movement planning
+references:
+    - https://attack.mitre.org/techniques/T1018/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1018
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_discovery_ports:
+        DestinationPort:
+            - 135
+            - 139
+            - 445
+            - 3389
+            - 5985
+            - 5986
+            - 22
+    selection_internal:
+        DestinationIp|startswith:
+            - '10.'
+            - '172.16.'
+            - '172.17.'
+            - '172.18.'
+            - '172.19.'
+            - '172.20.'
+            - '172.21.'
+            - '172.22.'
+            - '172.23.'
+            - '172.24.'
+            - '172.25.'
+            - '172.26.'
+            - '172.27.'
+            - '172.28.'
+            - '172.29.'
+            - '172.30.'
+            - '172.31.'
+            - '192.168.'
+    condition: selection_discovery_ports and selection_internal
+falsepositives:
+    - Legitimate network administration and scanning
+    - Vulnerability scanning tools
+    - System management software
+level: medium

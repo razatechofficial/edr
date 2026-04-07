@@ -1,0 +1,48 @@
+title: Log Clearing and Indicator Removal
+id: de2c4f58-9bc0-4dfa-ab34-cba0cbdc9f12
+status: experimental
+description: Detects attempts to clear event logs, remove log files, or delete forensic artifacts to cover tracks after malicious activity.
+references:
+    - https://attack.mitre.org/techniques/T1070/
+    - https://attack.mitre.org/techniques/T1070/001/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1070
+    - attack.t1070.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_wevtutil:
+        Image|endswith: '\wevtutil.exe'
+        CommandLine|contains:
+            - 'cl '
+            - 'clear-log'
+            - 'sl '
+    selection_wevtutil_targets:
+        CommandLine|contains:
+            - 'Security'
+            - 'System'
+            - 'Application'
+            - 'Microsoft-Windows-Sysmon'
+            - 'PowerShell'
+            - 'Windows PowerShell'
+    selection_powershell_clear:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Clear-EventLog'
+            - 'Remove-EventLog'
+            - 'wevtutil'
+            - 'Clear-WinEvent'
+    selection_fsutil:
+        Image|endswith: '\fsutil.exe'
+        CommandLine|contains: 'usn deletejournal'
+    condition: (selection_wevtutil and selection_wevtutil_targets) or selection_powershell_clear or selection_fsutil
+falsepositives:
+    - Legitimate log rotation and maintenance scripts
+    - System administrators managing disk space
+level: high

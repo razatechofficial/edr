@@ -1,0 +1,33 @@
+title: Scheduled Task Cache Registry Modification
+id: 9a0b1c2d-3e4f-4a5b-6c7d-8e9f0a1b2c3d
+status: experimental
+description: Detects modification of the scheduled task cache in the registry, which may indicate task creation or modification for persistence
+references:
+    - https://attack.mitre.org/techniques/T1053/005/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.execution
+    - attack.t1053.005
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains: '\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\'
+        TargetObject|contains:
+            - '\Tree\'
+            - '\Tasks\'
+    filter_system_tasks:
+        TargetObject|contains:
+            - '\Microsoft\Windows\UpdateOrchestrator'
+            - '\Microsoft\Windows\WindowsUpdate'
+            - '\Microsoft\Windows\Maintenance'
+            - '\Microsoft\Windows\Defrag'
+            - '\Microsoft\Windows\DiskCleanup'
+    condition: selection and not filter_system_tasks
+falsepositives:
+    - Legitimate scheduled task creation
+    - Software installation creating scheduled tasks
+level: medium

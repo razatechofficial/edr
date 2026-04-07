@@ -1,0 +1,63 @@
+title: Lateral Tool Transfer via Network Shares
+id: d6f0a4b3-5c8e-4a2d-bf4b-3e7c9d5a2b05
+status: experimental
+description: Detects the transfer of tools, scripts, or payloads between systems using SMB shares, administrative shares (ADMIN$, C$), or other network file transfer mechanisms commonly abused during lateral movement.
+references:
+    - https://attack.mitre.org/techniques/T1570/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.lateral_movement
+    - attack.t1570
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_copy_admin_share:
+        Image|endswith:
+            - '\xcopy.exe'
+            - '\robocopy.exe'
+            - '\copy.exe'
+            - '\cmd.exe'
+        CommandLine|contains:
+            - '\\\\*\\ADMIN$'
+            - '\\\\*\\C$'
+            - '\\\\*\\IPC$'
+    selection_powershell_copy:
+        CommandLine|contains:
+            - 'Copy-Item'
+            - 'Move-Item'
+        CommandLine|contains:
+            - '\\\\*\\'
+            - '-ToSession'
+    selection_net_use:
+        CommandLine|contains:
+            - 'net use \\\\'
+            - 'net share'
+        CommandLine|contains:
+            - 'ADMIN$'
+            - 'C$'
+            - 'IPC$'
+    selection_bitsadmin:
+        Image|endswith: '\bitsadmin.exe'
+        CommandLine|contains:
+            - '/transfer'
+            - '/create'
+        CommandLine|contains: '\\\\'
+    selection_executable_transfer:
+        TargetFilename|endswith:
+            - '.exe'
+            - '.dll'
+            - '.ps1'
+            - '.bat'
+            - '.vbs'
+            - '.hta'
+        TargetFilename|contains:
+            - '\\ADMIN$\\'
+            - '\\C$\\'
+    condition: selection_copy_admin_share or selection_powershell_copy or selection_net_use or selection_bitsadmin or selection_executable_transfer
+falsepositives:
+    - Software deployment via administrative shares
+    - File server management operations
+    - Backup solutions using network shares
+level: medium

@@ -1,0 +1,58 @@
+title: Compile After Delivery - Dynamic Code Compilation
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d14
+status: experimental
+description: Detects the use of compilers like csc.exe, msbuild.exe, vbc.exe, or jsc.exe to compile code after delivery, which attackers use to evade detection by delivering source code instead of compiled binaries.
+references:
+    - https://attack.mitre.org/techniques/T1027/004/
+    - https://lolbas-project.github.io/lolbas/Binaries/Csc/
+    - https://lolbas-project.github.io/lolbas/Binaries/Msbuild/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1027.004
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_csc:
+        Image|endswith: '\csc.exe'
+        CommandLine|contains:
+            - '/out:'
+            - '-out:'
+            - '/target:exe'
+            - '/target:library'
+            - '-target:exe'
+    selection_vbc:
+        Image|endswith: '\vbc.exe'
+        CommandLine|contains:
+            - '/out:'
+            - '-out:'
+    selection_jsc:
+        Image|endswith: '\jsc.exe'
+    selection_msbuild:
+        Image|endswith: '\msbuild.exe'
+        CommandLine|contains:
+            - '.csproj'
+            - '.vbproj'
+            - '.sln'
+            - '.xml'
+            - '.proj'
+    selection_ilasm:
+        Image|endswith: '\ilasm.exe'
+    filter_visual_studio:
+        ParentImage|endswith:
+            - '\devenv.exe'
+            - '\MSBuild.exe'
+        CurrentDirectory|contains:
+            - '\Visual Studio'
+            - '\Projects\\'
+    filter_nuget:
+        ParentImage|endswith: '\nuget.exe'
+    condition: (selection_csc or selection_vbc or selection_jsc or selection_msbuild or selection_ilasm) and not filter_visual_studio and not filter_nuget
+falsepositives:
+    - Software developers compiling projects
+    - CI/CD build agents
+    - .NET applications that dynamically compile code (e.g., Roslyn-based tools)
+    - ASP.NET runtime compilation
+level: medium

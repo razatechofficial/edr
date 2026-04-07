@@ -1,0 +1,28 @@
+title: Scheduled Task XML File Creation
+id: 5f7a9b13-d4e6-4f80-c215-0c8a3d5e9f42
+status: experimental
+description: Detects creation of scheduled task XML definition files outside of normal system operations
+references:
+    - https://attack.mitre.org/techniques/T1053/005/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.execution
+    - attack.t1053.005
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection:
+        TargetFilename|contains: '\Windows\System32\Tasks\'
+    filter_system:
+        SourceFilename|contains:
+            - '\svchost.exe'
+            - '\taskeng.exe'
+            - '\taskhostw.exe'
+    condition: selection and not filter_system
+falsepositives:
+    - Legitimate task scheduling by administrators
+    - Software installations creating scheduled tasks
+level: medium

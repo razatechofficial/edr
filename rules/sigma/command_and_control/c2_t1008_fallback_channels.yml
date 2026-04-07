@@ -1,0 +1,57 @@
+title: Fallback C2 Channel Indicators
+id: b4c5d6e7-f8a9-4b0c-1d2e-3f4a5b6c7d8f
+status: experimental
+description: Detects indicators of fallback communication channels being established, including alternative DNS resolvers, proxy configurations, and backup C2 infrastructure
+references:
+    - https://attack.mitre.org/techniques/T1008/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1008
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_dns_change:
+        CommandLine|contains:
+            - 'netsh interface ip set dns'
+            - 'Set-DnsClientServerAddress'
+        CommandLine|contains:
+            - '8.8.8.8'
+            - '8.8.4.4'
+            - '1.1.1.1'
+            - '9.9.9.9'
+            - '208.67.222.222'
+    selection_proxy_config:
+        CommandLine|contains:
+            - 'netsh winhttp set proxy'
+            - 'Set-ItemProperty'
+            - 'ProxyServer'
+            - 'ProxyEnable'
+            - 'AutoConfigURL'
+    selection_hosts_file:
+        CommandLine|contains:
+            - 'drivers\etc\hosts'
+            - 'echo'
+            - 'Add-Content'
+        CommandLine|contains:
+            - 'hosts'
+    selection_multi_c2:
+        CommandLine|contains:
+            - 'Invoke-WebRequest'
+            - 'Net.WebClient'
+            - 'curl'
+            - 'wget'
+        CommandLine|contains:
+            - 'catch'
+            - 'try'
+            - '-ErrorAction'
+            - '||'
+            - 'if ('
+    condition: selection_dns_change or selection_proxy_config or selection_hosts_file or selection_multi_c2
+falsepositives:
+    - Legitimate network configuration changes
+    - VPN and proxy setup scripts
+    - DNS configuration by IT teams
+level: medium

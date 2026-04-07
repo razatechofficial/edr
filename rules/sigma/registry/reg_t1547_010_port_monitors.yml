@@ -1,0 +1,31 @@
+title: Print Monitor Registry Persistence
+id: 3c4d5e6f-7a8b-4c9d-0e1f-2a3b4c5d6e7f
+status: experimental
+description: Detects registration of new print monitors via the registry, a technique used for DLL persistence with SYSTEM privileges
+references:
+    - https://attack.mitre.org/techniques/T1547/010/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.privilege_escalation
+    - attack.t1547.010
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains: '\SYSTEM\CurrentControlSet\Control\Print\Monitors\'
+        TargetObject|endswith: '\Driver'
+    filter_known:
+        Details|contains:
+            - 'localspl.dll'
+            - 'tcpmon.dll'
+            - 'usbmon.dll'
+            - 'APMon.dll'
+            - 'FXSMON.DLL'
+            - 'pjlmon.dll'
+    condition: selection and not filter_known
+falsepositives:
+    - Legitimate printer driver installations
+level: high

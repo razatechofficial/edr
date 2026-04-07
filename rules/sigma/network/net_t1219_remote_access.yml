@@ -1,0 +1,43 @@
+title: Remote Access Tool Connection
+id: d0e1f2a3-b4c5-4678-d901-e2f3a4b5c6d7
+status: experimental
+description: Detects network connections to known remote access tool infrastructure such as TeamViewer, AnyDesk, and similar services
+references:
+    - https://attack.mitre.org/techniques/T1219/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1219
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_hostname:
+        DestinationHostname|contains:
+            - '.teamviewer.com'
+            - '.anydesk.com'
+            - '.logmein.com'
+            - '.gotomypc.com'
+            - '.screenconnect.com'
+            - '.connectwise.com'
+            - '.bomgar.com'
+            - '.splashtop.com'
+            - '.ammyy.com'
+            - '.supremocontrol.com'
+            - '.remotepc.com'
+            - '.zoho.com/assist'
+            - '.rustdesk.com'
+            - '.meshcentral.com'
+            - '.dwservice.net'
+            - '.getscreen.me'
+    selection_ports:
+        DestinationPort:
+            - 5938
+            - 7070
+            - 6568
+    condition: selection_hostname or selection_ports
+falsepositives:
+    - Authorized remote support tools
+    - IT helpdesk remote assistance
+level: medium

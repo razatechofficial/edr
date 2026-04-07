@@ -1,0 +1,46 @@
+title: Command History Clearing
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d03
+status: experimental
+description: Detects attempts to clear or disable command history in bash, zsh, or PowerShell, which attackers use to remove evidence of their commands from the system.
+references:
+    - https://attack.mitre.org/techniques/T1070/003/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1070.003
+logsource:
+    category: process_creation
+detection:
+    selection_bash_clear:
+        CommandLine|contains:
+            - 'history -c'
+            - 'history -w /dev/null'
+            - 'export HISTSIZE=0'
+            - 'export HISTFILESIZE=0'
+            - 'unset HISTFILE'
+            - 'unset HISTSIZE'
+            - 'set +o history'
+            - 'HISTCONTROL=ignoreboth'
+            - 'kill -9 $$'
+    selection_file_delete:
+        CommandLine|contains:
+            - 'rm ~/.bash_history'
+            - 'rm ~/.zsh_history'
+            - 'rm -f ~/.bash_history'
+            - 'rm -rf ~/.bash_history'
+            - '> ~/.bash_history'
+            - 'cat /dev/null > ~/.bash_history'
+            - 'truncate -s 0 ~/.bash_history'
+            - 'shred ~/.bash_history'
+    selection_powershell:
+        CommandLine|contains:
+            - 'Clear-History'
+            - 'Remove-Item (Get-PSReadLineOption).HistorySavePath'
+            - 'Set-PSReadLineOption -HistorySaveStyle SaveNothing'
+            - 'Remove-Item $env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine'
+    condition: selection_bash_clear or selection_file_delete or selection_powershell
+falsepositives:
+    - Users who intentionally clear history for privacy
+    - Automated scripts that reset environment between sessions
+level: high

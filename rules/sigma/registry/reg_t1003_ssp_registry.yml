@@ -1,0 +1,39 @@
+title: Security Support Provider Registry Modification
+id: 5c6d7e8f-9a0b-4c1d-2e3f-4a5b6c7d8e9f
+status: experimental
+description: Detects modification of Security Support Provider (SSP) registry keys that can be used to load malicious DLLs into lsass.exe for credential harvesting
+references:
+    - https://attack.mitre.org/techniques/T1547/005/
+    - https://attack.mitre.org/techniques/T1003/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.credential_access
+    - attack.t1547.005
+    - attack.t1003.001
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains:
+            - '\SYSTEM\CurrentControlSet\Control\Lsa\Security Packages'
+            - '\SYSTEM\CurrentControlSet\Control\Lsa\OSConfig\Security Packages'
+            - '\SYSTEM\CurrentControlSet\Control\Lsa\Authentication Packages'
+    filter_default:
+        Details|contains:
+            - 'kerberos'
+            - 'msv1_0'
+            - 'schannel'
+            - 'wdigest'
+            - 'tspkg'
+            - 'pku2u'
+            - 'cloudap'
+            - 'negoexts'
+            - 'negotiat'
+    condition: selection and not filter_default
+falsepositives:
+    - Third-party authentication providers
+    - Smart card authentication software
+level: critical

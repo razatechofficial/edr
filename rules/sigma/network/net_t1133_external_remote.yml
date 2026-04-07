@@ -1,0 +1,43 @@
+title: External Remote Service Connection
+id: d2e3f4a5-b6c7-4890-d123-e4f5a6b7c8d9
+status: experimental
+description: Detects connections to external remote service infrastructure including VPN gateways, Citrix, and remote desktop gateways
+references:
+    - https://attack.mitre.org/techniques/T1133/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.initial_access
+    - attack.persistence
+    - attack.t1133
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_vpn_ports:
+        DestinationPort:
+            - 1194
+            - 1723
+            - 500
+            - 4500
+            - 4993
+            - 10000
+    selection_remote_gateways:
+        DestinationHostname|contains:
+            - 'vpn.'
+            - 'remote.'
+            - 'gateway.'
+            - 'citrix.'
+            - 'rdweb.'
+            - 'rds.'
+            - 'access.'
+    filter_internal:
+        DestinationIp|startswith:
+            - '10.'
+            - '172.16.'
+            - '192.168.'
+    condition: (selection_vpn_ports or selection_remote_gateways) and not filter_internal
+falsepositives:
+    - Legitimate VPN connections
+    - Authorized remote access
+level: low

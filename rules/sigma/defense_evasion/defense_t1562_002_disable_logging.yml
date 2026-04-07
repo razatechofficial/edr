@@ -1,0 +1,61 @@
+title: Audit Policy or Logging Disabled
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d15
+status: experimental
+description: Detects attempts to disable or weaken system logging and audit policies, including Windows audit policy changes, Sysmon service stopping, and Linux audit daemon manipulation.
+references:
+    - https://attack.mitre.org/techniques/T1562/002/
+    - https://attack.mitre.org/techniques/T1562/001/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1562.002
+    - attack.t1562.001
+logsource:
+    category: process_creation
+detection:
+    selection_auditpol:
+        Image|endswith: '\auditpol.exe'
+        CommandLine|contains:
+            - '/clear'
+            - '/remove'
+            - '/set /subcategory:' 
+    selection_auditpol_disable:
+        Image|endswith: '\auditpol.exe'
+        CommandLine|contains:
+            - '/success:disable'
+            - '/failure:disable'
+    selection_powershell_audit:
+        CommandLine|contains:
+            - 'Set-AuditPolicy'
+            - 'Disable-WindowsOptionalFeature'
+            - 'ScriptBlockLogging'
+            - 'ModuleLogging'
+            - 'EnableScriptBlockLogging'
+    selection_registry_audit:
+        TargetObject|contains:
+            - '\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging'
+            - '\Policies\Microsoft\Windows\PowerShell\ModuleLogging'
+            - '\Policies\Microsoft\Windows\EventLog'
+    selection_sysmon_stop:
+        CommandLine|contains:
+            - 'sc stop sysmon'
+            - 'net stop sysmon'
+            - 'Uninstall-Sysmon'
+            - 'sysmon -u'
+            - 'fltMC.exe unload SysmonDrv'
+    selection_linux_audit:
+        CommandLine|contains:
+            - 'service auditd stop'
+            - 'systemctl stop auditd'
+            - 'systemctl disable auditd'
+            - 'auditctl -e 0'
+            - 'auditctl -D'
+            - 'service rsyslog stop'
+            - 'systemctl stop rsyslog'
+    condition: selection_auditpol or selection_auditpol_disable or selection_powershell_audit or selection_registry_audit or selection_sysmon_stop or selection_linux_audit
+falsepositives:
+    - Security teams reconfiguring audit policies
+    - System hardening scripts adjusting logging levels
+    - Sysmon upgrades requiring service restart
+level: high

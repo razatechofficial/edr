@@ -1,0 +1,46 @@
+title: Mass File Extension Change - Potential Ransomware
+id: 3b5c7d91-f2a4-4768-e093-8e6c1f3a7b20
+status: experimental
+description: Detects mass file extension changes consistent with ransomware encryption activity
+references:
+    - https://attack.mitre.org/techniques/T1486/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.impact
+    - attack.t1486
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection:
+        TargetFilename|endswith:
+            - '.encrypted'
+            - '.locked'
+            - '.crypt'
+            - '.crypto'
+            - '.enc'
+            - '.locky'
+            - '.cerber'
+            - '.zepto'
+            - '.thor'
+            - '.aaa'
+            - '.abc'
+            - '.xyz'
+            - '.zzz'
+            - '.micro'
+            - '.crypted'
+            - '.crinf'
+            - '.r5a'
+            - '.XRNT'
+            - '.XTBL'
+            - '.crypt1'
+            - '.da_vinci_code'
+            - '.lock'
+            - '.wncry'
+            - '.cryptolocker'
+    condition: selection
+falsepositives:
+    - Legitimate encryption software
+    - File encryption for backup purposes
+level: critical

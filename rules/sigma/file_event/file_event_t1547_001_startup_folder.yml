@@ -1,0 +1,36 @@
+title: Suspicious File Dropped in Startup Folder
+id: d2e5f8a1-7c34-4b69-a158-3f9e6d2c1b87
+status: experimental
+description: Detects creation of files in Windows startup folders, a common persistence mechanism
+references:
+    - https://attack.mitre.org/techniques/T1547/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1547.001
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection:
+        TargetFilename|contains:
+            - '\Start Menu\Programs\Startup\'
+            - '\Microsoft\Windows\Start Menu\Programs\Startup\'
+    selection_ext:
+        TargetFilename|endswith:
+            - '.exe'
+            - '.dll'
+            - '.bat'
+            - '.cmd'
+            - '.vbs'
+            - '.js'
+            - '.wsf'
+            - '.hta'
+            - '.ps1'
+            - '.lnk'
+            - '.scr'
+    condition: selection and selection_ext
+falsepositives:
+    - Legitimate applications adding startup entries during installation
+level: high

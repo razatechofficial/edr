@@ -1,0 +1,54 @@
+title: Cryptocurrency Mining Pool Connection
+id: e3f4a5b6-c7d8-4901-e234-f5a6b7c8d9e0
+status: experimental
+description: Detects connections to known cryptocurrency mining pools indicating potential cryptojacking
+references:
+    - https://attack.mitre.org/techniques/T1496/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.impact
+    - attack.t1496
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_pools:
+        DestinationHostname|contains:
+            - 'pool.minergate.com'
+            - 'mining.pool'
+            - 'xmrpool.eu'
+            - 'moneropool.com'
+            - 'monerohash.com'
+            - 'minexmr.com'
+            - 'supportxmr.com'
+            - 'pool.hashvault.pro'
+            - 'nanopool.org'
+            - 'ethermine.org'
+            - 'f2pool.com'
+            - 'antpool.com'
+            - 'pool.bitcoin.com'
+            - 'stratum+tcp'
+            - 'stratum2+tcp'
+            - 'nicehash.com'
+            - '2miners.com'
+            - 'flypool.org'
+            - 'sparkpool.com'
+            - 'hiveon.net'
+            - 'herominers.com'
+            - 'hashrate.to'
+    selection_stratum_ports:
+        DestinationPort:
+            - 3333
+            - 4444
+            - 5555
+            - 7777
+            - 8888
+            - 9999
+            - 14433
+            - 14444
+            - 45560
+    condition: selection_pools or selection_stratum_ports
+falsepositives:
+    - Authorized cryptocurrency mining operations
+level: high

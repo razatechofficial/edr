@@ -1,0 +1,57 @@
+title: Data Exfiltration to Cloud Storage Service
+id: e7a1b5c4-6d9f-4b3e-af5c-4e8d0a6b3c03
+status: experimental
+description: Detects data upload to cloud storage services (Dropbox, Google Drive, OneDrive, AWS S3, Mega, etc.) using command-line tools, which may indicate data exfiltration through legitimate cloud infrastructure.
+references:
+    - https://attack.mitre.org/techniques/T1567/002/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.exfiltration
+    - attack.t1567.002
+logsource:
+    category: process_creation
+detection:
+    selection_cloud_cli:
+        CommandLine|contains:
+            - 'rclone copy'
+            - 'rclone sync'
+            - 'rclone move'
+            - 'aws s3 cp'
+            - 'aws s3 sync'
+            - 'aws s3 mv'
+            - 'gsutil cp'
+            - 'gsutil rsync'
+            - 'azcopy'
+    selection_cloud_urls:
+        CommandLine|contains:
+            - 'dropbox.com/s/'
+            - 'drive.google.com'
+            - 'onedrive.live.com'
+            - 'mega.nz'
+            - 'mega.co.nz'
+            - 'file.io'
+            - 'transfer.sh'
+            - 'wetransfer.com'
+            - 'gofile.io'
+            - 'anonfiles.com'
+            - 'paste.ee'
+    selection_rclone:
+        Image|endswith:
+            - '\rclone.exe'
+            - '/rclone'
+    selection_mega:
+        Image|endswith:
+            - '\MEGAcmd.exe'
+            - '/mega-cmd'
+        CommandLine|contains:
+            - 'put '
+            - 'upload '
+            - 'sync '
+    condition: selection_cloud_cli or selection_cloud_urls or selection_rclone or selection_mega
+falsepositives:
+    - Legitimate cloud backup solutions
+    - Developers syncing files with cloud storage
+    - Authorized data migration projects
+    - Cloud-based CI/CD artifact storage
+level: medium

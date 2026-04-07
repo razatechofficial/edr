@@ -1,0 +1,67 @@
+title: Private Key File Access or Exfiltration
+id: c5e9f3a2-4b7d-4f1c-9e3a-2d6b8c4f1a04
+status: experimental
+description: Detects access to or copying of private key files (SSH keys, TLS/SSL certificates, PGP keys) that could be used for unauthorized access, impersonation, or decryption of encrypted communications.
+references:
+    - https://attack.mitre.org/techniques/T1552/004/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1552.004
+logsource:
+    category: process_creation
+detection:
+    selection_ssh_keys:
+        CommandLine|contains:
+            - '/.ssh/id_rsa'
+            - '/.ssh/id_dsa'
+            - '/.ssh/id_ecdsa'
+            - '/.ssh/id_ed25519'
+            - '/.ssh/authorized_keys'
+            - '/.ssh/known_hosts'
+            - '/.ssh/config'
+    selection_windows_keys:
+        CommandLine|contains:
+            - '\PuTTY\Sessions'
+            - '.ppk'
+            - '.pem'
+            - '.pfx'
+            - '.p12'
+            - '.key'
+    selection_copy_keys:
+        Image|endswith:
+            - '\xcopy.exe'
+            - '\robocopy.exe'
+            - '\copy.exe'
+            - '/cp'
+            - '/scp'
+            - '/rsync'
+        CommandLine|contains:
+            - '.pem'
+            - '.key'
+            - '.pfx'
+            - '.p12'
+            - '.ppk'
+            - 'id_rsa'
+            - 'id_ed25519'
+    selection_certutil_export:
+        Image|endswith: '\certutil.exe'
+        CommandLine|contains:
+            - '-exportPFX'
+            - '-backup'
+    selection_openssl_key:
+        Image|endswith:
+            - '/openssl'
+            - '\openssl.exe'
+        CommandLine|contains:
+            - 'rsa -in'
+            - 'pkey -in'
+            - 'pkcs12 -in'
+    condition: selection_ssh_keys or selection_windows_keys or selection_copy_keys or selection_certutil_export or selection_openssl_key
+falsepositives:
+    - System administrators managing SSH keys
+    - Certificate rotation and renewal processes
+    - Backup scripts including key files
+    - DevOps tooling deploying with SSH keys
+level: high

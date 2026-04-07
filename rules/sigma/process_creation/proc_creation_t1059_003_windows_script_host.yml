@@ -1,0 +1,44 @@
+title: Windows Script Host Executing Script Files
+id: d6a0e1f4-5b7c-4d9e-af40-6b8c1e3d5f7a
+status: experimental
+description: Detects WScript or CScript executing scripts from suspicious locations such as temp directories, user profile folders, or remote paths, commonly abused for initial access and execution.
+references:
+    - https://attack.mitre.org/techniques/T1059/003/
+    - https://attack.mitre.org/techniques/T1059/005/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1059.003
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_image:
+        Image|endswith:
+            - '\wscript.exe'
+            - '\cscript.exe'
+    selection_suspicious_path:
+        CommandLine|contains:
+            - '\Temp\'
+            - '\tmp\'
+            - '\AppData\Local\'
+            - '\AppData\Roaming\'
+            - '\Users\Public\'
+            - '\ProgramData\'
+            - '\Downloads\'
+            - '\\\\' 
+    selection_suspicious_extension:
+        CommandLine|endswith:
+            - '.js'
+            - '.jse'
+            - '.vbs'
+            - '.vbe'
+            - '.wsf'
+            - '.wsh'
+    condition: selection_image and (selection_suspicious_path or selection_suspicious_extension)
+falsepositives:
+    - Legitimate login scripts deployed via Group Policy
+    - Software installers that use VBS/JS wrapper scripts
+    - Enterprise automation using Windows Script Host
+level: medium

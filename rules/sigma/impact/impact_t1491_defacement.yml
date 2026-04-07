@@ -1,0 +1,57 @@
+title: Web or Internal Defacement
+id: f8b2c6d5-7e0a-4c4f-b06d-5f9e1a7c4d04
+status: experimental
+description: Detects potential defacement activity including modification of web server content, replacement of system wallpapers, or mass modification of document files that could indicate hacktivism or destructive attack.
+references:
+    - https://attack.mitre.org/techniques/T1491/
+    - https://attack.mitre.org/techniques/T1491/001/
+    - https://attack.mitre.org/techniques/T1491/002/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.impact
+    - attack.t1491
+    - attack.t1491.001
+    - attack.t1491.002
+logsource:
+    category: process_creation
+detection:
+    selection_web_root_modify:
+        TargetFilename|contains:
+            - '\inetpub\wwwroot\\'
+            - '\Apache24\htdocs\\'
+            - '\nginx\html\\'
+            - '/var/www/html/'
+            - '/var/www/public/'
+            - '/usr/share/nginx/html/'
+        TargetFilename|endswith:
+            - 'index.html'
+            - 'index.htm'
+            - 'index.php'
+            - 'default.aspx'
+            - 'default.htm'
+    selection_wallpaper:
+        CommandLine|contains:
+            - 'SystemParametersInfo'
+            - 'HKCU\Control Panel\Desktop\Wallpaper'
+            - 'reg add.*Wallpaper'
+            - 'Set-ItemProperty.*Wallpaper'
+    selection_mass_rename:
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+        CommandLine|contains:
+            - 'ren *.* *.'
+            - 'Rename-Item'
+            - 'forfiles /p'
+        CommandLine|contains:
+            - '.doc'
+            - '.xls'
+            - '.pdf'
+            - '.ppt'
+    condition: selection_web_root_modify or selection_wallpaper or selection_mass_rename
+falsepositives:
+    - Web content deployment and updates
+    - Group Policy wallpaper changes
+    - Batch file renaming for organizational purposes
+level: high

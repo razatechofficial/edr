@@ -1,0 +1,44 @@
+title: Sensitive Registry Key Query
+id: c18f6d49-a0ce-4a07-fe6c-7dbc9edf8a05
+status: experimental
+description: Detects queries to sensitive registry keys commonly targeted during discovery, including credentials, system configuration, and installed software
+references:
+    - https://attack.mitre.org/techniques/T1012/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.discovery
+    - attack.t1012
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_reg:
+        Image|endswith: '\reg.exe'
+        CommandLine|contains: 'query'
+    selection_keys:
+        CommandLine|contains:
+            - 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+            - 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+            - 'HKLM\SYSTEM\CurrentControlSet\Services'
+            - 'HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders'
+            - 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa'
+            - 'HKLM\SAM\SAM'
+            - 'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+            - 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies'
+            - 'HKLM\SECURITY'
+            - 'HKLM\SOFTWARE\OpenSSH'
+            - 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer\AlwaysInstallElevated'
+            - 'HKCU\SOFTWARE\Policies\Microsoft\Windows\Installer\AlwaysInstallElevated'
+    selection_powershell:
+        CommandLine|contains:
+            - 'Get-ItemProperty'
+            - 'Get-Item -Path Registry::'
+            - 'Get-ChildItem -Path Registry::'
+            - '[Microsoft.Win32.Registry]'
+    condition: (selection_reg and selection_keys) or selection_powershell
+falsepositives:
+    - System administration scripts querying registry
+    - Software inventory tools
+    - Group Policy processing
+level: medium

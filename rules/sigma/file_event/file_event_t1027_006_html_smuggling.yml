@@ -1,0 +1,41 @@
+title: HTML Smuggling File Creation Pattern
+id: 3d5e7f91-b2c4-4d68-af93-8a6e1b3c7d20
+status: experimental
+description: Detects file creation patterns consistent with HTML smuggling, where malicious payloads are delivered via HTML files using JavaScript blobs
+references:
+    - https://attack.mitre.org/techniques/T1027/006/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1027.006
+    - attack.initial_access
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_html:
+        TargetFilename|endswith:
+            - '.html'
+            - '.htm'
+        TargetFilename|contains:
+            - '\Downloads\'
+            - '\Temp\'
+            - '\AppData\Local\Temp\'
+    selection_payload_drop:
+        TargetFilename|endswith:
+            - '.iso'
+            - '.img'
+            - '.zip'
+            - '.rar'
+            - '.exe'
+            - '.dll'
+            - '.vhd'
+            - '.vhdx'
+        TargetFilename|contains:
+            - '\Downloads\'
+    condition: selection_html or selection_payload_drop
+falsepositives:
+    - Legitimate HTML file downloads
+    - Browser caching
+level: medium

@@ -1,0 +1,54 @@
+title: Scheduled Task Privilege Escalation
+id: b8c9d0e1-f2a3-4b4c-5d6e-7f8a9b0c1d2f
+status: experimental
+description: Detects creation of scheduled tasks configured to run as SYSTEM or with elevated privileges, commonly used for privilege escalation
+references:
+    - https://attack.mitre.org/techniques/T1053/005/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.privilege_escalation
+    - attack.execution
+    - attack.persistence
+    - attack.t1053.005
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_schtasks:
+        Image|endswith: '\schtasks.exe'
+        CommandLine|contains:
+            - '/create'
+    selection_system_run:
+        CommandLine|contains:
+            - '/ru SYSTEM'
+            - '/ru "NT AUTHORITY\SYSTEM"'
+            - '/ru "SYSTEM"'
+            - '/rl HIGHEST'
+    selection_suspicious_action:
+        CommandLine|contains:
+            - '/tr "cmd'
+            - '/tr cmd'
+            - '/tr "powershell'
+            - '/tr powershell'
+            - '/tr "mshta'
+            - '/tr "wscript'
+            - '/tr "cscript'
+            - '/tr "rundll32'
+            - '/tr "regsvr32'
+            - '/tr "certutil'
+            - '/tr "bitsadmin'
+    selection_powershell:
+        CommandLine|contains:
+            - 'Register-ScheduledTask'
+            - 'New-ScheduledTaskAction'
+            - 'New-ScheduledTaskTrigger'
+        CommandLine|contains:
+            - 'SYSTEM'
+            - '-RunLevel Highest'
+    condition: (selection_schtasks and selection_system_run) or (selection_schtasks and selection_suspicious_action) or selection_powershell
+falsepositives:
+    - Legitimate administrative scheduled tasks running as SYSTEM
+    - Software installers creating maintenance tasks
+    - SCCM and MDM managed scheduled tasks
+level: high

@@ -1,0 +1,57 @@
+title: Data Exfiltration Over Alternative Protocol
+id: e7a1b5c4-6d9f-4b3e-af5c-4e8d0a6b3c02
+status: experimental
+description: Detects potential data exfiltration using non-standard or asymmetric protocols including DNS tunneling, ICMP exfiltration, and data transfer over uncommon ports to bypass network monitoring.
+references:
+    - https://attack.mitre.org/techniques/T1048/
+    - https://attack.mitre.org/techniques/T1048/003/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.exfiltration
+    - attack.t1048
+logsource:
+    category: process_creation
+detection:
+    selection_dns_tunnel:
+        CommandLine|contains:
+            - 'iodine'
+            - 'dnscat'
+            - 'dns2tcp'
+            - 'Invoke-DNSExfiltration'
+            - 'dnsexfiltrator'
+            - 'DNSExfiltration'
+    selection_icmp_exfil:
+        CommandLine|contains:
+            - 'icmpsh'
+            - 'icmptunnel'
+            - 'ptunnel'
+            - 'Invoke-PowerShellIcmp'
+    selection_ncat_reverse:
+        CommandLine|contains:
+            - 'ncat -e'
+            - 'nc -e'
+            - 'ncat --exec'
+            - 'nc.exe -e'
+    selection_ftp_upload:
+        Image|endswith:
+            - '\ftp.exe'
+            - '/ftp'
+        CommandLine|contains:
+            - 'put '
+            - 'mput '
+            - 'send '
+    selection_tftp:
+        Image|endswith:
+            - '\tftp.exe'
+            - '/tftp'
+        CommandLine|contains:
+            - 'put '
+            - '-i '
+    condition: selection_dns_tunnel or selection_icmp_exfil or selection_ncat_reverse or selection_ftp_upload or selection_tftp
+falsepositives:
+    - Legitimate DNS management tools
+    - Network diagnostic utilities using ICMP
+    - Authorized FTP file transfers
+    - Network testing and troubleshooting
+level: high

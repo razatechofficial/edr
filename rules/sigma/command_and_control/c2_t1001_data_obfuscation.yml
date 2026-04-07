@@ -1,0 +1,51 @@
+title: C2 Traffic Obfuscation
+id: a3b4c5d6-e7f8-4a9b-0c1d-2e3f4a5b6c7e
+status: experimental
+description: Detects indicators of C2 traffic obfuscation including steganography tools, DNS tunneling utilities, and protocol manipulation
+references:
+    - https://attack.mitre.org/techniques/T1001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_dns_tunnel:
+        CommandLine|contains:
+            - 'dnscat'
+            - 'dns2tcp'
+            - 'iodine'
+            - 'dnscapy'
+            - 'Invoke-DNSExfiltration'
+            - 'nslookup -type=TXT'
+    selection_stego:
+        CommandLine|contains:
+            - 'steghide'
+            - 'openstego'
+            - 'snow.exe'
+            - 'Invoke-PSImage'
+            - 'Out-DnsTxt'
+    selection_icmp_tunnel:
+        CommandLine|contains:
+            - 'ptunnel'
+            - 'icmpsh'
+            - 'ICMP tunnel'
+            - 'ping -p'
+    selection_protocol_abuse:
+        CommandLine|contains:
+            - 'ngrok'
+            - 'frpc'
+            - 'chisel'
+            - 'plink -R'
+            - 'ssh -R'
+            - 'ssh -D'
+            - 'cloudflared tunnel'
+    condition: selection_dns_tunnel or selection_stego or selection_icmp_tunnel or selection_protocol_abuse
+falsepositives:
+    - Legitimate use of SSH tunneling by administrators
+    - Authorized ngrok usage for development
+    - Security testing tools
+level: high

@@ -1,0 +1,57 @@
+title: Scheduled Data Transfer for Exfiltration
+id: e7a1b5c4-6d9f-4b3e-af5c-4e8d0a6b3c04
+status: experimental
+description: Detects the creation of scheduled tasks or cron jobs that perform data transfer operations, indicating an attacker setting up recurring exfiltration to gradually steal data while avoiding detection thresholds.
+references:
+    - https://attack.mitre.org/techniques/T1029/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.exfiltration
+    - attack.t1029
+logsource:
+    category: process_creation
+detection:
+    selection_schtask_transfer:
+        Image|endswith: '\schtasks.exe'
+        CommandLine|contains:
+            - '/create'
+            - '-create'
+        CommandLine|contains:
+            - 'ftp'
+            - 'curl'
+            - 'wget'
+            - 'scp'
+            - 'sftp'
+            - 'rclone'
+            - 'Invoke-WebRequest'
+            - 'Invoke-RestMethod'
+            - 'bitsadmin'
+    selection_cron_transfer:
+        CommandLine|contains:
+            - 'crontab'
+            - '/etc/cron'
+        CommandLine|contains:
+            - 'curl'
+            - 'wget'
+            - 'scp'
+            - 'rsync'
+            - 'ftp'
+            - 'nc '
+    selection_at_transfer:
+        Image|endswith:
+            - '\at.exe'
+            - '/at'
+        CommandLine|contains:
+            - 'ftp'
+            - 'curl'
+            - 'wget'
+            - 'scp'
+            - 'bitsadmin'
+    condition: selection_schtask_transfer or selection_cron_transfer or selection_at_transfer
+falsepositives:
+    - Legitimate scheduled backup jobs
+    - Automated reporting systems
+    - Log shipping configurations
+    - Scheduled cloud synchronization tasks
+level: medium

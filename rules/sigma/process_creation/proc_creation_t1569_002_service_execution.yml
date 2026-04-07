@@ -1,0 +1,57 @@
+title: Windows Service Creation or Modification via Command Line
+id: ab9f1c25-6ef7-4acd-de01-fea7feab6c89
+status: experimental
+description: Detects creation or modification of Windows services using sc.exe or PowerShell, commonly used for persistence, privilege escalation, and lateral movement.
+references:
+    - https://attack.mitre.org/techniques/T1569/002/
+    - https://attack.mitre.org/techniques/T1543/003/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1569.002
+    - attack.persistence
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_sc_create:
+        Image|endswith: '\sc.exe'
+        CommandLine|contains:
+            - 'create'
+            - 'config'
+    selection_sc_suspicious:
+        CommandLine|contains:
+            - 'binPath='
+            - 'binpath='
+        CommandLine|contains:
+            - 'cmd.exe'
+            - 'powershell'
+            - 'mshta'
+            - 'regsvr32'
+            - 'rundll32'
+            - '\Temp\'
+            - '\tmp\'
+            - '\AppData\'
+            - '\Users\Public\'
+            - 'http://'
+            - 'https://'
+    selection_powershell_service:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'New-Service'
+            - 'Set-Service'
+    selection_sc_start:
+        Image|endswith: '\sc.exe'
+        CommandLine|contains: 'start='
+        CommandLine|contains:
+            - 'auto'
+            - 'delayed-auto'
+    condition: (selection_sc_create and selection_sc_suspicious) or selection_powershell_service or (selection_sc_create and selection_sc_start)
+falsepositives:
+    - Legitimate service installations by software installers
+    - System administrators configuring services
+    - Group Policy service deployment
+level: medium

@@ -1,0 +1,52 @@
+title: SUID/SGID Privilege Escalation
+id: ef5d7a81-2ce8-4dbc-cd67-def8defa2a45
+status: experimental
+description: Detects attempts to set SUID or SGID bits on binaries or execution of known SUID-abusable binaries for privilege escalation on Linux and macOS systems.
+references:
+    - https://attack.mitre.org/techniques/T1548/001/
+    - https://gtfobins.github.io/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.privilege_escalation
+    - attack.t1548.001
+    - attack.defense_evasion
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection_chmod_suid:
+        Image|endswith:
+            - '/chmod'
+        CommandLine|contains:
+            - 'u+s '
+            - 'g+s '
+            - '4755 '
+            - '4777 '
+            - '2755 '
+            - '6755 '
+            - '+s '
+            - 'u+s'
+    selection_find_suid:
+        Image|endswith: '/find'
+        CommandLine|contains:
+            - '-perm -4000'
+            - '-perm -2000'
+            - '-perm /4000'
+            - '-perm /2000'
+            - '-perm -u=s'
+            - '-perm -g=s'
+    selection_suid_abuse:
+        CommandLine|contains:
+            - 'find *-exec /bin/sh'
+            - 'find *-exec /bin/bash'
+            - 'nmap --interactive'
+            - 'vim -c '':!sh'''
+            - 'awk ''BEGIN {system'
+            - 'python -c "import os; os.setuid'
+    condition: selection_chmod_suid or selection_find_suid or selection_suid_abuse
+falsepositives:
+    - System administrators setting SUID for legitimate service binaries
+    - Package installations that require SUID permissions
+    - Security auditing tools scanning for SUID binaries
+level: high

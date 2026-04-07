@@ -1,0 +1,37 @@
+title: Remote Login From Unusual Source
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a07
+status: experimental
+description: Detects remote interactive or network logon events originating from external or unusual source IP addresses that are not part of the known internal network ranges.
+references:
+    - https://attack.mitre.org/techniques/T1021/
+    - https://docs.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4624
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.lateral_movement
+    - attack.t1021
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection:
+        EventID: 4624
+        LogonType:
+            - 3
+            - 10
+    filter_internal:
+        IpAddress|cidr:
+            - '10.0.0.0/8'
+            - '172.16.0.0/12'
+            - '192.168.0.0/16'
+    filter_local:
+        IpAddress:
+            - '127.0.0.1'
+            - '::1'
+            - '-'
+    condition: selection and not filter_internal and not filter_local
+falsepositives:
+    - Legitimate remote administration from external management networks
+    - VPN users who receive external IP addresses
+    - Cloud-hosted jump servers with public IPs
+level: medium

@@ -1,0 +1,51 @@
+title: Dynamic DNS Resolution
+id: a3b4c5d6-e7f8-4901-a234-b5c6d7e8f9a0
+status: experimental
+description: Detects DNS queries to dynamic DNS providers commonly abused by threat actors for C2 infrastructure
+references:
+    - https://attack.mitre.org/techniques/T1568/
+    - https://attack.mitre.org/techniques/T1568/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1568
+    - attack.t1568.001
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection:
+        DestinationHostname|endswith:
+            - '.duckdns.org'
+            - '.no-ip.com'
+            - '.no-ip.org'
+            - '.no-ip.biz'
+            - '.dynu.com'
+            - '.dynu.net'
+            - '.freedns.afraid.org'
+            - '.hopto.org'
+            - '.zapto.org'
+            - '.sytes.net'
+            - '.ddns.net'
+            - '.serveblog.net'
+            - '.servegame.com'
+            - '.servehttp.com'
+            - '.redirectme.net'
+            - '.bounceme.net'
+            - '.myftp.biz'
+            - '.myftp.org'
+            - '.myvnc.com'
+            - '.servecounterstrike.com'
+            - '.serveftp.com'
+            - '.servequake.com'
+            - '.changeip.com'
+            - '.dns.army'
+            - '.dns.navy'
+            - '.chickenkiller.com'
+            - '.mooo.com'
+    condition: selection
+falsepositives:
+    - Legitimate use of dynamic DNS for home servers or IoT
+    - Small business hosting
+level: high

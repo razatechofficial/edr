@@ -1,0 +1,40 @@
+title: Hidden File or Directory Creation
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d10
+status: experimental
+description: Detects the creation of hidden files or directories on Windows and Linux systems, which attackers use to conceal malicious tools, scripts, or exfiltrated data.
+references:
+    - https://attack.mitre.org/techniques/T1564/001/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1564.001
+logsource:
+    category: process_creation
+detection:
+    selection_windows_attrib:
+        Image|endswith: '\attrib.exe'
+        CommandLine|contains: '+h'
+    selection_windows_powershell:
+        CommandLine|contains:
+            - '.Attributes = ''Hidden'''
+            - 'Attributes -bor [IO.FileAttributes]::Hidden'
+            - 'Set-ItemProperty -Path * -Name Attributes -Value Hidden'
+    selection_windows_ads:
+        CommandLine|re: '.*:.*\.\w{2,4}$'
+    selection_linux_hidden:
+        CommandLine|contains:
+            - 'mkdir .'
+            - 'mv * .'
+            - 'cp * .'
+        CommandLine|re: '(mkdir|mv|cp)\s+\S+\s+\.\w+'
+    selection_linux_chattr:
+        Image|endswith: '/chattr'
+        CommandLine|contains: '+i'
+    condition: selection_windows_attrib or selection_windows_powershell or selection_windows_ads or selection_linux_hidden or selection_linux_chattr
+falsepositives:
+    - Application installers that create hidden configuration directories
+    - Version control systems (.git, .svn directories)
+    - IDE and editor configuration files (.vscode, .idea)
+    - Dotfile management tools
+level: medium

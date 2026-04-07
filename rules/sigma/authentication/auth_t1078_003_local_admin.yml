@@ -1,0 +1,33 @@
+title: Local Administrator Interactive Logon
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a03
+status: experimental
+description: Detects interactive logon using local administrator accounts, which may indicate lateral movement or privilege escalation by an attacker who has obtained local admin credentials.
+references:
+    - https://attack.mitre.org/techniques/T1078/003/
+    - https://docs.microsoft.com/en-us/windows-server/identity/securing-privileged-access/securing-privileged-access
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.privilege_escalation
+    - attack.t1078.003
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection:
+        EventID: 4624
+        LogonType:
+            - 2
+            - 10
+            - 11
+        TargetUserSid|startswith: 'S-1-5-21-'
+        TargetUserSid|endswith: '-500'
+    filter_local:
+        IpAddress: '127.0.0.1'
+        WorkstationName|fieldref: Computer
+    condition: selection and not filter_local
+falsepositives:
+    - Legitimate IT administrators performing maintenance via console logon
+    - Emergency break-glass scenarios
+level: high

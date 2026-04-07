@@ -1,0 +1,43 @@
+title: Brute Force - Multiple Failed Login Attempts
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a01
+status: experimental
+description: Detects multiple failed authentication attempts from a single source within a short time window, indicating a possible brute force attack against user accounts.
+references:
+    - https://attack.mitre.org/techniques/T1078/
+    - https://attack.mitre.org/techniques/T1110/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1110
+    - attack.t1078
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection:
+        EventID:
+            - 4625
+            - 529
+            - 530
+            - 531
+            - 532
+            - 533
+            - 534
+            - 535
+            - 536
+            - 537
+            - 539
+        LogonType:
+            - 2
+            - 3
+            - 10
+    filter_service:
+        TargetUserName|endswith: '$'
+    condition: selection and not filter_service | count(TargetUserName) by SourceAddress > 10
+    timeframe: 5m
+falsepositives:
+    - Misconfigured service accounts with wrong passwords
+    - Users who forgot their password and retry multiple times
+    - Automated scripts with expired credentials
+level: high

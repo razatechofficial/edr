@@ -1,0 +1,55 @@
+title: RDP Session Initiation for Lateral Movement
+id: fa0e2b36-7df8-4ebc-cd12-efa3efab7b90
+status: experimental
+description: Detects initiation of Remote Desktop Protocol sessions via command line including mstsc, cmdkey credential caching, and RDP-related registry modifications.
+references:
+    - https://attack.mitre.org/techniques/T1021/006/
+    - https://attack.mitre.org/techniques/T1021/001/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.lateral_movement
+    - attack.t1021.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_mstsc:
+        Image|endswith: '\mstsc.exe'
+        CommandLine|contains:
+            - '/v:'
+            - '-v:'
+    selection_cmdkey:
+        Image|endswith: '\cmdkey.exe'
+        CommandLine|contains:
+            - '/add:TERMSRV'
+            - '/generic:TERMSRV'
+    selection_rdp_registry:
+        Image|endswith: '\reg.exe'
+        CommandLine|contains:
+            - 'Terminal Server\Client'
+            - 'fDenyTSConnections'
+            - 'DisableRestrictedAdmin'
+    selection_tscon:
+        Image|endswith: '\tscon.exe'
+    selection_rdp_enable:
+        Image|endswith:
+            - '\netsh.exe'
+        CommandLine|contains:
+            - 'firewall'
+            - 'Remote Desktop'
+    selection_rdp_powershell:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Enable-NetFirewallRule'
+            - 'Remote Desktop'
+            - 'Set-ItemProperty'
+            - 'fDenyTSConnections'
+    condition: selection_mstsc or selection_cmdkey or selection_rdp_registry or selection_tscon or selection_rdp_enable or selection_rdp_powershell
+falsepositives:
+    - Legitimate remote desktop connections by administrators
+    - Help desk remote support sessions
+    - RDP configuration by Group Policy
+level: medium

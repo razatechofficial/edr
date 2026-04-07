@@ -1,0 +1,29 @@
+title: Windows Firewall Registry Disabling
+id: 6f7a8b9c-0d1e-4f2a-3b4c-5d6e7f8a9b0c
+status: experimental
+description: Detects registry modifications that disable the Windows Firewall
+references:
+    - https://attack.mitre.org/techniques/T1562/004/
+    - https://attack.mitre.org/techniques/T1112/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1562.004
+    - attack.t1112
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains:
+            - '\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile'
+            - '\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile'
+            - '\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile'
+        TargetObject|endswith: '\EnableFirewall'
+        Details: 'DWORD (0x00000000)'
+    condition: selection
+falsepositives:
+    - Legitimate firewall management by GPO
+    - Third-party firewall software
+level: high

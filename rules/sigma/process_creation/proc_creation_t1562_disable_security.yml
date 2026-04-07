@@ -1,0 +1,92 @@
+title: Security Tool and Feature Disabling
+id: ab7f9c03-4ea0-4fde-ef89-fab0fabc4c67
+status: experimental
+description: Detects attempts to disable security tools including antivirus, firewalls, tamper protection, and EDR solutions using command-line utilities.
+references:
+    - https://attack.mitre.org/techniques/T1562/
+    - https://attack.mitre.org/techniques/T1562/001/
+    - https://attack.mitre.org/techniques/T1562/004/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1562
+    - attack.t1562.001
+    - attack.t1562.004
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_defender_disable:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Set-MpPreference -DisableRealtimeMonitoring $true'
+            - 'Set-MpPreference -DisableBehaviorMonitoring $true'
+            - 'Set-MpPreference -DisableBlockAtFirstSeen $true'
+            - 'Set-MpPreference -DisableIOAVProtection $true'
+            - 'Set-MpPreference -DisableScriptScanning $true'
+            - 'Set-MpPreference -ExclusionPath'
+            - 'Set-MpPreference -ExclusionExtension'
+            - 'Set-MpPreference -ExclusionProcess'
+            - 'Add-MpPreference -ExclusionPath'
+    selection_firewall_disable:
+        Image|endswith: '\netsh.exe'
+        CommandLine|contains:
+            - 'advfirewall set allprofiles state off'
+            - 'advfirewall set currentprofile state off'
+            - 'firewall set opmode disable'
+    selection_firewall_powershell:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Set-NetFirewallProfile -Enabled False'
+            - 'Disable-NetFirewallRule'
+            - 'Set-NetFirewallProfile -All -Enabled False'
+    selection_tamper_registry:
+        Image|endswith: '\reg.exe'
+        CommandLine|contains:
+            - 'Windows Defender'
+            - 'DisableAntiSpyware'
+            - 'DisableAntiVirus'
+            - 'TamperProtection'
+    selection_sc_stop_security:
+        Image|endswith: '\sc.exe'
+        CommandLine|contains:
+            - 'stop WinDefend'
+            - 'stop MpsSvc'
+            - 'stop wscsvc'
+            - 'stop SecurityHealthService'
+            - 'stop Sense'
+            - 'delete WinDefend'
+            - 'config WinDefend start= disabled'
+    selection_taskkill_security:
+        Image|endswith: '\taskkill.exe'
+        CommandLine|contains:
+            - 'MsMpEng'
+            - 'McAfee'
+            - 'avp.exe'
+            - 'bdagent'
+            - 'SentinelAgent'
+            - 'CrowdStrike'
+            - 'cb.exe'
+            - 'CylanceSvc'
+    selection_linux_security:
+        CommandLine|contains:
+            - 'systemctl stop apparmor'
+            - 'systemctl disable apparmor'
+            - 'setenforce 0'
+            - 'systemctl stop firewalld'
+            - 'systemctl disable firewalld'
+            - 'ufw disable'
+            - 'iptables -F'
+            - 'iptables -X'
+            - 'service iptables stop'
+    condition: selection_defender_disable or selection_firewall_disable or selection_firewall_powershell or selection_tamper_registry or selection_sc_stop_security or selection_taskkill_security or selection_linux_security
+falsepositives:
+    - System administrators temporarily disabling security for troubleshooting
+    - Software installations requiring firewall modifications
+    - Security product migrations
+level: high

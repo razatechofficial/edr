@@ -1,0 +1,44 @@
+title: Login With Default or Built-in Account
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a02
+status: experimental
+description: Detects successful authentication using default or built-in accounts that are commonly targeted by attackers, such as Administrator, Guest, DefaultAccount, or well-known service accounts.
+references:
+    - https://attack.mitre.org/techniques/T1078/001/
+    - https://docs.microsoft.com/en-us/windows/security/identity-protection/access-control/local-accounts
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.privilege_escalation
+    - attack.t1078.001
+logsource:
+    category: authentication
+    product: windows
+detection:
+    selection_success:
+        EventID:
+            - 4624
+            - 528
+            - 540
+    selection_accounts:
+        TargetUserName|lower:
+            - 'administrator'
+            - 'admin'
+            - 'guest'
+            - 'defaultaccount'
+            - 'default'
+            - 'user'
+            - 'test'
+            - 'temp'
+            - 'setup'
+            - 'root'
+            - 'sa'
+            - 'postgres'
+            - 'oracle'
+            - 'mysql'
+    condition: selection_success and selection_accounts
+falsepositives:
+    - Legitimate use of default accounts during initial setup
+    - Emergency access scenarios using built-in Administrator
+    - Database administration using default service accounts
+level: high

@@ -1,0 +1,37 @@
+title: Suspicious File Masquerading in System Directory
+id: a1d4c7e9-3b5f-42e8-9c16-8d7f5e2a0b34
+status: experimental
+description: Detects creation of executable files in Windows system directories that do not match known legitimate system binaries
+references:
+    - https://attack.mitre.org/techniques/T1036/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1036
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_path:
+        TargetFilename|startswith:
+            - 'C:\Windows\System32\'
+            - 'C:\Windows\SysWOW64\'
+            - 'C:\Windows\SysNative\'
+    selection_ext:
+        TargetFilename|endswith:
+            - '.exe'
+            - '.dll'
+            - '.sys'
+    filter_trusted:
+        SourceFilename|contains:
+            - 'TrustedInstaller'
+            - 'Windows Module Installer'
+            - 'tiworker.exe'
+            - 'wuauclt.exe'
+    condition: selection_path and selection_ext and not filter_trusted
+falsepositives:
+    - Windows updates and patches
+    - Legitimate driver installations
+    - Software installations requiring system directory access
+level: high

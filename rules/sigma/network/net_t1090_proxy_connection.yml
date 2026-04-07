@@ -1,0 +1,43 @@
+title: Connection Through Known Proxy or VPN Service
+id: c5d6e7f8-a9b0-4123-c456-d7e8f9a0b1c2
+status: experimental
+description: Detects network connections to known proxy, VPN, or anonymization services that may be used to hide malicious activity
+references:
+    - https://attack.mitre.org/techniques/T1090/
+    - https://attack.mitre.org/techniques/T1090/002/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1090
+    - attack.t1090.002
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection:
+        DestinationHostname|contains:
+            - 'nordvpn.com'
+            - 'expressvpn.com'
+            - 'surfshark.com'
+            - 'mullvad.net'
+            - 'protonvpn.com'
+            - 'windscribe.com'
+            - 'cyberghostvpn.com'
+            - 'privateinternetaccess.com'
+            - 'hide.me'
+            - 'hidemyass.com'
+            - 'psiphon'
+            - 'ultrasurf'
+            - 'proxifier.com'
+            - 'shadowsocks'
+    selection_socks:
+        DestinationPort:
+            - 1080
+            - 9050
+            - 9150
+    condition: selection or selection_socks
+falsepositives:
+    - Authorized corporate VPN usage
+    - Privacy-conscious employees with approved VPN
+level: medium

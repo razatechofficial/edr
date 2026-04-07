@@ -1,0 +1,44 @@
+title: Malicious Browser Extension Installation
+id: 6d7e8f9a-0b1c-4d2e-3f4a-5b6c7d8e9f0a
+status: experimental
+description: Detects installation of browser extensions from outside official stores or through command-line manipulation of extension directories
+references:
+    - https://attack.mitre.org/techniques/T1176/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1176
+logsource:
+    category: file_event
+    product: windows
+detection:
+    selection_chrome:
+        TargetFilename|contains:
+            - '\AppData\Local\Google\Chrome\User Data\Default\Extensions\'
+            - '\AppData\Local\Google\Chrome\User Data\Profile'
+        TargetFilename|endswith:
+            - '\manifest.json'
+            - '\background.js'
+            - '\content.js'
+    selection_edge:
+        TargetFilename|contains:
+            - '\AppData\Local\Microsoft\Edge\User Data\Default\Extensions\'
+        TargetFilename|endswith:
+            - '\manifest.json'
+            - '\background.js'
+    selection_firefox:
+        TargetFilename|contains:
+            - '\AppData\Roaming\Mozilla\Firefox\Profiles\'
+        TargetFilename|endswith:
+            - '.xpi'
+    filter_store:
+        SourceFilename|contains:
+            - '\Google\Chrome\Application\'
+            - '\Microsoft\Edge\Application\'
+            - 'CRX_INSTALL'
+    condition: (selection_chrome or selection_edge or selection_firefox) and not filter_store
+falsepositives:
+    - Legitimate enterprise extension deployment via Group Policy
+    - Developer testing extensions in unpacked mode
+level: medium

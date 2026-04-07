@@ -1,0 +1,49 @@
+title: LLMNR/NBT-NS Poisoning and SMB Relay
+id: c5e9f3a2-4b7d-4f1c-9e3a-2d6b8c4f1a07
+status: experimental
+description: Detects indicators of LLMNR/NBT-NS poisoning tools and SMB relay attacks, where an attacker intercepts name resolution requests to capture NTLMv2 hashes or relay authentication to other services.
+references:
+    - https://attack.mitre.org/techniques/T1557/001/
+    - https://www.sternsecurity.com/blog/local-network-attacks-llmnr-and-nbt-ns-poisoning
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1557.001
+logsource:
+    category: process_creation
+detection:
+    selection_responder:
+        CommandLine|contains:
+            - 'Responder.py'
+            - 'responder -I'
+            - 'responder -i'
+            - 'Responder.conf'
+    selection_inveigh:
+        CommandLine|contains:
+            - 'Invoke-Inveigh'
+            - 'Inveigh.exe'
+            - 'InveighZero'
+    selection_relay:
+        CommandLine|contains:
+            - 'ntlmrelayx'
+            - 'smbrelayx'
+            - 'MultiRelay'
+            - 'Invoke-SMBRelay'
+    selection_mitm6:
+        CommandLine|contains:
+            - 'mitm6'
+            - 'Invoke-MITMv6'
+    selection_registry_disable:
+        TargetObject|contains:
+            - '\Services\Dnscache\Parameters\EnableMulticast'
+            - '\Services\NetBT\Parameters\Interfaces\Tcpip_'
+        Details:
+            - 'DWORD (0x00000000)'
+            - '0'
+    condition: selection_responder or selection_inveigh or selection_relay or selection_mitm6 or selection_registry_disable
+falsepositives:
+    - Legitimate network troubleshooting tools
+    - Authorized penetration testing
+    - Disabling LLMNR/NBT-NS as a security hardening measure
+level: critical

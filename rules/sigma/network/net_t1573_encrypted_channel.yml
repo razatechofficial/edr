@@ -1,0 +1,40 @@
+title: Encrypted Channel to Suspicious Destination
+id: e7f8a9b0-c1d2-4345-e678-f9a0b1c2d3e4
+status: experimental
+description: Detects TLS/SSL connections to recently registered domains, unusual TLDs, or destinations with self-signed certificates
+references:
+    - https://attack.mitre.org/techniques/T1573/
+    - https://attack.mitre.org/techniques/T1573/002/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1573
+    - attack.t1573.002
+logsource:
+    category: network_connection
+    product: windows
+detection:
+    selection_suspicious_tld:
+        DestinationHostname|endswith:
+            - '.top'
+            - '.xyz'
+            - '.tk'
+            - '.ml'
+            - '.ga'
+            - '.cf'
+            - '.gq'
+            - '.buzz'
+            - '.club'
+            - '.work'
+            - '.icu'
+            - '.cam'
+            - '.rest'
+            - '.surf'
+            - '.monster'
+        DestinationPort: 443
+    condition: selection_suspicious_tld
+falsepositives:
+    - Legitimate websites using newer TLDs
+    - Marketing sites and URL shorteners
+level: medium

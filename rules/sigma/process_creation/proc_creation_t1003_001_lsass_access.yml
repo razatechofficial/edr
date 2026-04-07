@@ -1,0 +1,52 @@
+title: LSASS Memory Access Patterns
+id: fa2e45b8-9de0-4fbc-cd34-edb0efbf9b12
+status: experimental
+description: Detects processes that attempt to access or dump the LSASS process memory, which stores credential material including NTLM hashes and Kerberos tickets.
+references:
+    - https://attack.mitre.org/techniques/T1003/001/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.t1003.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_comsvcs_dump:
+        Image|endswith: '\rundll32.exe'
+        CommandLine|contains:
+            - 'comsvcs.dll'
+            - 'MiniDump'
+            - '#24'
+    selection_procdump:
+        Image|endswith:
+            - '\procdump.exe'
+            - '\procdump64.exe'
+        CommandLine|contains:
+            - 'lsass'
+            - '-ma '
+    selection_taskmgr_dump:
+        Image|endswith: '\taskmgr.exe'
+        CommandLine|contains: 'lsass'
+    selection_powershell_dump:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - 'Get-Process lsass'
+            - '[System.Diagnostics.Process]::GetProcessesByName("lsass")'
+            - 'Out-Minidump'
+            - 'MiniDumpWriteDump'
+    selection_nanodump:
+        CommandLine|contains:
+            - 'nanodump'
+            - 'handlekatz'
+            - 'pypykatz'
+            - 'dumpert'
+    condition: selection_comsvcs_dump or selection_procdump or selection_taskmgr_dump or selection_powershell_dump or selection_nanodump
+falsepositives:
+    - Legitimate memory diagnostics by system administrators
+    - Windows Error Reporting accessing LSASS
+    - Authorized incident response activities
+level: critical

@@ -1,0 +1,45 @@
+title: MFA or Authentication Method Modification
+id: 9a3c7e12-4b5f-4d8a-a1c3-6e9f2b4d7a11
+status: experimental
+description: Detects modifications to multi-factor authentication settings, authentication providers, or security policies that could indicate an attacker weakening authentication controls for persistence.
+references:
+    - https://attack.mitre.org/techniques/T1556/
+    - https://attack.mitre.org/techniques/T1556/006/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.credential_access
+    - attack.defense_evasion
+    - attack.persistence
+    - attack.t1556
+logsource:
+    category: authentication
+detection:
+    selection_registry:
+        TargetObject|contains:
+            - '\Authentication\Credential Providers'
+            - '\Authentication\Credential Provider Filters'
+            - '\Control\SecurityProviders\SecurityProviders'
+            - '\Control\Lsa\Authentication Packages'
+            - '\Control\Lsa\Security Packages'
+    selection_event:
+        EventID:
+            - 4657
+            - 4670
+        ObjectName|contains:
+            - 'Authentication'
+            - 'MFA'
+            - 'TwoFactor'
+    selection_powershell:
+        CommandLine|contains:
+            - 'Set-MsolUser -StrongAuthenticationRequirements'
+            - 'Remove-MsolUser -StrongAuthentication'
+            - 'Set-MfaStatus'
+            - 'Disable-MFA'
+            - 'Register-SecurityTokenService'
+    condition: selection_registry or selection_event or selection_powershell
+falsepositives:
+    - Legitimate MFA enrollment or reset by IT helpdesk
+    - Organization-wide authentication policy changes
+    - Security provider updates during patching
+level: high

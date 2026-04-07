@@ -1,0 +1,38 @@
+title: Security Tool Registry Disabling
+id: 8b9c0d1e-2f3a-4b4c-5d6e-7f8a9b0c1d2e
+status: experimental
+description: Detects registry modifications that disable various security tools and features
+references:
+    - https://attack.mitre.org/techniques/T1562/001/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1562.001
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection_event_log:
+        TargetObject|contains: '\SYSTEM\CurrentControlSet\Services\EventLog\'
+        TargetObject|endswith: '\Start'
+        Details: 'DWORD (0x00000004)'
+    selection_sysmon:
+        TargetObject|contains: '\SYSTEM\CurrentControlSet\Services\Sysmon'
+        TargetObject|endswith: '\Start'
+        Details: 'DWORD (0x00000004)'
+    selection_amsi:
+        TargetObject|contains: '\SOFTWARE\Microsoft\AMSI\Providers'
+    selection_wdigest:
+        TargetObject|contains: '\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest'
+        TargetObject|endswith: '\UseLogonCredential'
+        Details: 'DWORD (0x00000001)'
+    selection_lsa:
+        TargetObject|contains: '\SYSTEM\CurrentControlSet\Control\Lsa'
+        TargetObject|endswith: '\RunAsPPL'
+        Details: 'DWORD (0x00000000)'
+    condition: selection_event_log or selection_sysmon or selection_amsi or selection_wdigest or selection_lsa
+falsepositives:
+    - Legitimate security configuration changes
+    - Troubleshooting steps recommended by Microsoft support
+level: high

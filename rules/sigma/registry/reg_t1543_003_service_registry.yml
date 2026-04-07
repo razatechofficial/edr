@@ -1,0 +1,50 @@
+title: Service Registry Modification for Persistence
+id: 8f9a0b1c-2d3e-4f4a-5b6c-7d8e9f0a1b2c
+status: experimental
+description: Detects creation or modification of Windows service registry keys used for persistence
+references:
+    - https://attack.mitre.org/techniques/T1543/003/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.privilege_escalation
+    - attack.t1543.003
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains: '\SYSTEM\CurrentControlSet\Services\'
+        TargetObject|endswith:
+            - '\ImagePath'
+            - '\Start'
+            - '\Type'
+    filter_start_disabled:
+        TargetObject|endswith: '\Start'
+        Details: 'DWORD (0x00000004)'
+    filter_known_services:
+        TargetObject|contains:
+            - '\Services\W32Time'
+            - '\Services\WinDefend'
+            - '\Services\EventLog'
+            - '\Services\Dnscache'
+            - '\Services\BITS'
+            - '\Services\wuauserv'
+    selection_suspicious_path:
+        TargetObject|endswith: '\ImagePath'
+        Details|contains:
+            - '\Temp\'
+            - '\AppData\'
+            - '\Users\Public\'
+            - '\ProgramData\'
+            - 'cmd.exe'
+            - 'powershell'
+            - 'mshta'
+            - 'rundll32'
+            - 'regsvr32'
+    condition: (selection and selection_suspicious_path) and not filter_known_services
+falsepositives:
+    - Legitimate service installations
+    - Software updates modifying service paths
+level: high

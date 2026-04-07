@@ -1,0 +1,96 @@
+title: Remote File Copy Indicators
+id: e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a5c
+status: experimental
+description: Detects use of various utilities to download or upload files from remote systems, commonly used in C2 operations for staging tools and exfiltration
+references:
+    - https://attack.mitre.org/techniques/T1105/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1105
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_certutil:
+        Image|endswith: '\certutil.exe'
+        CommandLine|contains:
+            - '-urlcache'
+            - '-verifyctl'
+            - '-split'
+            - '-f http'
+            - '-f ftp'
+    selection_bitsadmin:
+        Image|endswith: '\bitsadmin.exe'
+        CommandLine|contains:
+            - '/transfer'
+            - '/addfile'
+            - '/SetNotifyCmdLine'
+    selection_powershell:
+        CommandLine|contains:
+            - 'Invoke-WebRequest'
+            - 'iwr '
+            - 'wget '
+            - 'curl '
+            - 'Net.WebClient'
+            - 'DownloadFile'
+            - 'DownloadString'
+            - 'Start-BitsTransfer'
+        CommandLine|contains:
+            - 'http://'
+            - 'https://'
+            - 'ftp://'
+    selection_lolbins:
+        CommandLine|contains:
+            - 'desktopimgdownldr'
+            - 'MpCmdRun.exe -DownloadFile'
+            - 'esentutl.exe /y'
+            - 'replace.exe'
+            - 'finger.exe'
+            - 'expand.exe'
+    condition: selection_certutil or selection_bitsadmin or selection_powershell or selection_lolbins
+falsepositives:
+    - Legitimate certificate operations using certutil
+    - BITS-based software update mechanisms
+    - Administrative file download scripts
+level: medium
+---
+title: Remote File Copy on Linux
+id: e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a5d
+status: experimental
+description: Detects suspicious remote file transfers on Linux systems
+references:
+    - https://attack.mitre.org/techniques/T1105/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.command_and_control
+    - attack.t1105
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection:
+        CommandLine|contains:
+            - 'wget '
+            - 'curl -o'
+            - 'curl -O'
+            - 'scp '
+            - 'rsync '
+            - 'sftp '
+            - 'fetch '
+    selection_suspicious:
+        CommandLine|contains:
+            - '/tmp/'
+            - '/dev/shm/'
+            - '/var/tmp/'
+            - '| bash'
+            - '| sh'
+            - '| python'
+            - '| perl'
+    condition: selection and selection_suspicious
+falsepositives:
+    - Legitimate file downloads to temporary directories
+    - Package installation from custom repositories
+level: medium

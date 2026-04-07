@@ -1,0 +1,35 @@
+title: Registry Run Key Persistence via reg.exe
+id: e3b7f8a1-2cd3-4ea5-b6c7-dc3d8fae2a4b
+status: experimental
+description: Detects the use of reg.exe to add or modify Registry Run and RunOnce keys, a classic persistence mechanism that ensures malicious code executes at user logon or system startup.
+references:
+    - https://attack.mitre.org/techniques/T1547/001/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1547.001
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_reg:
+        Image|endswith: '\reg.exe'
+        CommandLine|contains: 'add'
+    selection_run_keys:
+        CommandLine|contains:
+            - '\CurrentVersion\Run'
+            - '\CurrentVersion\RunOnce'
+            - '\CurrentVersion\RunServices'
+            - '\CurrentVersion\RunServicesOnce'
+            - '\CurrentVersion\Explorer\Shell Folders'
+            - '\CurrentVersion\Explorer\User Shell Folders'
+            - '\CurrentVersion\Policies\Explorer\Run'
+            - '\CurrentVersion\Windows\load'
+            - '\CurrentVersion\Windows\run'
+    condition: selection_reg and selection_run_keys
+falsepositives:
+    - Legitimate software installations configuring autostart entries
+    - System administrators managing startup programs
+    - Group Policy preference items
+level: high

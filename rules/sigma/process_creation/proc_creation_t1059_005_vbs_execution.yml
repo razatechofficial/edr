@@ -1,0 +1,38 @@
+title: VBScript Execution via Script Host
+id: f8c2a3b6-7d9e-4fb0-c162-8dae3a5f7b9c
+status: experimental
+description: Detects VBScript execution through wscript or cscript with indicators of malicious activity such as creating objects, running shell commands, or accessing the network.
+references:
+    - https://attack.mitre.org/techniques/T1059/005/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1059.005
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_parent:
+        ParentImage|endswith:
+            - '\wscript.exe'
+            - '\cscript.exe'
+    selection_child_suspicious:
+        Image|endswith:
+            - '\cmd.exe'
+            - '\powershell.exe'
+            - '\pwsh.exe'
+            - '\mshta.exe'
+            - '\certutil.exe'
+            - '\bitsadmin.exe'
+            - '\regsvr32.exe'
+            - '\rundll32.exe'
+            - '\net.exe'
+            - '\net1.exe'
+            - '\wmic.exe'
+            - '\schtasks.exe'
+    condition: selection_parent and selection_child_suspicious
+falsepositives:
+    - Legitimate login scripts that invoke system utilities
+    - Software installation scripts using VBScript wrappers
+level: high

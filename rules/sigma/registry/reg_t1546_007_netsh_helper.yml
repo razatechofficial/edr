@@ -1,0 +1,40 @@
+title: Netsh Helper DLL Registration
+id: 1e2f3a4b-5c6d-4e7f-8a9b-0c1d2e3f4a5b
+status: experimental
+description: Detects registration of Netsh helper DLLs via the registry, which can be used for persistence and code execution
+references:
+    - https://attack.mitre.org/techniques/T1546/007/
+author: EDR Agent
+date: 2026-04-06
+tags:
+    - attack.persistence
+    - attack.t1546.007
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains: '\SOFTWARE\Microsoft\NetSh'
+    filter_system:
+        Details|contains:
+            - 'netsh'
+            - 'nshhttp.dll'
+            - 'nshipsec.dll'
+            - 'nshwfp.dll'
+            - 'ifmon.dll'
+            - 'rasmontr.dll'
+            - 'authfwcfg.dll'
+            - 'dhcpcmonitor.dll'
+            - 'dot3cfg.dll'
+            - 'fwcfg.dll'
+            - 'habormonitor.dll'
+            - 'p2pnetsh.dll'
+            - 'peabormonitor.dll'
+            - 'rabormonitor.dll'
+            - 'whhelper.dll'
+            - 'wshelper.dll'
+    condition: selection and not filter_system
+falsepositives:
+    - Legitimate network management software
+    - VPN clients
+level: high

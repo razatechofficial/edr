@@ -1,0 +1,54 @@
+title: Deobfuscation or Decoding Activity
+id: b4d8e2f1-3a6c-4e9b-8d2f-1a5c7e3b9d05
+status: experimental
+description: Detects the use of built-in tools to decode or deobfuscate payloads, including base64 decoding, certutil decoding, and other deobfuscation techniques commonly used to unpack malware.
+references:
+    - https://attack.mitre.org/techniques/T1140/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1140
+logsource:
+    category: process_creation
+detection:
+    selection_certutil:
+        Image|endswith: '\certutil.exe'
+        CommandLine|contains:
+            - '-decode'
+            - '-decodehex'
+            - '/decode'
+            - '/decodehex'
+    selection_powershell:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+        CommandLine|contains:
+            - '[Convert]::FromBase64String'
+            - '[System.Convert]::FromBase64String'
+            - '[Text.Encoding]::UTF8.GetString'
+            - '[Text.Encoding]::ASCII.GetString'
+            - '[Text.Encoding]::Unicode.GetString'
+            - '-EncodedCommand'
+            - 'Invoke-Decode'
+    selection_linux:
+        Image|endswith:
+            - '/base64'
+            - '/openssl'
+        CommandLine|contains:
+            - ' -d'
+            - ' --decode'
+            - 'enc -d'
+    selection_windows_tools:
+        Image|endswith:
+            - '\expand.exe'
+            - '\extrac32.exe'
+        CommandLine|contains:
+            - '-F:'
+            - '/Y'
+    condition: selection_certutil or selection_powershell or selection_linux or selection_windows_tools
+falsepositives:
+    - Legitimate certificate operations using certutil
+    - Developers working with base64-encoded data
+    - Automated deployment scripts that decode configuration
+level: medium

@@ -1,78 +1,1044 @@
 version: "1"
 rules:
-  # Sigma-inspired baseline process behavior detections.
+  # ───────────────────────────────────────────────────────────────────────────
+  # PROCESS RULES  (PROC-001 → PROC-050)
+  # ───────────────────────────────────────────────────────────────────────────
+
   - id: "PROC-001"
     name: "Suspicious shell child"
     severity: "high"
+    score: 80
+    description: "A shell interpreter spawned a high-risk child process"
+    event_type: "process"
     when:
       parent_in: ["cmd.exe", "powershell.exe", "bash", "sh"]
       child_in: ["powershell.exe", "curl", "wget"]
+
   - id: "PROC-002A"
     name: "Temp directory execution by process path"
     severity: "high"
+    score: 80
+    description: "Binary running from a temp directory"
+    event_type: "process"
     when:
       process_path_contains: ["/tmp/", "\\AppData\\Local\\Temp\\"]
+
   - id: "PROC-002B"
     name: "Temp directory execution by command line"
     severity: "high"
+    score: 80
+    description: "Command line references a temp directory path"
+    event_type: "process"
     when:
       command_line_contains: ["/tmp/", "\\AppData\\Local\\Temp\\"]
+
   - id: "PROC-003"
     name: "Critical temp interpreter execution"
     severity: "critical"
+    score: 100
+    description: "Interpreter executing a script from a temp directory"
+    event_type: "process"
     when:
       child_in: ["sh", "bash", "zsh", "python", "python3"]
       command_line_contains: ["/tmp/"]
+
   - id: "PROC-004"
     name: "PowerShell encoded command"
     severity: "critical"
+    score: 100
+    description: "PowerShell launched with an encoded command argument"
+    event_type: "process"
     when:
       child_in: ["powershell.exe", "pwsh.exe"]
       command_line_contains: ["-enc", "-encodedcommand"]
+
   - id: "PROC-005"
     name: "MSHTA suspicious execution"
     severity: "critical"
+    score: 100
+    description: "MSHTA executing a remote or local HTA payload"
+    event_type: "process"
     when:
       child_in: ["mshta.exe"]
       command_line_contains: ["http", ".hta"]
+
   - id: "PROC-006"
     name: "Certutil download usage"
     severity: "high"
+    score: 80
+    description: "Certutil used to download a remote file"
+    event_type: "process"
     when:
       child_in: ["certutil.exe"]
       command_line_contains: ["-urlcache", "-split", "-f", "http"]
+
   - id: "PROC-007"
     name: "Rundll32 remote script pattern"
     severity: "critical"
+    score: 100
+    description: "Rundll32 invoked with a remote JavaScript URL"
+    event_type: "process"
     when:
       child_in: ["rundll32.exe"]
       command_line_contains: ["javascript:", "http"]
+
   - id: "PROC-008"
     name: "Bitsadmin transfer usage"
     severity: "high"
+    score: 80
+    description: "BITSAdmin used to download a file"
+    event_type: "process"
     when:
       child_in: ["bitsadmin.exe"]
       command_line_contains: ["/transfer", "http"]
+
   - id: "PROC-009"
     name: "Wget or curl to script pipe"
     severity: "critical"
+    score: 100
+    description: "Remote script piped directly into a shell"
+    event_type: "process"
     when:
       command_line_all_contains: ["curl", "| sh"]
+
   - id: "PROC-010"
     name: "Bash base64 decode execution"
     severity: "high"
+    score: 80
+    description: "Shell decoding and executing base64 content"
+    event_type: "process"
     when:
       child_in: ["bash", "sh", "zsh"]
       command_line_contains: ["base64", "-d"]
+
   - id: "PROC-011"
     name: "Python inline command execution"
     severity: "medium"
+    score: 55
+    description: "Python executing inline code via -c flag"
+    event_type: "process"
     when:
       child_in: ["python", "python3"]
       command_line_contains: ["-c "]
+
   - id: "PROC-012"
     name: "Regsvr32 remote scriptlet"
     severity: "critical"
+    score: 100
+    description: "Regsvr32 loading a remote COM scriptlet (Squiblydoo)"
+    event_type: "process"
     when:
       child_in: ["regsvr32.exe"]
       command_line_contains: ["/i:http", "scrobj.dll"]
+
+  # --- Extended process rules ---
+
+  - id: "PROC-013"
+    name: "PowerShell AMSI bypass"
+    severity: "critical"
+    score: 100
+    description: "PowerShell command attempts to disable AMSI scanning"
+    event_type: "process"
+    when:
+      child_in: ["powershell.exe", "pwsh.exe"]
+      command_line_contains: ["AmsiUtils", "amsiInitFailed", "Bypass"]
+
+  - id: "PROC-014"
+    name: "WMI process creation"
+    severity: "high"
+    score: 80
+    description: "WMI used to create a remote or local process"
+    event_type: "process"
+    when:
+      child_in: ["wmic.exe"]
+      command_line_contains: ["process", "call", "create"]
+
+  - id: "PROC-015"
+    name: "MSHTA from unusual path"
+    severity: "critical"
+    score: 95
+    description: "MSHTA launched from a non-standard directory"
+    event_type: "process"
+    when:
+      child_in: ["mshta.exe"]
+      command_line_contains: ["\\AppData\\", "\\Users\\Public\\", "\\Temp\\"]
+
+  - id: "PROC-016"
+    name: "Regasm/Regsvcs abuse"
+    severity: "high"
+    score: 85
+    description: "Regasm or Regsvcs used to execute managed code (T1218.009)"
+    event_type: "process"
+    when:
+      child_in: ["regasm.exe", "regsvcs.exe"]
+      command_line_contains: [".dll"]
+
+  - id: "PROC-017"
+    name: "InstallUtil abuse"
+    severity: "high"
+    score: 85
+    description: "InstallUtil used to execute managed code bypassing application control"
+    event_type: "process"
+    when:
+      child_in: ["installutil.exe"]
+      command_line_contains: ["/logfile=", "/logtoconsole=false", ".exe"]
+
+  - id: "PROC-018"
+    name: "MSBuild inline task abuse"
+    severity: "critical"
+    score: 95
+    description: "MSBuild executing inline C# tasks from an XML project file"
+    event_type: "process"
+    when:
+      child_in: ["msbuild.exe"]
+      command_line_contains: [".xml", ".csproj", ".proj"]
+
+  - id: "PROC-019"
+    name: "CMSTP UAC bypass"
+    severity: "critical"
+    score: 95
+    description: "CMSTP used to execute a malicious INF profile"
+    event_type: "process"
+    when:
+      child_in: ["cmstp.exe"]
+      command_line_contains: ["/ni", "/s", ".inf"]
+
+  - id: "PROC-020"
+    name: "Eventvwr UAC bypass"
+    severity: "critical"
+    score: 95
+    description: "Event Viewer launched to exploit registry hijack for UAC bypass"
+    event_type: "process"
+    when:
+      child_in: ["eventvwr.exe"]
+      command_line_contains: ["eventvwr"]
+
+  - id: "PROC-021"
+    name: "Fodhelper UAC bypass"
+    severity: "critical"
+    score: 95
+    description: "Fodhelper used as a UAC bypass vector"
+    event_type: "process"
+    when:
+      child_in: ["fodhelper.exe"]
+      command_line_contains: ["fodhelper"]
+
+  - id: "PROC-022"
+    name: "WSReset UAC bypass"
+    severity: "critical"
+    score: 95
+    description: "WSReset.exe abused for fileless UAC bypass"
+    event_type: "process"
+    when:
+      child_in: ["wsreset.exe"]
+      command_line_contains: ["wsreset"]
+
+  - id: "PROC-023"
+    name: "SilentCleanup UAC bypass"
+    severity: "high"
+    score: 85
+    description: "SilentCleanup scheduled task abused for UAC bypass"
+    event_type: "process"
+    when:
+      command_line_contains: ["SilentCleanup", "\\Environment\\windir"]
+
+  - id: "PROC-024"
+    name: "Disk cleanup bypass"
+    severity: "high"
+    score: 80
+    description: "Disk cleanup task hijacked for privilege escalation"
+    event_type: "process"
+    when:
+      child_in: ["cleanmgr.exe"]
+      command_line_contains: ["/autoclean", "/d"]
+
+  - id: "PROC-025"
+    name: "RunOnce registry abuse"
+    severity: "medium"
+    score: 60
+    description: "RunOnce registry key used for persistence"
+    event_type: "process"
+    when:
+      child_in: ["reg.exe"]
+      command_line_contains: ["RunOnce", "add"]
+
+  - id: "PROC-026"
+    name: "PsExec remote execution"
+    severity: "high"
+    score: 85
+    description: "PsExec used for remote process execution"
+    event_type: "process"
+    when:
+      child_in: ["psexec.exe", "psexec64.exe", "psexesvc.exe"]
+
+  - id: "PROC-027"
+    name: "BITSAdmin download and execute"
+    severity: "high"
+    score: 80
+    description: "BITSAdmin used to download and immediately execute a payload"
+    event_type: "process"
+    when:
+      child_in: ["bitsadmin.exe"]
+      command_line_all_contains: ["/transfer", "/download", "http"]
+
+  - id: "PROC-028"
+    name: "BITSAdmin SetNotifyCmdLine persistence"
+    severity: "critical"
+    score: 95
+    description: "BITSAdmin SetNotifyCmdLine used for persistent execution"
+    event_type: "process"
+    when:
+      child_in: ["bitsadmin.exe"]
+      command_line_contains: ["SetNotifyCmdLine"]
+
+  - id: "PROC-029"
+    name: "IEExec remote download"
+    severity: "high"
+    score: 80
+    description: "IEExec.exe used to download and execute a remote binary"
+    event_type: "process"
+    when:
+      child_in: ["ieexec.exe"]
+      command_line_contains: ["http"]
+
+  - id: "PROC-030"
+    name: "Mavinject DLL injection"
+    severity: "critical"
+    score: 100
+    description: "Mavinject.exe used to inject a DLL into a running process"
+    event_type: "process"
+    when:
+      child_in: ["mavinject.exe", "mavinject64.exe"]
+      command_line_contains: ["/INJECTRUNNING", ".dll"]
+
+  - id: "PROC-031"
+    name: "Cobalt Strike beacon indicators"
+    severity: "critical"
+    score: 100
+    description: "Command line patterns consistent with Cobalt Strike beacon"
+    event_type: "process"
+    when:
+      command_line_contains: ["beacon.exe", "cobaltstrike", "artifact.exe", "pipename=msagent_"]
+
+  - id: "PROC-032"
+    name: "Sliver C2 implant"
+    severity: "critical"
+    score: 100
+    description: "Process indicators consistent with Sliver C2 framework"
+    event_type: "process"
+    when:
+      command_line_contains: ["sliver-client", "sliver-server", ".woff"]
+
+  - id: "PROC-033"
+    name: "Havoc C2 framework"
+    severity: "critical"
+    score: 100
+    description: "Process indicators consistent with Havoc C2 framework"
+    event_type: "process"
+    when:
+      command_line_contains: ["havoc.exe", "havoc-client", "demon.x64"]
+
+  - id: "PROC-034"
+    name: "Empire PowerShell agent"
+    severity: "critical"
+    score: 100
+    description: "PowerShell Empire agent stager or launcher detected"
+    event_type: "process"
+    when:
+      child_in: ["powershell.exe", "pwsh.exe"]
+      command_line_contains: ["empire", "Invoke-Empire", "stager", "launcher.bat"]
+
+  - id: "PROC-035"
+    name: "Pentest tool chain - Mimikatz"
+    severity: "critical"
+    score: 100
+    description: "Mimikatz credential dumping tool detected"
+    event_type: "process"
+    when:
+      command_line_contains: ["mimikatz", "sekurlsa", "logonpasswords", "kerberos::list"]
+
+  - id: "PROC-036"
+    name: "Cryptocurrency miner execution"
+    severity: "high"
+    score: 75
+    description: "Crypto mining process detected"
+    event_type: "process"
+    when:
+      command_line_contains: ["stratum+tcp://", "-o pool.", "xmrig", "minerd", "cpuminer", "ethminer"]
+
+  - id: "PROC-037"
+    name: "Reverse shell - bash -i"
+    severity: "critical"
+    score: 100
+    description: "Bash interactive reverse shell pattern"
+    event_type: "process"
+    when:
+      child_in: ["bash", "sh"]
+      command_line_all_contains: ["bash -i", "/dev/tcp/"]
+
+  - id: "PROC-038"
+    name: "Reverse shell - netcat"
+    severity: "critical"
+    score: 100
+    description: "Netcat used to spawn a reverse shell"
+    event_type: "process"
+    when:
+      child_in: ["nc", "ncat", "netcat", "nc.exe"]
+      command_line_contains: ["-e /bin/sh", "-e /bin/bash", "-e cmd.exe"]
+
+  - id: "PROC-039"
+    name: "Reverse shell - Python"
+    severity: "critical"
+    score: 100
+    description: "Python inline reverse shell pattern"
+    event_type: "process"
+    when:
+      child_in: ["python", "python3", "python.exe"]
+      command_line_all_contains: ["import socket", "subprocess"]
+
+  - id: "PROC-040"
+    name: "Suspicious cron job modification"
+    severity: "high"
+    score: 80
+    description: "Crontab being edited or a cron job added"
+    event_type: "process"
+    when:
+      child_in: ["crontab"]
+      command_line_contains: ["-e", "-l", "-r"]
+
+  - id: "PROC-041"
+    name: "Suspicious at job scheduling"
+    severity: "medium"
+    score: 60
+    description: "The at command used to schedule a deferred task"
+    event_type: "process"
+    when:
+      child_in: ["at", "at.exe"]
+
+  - id: "PROC-042"
+    name: "macOS osascript abuse"
+    severity: "high"
+    score: 80
+    description: "AppleScript used to execute system commands or display fake prompts"
+    event_type: "process"
+    when:
+      child_in: ["osascript"]
+      command_line_contains: ["-e", "do shell script", "display dialog"]
+
+  - id: "PROC-043"
+    name: "macOS dscl user manipulation"
+    severity: "high"
+    score: 85
+    description: "dscl used to create or modify user accounts on macOS"
+    event_type: "process"
+    when:
+      child_in: ["dscl"]
+      command_line_contains: ["-create", "UserShell", "IsHidden"]
+
+  - id: "PROC-044"
+    name: "macOS xattr quarantine bypass"
+    severity: "high"
+    score: 80
+    description: "Gatekeeper quarantine attribute removed from a downloaded file"
+    event_type: "process"
+    when:
+      child_in: ["xattr"]
+      command_line_contains: ["-d com.apple.quarantine", "-cr"]
+
+  - id: "PROC-045"
+    name: "LinPEAS/WinPEAS privilege escalation scanner"
+    severity: "critical"
+    score: 95
+    description: "Privilege escalation enumeration tool detected"
+    event_type: "process"
+    when:
+      command_line_contains: ["linpeas", "winpeas", "PEASS"]
+
+  - id: "PROC-046"
+    name: "BloodHound/SharpHound AD enumeration"
+    severity: "critical"
+    score: 100
+    description: "Active Directory enumeration tool detected"
+    event_type: "process"
+    when:
+      command_line_contains: ["SharpHound", "BloodHound", "Invoke-BloodHound", "azurehound"]
+
+  - id: "PROC-047"
+    name: "Rubeus Kerberos abuse"
+    severity: "critical"
+    score: 100
+    description: "Rubeus used for Kerberos ticket manipulation"
+    event_type: "process"
+    when:
+      command_line_contains: ["Rubeus", "asktgt", "asktgs", "kerberoast", "s4u"]
+
+  - id: "PROC-048"
+    name: "Certify/Certipy ADCS abuse"
+    severity: "critical"
+    score: 100
+    description: "AD Certificate Services enumeration or abuse tool detected"
+    event_type: "process"
+    when:
+      command_line_contains: ["Certify.exe", "certipy", "find -vulnerable"]
+
+  - id: "PROC-049"
+    name: "CrackMapExec lateral movement"
+    severity: "critical"
+    score: 100
+    description: "CrackMapExec used for credential testing or lateral movement"
+    event_type: "process"
+    when:
+      command_line_contains: ["crackmapexec", "cme ", "nxc "]
+
+  - id: "PROC-050"
+    name: "Impacket tools usage"
+    severity: "critical"
+    score: 100
+    description: "Impacket framework tool detected (wmiexec, smbexec, psexec, atexec)"
+    event_type: "process"
+    when:
+      command_line_contains: ["impacket", "wmiexec", "smbexec.py", "atexec.py", "secretsdump"]
+
+  - id: "PROC-051"
+    name: "pspy process spy"
+    severity: "high"
+    score: 80
+    description: "pspy used to monitor processes without root"
+    event_type: "process"
+    when:
+      command_line_contains: ["pspy32", "pspy64", "pspy"]
+
+  - id: "PROC-052"
+    name: "linuxprivchecker enumeration"
+    severity: "high"
+    score: 80
+    description: "Linux privilege escalation checker script detected"
+    event_type: "process"
+    when:
+      command_line_contains: ["linuxprivchecker", "linux-exploit-suggester"]
+
+  - id: "PROC-053"
+    name: "PowerShell download cradle"
+    severity: "critical"
+    score: 95
+    description: "PowerShell IEX download cradle pattern"
+    event_type: "process"
+    when:
+      child_in: ["powershell.exe", "pwsh.exe"]
+      command_line_contains: ["IEX", "Invoke-Expression", "DownloadString", "Net.WebClient"]
+
+  - id: "PROC-054"
+    name: "LOLBAS forfiles execution"
+    severity: "high"
+    score: 80
+    description: "Forfiles used to proxy execution of arbitrary commands"
+    event_type: "process"
+    when:
+      child_in: ["forfiles.exe"]
+      command_line_contains: ["/c", "cmd"]
+
+  - id: "PROC-055"
+    name: "WMIC XSL script processing"
+    severity: "critical"
+    score: 95
+    description: "WMIC used to download and execute an XSL script"
+    event_type: "process"
+    when:
+      child_in: ["wmic.exe"]
+      command_line_contains: ["/format:", "http"]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # FILE RULES  (FILE-001 → FILE-025)
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - id: "FILE-001"
+    name: "Suspicious DLL drop in system directory"
+    severity: "critical"
+    score: 95
+    description: "DLL file written to a system directory"
+    event_type: "file"
+    when:
+      file_path_contains: ["\\System32\\", "\\SysWOW64\\", "/usr/lib/"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-002"
+    name: "Webshell creation in web root"
+    severity: "critical"
+    score: 100
+    description: "Script file created in a web server document root"
+    event_type: "file"
+    when:
+      file_path_contains: ["/var/www/", "\\inetpub\\", "\\wwwroot\\", "/srv/http/"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-003"
+    name: "Windows Startup folder modification"
+    severity: "high"
+    score: 85
+    description: "File written to user or common Startup folder for persistence"
+    event_type: "file"
+    when:
+      file_path_contains: ["\\Start Menu\\Programs\\Startup\\", "\\Microsoft\\Windows\\Start Menu\\"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-004"
+    name: "Crontab file modification"
+    severity: "high"
+    score: 80
+    description: "Crontab spool file modified directly"
+    event_type: "file"
+    when:
+      file_path_contains: ["/var/spool/cron/", "/etc/cron.d/", "/etc/crontab"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-005"
+    name: "SSH authorized_keys modification"
+    severity: "high"
+    score: 85
+    description: "SSH authorized_keys file modified, may indicate unauthorized access setup"
+    event_type: "file"
+    when:
+      file_path_contains: [".ssh/authorized_keys"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-006"
+    name: "macOS LaunchAgent creation"
+    severity: "high"
+    score: 85
+    description: "LaunchAgent plist created for persistence on macOS"
+    event_type: "file"
+    when:
+      file_path_contains: ["/Library/LaunchAgents/", "/Library/LaunchDaemons/", "LaunchAgents/"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-007"
+    name: "Sensitive file access - shadow/passwd"
+    severity: "high"
+    score: 80
+    description: "Access to Linux authentication database files"
+    event_type: "file"
+    when:
+      file_path_contains: ["/etc/shadow", "/etc/passwd", "/etc/master.passwd"]
+
+  - id: "FILE-008"
+    name: "Sensitive file access - SAM/SYSTEM hives"
+    severity: "critical"
+    score: 100
+    description: "Access to Windows SAM or SYSTEM registry hives"
+    event_type: "file"
+    when:
+      file_path_contains: ["\\config\\SAM", "\\config\\SYSTEM", "\\config\\SECURITY"]
+
+  - id: "FILE-009"
+    name: "Executable in temp directory"
+    severity: "high"
+    score: 80
+    description: "Executable file written to a temp directory"
+    event_type: "file"
+    when:
+      file_path_contains: ["/tmp/", "\\Temp\\", "\\tmp\\"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-010"
+    name: "Script file in temp directory"
+    severity: "high"
+    score: 75
+    description: "Script file (bat, ps1, sh, py, vbs) written to a temp directory"
+    event_type: "file"
+    when:
+      file_path_contains: ["/tmp/", "\\Temp\\"]
+      operation_in: ["create"]
+
+  - id: "FILE-011"
+    name: "Office template modification"
+    severity: "high"
+    score: 85
+    description: "Office template file modified for macro persistence"
+    event_type: "file"
+    when:
+      file_path_contains: ["\\Microsoft\\Word\\STARTUP\\", "\\Microsoft\\Excel\\XLSTART\\", "Normal.dotm", "Personal.xlsb"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-012"
+    name: "Browser extension drop"
+    severity: "medium"
+    score: 60
+    description: "Browser extension files written outside normal install flow"
+    event_type: "file"
+    when:
+      file_path_contains: ["\\Extensions\\", "/extensions/", "\\chrome\\", "manifest.json"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-013"
+    name: "SSH private key access"
+    severity: "high"
+    score: 85
+    description: "SSH private key file accessed or copied"
+    event_type: "file"
+    when:
+      file_path_contains: [".ssh/id_rsa", ".ssh/id_ed25519", ".ssh/id_ecdsa", ".ssh/id_dsa"]
+
+  - id: "FILE-014"
+    name: "AWS credential file access"
+    severity: "high"
+    score: 85
+    description: "AWS credentials or config file accessed"
+    event_type: "file"
+    when:
+      file_path_contains: [".aws/credentials", ".aws/config"]
+
+  - id: "FILE-015"
+    name: "Kubernetes config access"
+    severity: "high"
+    score: 80
+    description: "Kubernetes kubeconfig file accessed"
+    event_type: "file"
+    when:
+      file_path_contains: [".kube/config", "kubeconfig"]
+
+  - id: "FILE-016"
+    name: "Docker config access"
+    severity: "medium"
+    score: 65
+    description: "Docker configuration or credential file accessed"
+    event_type: "file"
+    when:
+      file_path_contains: [".docker/config.json", ".dockercfg"]
+
+  - id: "FILE-017"
+    name: "Certificate/key file access"
+    severity: "medium"
+    score: 60
+    description: "PKI certificate or private key file accessed"
+    event_type: "file"
+    when:
+      file_path_contains: [".pem", ".pfx", ".p12", ".key", ".crt"]
+
+  - id: "FILE-018"
+    name: "Large archive creation"
+    severity: "medium"
+    score: 55
+    description: "Archive file created, potential data staging for exfiltration"
+    event_type: "file"
+    when:
+      file_path_contains: [".zip", ".tar", ".7z", ".rar", ".tar.gz"]
+      operation_in: ["create"]
+
+  - id: "FILE-019"
+    name: "Ransom note creation"
+    severity: "critical"
+    score: 100
+    description: "File matching common ransomware note naming conventions created"
+    event_type: "file"
+    when:
+      file_path_contains: ["README_LOCKED", "DECRYPT_INSTRUCTION", "HOW_TO_RECOVER", "RANSOM_NOTE", "YOUR_FILES_ARE_ENCRYPTED", "_readme.txt"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-020"
+    name: "Mass file rename (ransomware indicator)"
+    severity: "critical"
+    score: 95
+    description: "File renamed with encryption-related extensions"
+    event_type: "file"
+    when:
+      file_path_contains: [".encrypted", ".locked", ".crypto", ".crypt", ".enc"]
+      operation_in: ["rename", "write"]
+
+  - id: "FILE-021"
+    name: "Executable dropped by browser"
+    severity: "high"
+    score: 80
+    description: "Executable dropped into a browser download directory"
+    event_type: "file"
+    when:
+      file_path_contains: ["\\Downloads\\", "/Downloads/"]
+      operation_in: ["create"]
+
+  - id: "FILE-022"
+    name: "PE file in non-standard location"
+    severity: "high"
+    score: 80
+    description: "Portable executable written outside Program Files or System directories"
+    event_type: "file"
+    when:
+      file_path_contains: ["\\Users\\Public\\", "\\ProgramData\\", "\\AppData\\Roaming\\"]
+      operation_in: ["create", "write"]
+
+  - id: "FILE-023"
+    name: "Log file deletion"
+    severity: "high"
+    score: 85
+    description: "Security or system log file deleted (anti-forensics)"
+    event_type: "file"
+    when:
+      file_path_contains: ["/var/log/", "\\winevt\\Logs\\", "\\System32\\LogFiles\\"]
+      operation_in: ["delete"]
+
+  - id: "FILE-024"
+    name: "Hidden file creation"
+    severity: "medium"
+    score: 55
+    description: "Hidden file created (dot-prefixed on Linux/macOS)"
+    event_type: "file"
+    when:
+      file_path_contains: ["/.", "\\."]
+      operation_in: ["create"]
+
+  - id: "FILE-025"
+    name: "systemd service file creation"
+    severity: "high"
+    score: 85
+    description: "Systemd unit file created for persistence"
+    event_type: "file"
+    when:
+      file_path_contains: ["/etc/systemd/system/", "/lib/systemd/system/", ".service"]
+      operation_in: ["create", "write"]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # NETWORK RULES  (NET-001 → NET-015)
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - id: "NET-001"
+    name: "Connection to common C2 ports"
+    severity: "high"
+    score: 80
+    description: "Outbound connection to ports commonly used by C2 frameworks"
+    event_type: "network"
+    when:
+      dest_port_in: [4444, 5555, 8443, 1234, 9999, 6666, 7777, 13337]
+      protocol_in: ["tcp"]
+
+  - id: "NET-002"
+    name: "Tor exit node connection"
+    severity: "high"
+    score: 80
+    description: "Connection to Tor network ports"
+    event_type: "network"
+    when:
+      dest_port_in: [9001, 9030, 9050, 9051, 9150]
+
+  - id: "NET-003"
+    name: "IRC connection"
+    severity: "medium"
+    score: 60
+    description: "Connection to IRC ports, potential bot C2 channel"
+    event_type: "network"
+    when:
+      dest_port_in: [6667, 6668, 6669, 6697, 7000]
+      protocol_in: ["tcp"]
+
+  - id: "NET-004"
+    name: "Crypto mining pool connection"
+    severity: "high"
+    score: 75
+    description: "Connection to common cryptocurrency mining pool ports"
+    event_type: "network"
+    when:
+      dest_port_in: [3333, 5555, 7777, 8888, 14433, 14444, 45700]
+
+  - id: "NET-005"
+    name: "DNS over non-standard port"
+    severity: "medium"
+    score: 60
+    description: "DNS traffic detected on non-standard port, possible DNS tunneling"
+    event_type: "network"
+    when:
+      dest_port_in: [5353, 8053, 8853]
+      protocol_in: ["udp", "tcp"]
+
+  - id: "NET-006"
+    name: "Connection to dynamic DNS domain"
+    severity: "medium"
+    score: 65
+    description: "DNS resolution or connection to a dynamic DNS provider"
+    event_type: "network"
+    when:
+      domain_contains: ["dyndns.", "no-ip.", "duckdns.", "freedns.", "dynu.", "hopto.org", "zapto.org", "sytes.net"]
+
+  - id: "NET-007"
+    name: "Raw socket creation (ICMP)"
+    severity: "high"
+    score: 75
+    description: "Raw ICMP socket created, potential ICMP tunnel or exfiltration"
+    event_type: "network"
+    when:
+      protocol_in: ["icmp"]
+
+  - id: "NET-008"
+    name: "ICMP tunnel detection"
+    severity: "high"
+    score: 80
+    description: "Unusual ICMP traffic pattern consistent with tunneling"
+    event_type: "network"
+    when:
+      protocol_in: ["icmp"]
+      dest_port_in: [0]
+
+  - id: "NET-009"
+    name: "Outbound SMB connection"
+    severity: "high"
+    score: 80
+    description: "Outbound SMB connection to external network"
+    event_type: "network"
+    when:
+      dest_port_in: [445, 139]
+      protocol_in: ["tcp"]
+
+  - id: "NET-010"
+    name: "Outbound RDP connection"
+    severity: "high"
+    score: 80
+    description: "Outbound RDP connection, possible lateral movement or tunneling"
+    event_type: "network"
+    when:
+      dest_port_in: [3389]
+      protocol_in: ["tcp"]
+
+  - id: "NET-011"
+    name: "Outbound SSH to external host"
+    severity: "medium"
+    score: 55
+    description: "SSH connection to external host"
+    event_type: "network"
+    when:
+      dest_port_in: [22]
+      protocol_in: ["tcp"]
+
+  - id: "NET-012"
+    name: "Large data transfer to external host"
+    severity: "high"
+    score: 75
+    description: "Significant outbound data transfer detected"
+    event_type: "network"
+    when:
+      protocol_in: ["tcp"]
+      dest_port_in: [443, 80, 8080, 8443]
+
+  - id: "NET-013"
+    name: "Connection to known bad TLDs"
+    severity: "medium"
+    score: 65
+    description: "Connection to a domain with a historically abused TLD"
+    event_type: "network"
+    when:
+      domain_contains: [".top", ".xyz", ".tk", ".ml", ".ga", ".cf", ".gq", ".buzz", ".surf"]
+
+  - id: "NET-014"
+    name: "Unusual high port outbound connection"
+    severity: "medium"
+    score: 55
+    description: "Outbound connection to an ephemeral or unusual high port (>49152)"
+    event_type: "network"
+    when:
+      dest_port_in: [49153, 49154, 50000, 55555, 60000, 65535]
+      protocol_in: ["tcp"]
+
+  - id: "NET-015"
+    name: "Connection to Metasploit default ports"
+    severity: "critical"
+    score: 100
+    description: "Outbound connection to default Metasploit listener ports"
+    event_type: "network"
+    when:
+      dest_port_in: [4444, 4445, 8080, 8443]
+      protocol_in: ["tcp"]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # AUTH RULES  (AUTH-001 → AUTH-010)
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - id: "AUTH-001"
+    name: "Multiple failed login attempts"
+    severity: "high"
+    score: 80
+    description: "Authentication failure, potential brute-force or credential stuffing"
+    event_type: "auth"
+    when:
+      outcome_in: ["failure", "failed", "denied"]
+
+  - id: "AUTH-002"
+    name: "After-hours login"
+    severity: "medium"
+    score: 55
+    description: "Successful authentication outside normal business hours"
+    event_type: "auth"
+    when:
+      outcome_in: ["success"]
+      auth_type_in: ["interactive", "remote_interactive"]
+
+  - id: "AUTH-003"
+    name: "Root/admin direct login"
+    severity: "high"
+    score: 85
+    description: "Direct interactive login as root or Administrator"
+    event_type: "auth"
+    when:
+      src_user_contains: ["root", "administrator", "admin"]
+      auth_type_in: ["interactive"]
+
+  - id: "AUTH-004"
+    name: "Service account interactive login"
+    severity: "high"
+    score: 85
+    description: "Service account used for interactive login"
+    event_type: "auth"
+    when:
+      src_user_contains: ["svc_", "svc-", "service_", "sa_"]
+      auth_type_in: ["interactive", "remote_interactive"]
+
+  - id: "AUTH-005"
+    name: "Sudo escalation to root"
+    severity: "medium"
+    score: 60
+    description: "User escalated to root via sudo"
+    event_type: "auth"
+    when:
+      auth_type_in: ["sudo"]
+      src_user_contains: ["root"]
+
+  - id: "AUTH-006"
+    name: "New user account creation"
+    severity: "medium"
+    score: 60
+    description: "New user account created on the system"
+    event_type: "auth"
+    when:
+      auth_type_in: ["user_create", "account_create"]
+
+  - id: "AUTH-007"
+    name: "Group membership change"
+    severity: "medium"
+    score: 60
+    description: "User added to a privileged group"
+    event_type: "auth"
+    when:
+      auth_type_in: ["group_add", "group_modify"]
+
+  - id: "AUTH-008"
+    name: "Password change for system account"
+    severity: "high"
+    score: 80
+    description: "Password changed for a system or service account"
+    event_type: "auth"
+    when:
+      auth_type_in: ["password_change"]
+      src_user_contains: ["root", "administrator", "admin", "svc_"]
+
+  - id: "AUTH-009"
+    name: "SSH key-based login from new key"
+    severity: "medium"
+    score: 55
+    description: "SSH public key authentication from an unfamiliar source"
+    event_type: "auth"
+    when:
+      auth_type_in: ["publickey", "ssh_key"]
+
+  - id: "AUTH-010"
+    name: "Concurrent sessions from different IPs"
+    severity: "high"
+    score: 80
+    description: "Multiple active sessions from distinct source addresses"
+    event_type: "auth"
+    when:
+      auth_type_in: ["interactive", "remote_interactive"]
+      outcome_in: ["success"]

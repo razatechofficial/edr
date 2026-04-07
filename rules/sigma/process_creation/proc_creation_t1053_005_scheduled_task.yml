@@ -1,0 +1,47 @@
+title: Scheduled Task Creation via Command Line
+id: c1f5d6e9-0ac1-4ce3-f495-ba1b6d8c0e2f
+status: experimental
+description: Detects creation of scheduled tasks via schtasks.exe or at.exe, a common persistence and execution mechanism used by threat actors.
+references:
+    - https://attack.mitre.org/techniques/T1053/005/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.execution
+    - attack.t1053.005
+    - attack.persistence
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_schtasks:
+        Image|endswith: '\schtasks.exe'
+        CommandLine|contains:
+            - '/create'
+            - '-create'
+    selection_schtasks_suspicious:
+        CommandLine|contains:
+            - '/sc onlogon'
+            - '/sc onstart'
+            - '/sc onidle'
+            - '/ru system'
+            - '/ru SYSTEM'
+            - 'cmd.exe'
+            - 'powershell'
+            - 'mshta'
+            - 'rundll32'
+            - 'regsvr32'
+            - 'certutil'
+            - '\AppData\'
+            - '\Temp\'
+            - '\Users\Public\'
+            - 'http://'
+            - 'https://'
+    selection_at:
+        Image|endswith: '\at.exe'
+    condition: (selection_schtasks and selection_schtasks_suspicious) or selection_at
+falsepositives:
+    - Legitimate software installations creating scheduled tasks
+    - System administrators configuring maintenance tasks
+    - Group Policy scheduled task deployment
+level: medium

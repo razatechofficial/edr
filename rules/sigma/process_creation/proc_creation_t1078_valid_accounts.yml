@@ -1,0 +1,42 @@
+title: Suspicious Account Usage and Privilege Switching
+id: b6ea01d4-5fa6-4bd8-e9f0-af6abcdb5d7e
+status: experimental
+description: Detects suspicious use of account switching utilities such as runas, su, or sudo with unusual targets, potentially indicating abuse of valid credentials for lateral movement or privilege escalation.
+references:
+    - https://attack.mitre.org/techniques/T1078/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.defense_evasion
+    - attack.t1078
+    - attack.privilege_escalation
+    - attack.initial_access
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_runas:
+        Image|endswith: '\runas.exe'
+    selection_runas_suspicious:
+        CommandLine|contains:
+            - '/user:administrator'
+            - '/user:admin'
+            - '/user:system'
+            - '/user:domain\\'
+            - '/savecred'
+            - '/netonly'
+            - 'powershell'
+            - 'cmd.exe'
+    selection_psexec:
+        Image|endswith: '\PsExec.exe'
+        CommandLine|contains:
+            - '-u '
+            - '-p '
+            - '-s '
+            - '-accepteula'
+    condition: (selection_runas and selection_runas_suspicious) or selection_psexec
+falsepositives:
+    - System administrators using runas for legitimate tasks
+    - Help desk personnel switching accounts for user support
+    - Authorized use of PsExec for remote administration
+level: medium

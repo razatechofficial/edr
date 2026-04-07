@@ -1,0 +1,77 @@
+title: Critical Service or Process Termination
+id: f8b2c6d5-7e0a-4c4f-b06d-5f9e1a7c4d02
+status: experimental
+description: Detects the stopping or disabling of critical services including security tools, backup solutions, and database services, which is commonly performed by ransomware and destructive malware before encryption or wiping.
+references:
+    - https://attack.mitre.org/techniques/T1489/
+author: EDR Agent Team
+date: 2026-04-06
+tags:
+    - attack.impact
+    - attack.t1489
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_net_stop:
+        Image|endswith:
+            - '\net.exe'
+            - '\net1.exe'
+        CommandLine|contains: 'stop'
+        CommandLine|contains:
+            - 'MSSQLServer'
+            - 'MSSQL$'
+            - 'SQLAgent'
+            - 'SQLBrowser'
+            - 'MsDtsServer'
+            - 'vss'
+            - 'VSS'
+            - 'backup'
+            - 'sophos'
+            - 'McAfee'
+            - 'symantec'
+            - 'veeam'
+            - 'sql'
+    selection_sc_stop:
+        Image|endswith: '\sc.exe'
+        CommandLine|contains:
+            - 'stop'
+            - 'delete'
+            - 'config'
+            - 'disabled'
+        CommandLine|contains:
+            - 'MSSQLServer'
+            - 'vss'
+            - 'backup'
+            - 'sophos'
+            - 'McAfee'
+            - 'symantec'
+            - 'wscsvc'
+            - 'WinDefend'
+            - 'SecurityHealthService'
+    selection_taskkill:
+        Image|endswith: '\taskkill.exe'
+        CommandLine|contains:
+            - 'sqlserver'
+            - 'oracle'
+            - 'mysql'
+            - 'postgres'
+            - 'veeam'
+            - 'backup'
+            - 'exchange'
+    selection_powershell_stop:
+        CommandLine|contains:
+            - 'Stop-Service'
+            - 'Set-Service -StartupType Disabled'
+        CommandLine|contains:
+            - 'SQL'
+            - 'Backup'
+            - 'VSS'
+            - 'Exchange'
+            - 'Defender'
+    condition: selection_net_stop or selection_sc_stop or selection_taskkill or selection_powershell_stop
+falsepositives:
+    - Service maintenance and upgrades
+    - Authorized security tool reconfiguration
+    - Database maintenance windows
+level: high
