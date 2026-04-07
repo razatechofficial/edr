@@ -36,6 +36,7 @@ func Load(path string) (Config, error) {
 	}
 
 	migrateLegacy(&cfg, v)
+	applyResourcePathDefaults(&cfg, path)
 
 	if err := Validate(&cfg); err != nil {
 		return Config{}, err
@@ -76,6 +77,7 @@ func LoadEncrypted(path string, key []byte) (Config, error) {
 	}
 
 	migrateLegacy(&cfg, v)
+	applyResourcePathDefaults(&cfg, path)
 
 	if err := Validate(&cfg); err != nil {
 		return Config{}, err
@@ -167,5 +169,106 @@ func migrateLegacy(cfg *Config, v *viper.Viper) {
 
 	if cfg.Logging.Level != "" && !v.IsSet("agent.log_level") {
 		cfg.Agent.LogLevel = cfg.Logging.Level
+	}
+}
+
+// applyResourcePathDefaults resolves empty detection, ML, and rules paths when
+// the config file lives next to a standard repo layout (configs/agent.yaml →
+// ../rules, ../models) or when Debian-style shipped paths exist under
+// /usr/share/edr.
+func applyResourcePathDefaults(cfg *Config, configPath string) {
+	if configPath == "" {
+		return
+	}
+	base := filepath.Dir(configPath)
+	repoRules := filepath.Clean(filepath.Join(base, "..", "rules"))
+	repoModels := filepath.Clean(filepath.Join(base, "..", "models"))
+
+	tryDir := func(path string) bool {
+		fi, err := os.Stat(path)
+		return err == nil && fi.IsDir()
+	}
+	tryFile := func(path string) bool {
+		fi, err := os.Stat(path)
+		return err == nil && !fi.IsDir()
+	}
+
+	if cfg.Detection.Sigma.Enabled && cfg.Detection.Sigma.RulesDir == "" {
+		for _, p := range []string{
+			filepath.Join(repoRules, "sigma"),
+			"/usr/share/edr/rules/sigma",
+		} {
+			if tryDir(p) {
+				cfg.Detection.Sigma.RulesDir = p
+				break
+			}
+		}
+	}
+	if cfg.Detection.YARA.Enabled && cfg.Detection.YARA.RulesDir == "" {
+		for _, p := range []string{
+			filepath.Join(repoRules, "yara"),
+			"/usr/share/edr/rules/yara",
+		} {
+			if tryDir(p) {
+				cfg.Detection.YARA.RulesDir = p
+				break
+			}
+		}
+	}
+	if cfg.Detection.CustomRules.Enabled && cfg.Detection.CustomRules.RulesPath == "" {
+		for _, p := range []string{
+			filepath.Join(repoRules, "custom"),
+			"/usr/share/edr/rules/custom",
+		} {
+			if tryDir(p) || tryFile(p) {
+				cfg.Detection.CustomRules.RulesPath = p
+				break
+			}
+		}
+		if cfg.Detection.CustomRules.RulesPath == "" {
+			sample := filepath.Join(repoRules, "custom", "sample_rules.yaml")
+			if tryFile(sample) {
+				cfg.Detection.CustomRules.RulesPath = sample
+			}
+		}
+	}
+	if cfg.ML.Enabled && cfg.ML.ModelsDir == "" {
+		for _, p := range []string{
+			repoModels,
+			"/usr/share/edr/models",
+		} {
+			if tryDir(p) {
+				cfg.ML.ModelsDir = p
+				break
+			}
+		}
+	}
+	if cfg.LLM.RAG.Enabled && cfg.LLM.RAG.VectorDBPath == "" {
+		dd := cfg.Agent.DataDir
+		if dd == "" {
+			dd = "/var/lib/edr"
+		}
+		cfg.LLM.RAG.VectorDBPath = filepath.Join(dd, "rag")
+	}
+
+	if cfg.RulesFile == "" {
+		cfg.RulesFile = "rules/baseline.yaml"
+	}
+	if !filepath.IsAbs(cfg.RulesFile) {
+		// Keep a working relative path when the process CWD already resolves it
+		// (typical local dev from repo root).
+		if _, err := os.Stat(cfg.RulesFile); err != nil {
+			candidates := []string{
+				filepath.Clean(filepath.Join(base, "..", cfg.RulesFile)),
+				filepath.Join(repoRules, "baseline.yaml"),
+				"/usr/share/edr/rules/baseline.yaml",
+			}
+			for _, p := range candidates {
+				if tryFile(p) {
+					cfg.RulesFile = p
+					break
+				}
+			}
+		}
 	}
 }

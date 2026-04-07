@@ -2,7 +2,9 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,8 +126,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.LegacyResponse.MinKillScore != 90 {
 		t.Errorf("LegacyResponse.MinKillScore = %d, want %d", cfg.LegacyResponse.MinKillScore, 90)
 	}
-	if cfg.RulesFile != "rules/baseline.yaml" {
-		t.Errorf("RulesFile = %q, want %q", cfg.RulesFile, "rules/baseline.yaml")
+	if !strings.Contains(cfg.RulesFile, "baseline.yaml") {
+		t.Errorf("RulesFile = %q, should reference baseline.yaml", cfg.RulesFile)
 	}
 }
 
@@ -137,8 +139,10 @@ func TestLoadYAML(t *testing.T) {
 	if cfg.Service.EndpointID != "host-dev-01" {
 		t.Errorf("Service.EndpointID = %q, want %q", cfg.Service.EndpointID, "host-dev-01")
 	}
-	if cfg.RulesFile != "rules/baseline.yaml" {
-		t.Errorf("RulesFile = %q, want %q", cfg.RulesFile, "rules/baseline.yaml")
+	baselineOK := cfg.RulesFile == "rules/baseline.yaml" ||
+		strings.HasSuffix(filepath.ToSlash(cfg.RulesFile), "rules/baseline.yaml")
+	if !baselineOK {
+		t.Errorf("RulesFile = %q, want rules/baseline.yaml or repo-resolved path", cfg.RulesFile)
 	}
 	if cfg.Logging.Level != "info" {
 		t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, "info")

@@ -61,22 +61,20 @@ llm:
     top_k: 5
     knowledge_bases:
       - "mitre_attack"
-      - "malware_families"
-      - "threat_reports"
-      - "cve_db"
+      - "sigma_rules"
 
 # Enable all ML models with strict thresholds.
 ml:
   enabled: true
-  models_dir: "/var/lib/edr/models"
+  models_dir: "/usr/share/edr/models"
   auto_update: false
   update_interval_hours: 0
 
   models:
-    pe_classifier: "pe_classifier_v3.onnx"
-    behavior_lstm: "behavior_lstm_v2.onnx"
-    network_anomaly: "network_anomaly_v2.onnx"
-    ransomware: "ransomware_v3.onnx"
+    pe_classifier: ""
+    behavior_lstm: ""
+    network_anomaly: ""
+    ransomware: ""
 
   thresholds:
     pe_malicious: 0.60
@@ -89,20 +87,26 @@ ml:
     use_gpu: true
     gpu_device_id: 0
 
+  verify_pubkey: ""
+
 # All detection engines enabled at maximum sensitivity.
 detection:
   sigma:
     enabled: true
-    rules_dir: "/etc/edr/rules/sigma"
+    rules_dir: "/usr/share/edr/rules/sigma"
     auto_update: false
     update_source: ""
 
   yara:
     enabled: true
-    rules_dir: "/etc/edr/rules/yara"
+    rules_dir: "/usr/share/edr/rules/yara"
     scan_on_write: true
     scan_on_exec: true
     max_file_size_mb: 100
+
+  custom_rules:
+    enabled: true
+    rules_path: "/usr/share/edr/rules/custom"
 
   ioc:
     enabled: true
@@ -213,5 +217,5 @@ forwarder:
   retry_max: 10
   spool_path: "/var/lib/edr/forward_spool.jsonl"
 
-rules_file: "rules/baseline.yaml"
+rules_file: "/usr/share/edr/rules/baseline.yaml"
 rules_verify_pubkey_path: "/etc/edr/certs/edr-rules.pub.pem"

@@ -138,7 +138,6 @@ llm:
     model: "llama-3.1-8b-instant"
     base_url: "https://api.groq.com/openai/v1"
     max_tokens: 1024
-    max_tokens: 0
 
   gemini:
     # Env: GEMINI_API_KEY, GEMINI_MODEL, GEMINI_PROJECT_ID
@@ -226,6 +225,10 @@ ml:
     use_gpu: false
     gpu_device_id: 0
 
+  # Hex-encoded Ed25519 public key for verifying model signatures.
+  # When set, all model loads and hot-swaps require a valid .sig file.
+  verify_pubkey: ""
+
 # -----------------------------------------------------------------------------
 # Detection engines
 # -----------------------------------------------------------------------------
@@ -244,6 +247,13 @@ detection:
     scan_on_write: false
     scan_on_exec: false
     max_file_size_mb: 0
+
+  # CEL custom rules (YAML file or directory of .yaml/.yml files).
+  # When enabled with an empty rules_path, paths resolve from the config file
+  # (../rules/custom) or /usr/share/edr/rules/custom when packaged.
+  custom_rules:
+    enabled: true
+    rules_path: ""
 
   # Indicator of Compromise matching (hash, IP, domain).
   ioc:
@@ -302,20 +312,39 @@ response:
 # -----------------------------------------------------------------------------
 # Threat intelligence feeds
 # -----------------------------------------------------------------------------
+# Feeds are polled periodically and IOCs are pushed into the detection engine's
+# layer 1 IOC matcher (hashes, IPs, domains) so that real-time telemetry is
+# checked against the latest threat intelligence.
 threat_intel:
+  # MISP (Malware Information Sharing Platform) integration.
+  # Env: MISP_URL, MISP_API_KEY
   misp:
     enabled: false
-    url: ""
-    api_key: ""
-    verify_ssl: false
-    update_interval_hours: 0
+    url: ""                      # e.g. "https://misp.example.com"
+    api_key: ""                  # MISP auth key
+    verify_ssl: true
+    update_interval_hours: 1
 
+  # AlienVault OTX (Open Threat Exchange) integration.
+  # Env: OTX_API_KEY
   otx:
     enabled: false
-    api_key: ""
-    update_interval_hours: 0
+    api_key: ""                  # OTX API key from https://otx.alienvault.com
+    update_interval_hours: 1
 
+  # Additional STIX/TAXII, CSV, or JSON feeds.
+  # Each entry must specify name, url, and format (stix|taxii|csv|json).
   custom_feeds: []
+  # - name: "abuse-ch-urlhaus"
+  #   url: "https://urlhaus-api.abuse.ch/v1/urls/recent/"
+  #   format: "json"
+  #   api_key: ""
+  #   update_interval_hours: 1
+  # - name: "my-stix-feed"
+  #   url: "https://stix.example.com/taxii2/collections/indicators/objects"
+  #   format: "stix"
+  #   api_key: ""
+  #   update_interval_hours: 4
 
 # -----------------------------------------------------------------------------
 # Self-protection
@@ -348,6 +377,23 @@ performance:
 
   # Batch flush interval in milliseconds.
   batch_interval_ms: 15000
+
+# -----------------------------------------------------------------------------
+# Baseline anomaly detection
+# -----------------------------------------------------------------------------
+baseline:
+  # Enable statistical baseline learning and anomaly detection.
+  enabled: false
+
+  # Directory for persisting baseline data (BadgerDB).
+  # Defaults to <data_dir>/baseline when empty.
+  storage_path: ""
+
+  # Number of days to learn normal behaviour before firing anomaly alerts.
+  learning_days: 7
+
+  # Standard deviation multiplier for the anomaly threshold (3.0 = 3-sigma).
+  deviation_mult: 3.0
 
 # =============================================================================
 # Legacy compatibility fields
