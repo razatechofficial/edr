@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"path/filepath"
 
 	"github.com/razatechofficial/edr/internal/kernel"
 	"github.com/razatechofficial/edr/pkg/events"
@@ -34,6 +35,7 @@ type ProcessExecEvent struct {
 	SHA256     string    `json:"sha256,omitempty"`
 	ParentComm string    `json:"parent_comm,omitempty"`
 	IsElevated bool      `json:"is_elevated"`
+	SpoofRisk  float64   `json:"spoof_risk"`
 }
 
 // ProcessExitEvent is emitted when a process terminates.
@@ -162,6 +164,7 @@ func (c *ProcessCollector) handleExec(evt *RawEvent) {
 		SHA256:     hash,
 		ParentComm: parentComm,
 		IsElevated: evt.UID == 0,
+		SpoofRisk:  processSpoofRisk(comm, exePath, parentComm, ppid),
 	})
 }
 
@@ -276,4 +279,23 @@ func resolveGroup(gid uint32) string {
 		return strconv.FormatUint(uint64(gid), 10)
 	}
 	return g.Name
+}
+
+func processSpoofRisk(comm, exePath, parentComm string, ppid uint32) float64 {
+	score := 0.0
+	base := strings.ToLower(strings.TrimSpace(filepath.Base(exePath)))
+	c := strings.ToLower(strings.TrimSpace(comm))
+	if base != "" && c != "" && base != c {
+		score += 0.5
+	}
+	if ppid > 1 && strings.TrimSpace(parentComm) == "" {
+		score += 0.35
+	}
+	if strings.Contains(base, "svchost") && !strings.Contains(exePath, "System32") {
+		score += 0.25
+	}
+	if score > 1 {
+		score = 1
+	}
+	return score
 }

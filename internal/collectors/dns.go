@@ -2,7 +2,9 @@ package collectors
 
 import (
 	"context"
+	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/kernel"
@@ -19,6 +21,8 @@ type DNSEvent struct {
 	Answers      []string      `json:"answers,omitempty"`
 	ResponseCode string        `json:"response_code"`
 	Latency      time.Duration `json:"latency_ns"`
+	SuspectedDGA bool          `json:"suspected_dga"`
+	TunnelScore  float64       `json:"tunnel_score"`
 }
 
 // DNSCollector captures and normalizes DNS query events from the kernel.
@@ -81,6 +85,8 @@ func (c *DNSCollector) processRaw(evt *RawEvent) {
 		Answers:      answers,
 		ResponseCode: dnsRcodeName(rcodeNum),
 		Latency:      time.Duration(latencyNs),
+		SuspectedDGA: looksLikeDGA(queryName),
+		TunnelScore:  dnsTunnelScore(queryName, queryTypeNum, numAnswers),
 	})
 }
 
@@ -114,4 +120,64 @@ func dnsRcodeName(code uint16) string {
 		return name
 	}
 	return "RCODE" + strconv.FormatUint(uint64(code), 10)
+}
+
+func looksLikeDGA(q string) bool {
+	host := strings.ToLower(strings.TrimSuffix(q, "."))
+	if host == "" {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	if len(labels) == 0 || labels[0] == "" {
+		return false
+	}
+	l := labels[0]
+	if len(l) < 12 {
+		return false
+	}
+	var digits int
+	for i := 0; i < len(l); i++ {
+		if l[i] >= '0' && l[i] <= '9' {
+			digits++
+		}
+	}
+	return shannon(l) > 3.6 || float64(digits)/float64(len(l)) > 0.35
+}
+
+func dnsTunnelScore(query string, qtype uint16, answers uint16) float64 {
+	host := strings.TrimSuffix(query, ".")
+	score := 0.0
+	if len(host) > 55 {
+		score += 0.35
+	}
+	if strings.Count(host, ".") >= 4 {
+		score += 0.25
+	}
+	if qtype == 16 || qtype == 255 {
+		score += 0.25
+	}
+	if answers == 0 {
+		score += 0.15
+	}
+	if score > 1 {
+		score = 1
+	}
+	return score
+}
+
+func shannon(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	freq := make(map[byte]float64, len(s))
+	for i := 0; i < len(s); i++ {
+		freq[s[i]]++
+	}
+	var h float64
+	l := float64(len(s))
+	for _, c := range freq {
+		p := c / l
+		h -= p * math.Log2(p)
+	}
+	return h
 }

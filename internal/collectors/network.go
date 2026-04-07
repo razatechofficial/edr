@@ -23,6 +23,8 @@ type NetworkConnectEvent struct {
 	DstPort   uint16    `json:"dst_port"`
 	Direction string    `json:"direction"`
 	Domain    string    `json:"domain,omitempty"`
+	IsPrivate bool      `json:"is_private"`
+	RiskScore float64   `json:"risk_score"`
 }
 
 // NetworkAcceptEvent is emitted when a process accepts an inbound connection.
@@ -121,6 +123,8 @@ func (c *NetworkCollector) handleConnect(evt *RawEvent) {
 		DstPort:   dstPort,
 		Direction: dir,
 		Domain:    c.reverseLookup(dstAddr),
+		IsPrivate: isPrivateIP(dstAddr),
+		RiskScore: networkRiskScore(dstAddr, dstPort, proto),
 	})
 }
 
@@ -221,4 +225,38 @@ func protoName(proto uint8) string {
 	default:
 		return fmt.Sprintf("proto:%d", proto)
 	}
+}
+
+func isPrivateIP(addr string) bool {
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return false
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4[0] == 10 ||
+			(v4[0] == 172 && v4[1] >= 16 && v4[1] <= 31) ||
+			(v4[0] == 192 && v4[1] == 168) ||
+			(v4[0] == 127)
+	}
+	return ip.IsPrivate() || ip.IsLoopback()
+}
+
+func networkRiskScore(dstAddr string, dstPort uint16, proto uint8) float64 {
+	score := 0.0
+	if !isPrivateIP(dstAddr) {
+		score += 0.4
+	}
+	switch dstPort {
+	case 4444, 1337, 6667, 31337:
+		score += 0.35
+	case 22, 3389:
+		score += 0.2
+	}
+	if proto != 6 && proto != 17 {
+		score += 0.2
+	}
+	if score > 1 {
+		score = 1
+	}
+	return score
 }
