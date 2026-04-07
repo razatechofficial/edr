@@ -19,6 +19,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.bui
 BIN_DIR     := bin
 PROTO_DIR   := proto
 PROTO_OUT   := pkg/protocol
+GOPATH_BIN  := $(shell go env GOPATH 2>/dev/null)/bin
 RULES_DIR   := rules
 MODELS_DIR  := models
 PACKAGE_DIR := dist
@@ -86,7 +87,7 @@ platform/linux/ebpf/%.o: platform/linux/ebpf/%.c platform/linux/ebpf/common.h
 proto:
 	@echo "==> Generating protobuf code"
 	@mkdir -p $(PROTO_OUT)
-	protoc --go_out=$(PROTO_OUT) --go_opt=paths=source_relative \
+	PATH="$(GOPATH_BIN):$$PATH" protoc --go_out=$(PROTO_OUT) --go_opt=paths=source_relative \
 		--go-grpc_out=$(PROTO_OUT) --go-grpc_opt=paths=source_relative \
 		-I $(PROTO_DIR) \
 		$(PROTO_DIR)/events.proto \
