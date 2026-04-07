@@ -27,6 +27,8 @@ go.work.sum
 # env file
 .env
 
+ml/training/.venv/
+
 *.md
 /bin/
 /alerts/

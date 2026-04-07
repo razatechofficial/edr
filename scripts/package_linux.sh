@@ -33,12 +33,34 @@ trap cleanup EXIT
 
 DEB_ROOT="${WORK}/deb"
 mkdir -p "${DEB_ROOT}/DEBIAN" "${DEB_ROOT}/usr/local/bin" "${DEB_ROOT}/etc/edr" "${DEB_ROOT}/etc/systemd/system"
+mkdir -p "${DEB_ROOT}/usr/share/edr/rules/sigma" "${DEB_ROOT}/usr/share/edr/rules/yara" "${DEB_ROOT}/usr/share/edr/rules/custom" "${DEB_ROOT}/usr/share/edr/models"
 
 cp "${AGENT_BIN}" "${DEB_ROOT}/usr/local/bin/edr-agent"
 cp "${EDRCTL_BIN}" "${DEB_ROOT}/usr/local/bin/edrctl"
 chmod 0755 "${DEB_ROOT}/usr/local/bin/edr-agent" "${DEB_ROOT}/usr/local/bin/edrctl"
 cp "${CONFIG_SRC}" "${DEB_ROOT}/etc/edr/agent.yaml.default"
 chmod 0644 "${DEB_ROOT}/etc/edr/agent.yaml.default"
+
+if [[ -d "${ROOT}/rules/sigma" ]]; then
+	cp -a "${ROOT}/rules/sigma/." "${DEB_ROOT}/usr/share/edr/rules/sigma/"
+fi
+if [[ -d "${ROOT}/rules/yara" ]]; then
+	cp -a "${ROOT}/rules/yara/." "${DEB_ROOT}/usr/share/edr/rules/yara/"
+fi
+if [[ -d "${ROOT}/rules/custom" ]]; then
+	cp -a "${ROOT}/rules/custom/." "${DEB_ROOT}/usr/share/edr/rules/custom/"
+fi
+if [[ -f "${ROOT}/rules/baseline.yaml" ]]; then
+	cp "${ROOT}/rules/baseline.yaml" "${DEB_ROOT}/usr/share/edr/rules/baseline.yaml"
+fi
+shopt -s nullglob
+for f in "${ROOT}/models/"*.onnx; do
+	cp -a "${f}" "${DEB_ROOT}/usr/share/edr/models/"
+done
+for f in "${ROOT}/models/"*.sig; do
+	cp -a "${f}" "${DEB_ROOT}/usr/share/edr/models/"
+done
+shopt -u nullglob
 
 cat > "${DEB_ROOT}/etc/systemd/system/edr-agent.service" <<'UNIT'
 [Unit]
@@ -170,11 +192,13 @@ mkdir -p "${RPM_TOP}/"{BUILD,RPMS/noarch,RPMS/x86_64,SOURCES,SPECS,SRPMS}
 PAYLOAD_NAME="edr-agent-${VERSION_RPM}"
 PAYLOAD_ROOT="${WORK}/rpm-src/${PAYLOAD_NAME}"
 mkdir -p "${PAYLOAD_ROOT}/usr/local/bin" "${PAYLOAD_ROOT}/etc/edr" "${PAYLOAD_ROOT}/etc/systemd/system"
+mkdir -p "${PAYLOAD_ROOT}/usr/share/edr/rules/sigma" "${PAYLOAD_ROOT}/usr/share/edr/rules/yara" "${PAYLOAD_ROOT}/usr/share/edr/rules/custom" "${PAYLOAD_ROOT}/usr/share/edr/models"
 cp "${AGENT_BIN}" "${PAYLOAD_ROOT}/usr/local/bin/edr-agent"
 cp "${EDRCTL_BIN}" "${PAYLOAD_ROOT}/usr/local/bin/edrctl"
 chmod 0755 "${PAYLOAD_ROOT}/usr/local/bin/edr-agent" "${PAYLOAD_ROOT}/usr/local/bin/edrctl"
 cp "${CONFIG_SRC}" "${PAYLOAD_ROOT}/etc/edr/agent.yaml.default"
 chmod 0644 "${PAYLOAD_ROOT}/etc/edr/agent.yaml.default"
+cp -a "${DEB_ROOT}/usr/share/edr/." "${PAYLOAD_ROOT}/usr/share/edr/"
 cp "${DEB_ROOT}/etc/systemd/system/edr-agent.service" "${PAYLOAD_ROOT}/etc/systemd/system/edr-agent.service"
 chmod 0644 "${PAYLOAD_ROOT}/etc/systemd/system/edr-agent.service"
 
@@ -253,6 +277,7 @@ fi
 %attr(0755,root,root) /usr/local/bin/edrctl
 %attr(0644,root,root) /etc/edr/agent.yaml.default
 %attr(0644,root,root) /etc/systemd/system/edr-agent.service
+/usr/share/edr
 SPECEOF
 
 rpmbuild --define "_topdir ${RPM_TOP}" -bb "${RPM_TOP}/SPECS/edr-agent.spec"
