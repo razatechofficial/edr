@@ -1,14 +1,15 @@
 package response
 
 import (
-	"errors"
+	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/razatechofficial/edr/internal/schema"
+	"go.uber.org/zap"
 )
 
 type Responder struct {
@@ -84,11 +85,15 @@ func quarantineFile(cmd schema.ResponseCommand) schema.ResponseResult {
 }
 
 func hostIsolate(cmd schema.ResponseCommand) schema.ResponseResult {
-	// MVP stub only. Full host firewall isolation is OS-specific and handled later.
-	if runtime.GOOS == "" {
-		return fail(cmd, errors.New("runtime unavailable").Error())
+	server := extractServerHost(cmd.Reason)
+	if server == "" {
+		server = "127.0.0.1"
 	}
-	return ok(cmd, "host isolate requested (stub)")
+	handler := NewNetworkHandler(zap.NewNop(), server, nil)
+	if _, err := handler.Execute(context.Background(), map[string]interface{}{"action": "isolate"}); err != nil {
+		return fail(cmd, fmt.Sprintf("host isolation failed: %v", err))
+	}
+	return ok(cmd, "host isolated")
 }
 
 func ok(cmd schema.ResponseCommand, msg string) schema.ResponseResult {
@@ -111,4 +116,18 @@ func fail(cmd schema.ResponseCommand, msg string) schema.ResponseResult {
 		Success:       false,
 		Message:       msg,
 	}
+}
+
+func extractServerHost(reason string) string {
+	trimmed := strings.TrimSpace(reason)
+	if trimmed == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(trimmed); err == nil {
+		return host
+	}
+	if ip := net.ParseIP(trimmed); ip != nil {
+		return trimmed
+	}
+	return ""
 }
