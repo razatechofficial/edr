@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -20,14 +21,25 @@ import (
 )
 
 const (
-	bpfCommLen     = 16
-	bpfFilenameLen = 256
-	bpfArgsLen     = 512
-	bpfObjectPath  = "/var/lib/edr/bpf/edr.bpf.o"
-
-	bpfEvtProcess uint32 = 0
-	bpfEvtFile    uint32 = 1
-	bpfEvtNetwork uint32 = 2
+	bpfCommLen      = 16
+	bpfFilenameLen  = 256
+	bpfArgsLen      = 512
+	bpfObjectPath   = "/var/lib/edr/bpf/edr.bpf.o"
+	rawHeaderSize   = 26
+	bpfEvtProcExec  = 1
+	bpfEvtProcExit  = 2
+	bpfEvtProcFork  = 3
+	bpfEvtFileOpen  = 6
+	bpfEvtFileWrite = 7
+	bpfEvtFileDel   = 8
+	bpfEvtFileRen   = 9
+	bpfEvtNetConn   = 11
+	bpfEvtNetAccept = 12
+	bpfEvtNetBind   = 13
+	bpfEvtModule    = 22
+	bpfEvtMount     = 23
+	bpfEvtPtrace    = 24
+	bpfEvtSignal    = 25
 )
 
 // Placeholder for compiled eBPF bytecode. Uncomment after running `make bpf`:
@@ -36,37 +48,55 @@ const (
 
 // bpfProcessEvent mirrors the C struct process_event emitted by the eBPF program.
 type bpfProcessEvent struct {
+	Type     uint32
 	PID      uint32
 	PPID     uint32
 	UID      uint32
 	GID      uint32
+	TS       uint64
 	Comm     [bpfCommLen]byte
 	Filename [bpfFilenameLen]byte
 	ArgsSize uint32
 	Args     [bpfArgsLen]byte
+	ExitCode int32
+	ChildPID uint32
+	CloneFlg uint64
 }
 
 // bpfFileEvent mirrors the C struct file_event emitted by the eBPF program.
 type bpfFileEvent struct {
+	Type       uint32
 	PID       uint32
+	PPID      uint32
 	UID       uint32
-	EventType uint32
+	GID       uint32
+	TS        uint64
+	Comm      [bpfCommLen]byte
 	Filename  [bpfFilenameLen]byte
 	Flags     uint32
 	Mode      uint32
+	BytesW    uint64
+	NewName   [bpfFilenameLen]byte
 }
 
 // bpfNetworkEvent mirrors the C struct network_event emitted by the eBPF program.
 type bpfNetworkEvent struct {
+	Type     uint32
 	PID      uint32
+	PPID     uint32
 	UID      uint32
+	GID      uint32
+	TS       uint64
+	Comm     [bpfCommLen]byte
+	Proto    uint32
 	SrcAddr  uint32
-	DstAddr  uint32
 	SrcPort  uint16
+	DstAddr  uint32
 	DstPort  uint16
-	Protocol uint8
-	Family   uint8
-	_        [2]byte
+	SrcAddr6 [16]byte
+	DstAddr6 [16]byte
+	IsIPv6   uint8
+	Dir      uint8
 }
 
 // EBPFDriver implements Driver using eBPF tracepoints and ring buffers on Linux.
@@ -79,6 +109,7 @@ type EBPFDriver struct {
 	coll   *ebpf.Collection
 	links  []link.Link
 	reader *ringbuf.Reader
+	readers []*ringbuf.Reader
 
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -145,18 +176,10 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 		return fmt.Errorf("attaching tracepoints: %w", err)
 	}
 
-	eventsMap, ok := d.coll.Maps["events"]
-	if !ok {
+	if err := d.openReaders(); err != nil {
 		d.cleanup()
-		return fmt.Errorf("events ring buffer map not found in ebpf collection")
+		return err
 	}
-
-	reader, err := ringbuf.NewReader(eventsMap)
-	if err != nil {
-		d.cleanup()
-		return fmt.Errorf("opening ebpf ring buffer reader: %w", err)
-	}
-	d.reader = reader
 
 	if err := d.syncPolicyToMaps(); err != nil {
 		d.cleanup()
@@ -166,8 +189,10 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	d.startTime = time.Now()
 	d.running.Store(true)
 
-	d.wg.Add(1)
-	go d.eventLoop(child)
+	d.wg.Add(len(d.readers))
+	for _, r := range d.readers {
+		go d.eventLoop(child, r)
+	}
 
 	return nil
 }
@@ -178,8 +203,8 @@ func (d *EBPFDriver) Stop() error {
 		return nil
 	}
 	d.cancel()
-	if d.reader != nil {
-		d.reader.Close()
+	for _, r := range d.readers {
+		r.Close()
 	}
 	d.wg.Wait()
 	d.cleanup()
@@ -222,6 +247,10 @@ func (d *EBPFDriver) cleanup() {
 		d.reader.Close()
 		d.reader = nil
 	}
+	for _, r := range d.readers {
+		r.Close()
+	}
+	d.readers = nil
 	if d.coll != nil {
 		d.coll.Close()
 		d.coll = nil
@@ -243,27 +272,30 @@ func (d *EBPFDriver) loadCollection() (*ebpf.CollectionSpec, error) {
 }
 
 func (d *EBPFDriver) attachTracepoints() error {
-	type tp struct {
-		group, name, prog string
-	}
-	tracepoints := []tp{
-		{"sched", "sched_process_exec", "tp_sched_process_exec"},
-		{"sched", "sched_process_exit", "tp_sched_process_exit"},
-		{"sched", "sched_process_fork", "tp_sched_process_fork"},
-		{"syscalls", "sys_enter_openat", "tp_sys_enter_openat"},
-		{"syscalls", "sys_enter_write", "tp_sys_enter_write"},
-		{"syscalls", "sys_enter_connect", "tp_sys_enter_connect"},
-		{"syscalls", "sys_enter_accept4", "tp_sys_enter_accept4"},
-	}
-
-	for _, t := range tracepoints {
-		prog, ok := d.coll.Programs[t.prog]
-		if !ok {
+	for name, prog := range d.coll.Programs {
+		if prog == nil {
 			continue
 		}
-		l, err := link.Tracepoint(t.group, t.name, prog, nil)
+		const prefix = "tracepoint__"
+		if len(name) <= len(prefix) || name[:len(prefix)] != prefix {
+			continue
+		}
+		rest := name[len(prefix):]
+		sep := -1
+		for i := 0; i+1 < len(rest); i++ {
+			if rest[i] == '_' && rest[i+1] == '_' {
+				sep = i
+				break
+			}
+		}
+		if sep <= 0 || sep+2 >= len(rest) {
+			continue
+		}
+		group := rest[:sep]
+		tp := rest[sep+2:]
+		l, err := link.Tracepoint(group, tp, prog, nil)
 		if err != nil {
-			return fmt.Errorf("attaching %s/%s: %w", t.group, t.name, err)
+			return fmt.Errorf("attaching %s (%s/%s): %w", name, group, tp, err)
 		}
 		d.links = append(d.links, l)
 	}
@@ -316,10 +348,16 @@ func (d *EBPFDriver) syncPolicyToMaps() error {
 	return nil
 }
 
-func (d *EBPFDriver) eventLoop(ctx context.Context) {
+func (d *EBPFDriver) eventLoop(ctx context.Context, reader *ringbuf.Reader) {
 	defer d.wg.Done()
 	for {
-		record, err := d.reader.Read()
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		record, err := reader.Read()
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -341,30 +379,43 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 	if len(raw) < 4 {
 		return fmt.Errorf("record too short: %d bytes", len(raw))
 	}
-
 	typ := binary.LittleEndian.Uint32(raw[:4])
-	payload := raw[4:]
 
 	d.mu.RLock()
 	p := d.policy
 	d.mu.RUnlock()
 
 	switch typ {
-	case bpfEvtProcess:
+	case bpfEvtProcExec, bpfEvtProcExit, bpfEvtProcFork:
 		if !p.ProcessEvents {
 			return nil
 		}
-		return d.decodeProcessEvent(payload)
-	case bpfEvtFile:
+		return d.decodeProcessEvent(raw)
+	case bpfEvtFileOpen, bpfEvtFileWrite, bpfEvtFileDel, bpfEvtFileRen:
 		if !p.FileEvents {
 			return nil
 		}
-		return d.decodeFileEvent(payload)
-	case bpfEvtNetwork:
+		return d.decodeFileEvent(raw)
+	case bpfEvtNetConn, bpfEvtNetAccept, bpfEvtNetBind:
 		if !p.NetworkEvents {
 			return nil
 		}
-		return d.decodeNetworkEvent(payload)
+		return d.decodeNetworkEvent(raw)
+	case bpfEvtModule:
+		if !p.ModuleEvents {
+			return nil
+		}
+		return d.decodeSecurityEvent(raw, events.EventModule)
+	case bpfEvtMount:
+		if !p.MountEvents {
+			return nil
+		}
+		return d.decodeSecurityEvent(raw, events.EventMount)
+	case bpfEvtPtrace, bpfEvtSignal:
+		if !p.SignalEvents {
+			return nil
+		}
+		return d.decodeSecurityEvent(raw, events.EventSignal)
 	default:
 		return fmt.Errorf("unknown bpf event type %d", typ)
 	}
@@ -377,18 +428,23 @@ func (d *EBPFDriver) decodeProcessEvent(data []byte) error {
 	}
 
 	evt := (*bpfProcessEvent)(unsafe.Pointer(&data[0]))
-	return d.writeEvent(map[string]interface{}{
-		"type":      events.EventProcess,
-		"timestamp": time.Now().UTC(),
-		"agent_id":  d.agentID,
-		"pid":       evt.PID,
-		"ppid":      evt.PPID,
-		"uid":       evt.UID,
-		"gid":       evt.GID,
-		"comm":      nullTerminated(evt.Comm[:]),
-		"filename":  nullTerminated(evt.Filename[:]),
-		"args":      nullTerminated(evt.Args[:min(int(evt.ArgsSize), bpfArgsLen)]),
-	})
+	payload := make([]byte, 0, 1024)
+	payload = appendUint32(payload, evt.PPID)
+	payload = appendString(payload, nullTerminated(evt.Filename[:]))
+	payload = appendString(payload, nullTerminated(evt.Args[:min(int(evt.ArgsSize), bpfArgsLen)]))
+	payload = appendString(payload, "")
+	payload = appendString(payload, nullTerminated(evt.Comm[:]))
+	if evt.Type == bpfEvtProcExit {
+		payload = payload[:0]
+		payload = appendInt32(payload, evt.ExitCode)
+		payload = appendInt32(payload, 0)
+		payload = appendUint64(payload, uint64(evt.TS))
+	} else if evt.Type == bpfEvtProcFork {
+		payload = payload[:0]
+		payload = appendUint32(payload, evt.ChildPID)
+		payload = appendUint64(payload, evt.CloneFlg)
+	}
+	return d.writeRawEvent(uint16(evt.Type), evt, payload)
 }
 
 func (d *EBPFDriver) decodeFileEvent(data []byte) error {
@@ -398,17 +454,22 @@ func (d *EBPFDriver) decodeFileEvent(data []byte) error {
 	}
 
 	evt := (*bpfFileEvent)(unsafe.Pointer(&data[0]))
-	return d.writeEvent(map[string]interface{}{
-		"type":      events.EventFile,
-		"timestamp": time.Now().UTC(),
-		"agent_id":  d.agentID,
-		"pid":       evt.PID,
-		"uid":       evt.UID,
-		"sub_type":  evt.EventType,
-		"filename":  nullTerminated(evt.Filename[:]),
-		"flags":     evt.Flags,
-		"mode":      evt.Mode,
-	})
+	payload := make([]byte, 0, 768)
+	switch evt.Type {
+	case bpfEvtFileOpen:
+		payload = appendString(payload, nullTerminated(evt.Filename[:]))
+		payload = appendUint32(payload, evt.Flags)
+	case bpfEvtFileWrite:
+		payload = appendString(payload, nullTerminated(evt.Filename[:]))
+		payload = appendUint64(payload, evt.BytesW)
+		payload = appendUint32(payload, 0)
+	case bpfEvtFileDel:
+		payload = appendString(payload, nullTerminated(evt.Filename[:]))
+	case bpfEvtFileRen:
+		payload = appendString(payload, nullTerminated(evt.Filename[:]))
+		payload = appendString(payload, nullTerminated(evt.NewName[:]))
+	}
+	return d.writeRawEvent(uint16(evt.Type), evt, payload)
 }
 
 func (d *EBPFDriver) decodeNetworkEvent(data []byte) error {
@@ -418,22 +479,68 @@ func (d *EBPFDriver) decodeNetworkEvent(data []byte) error {
 	}
 
 	evt := (*bpfNetworkEvent)(unsafe.Pointer(&data[0]))
-	return d.writeEvent(map[string]interface{}{
-		"type":      events.EventNetwork,
-		"timestamp": time.Now().UTC(),
-		"agent_id":  d.agentID,
-		"pid":       evt.PID,
-		"uid":       evt.UID,
-		"src_addr":  uint32ToIPv4(evt.SrcAddr),
-		"dst_addr":  uint32ToIPv4(evt.DstAddr),
-		"src_port":  evt.SrcPort,
-		"dst_port":  evt.DstPort,
-		"protocol":  evt.Protocol,
-		"family":    evt.Family,
-	})
+	payload := make([]byte, 0, 128)
+	family := uint8(2)
+	if evt.IsIPv6 == 1 {
+		family = 10
+	}
+	payload = append(payload, family)
+	payload = append(payload, uint8(evt.Proto))
+	payload = append(payload, evt.Dir)
+	if evt.IsIPv6 == 1 {
+		payload = append(payload, evt.SrcAddr6[:]...)
+	} else {
+		payload = append(payload, ipv4Bytes(evt.SrcAddr)...)
+	}
+	payload = appendUint16(payload, evt.SrcPort)
+	if evt.IsIPv6 == 1 {
+		payload = append(payload, evt.DstAddr6[:]...)
+	} else {
+		payload = append(payload, ipv4Bytes(evt.DstAddr)...)
+	}
+	payload = appendUint16(payload, evt.DstPort)
+	return d.writeRawEvent(uint16(evt.Type), evt, payload)
 }
 
-func (d *EBPFDriver) writeEvent(envelope map[string]interface{}) error {
+func (d *EBPFDriver) decodeSecurityEvent(data []byte, et events.EventType) error {
+	var envelope map[string]interface{}
+	switch et {
+	case events.EventModule:
+		envelope = map[string]interface{}{"type": events.EventModule, "timestamp": time.Now().UTC(), "agent_id": d.agentID}
+	case events.EventMount:
+		envelope = map[string]interface{}{"type": events.EventMount, "timestamp": time.Now().UTC(), "agent_id": d.agentID}
+	default:
+		envelope = map[string]interface{}{"type": events.EventSignal, "timestamp": time.Now().UTC(), "agent_id": d.agentID}
+	}
+	return d.writeJSONEvent(envelope)
+}
+
+func (d *EBPFDriver) writeRawEvent(typ uint16, hdr interface{}, payload []byte) error {
+	var pid, uid, gid, tid uint32
+	var ts uint64
+	switch e := hdr.(type) {
+	case *bpfProcessEvent:
+		pid, uid, gid, ts = e.PID, e.UID, e.GID, e.TS
+		tid = e.PID
+	case *bpfFileEvent:
+		pid, uid, gid, ts = e.PID, e.UID, e.GID, e.TS
+		tid = e.PID
+	case *bpfNetworkEvent:
+		pid, uid, gid, ts = e.PID, e.UID, e.GID, e.TS
+		tid = e.PID
+	}
+	raw := make([]byte, rawHeaderSize+len(payload))
+	binary.LittleEndian.PutUint16(raw[0:2], typ)
+	binary.LittleEndian.PutUint64(raw[2:10], ts)
+	binary.LittleEndian.PutUint32(raw[10:14], pid)
+	binary.LittleEndian.PutUint32(raw[14:18], tid)
+	binary.LittleEndian.PutUint32(raw[18:22], uid)
+	binary.LittleEndian.PutUint32(raw[22:26], gid)
+	copy(raw[26:], payload)
+	return d.buf.Write(raw)
+}
+
+func (d *EBPFDriver) writeJSONEvent(envelope map[string]interface{}) error {
 	data, err := json.Marshal(envelope)
 	if err != nil {
 		return fmt.Errorf("marshaling event: %w", err)
@@ -453,4 +560,59 @@ func nullTerminated(b []byte) string {
 func uint32ToIPv4(addr uint32) string {
 	return fmt.Sprintf("%d.%d.%d.%d",
 		addr&0xFF, (addr>>8)&0xFF, (addr>>16)&0xFF, (addr>>24)&0xFF)
+}
+
+func ipv4Bytes(addr uint32) []byte {
+	ip := net.IPv4(byte(addr), byte(addr>>8), byte(addr>>16), byte(addr>>24))
+	return []byte(ip.To4())
+}
+
+func appendString(dst []byte, s string) []byte {
+	if len(s) > 65535 {
+		s = s[:65535]
+	}
+	dst = appendUint16(dst, uint16(len(s)))
+	return append(dst, []byte(s)...)
+}
+
+func appendUint16(dst []byte, v uint16) []byte {
+	var b [2]byte
+	binary.LittleEndian.PutUint16(b[:], v)
+	return append(dst, b[:]...)
+}
+
+func appendUint32(dst []byte, v uint32) []byte {
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], v)
+	return append(dst, b[:]...)
+}
+
+func appendInt32(dst []byte, v int32) []byte {
+	return appendUint32(dst, uint32(v))
+}
+
+func appendUint64(dst []byte, v uint64) []byte {
+	var b [8]byte
+	binary.LittleEndian.PutUint64(b[:], v)
+	return append(dst, b[:]...)
+}
+
+func (d *EBPFDriver) openReaders() error {
+	readerMaps := []string{"events", "file_events", "net_events", "sec_events", "lsm_events"}
+	for _, name := range readerMaps {
+		m, ok := d.coll.Maps[name]
+		if !ok {
+			continue
+		}
+		r, err := ringbuf.NewReader(m)
+		if err != nil {
+			return fmt.Errorf("opening ring buffer %s: %w", name, err)
+		}
+		d.readers = append(d.readers, r)
+	}
+	if len(d.readers) == 0 {
+		return fmt.Errorf("no ring buffer maps found in ebpf collection")
+	}
+	d.reader = d.readers[0]
+	return nil
 }

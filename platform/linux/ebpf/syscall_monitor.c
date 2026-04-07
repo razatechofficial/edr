@@ -186,4 +186,97 @@ int tracepoint__syscalls__sys_enter_mount(struct trace_event_raw_sys_enter *ctx)
 	return 0;
 }
 
+SEC("tracepoint/syscalls/sys_enter_clone")
+int tracepoint__syscalls__sys_enter_clone(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct process_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_PROCESS_FORK);
+	evt->clone_flags = ctx->args[0];
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_clone3")
+int tracepoint__syscalls__sys_enter_clone3(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct process_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_PROCESS_FORK);
+	evt->clone_flags = 0;
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_sendto")
+int tracepoint__syscalls__sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct network_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_NET_CONNECT);
+	evt->direction = 0;
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_delete_module")
+int tracepoint__syscalls__sys_enter_delete_module(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_MODULE_LOAD);
+	evt->arg0 = ctx->args[1];
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_capset")
+int tracepoint__syscalls__sys_enter_capset(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_SIGNAL);
+	evt->syscall_nr = 126;
+	evt->arg0 = ctx->args[0];
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_prctl")
+int tracepoint__syscalls__sys_enter_prctl(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_SIGNAL);
+	evt->syscall_nr = 157;
+	evt->arg0 = ctx->args[0];
+	evt->arg1 = ctx->args[1];
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
 char _license[] SEC("license") = "GPL";
