@@ -153,4 +153,21 @@ int BPF_PROG(lsm_task_kill, struct task_struct *p, struct kernel_siginfo *info,
 	return 0;
 }
 
+SEC("lsm/kernel_module_request")
+int BPF_PROG(lsm_kernel_module_request, char *kmod_name)
+{
+	struct security_event *evt;
+	evt = bpf_ringbuf_reserve(&lsm_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_MODULE_LOAD);
+	if (kmod_name)
+		bpf_probe_read_kernel_str(evt->path, sizeof(evt->path), kmod_name);
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
 char _license[] SEC("license") = "GPL";
