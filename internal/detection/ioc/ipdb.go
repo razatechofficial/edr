@@ -71,6 +71,13 @@ func (db *IPDB) Add(entry IPEntry) {
 	db.exact[entry.Address] = e
 }
 
+// AddBatch inserts multiple IP entries efficiently.
+func (db *IPDB) AddBatch(entries []IPEntry) {
+	for i := range entries {
+		db.Add(entries[i])
+	}
+}
+
 // Lookup checks an IP against exact entries first, then iterates CIDR ranges.
 // Supports both IPv4 and IPv6 addresses.
 func (db *IPDB) Lookup(ip string) (*IPEntry, bool) {

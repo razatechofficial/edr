@@ -79,6 +79,13 @@ func (db *HashDB) Add(entry HashEntry) {
 	db.bloom.Add(lower)
 }
 
+// AddBatch inserts multiple hash entries efficiently.
+func (db *HashDB) AddBatch(entries []HashEntry) {
+	for i := range entries {
+		db.Add(entries[i])
+	}
+}
+
 // Lookup checks a hash against the Bloom filter, then falls back to exact maps.
 // The hash is matched against all three maps (SHA256, SHA1, MD5).
 func (db *HashDB) Lookup(hash string) (*HashEntry, bool) {

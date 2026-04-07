@@ -1,6 +1,9 @@
 package llm
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Provider is the interface all LLM providers implement.
 type Provider interface {
@@ -14,6 +17,21 @@ type Provider interface {
 	Close() error
 }
 
+// AnalyzeOptions carries optional provider tuning knobs.
+type AnalyzeOptions struct {
+	Model       string
+	MaxTokens   int
+	Temperature float32
+	Timeout     time.Duration
+}
+
+// ProviderWithOptions is optionally implemented by providers that support
+// model/tuning controls per request.
+type ProviderWithOptions interface {
+	Provider
+	AnalyzeWithOptions(ctx context.Context, prompt string, opts AnalyzeOptions) (string, error)
+}
+
 // EventContext contains all the context for LLM analysis of a security event.
 type EventContext struct {
 	Event                 interface{}
@@ -24,6 +42,10 @@ type EventContext struct {
 	SimilarHistorical     []interface{}
 	ThreatIntelContext     []string
 	BehavioralIndicators   []string
+	Model                  string
+	MaxTokens              int
+	Temperature            float32
+	Timeout                time.Duration
 }
 
 // ProcessInfo describes a single process in a process tree.

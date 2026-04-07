@@ -168,7 +168,15 @@ func (e *Engine) AnalyzeAsync(eventCtx *EventContext) <-chan *AnalysisResult {
 }
 
 func (e *Engine) analyzeWith(ctx context.Context, p Provider, prompt string) (*Verdict, error) {
-	resp, err := p.Analyze(ctx, prompt)
+	var (
+		resp string
+		err  error
+	)
+	if po, ok := p.(ProviderWithOptions); ok {
+		resp, err = po.AnalyzeWithOptions(ctx, prompt, AnalyzeOptions{})
+	} else {
+		resp, err = p.Analyze(ctx, prompt)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("llm [%s]: %w", p.Name(), err)
 	}

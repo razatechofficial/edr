@@ -67,6 +67,13 @@ func (db *DomainDB) Add(entry DomainEntry) {
 	}
 }
 
+// AddBatch inserts multiple domain entries efficiently.
+func (db *DomainDB) AddBatch(entries []DomainEntry) {
+	for i := range entries {
+		db.Add(entries[i])
+	}
+}
+
 // Lookup checks a domain against exact entries, then walks up the domain
 // hierarchy checking wildcards. For "sub.evil.com" it checks:
 //
