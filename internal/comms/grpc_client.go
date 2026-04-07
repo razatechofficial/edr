@@ -3,6 +3,7 @@ package comms
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -14,8 +15,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/razatechofficial/edr/pkg/events"
+	"github.com/razatechofficial/edr/pkg/protocol"
 )
 
 // GRPCClient manages a resilient gRPC connection to the control-plane
@@ -28,6 +31,7 @@ type GRPCClient struct {
 
 	mu   sync.RWMutex
 	conn *grpc.ClientConn
+	api  protocol.EDRServiceClient
 
 	reconnectBase time.Duration
 	reconnectMax  time.Duration
@@ -77,33 +81,97 @@ func (c *GRPCClient) Connect(ctx context.Context) error {
 // server and receiving commands. The method blocks until ctx is cancelled.
 func (c *GRPCClient) StreamEvents(ctx context.Context) error {
 	c.mu.RLock()
-	conn := c.conn
+	api := c.api
 	c.mu.RUnlock()
 
-	if conn == nil {
+	if api == nil {
 		return fmt.Errorf("grpc_client: not connected")
 	}
 
-	<-ctx.Done()
-	return ctx.Err()
+	stream, err := api.StreamEvents(ctx)
+	if err != nil {
+		return fmt.Errorf("grpc_client: stream open: %w", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		for {
+			cmd, recvErr := stream.Recv()
+			if recvErr != nil {
+				errCh <- recvErr
+				return
+			}
+			c.emitServerCommand(cmd)
+		}
+	}()
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	sequence := int32(0)
+	for {
+		select {
+		case <-ctx.Done():
+			_ = stream.CloseSend()
+			return ctx.Err()
+		case recvErr := <-errCh:
+			return fmt.Errorf("grpc_client: stream recv: %w", recvErr)
+		case t := <-ticker.C:
+			sequence++
+			batch := &protocol.EventBatch{
+				AgentId:   c.endpoint,
+				BatchTime: timestamppb.New(t.UTC()),
+				Sequence:  sequence,
+			}
+			if sendErr := stream.Send(batch); sendErr != nil {
+				return fmt.Errorf("grpc_client: stream send: %w", sendErr)
+			}
+		}
+	}
 }
 
 // SendAlert transmits a critical alert to the server as a unary RPC.
 func (c *GRPCClient) SendAlert(ctx context.Context, alert *events.Alert) error {
 	c.mu.RLock()
-	conn := c.conn
+	api := c.api
 	c.mu.RUnlock()
 
-	if conn == nil {
+	if api == nil {
 		return fmt.Errorf("grpc_client: not connected")
 	}
 
-	payload, err := json.Marshal(alert)
-	if err != nil {
-		return fmt.Errorf("grpc_client: marshal alert: %w", err)
+	req := &protocol.Alert{
+		AlertId:      alert.ID,
+		RuleId:       alert.RuleID,
+		RuleName:     alert.RuleName,
+		EndpointId:   c.endpoint,
+		Severity:     toProtoSeverity(alert.Severity),
+		Title:        alert.Title,
+		Description:  alert.Description,
+		Timestamp:    timestamppb.New(alert.Timestamp.UTC()),
+		Tags:         alert.Tags,
+		ProcessName:  "",
+		ProcessPath:  "",
+		CommandLine:  "",
+		ProcessPid:   0,
+	}
+	for _, m := range alert.MITRE {
+		req.Mitre = append(req.Mitre, &protocol.MITREAttack{
+			TechniqueId:   m.TechniqueID,
+			TechniqueName: m.TechniqueName,
+			TacticId:      m.TacticID,
+			TacticName:    m.TacticName,
+		})
 	}
 
-	_ = payload
+	raw, err := json.Marshal(alert.RawEvent)
+	if err == nil {
+		req.RawEvent = raw
+	}
+
+	if _, err := api.ReportAlert(ctx, req); err != nil {
+		return fmt.Errorf("grpc_client: report alert: %w", err)
+	}
 	c.logger.Debug("alert sent", zap.String("alert_id", alert.ID))
 	return nil
 }
@@ -111,14 +179,41 @@ func (c *GRPCClient) SendAlert(ctx context.Context, alert *events.Alert) error {
 // SendRaw transmits an opaque byte payload over the connection.
 func (c *GRPCClient) SendRaw(ctx context.Context, data []byte) error {
 	c.mu.RLock()
-	conn := c.conn
+	api := c.api
 	c.mu.RUnlock()
 
-	if conn == nil {
+	if api == nil {
 		return fmt.Errorf("grpc_client: not connected")
 	}
 
-	_ = data
+	stream, err := api.StreamEvents(ctx)
+	if err != nil {
+		return fmt.Errorf("grpc_client: stream open: %w", err)
+	}
+	defer stream.CloseSend()
+
+	now := time.Now().UTC()
+	ev := &protocol.FileEvent{
+		Base: &protocol.BaseEvent{
+			SchemaVersion: "v1",
+			EventType:     protocol.EventType_EVENT_TYPE_FILE,
+			EndpointId:    c.endpoint,
+			Timestamp:     timestamppb.New(now),
+			Hostname:      c.endpoint,
+			Os:            "unknown",
+		},
+		Path:      "raw://payload",
+		Operation: "raw",
+		Hash:      base64.StdEncoding.EncodeToString(data),
+	}
+	if err := stream.Send(&protocol.EventBatch{
+		AgentId:    c.endpoint,
+		BatchTime:  timestamppb.New(now),
+		Sequence:   1,
+		FileEvents: []*protocol.FileEvent{ev},
+	}); err != nil {
+		return fmt.Errorf("grpc_client: send raw batch: %w", err)
+	}
 	return nil
 }
 
@@ -152,6 +247,7 @@ func (c *GRPCClient) dial(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.conn = conn
+	c.api = protocol.NewEDRServiceClient(conn)
 	c.mu.Unlock()
 
 	c.logger.Info("grpc connected", zap.String("addr", addr))
@@ -227,4 +323,34 @@ func (c *GRPCClient) calcBackoff(attempt int) time.Duration {
 	}
 	jitter := d * 0.2 * rand.Float64()
 	return time.Duration(d + jitter)
+}
+
+func (c *GRPCClient) emitServerCommand(cmd *protocol.Command) {
+	c.mu.RLock()
+	fn := c.onEvent
+	c.mu.RUnlock()
+	if fn == nil {
+		return
+	}
+	payload, err := json.Marshal(cmd)
+	if err != nil {
+		c.logger.Warn("grpc command marshal failed", zap.Error(err))
+		return
+	}
+	fn(payload)
+}
+
+func toProtoSeverity(s events.Severity) protocol.Severity {
+	switch s {
+	case events.SeverityCritical:
+		return protocol.Severity_SEVERITY_CRITICAL
+	case events.SeverityHigh:
+		return protocol.Severity_SEVERITY_HIGH
+	case events.SeverityMedium:
+		return protocol.Severity_SEVERITY_MEDIUM
+	case events.SeverityLow:
+		return protocol.Severity_SEVERITY_LOW
+	default:
+		return protocol.Severity_SEVERITY_INFO
+	}
 }
