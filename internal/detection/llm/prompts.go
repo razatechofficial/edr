@@ -102,6 +102,15 @@ func BuildAnalysisPrompt(ctx *EventContext) string {
 		b.WriteString("\n")
 	}
 
+	if len(ctx.BehavioralIndicators) > 0 {
+		b.WriteString("## Behavioral Detection Results\n")
+		b.WriteString("The following detections already fired for this event from rule/ML/behavioral layers:\n")
+		for _, bi := range ctx.BehavioralIndicators {
+			fmt.Fprintf(&b, "- %s\n", bi)
+		}
+		b.WriteString("\n")
+	}
+
 	b.WriteString("Respond with the JSON verdict only.")
 	return b.String()
 }

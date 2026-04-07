@@ -19,7 +19,7 @@ type Config struct {
 		ID          string `yaml:"id" env:"AGENT_ID"`
 		Name        string `yaml:"name" env:"AGENT_NAME"`
 		Version     string `yaml:"version"`
-		Environment string `yaml:"environment" env:"AGENT_ENV"`  // government|enterprise|airgap
+		Environment string `yaml:"environment" env:"AGENT_ENV"` // government|enterprise|airgap
 		LogLevel    string `yaml:"log_level" env:"LOG_LEVEL"`
 		DataDir     string `yaml:"data_dir" env:"DATA_DIR"`
 		TempDir     string `yaml:"temp_dir"`
@@ -38,15 +38,15 @@ type Config struct {
 	} `yaml:"server"`
 
 	LLM struct {
-		Enabled          bool    `yaml:"enabled" env:"LLM_ENABLED"`
-		PrimaryProvider  string  `yaml:"primary_provider" env:"LLM_PRIMARY"`   // openai|anthropic|grok|groq|gemini|azure|bedrock|ollama|llamacpp
-		FallbackProvider string  `yaml:"fallback_provider" env:"LLM_FALLBACK"`
-		LocalProvider    string  `yaml:"local_provider" env:"LLM_LOCAL"`       // ollama|llamacpp
-		ForceLocal       bool    `yaml:"force_local" env:"LLM_FORCE_LOCAL"`
-		LocalThreshold   float32 `yaml:"local_threshold"`
-		MinSeverityForLLM string `yaml:"min_severity_llm"` // medium|high|critical
-		MaxConcurrent    int     `yaml:"max_concurrent"`
-		TimeoutSec       int     `yaml:"timeout_sec"`
+		Enabled           bool    `yaml:"enabled" env:"LLM_ENABLED"`
+		PrimaryProvider   string  `yaml:"primary_provider" env:"LLM_PRIMARY"` // openai|anthropic|grok|groq|gemini|azure|bedrock|ollama|llamacpp
+		FallbackProvider  string  `yaml:"fallback_provider" env:"LLM_FALLBACK"`
+		LocalProvider     string  `yaml:"local_provider" env:"LLM_LOCAL"` // ollama|llamacpp
+		ForceLocal        bool    `yaml:"force_local" env:"LLM_FORCE_LOCAL"`
+		LocalThreshold    float32 `yaml:"local_threshold"`
+		MinSeverityForLLM string  `yaml:"min_severity_llm"` // medium|high|critical
+		MaxConcurrent     int     `yaml:"max_concurrent"`
+		TimeoutSec        int     `yaml:"timeout_sec"`
 
 		OpenAI struct {
 			APIKey      string  `yaml:"api_key" env:"OPENAI_API_KEY"`
@@ -105,7 +105,7 @@ type Config struct {
 			Model     string `yaml:"model" env:"OLLAMA_MODEL"`       // phi3|mistral|llama3|gemma3
 			KeepAlive string `yaml:"keep_alive"`
 			NumCtx    int    `yaml:"num_ctx"`
-			NumGPU    int    `yaml:"num_gpu"`    // -1 = all layers on GPU
+			NumGPU    int    `yaml:"num_gpu"` // -1 = all layers on GPU
 			NumThread int    `yaml:"num_thread"`
 		} `yaml:"ollama"`
 
@@ -122,7 +122,7 @@ type Config struct {
 			VectorDBPath   string   `yaml:"vectordb_path"`
 			EmbeddingModel string   `yaml:"embedding_model"`
 			ChunkSize      int      `yaml:"chunk_size"`
-			TopK           int      `yaml:"top_k"` // number of context chunks to retrieve
+			TopK           int      `yaml:"top_k"`           // number of context chunks to retrieve
 			KnowledgeBases []string `yaml:"knowledge_bases"` // mitre_attack|malware_families|threat_reports|cve_db
 		} `yaml:"rag"`
 	} `yaml:"llm"`
@@ -152,6 +152,8 @@ type Config struct {
 			UseGPU      bool `yaml:"use_gpu"`
 			GPUDeviceID int  `yaml:"gpu_device_id"`
 		} `yaml:"onnx"`
+
+		VerifyPubKey string `yaml:"verify_pubkey"` // hex-encoded Ed25519 public key for model signatures
 	} `yaml:"ml"`
 
 	Detection struct {
@@ -169,6 +171,11 @@ type Config struct {
 			ScanOnExec    bool   `yaml:"scan_on_exec"`
 			MaxFileSizeMB int    `yaml:"max_file_size_mb"`
 		} `yaml:"yara"`
+
+		CustomRules struct {
+			Enabled   bool   `yaml:"enabled"`
+			RulesPath string `yaml:"rules_path"`
+		} `yaml:"custom_rules"`
 
 		IOC struct {
 			Enabled         bool   `yaml:"enabled"`
@@ -255,6 +262,13 @@ type Config struct {
 		BatchSize       int `yaml:"batch_size"`
 		BatchIntervalMs int `yaml:"batch_interval_ms"`
 	} `yaml:"performance"`
+
+	Baseline struct {
+		Enabled       bool    `yaml:"enabled"`
+		StoragePath   string  `yaml:"storage_path"`
+		LearningDays  int     `yaml:"learning_days"`
+		DeviationMult float64 `yaml:"deviation_mult"`
+	} `yaml:"baseline"`
 
 	// Legacy fields for backward compatibility with existing agent.example.yaml.
 	// These map to the older flat configuration layout. Use migrateLegacy in the
@@ -345,6 +359,9 @@ func Defaults() Config {
 	cfg.Performance.WorkerCount = runtime.NumCPU()
 	cfg.Performance.BatchSize = 50
 	cfg.Performance.BatchIntervalMs = 15000
+
+	cfg.Baseline.LearningDays = 7
+	cfg.Baseline.DeviationMult = 3.0
 
 	cfg.Service.TickInterval = time.Second
 	cfg.LegacyResponse.MinKillScore = 90

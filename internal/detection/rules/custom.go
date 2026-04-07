@@ -3,6 +3,9 @@ package rules
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,17 +83,80 @@ func NewCustomEngine(logger *zap.Logger) (*CustomEngine, error) {
 	}, nil
 }
 
-// LoadRules reads a YAML file containing custom detection rules, compiles
-// each CEL expression, and stores the resulting programs for evaluation.
+// LoadRules reads a YAML file or directory of .yaml/.yml files containing
+// custom detection rules, compiles each CEL expression, and stores the
+// resulting programs for evaluation.
 func (e *CustomEngine) LoadRules(path string) error {
-	data, err := os.ReadFile(path)
+	fi, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("cel: read rules: %w", err)
+		return fmt.Errorf("cel: rules path: %w", err)
+	}
+	var compiled []compiledRule
+	if fi.IsDir() {
+		compiled, err = e.loadRulesFromDir(path)
+		if err != nil {
+			return err
+		}
+	} else {
+		compiled, err = e.loadRulesFromFile(path)
+		if err != nil {
+			return err
+		}
 	}
 
+	e.mu.Lock()
+	e.rules = compiled
+	e.mu.Unlock()
+
+	e.logger.Info("cel: rules loaded", zap.Int("count", len(compiled)))
+	return nil
+}
+
+func (e *CustomEngine) loadRulesFromFile(path string) ([]compiledRule, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("cel: read rules: %w", err)
+	}
+	return e.compileRulesYAML(data, path)
+}
+
+func (e *CustomEngine) loadRulesFromDir(dir string) ([]compiledRule, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cel: read rules dir: %w", err)
+	}
+	var paths []string
+	for _, ent := range entries {
+		if ent.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(ent.Name()))
+		if ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+		paths = append(paths, filepath.Join(dir, ent.Name()))
+	}
+	sort.Strings(paths)
+
+	var merged []compiledRule
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("cel: read rules %q: %w", p, err)
+		}
+		part, err := e.compileRulesYAML(data, p)
+		if err != nil {
+			return nil, err
+		}
+		merged = append(merged, part...)
+	}
+	return merged, nil
+}
+
+func (e *CustomEngine) compileRulesYAML(data []byte, source string) ([]compiledRule, error) {
 	var file customRulesFile
 	if err := yaml.Unmarshal(data, &file); err != nil {
-		return fmt.Errorf("cel: parse rules: %w", err)
+		return nil, fmt.Errorf("cel: parse rules %q: %w", source, err)
 	}
 
 	compiled := make([]compiledRule, 0, len(file.Rules))
@@ -101,6 +167,7 @@ func (e *CustomEngine) LoadRules(path string) error {
 		prg, err := e.compile(r.Expression)
 		if err != nil {
 			e.logger.Warn("cel: skipping rule with compile error",
+				zap.String("source", source),
 				zap.String("rule_id", r.ID),
 				zap.Error(err),
 			)
@@ -108,13 +175,7 @@ func (e *CustomEngine) LoadRules(path string) error {
 		}
 		compiled = append(compiled, compiledRule{def: r, program: prg})
 	}
-
-	e.mu.Lock()
-	e.rules = compiled
-	e.mu.Unlock()
-
-	e.logger.Info("cel: rules loaded", zap.Int("count", len(compiled)))
-	return nil
+	return compiled, nil
 }
 
 // AddRule dynamically compiles and adds a single rule at runtime.

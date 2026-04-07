@@ -22,7 +22,8 @@ type EventContext struct {
 	RecentConnections     []string
 	RecentRegistryChanges []string
 	SimilarHistorical     []interface{}
-	ThreatIntelContext    []string
+	ThreatIntelContext     []string
+	BehavioralIndicators   []string
 }
 
 // ProcessInfo describes a single process in a process tree.

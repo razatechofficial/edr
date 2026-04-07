@@ -130,6 +130,8 @@ ml:
     use_gpu: false
     gpu_device_id: 0
 
+  verify_pubkey: ""
+
 # All detection engines enabled with local-only data sources.
 detection:
   sigma:
@@ -144,6 +146,10 @@ detection:
     scan_on_write: true
     scan_on_exec: true
     max_file_size_mb: 50
+
+  custom_rules:
+    enabled: true
+    rules_path: "/etc/edr/rules/custom/"
 
   ioc:
     enabled: true

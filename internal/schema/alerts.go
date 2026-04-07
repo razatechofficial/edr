@@ -22,10 +22,28 @@ type Alert struct {
 	Title         string    `json:"title"`
 	Description   string    `json:"description"`
 	Timestamp     time.Time `json:"timestamp"`
-	ProcessPID    int       `json:"process_pid,omitempty"`
-	ProcessName   string    `json:"process_name,omitempty"`
-	ProcessPath   string    `json:"process_path,omitempty"`
-	CommandLine   string    `json:"command_line,omitempty"`
+
+	// Process context
+	ProcessPID  int    `json:"process_pid,omitempty"`
+	ProcessName string `json:"process_name,omitempty"`
+	ProcessPath string `json:"process_path,omitempty"`
+	CommandLine string `json:"command_line,omitempty"`
+
+	// File context
+	FilePath      string `json:"file_path,omitempty"`
+	FileOperation string `json:"file_operation,omitempty"`
+
+	// Network context
+	Protocol string `json:"protocol,omitempty"`
+	DestIP   string `json:"dest_ip,omitempty"`
+	DestPort int    `json:"dest_port,omitempty"`
+	Domain   string `json:"domain,omitempty"`
+
+	// Auth context
+	User     string `json:"user,omitempty"`
+	AuthType string `json:"auth_type,omitempty"`
+	Outcome  string `json:"outcome,omitempty"`
+	SourceIP string `json:"source_ip,omitempty"`
 }
 
 type AuditRecord struct {

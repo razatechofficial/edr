@@ -183,6 +183,76 @@ func (c *Correlator) GetRecentConnections(pid uint32, window TimeWindow) []strin
 	return out
 }
 
+// ProcessTreeEntry represents a node in the process ancestry chain.
+type ProcessTreeEntry struct {
+	PID  uint32
+	PPID uint32
+	Name string
+	Path string
+	Args string
+	User string
+}
+
+// GetProcessTree walks up the process ancestry chain for the given PID,
+// returning entries from child to root. It searches all shards within the
+// given time window for process events to reconstruct the lineage.
+func (c *Correlator) GetProcessTree(pid uint32, window TimeWindow) []ProcessTreeEntry {
+	cutoff := time.Now().Add(-time.Duration(window))
+
+	procMap := make(map[uint32]ProcessTreeEntry)
+	for i := 0; i < correlatorShardCount; i++ {
+		shard := c.pidShards[i]
+		shard.mu.RLock()
+		for _, e := range shard.events {
+			if e.timestamp.Before(cutoff) {
+				continue
+			}
+			switch pe := e.event.(type) {
+			case *schema.ProcessEvent:
+				procMap[uint32(pe.PID)] = ProcessTreeEntry{
+					PID: uint32(pe.PID), PPID: uint32(pe.PPID),
+					Name: pe.ProcessName, Path: pe.ProcessPath,
+					Args: pe.CommandLine, User: pe.User,
+				}
+			case schema.ProcessEvent:
+				procMap[uint32(pe.PID)] = ProcessTreeEntry{
+					PID: uint32(pe.PID), PPID: uint32(pe.PPID),
+					Name: pe.ProcessName, Path: pe.ProcessPath,
+					Args: pe.CommandLine, User: pe.User,
+				}
+			}
+		}
+		shard.mu.RUnlock()
+	}
+
+	var tree []ProcessTreeEntry
+	visited := make(map[uint32]bool)
+	current := pid
+	for {
+		if visited[current] {
+			break
+		}
+		visited[current] = true
+		entry, ok := procMap[current]
+		if !ok {
+			break
+		}
+		tree = append(tree, entry)
+		if entry.PPID == 0 || entry.PPID == current {
+			break
+		}
+		current = entry.PPID
+	}
+	return tree
+}
+
+// GetRecentRegistryChanges returns registry modification descriptions for a
+// PID within the given window. Registry events are only collected on Windows;
+// on other platforms this returns nil.
+func (c *Correlator) GetRecentRegistryChanges(_ uint32, _ TimeWindow) []string {
+	return nil
+}
+
 // Stop cancels the background cleanup goroutine and blocks until it exits.
 func (c *Correlator) Stop() {
 	close(c.stopCh)
