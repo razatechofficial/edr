@@ -31,6 +31,7 @@ BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror
 .PHONY: build-linux build-darwin build-windows build-all
 .PHONY: ebpf proto
 .PHONY: test test-detection test-response test-race test-coverage
+.PHONY: test-bench
 .PHONY: rules-update intel-update models-update
 .PHONY: install-linux install-darwin
 .PHONY: package package-deb package-rpm package-pkg package-msi clean fmt lint vet
@@ -123,28 +124,23 @@ test-coverage:
 	@echo "==> HTML coverage report: coverage.html"
 	go tool cover -html=coverage.out -o coverage.html
 
+test-bench:
+	@echo "==> Running benchmark suite"
+	go test ./tests/benchmark/... -bench=. -benchmem -run=^$
+
 # ============================================================================
 # Rule, intel, and model updates
 # ============================================================================
 
 rules-update:
 	@echo "==> Updating detection rules"
-	@mkdir -p $(RULES_DIR)/sigma $(RULES_DIR)/yara
-	@echo "Fetching latest Sigma rules..."
-	@if command -v git >/dev/null 2>&1; then \
-		if [ -d $(RULES_DIR)/sigma/.git ]; then \
-			cd $(RULES_DIR)/sigma && git pull --ff-only; \
-		else \
-			git clone --depth 1 https://github.com/SigmaHQ/sigma.git $(RULES_DIR)/sigma-upstream || true; \
-		fi; \
-	fi
+	@./scripts/update-rules.sh
 	@echo "Rules update complete"
 
 intel-update:
 	@echo "==> Updating threat intelligence feeds"
-	@mkdir -p $(RULES_DIR)/ioc
-	@echo "Fetching latest IOC feeds..."
-	@echo "IOC update complete (configure MISP/OTX endpoints in agent.yaml)"
+	@./scripts/update-intel.sh
+	@echo "IOC update complete"
 
 models-update:
 	@echo "==> Updating ML models"
