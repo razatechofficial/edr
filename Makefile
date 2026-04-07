@@ -149,7 +149,13 @@ intel-update:
 models-update:
 	@echo "==> Updating ML models"
 	@mkdir -p $(MODELS_DIR)
-	@echo "Model update complete (configure model registry in agent.yaml)"
+	@if [ -x ./scripts/download-models.sh ]; then \
+		./scripts/download-models.sh; \
+	else \
+		echo "download script missing or not executable"; \
+		exit 1; \
+	fi
+	@echo "Model update complete"
 
 # ============================================================================
 # Install targets
