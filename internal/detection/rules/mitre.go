@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/razatechofficial/edr/pkg/events"
@@ -292,4 +293,22 @@ func (m *MITREMapper) MapTacticName(name string) string {
 		return id
 	}
 	return ""
+}
+
+// CoverageByTags returns sorted technique IDs inferred from Sigma-style tags.
+func (m *MITREMapper) CoverageByTags(tags []string) []string {
+	seen := make(map[string]struct{}, len(tags))
+	for _, t := range tags {
+		mt := m.MapSigmaTag(t)
+		if mt == nil || mt.TechniqueID == "" {
+			continue
+		}
+		seen[mt.TechniqueID] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }

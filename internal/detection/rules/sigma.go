@@ -23,6 +23,7 @@ import (
 type SigmaEngine struct {
 	rulesDir   string
 	evaluators []*sigmaeval.RuleEvaluator
+	enabled    map[string]bool
 	mapper     *MITREMapper
 	mu         sync.RWMutex
 	logger     *zap.Logger
@@ -43,6 +44,7 @@ func NewSigmaEngine(rulesDir string, logger *zap.Logger) (*SigmaEngine, error) {
 
 	e := &SigmaEngine{
 		rulesDir: rulesDir,
+		enabled:  make(map[string]bool),
 		mapper:   NewMITREMapper(),
 		logger:   logger,
 	}
@@ -86,6 +88,11 @@ func (e *SigmaEngine) LoadRules() error {
 
 	e.mu.Lock()
 	e.evaluators = evaluators
+	for _, ev := range evaluators {
+		if _, ok := e.enabled[ev.ID]; !ok {
+			e.enabled[ev.ID] = true
+		}
+	}
 	e.mu.Unlock()
 
 	e.logger.Info("sigma: rules loaded",
@@ -106,6 +113,12 @@ func (e *SigmaEngine) Evaluate(event map[string]interface{}) []*events.Alert {
 	ctx := context.Background()
 
 	for _, eval := range evals {
+		e.mu.RLock()
+		enabled := e.enabled[eval.ID]
+		e.mu.RUnlock()
+		if !enabled {
+			continue
+		}
 		result, err := eval.Matches(ctx, event)
 		if err != nil {
 			e.logger.Debug("sigma: evaluation error",
@@ -138,6 +151,26 @@ func (e *SigmaEngine) Evaluate(event map[string]interface{}) []*events.Alert {
 		alerts = append(alerts, alert)
 	}
 	return alerts
+}
+
+// SetRuleEnabled toggles a specific Sigma rule by ID at runtime.
+func (e *SigmaEngine) SetRuleEnabled(ruleID string, enabled bool) {
+	e.mu.Lock()
+	e.enabled[ruleID] = enabled
+	e.mu.Unlock()
+}
+
+// EnabledRuleCount returns number of currently enabled rules.
+func (e *SigmaEngine) EnabledRuleCount() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	n := 0
+	for _, ev := range e.evaluators {
+		if e.enabled[ev.ID] {
+			n++
+		}
+	}
+	return n
 }
 
 // EventToMap converts a typed event struct (e.g., ProcessEvent, FileEvent,
