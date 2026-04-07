@@ -32,6 +32,7 @@ BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror
 .PHONY: ebpf proto
 .PHONY: test test-detection test-response test-race test-coverage
 .PHONY: test-bench
+.PHONY: vulncheck
 .PHONY: rules-update intel-update models-update
 .PHONY: install-linux install-darwin
 .PHONY: package package-deb package-rpm package-pkg package-msi clean fmt lint vet
@@ -230,6 +231,15 @@ lint:
 vet:
 	@echo "==> Running go vet"
 	go vet ./...
+
+vulncheck:
+	@echo "==> Running govulncheck"
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		GOTOOLCHAIN=auto govulncheck ./...; \
+	else \
+		echo "govulncheck not installed"; \
+		exit 1; \
+	fi
 
 # ============================================================================
 # Clean
