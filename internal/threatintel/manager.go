@@ -3,6 +3,7 @@ package threatintel
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +54,8 @@ type Manager struct {
 
 	mu    sync.RWMutex
 	feeds []Feed
+	seen  map[string]time.Time
+	conf  map[string]float64
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -66,6 +69,15 @@ func NewManager(matcher *ioc.Matcher, logger *zap.Logger) *Manager {
 		logger:  logger,
 		stopCh:  make(chan struct{}),
 		doneCh:  make(chan struct{}),
+		seen:    make(map[string]time.Time),
+		conf: map[string]float64{
+			"misp":       0.95,
+			"cisa":       0.9,
+			"otx":        0.7,
+			"abuse.ch":   0.85,
+			"spamhaus":   0.85,
+			"torproject": 0.75,
+		},
 	}
 }
 
@@ -201,7 +213,24 @@ func (m *Manager) refreshAll(ctx context.Context) {
 
 func (m *Manager) ingestIndicators(source string, indicators []Indicator) {
 	var added int
+	now := time.Now()
 	for _, ind := range indicators {
+		key := strings.ToLower(ind.Type + ":" + ind.Value + ":" + source)
+		ttl := 24 * time.Hour
+		if ind.Type == "ip" {
+			ttl = 6 * time.Hour
+		}
+		if ind.Type == "domain" {
+			ttl = 12 * time.Hour
+		}
+		m.mu.Lock()
+		if exp, ok := m.seen[key]; ok && now.Before(exp) {
+			m.mu.Unlock()
+			continue
+		}
+		m.seen[key] = now.Add(ttl)
+		m.mu.Unlock()
+		sev := normalizeSeverity(ind.Severity, m.confidence(source))
 		switch ind.Type {
 		case "hash":
 			hashType := ioc.HashSHA256
@@ -216,7 +245,7 @@ func (m *Manager) ingestIndicators(source string, indicators []Indicator) {
 				Type:          hashType,
 				MalwareFamily: ind.MalwareFamily,
 				Source:        source,
-				Severity:      ind.Severity,
+				Severity:      sev,
 				Tags:          ind.Tags,
 			})
 			added++
@@ -224,7 +253,7 @@ func (m *Manager) ingestIndicators(source string, indicators []Indicator) {
 			m.matcher.IPs().Add(ioc.IPEntry{
 				Address:  ind.Value,
 				Source:   source,
-				Severity: ind.Severity,
+				Severity: sev,
 				Tags:     ind.Tags,
 			})
 			added++
@@ -232,7 +261,7 @@ func (m *Manager) ingestIndicators(source string, indicators []Indicator) {
 			m.matcher.Domains().Add(ioc.DomainEntry{
 				Domain:   ind.Value,
 				Source:   source,
-				Severity: ind.Severity,
+				Severity: sev,
 				Tags:     ind.Tags,
 			})
 			added++
@@ -244,4 +273,31 @@ func (m *Manager) ingestIndicators(source string, indicators []Indicator) {
 			zap.Int("count", added),
 		)
 	}
+}
+
+func (m *Manager) confidence(source string) float64 {
+	s := strings.ToLower(source)
+	for k, v := range m.conf {
+		if strings.Contains(s, k) {
+			return v
+		}
+	}
+	return 0.6
+}
+
+func normalizeSeverity(sev string, confidence float64) string {
+	s := strings.ToLower(strings.TrimSpace(sev))
+	if s == "" {
+		if confidence >= 0.9 {
+			return "high"
+		}
+		if confidence >= 0.75 {
+			return "medium"
+		}
+		return "low"
+	}
+	if confidence < 0.7 && s == "critical" {
+		return "high"
+	}
+	return s
 }
