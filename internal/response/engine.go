@@ -2,6 +2,9 @@ package response
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -320,6 +323,9 @@ type AuditEntry struct {
 	AlertID      string                 `json:"alert_id,omitempty"`
 	PlaybookName string                 `json:"playbook_name,omitempty"`
 	Operator     string                 `json:"operator"`
+	PrevHash     string                 `json:"prev_hash,omitempty"`
+	EntryHash    string                 `json:"entry_hash,omitempty"`
+	Signature    string                 `json:"signature,omitempty"`
 }
 
 // AuditLogger writes append-only JSON-lines audit records.
@@ -327,6 +333,8 @@ type AuditLogger struct {
 	mu   sync.Mutex
 	file *os.File
 	enc  *json.Encoder
+	prev []byte
+	key  []byte
 }
 
 // NewAuditLogger opens (or creates) the audit log file in append-only mode.
@@ -341,6 +349,7 @@ func NewAuditLogger(path string) (*AuditLogger, error) {
 	return &AuditLogger{
 		file: f,
 		enc:  json.NewEncoder(f),
+		key:  []byte(os.Getenv("EDR_AUDIT_SIGNING_KEY")),
 	}, nil
 }
 
@@ -348,9 +357,19 @@ func NewAuditLogger(path string) (*AuditLogger, error) {
 func (a *AuditLogger) Log(entry AuditEntry) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	prevHex := hex.EncodeToString(a.prev)
+	entry.PrevHash = prevHex
+	sum := entryDigest(entry)
+	entry.EntryHash = hex.EncodeToString(sum[:])
+	if len(a.key) > 0 {
+		mac := hmac.New(sha256.New, a.key)
+		mac.Write(sum[:])
+		entry.Signature = hex.EncodeToString(mac.Sum(nil))
+	}
 	if err := a.enc.Encode(entry); err != nil {
 		return fmt.Errorf("audit logger: encode: %w", err)
 	}
+	a.prev = sum[:]
 	return a.file.Sync()
 }
 
@@ -393,4 +412,32 @@ func isApproved(params map[string]interface{}) bool {
 	}
 	b, _ := v.(bool)
 	return b
+}
+
+func entryDigest(entry AuditEntry) [32]byte {
+	type digestEntry struct {
+		Timestamp    time.Time              `json:"timestamp"`
+		Action       Action                 `json:"action"`
+		Params       map[string]interface{} `json:"params,omitempty"`
+		Success      bool                   `json:"success"`
+		Message      string                 `json:"message"`
+		Duration     time.Duration          `json:"duration_ns,omitempty"`
+		AlertID      string                 `json:"alert_id,omitempty"`
+		PlaybookName string                 `json:"playbook_name,omitempty"`
+		Operator     string                 `json:"operator"`
+		PrevHash     string                 `json:"prev_hash,omitempty"`
+	}
+	b, _ := json.Marshal(digestEntry{
+		Timestamp:    entry.Timestamp,
+		Action:       entry.Action,
+		Params:       entry.Params,
+		Success:      entry.Success,
+		Message:      entry.Message,
+		Duration:     entry.Duration,
+		AlertID:      entry.AlertID,
+		PlaybookName: entry.PlaybookName,
+		Operator:     entry.Operator,
+		PrevHash:     entry.PrevHash,
+	})
+	return sha256.Sum256(b)
 }

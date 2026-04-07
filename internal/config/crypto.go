@@ -7,6 +7,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"os"
+	"runtime"
+	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -87,4 +90,24 @@ func GenerateSalt() ([]byte, error) {
 		return nil, fmt.Errorf("generating salt: %w", err)
 	}
 	return salt, nil
+}
+
+// DeriveHardwareBoundKey derives a key material candidate using host-bound
+// attributes and a caller secret. This is a software fallback for TPM-bound
+// environments and can be rotated by changing the epoch.
+func DeriveHardwareBoundKey(secret string, epoch int64) []byte {
+	host, _ := os.Hostname()
+	material := fmt.Sprintf("%s|%s|%d|%s", host, runtimeOSArch(), epoch, secret)
+	sum := sha256.Sum256([]byte(material))
+	return sum[:]
+}
+
+// RotateKey derives a fresh key using the current UTC day as epoch.
+func RotateKey(secret string) []byte {
+	epoch := time.Now().UTC().Unix() / 86400
+	return DeriveHardwareBoundKey(secret, epoch)
+}
+
+func runtimeOSArch() string {
+	return fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
 }
