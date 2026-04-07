@@ -20,8 +20,31 @@ const (
 	modelNetworkAnomaly = "network_anomaly"
 	modelRansomware     = "ransomware"
 
-	defaultMalwareThreshold = 0.5
+	defaultPEMaliciousThreshold = 0.80
+
+	defaultFilePEClassifier   = "pe_classifier.onnx"
+	defaultFileBehaviorLSTM   = "behavior_lstm.onnx"
+	defaultFileNetworkAnomaly = "network_anomaly.onnx"
+	defaultFileRansomware     = "ransomware.onnx"
 )
+
+// Config holds settings for constructing a new ML Engine.
+type Config struct {
+	ModelsDir string
+
+	// Model filenames (basename, resolved under ModelsDir). Empty = default.
+	PEClassifierFile   string
+	BehaviorLSTMFile   string
+	NetworkAnomalyFile string
+	RansomwareFile     string
+
+	// Hex-encoded Ed25519 public key for signature verification. Empty = off.
+	VerifyPubKeyHex string
+
+	// PEMaliciousThreshold is the score above which ScoreFile marks Malicious.
+	// Zero defaults to 0.80 to match agent ML threshold defaults.
+	PEMaliciousThreshold float64
+}
 
 // FileScore contains the ML classification result for an executable file.
 type FileScore struct {
@@ -64,29 +87,38 @@ type Engine struct {
 	netExtractor   *features.NetworkFeatureExtractor
 	logger         *zap.Logger
 	enabled        bool
+	peThreshold    float64
 }
 
 // NewEngine initializes the ML inference engine, loading available models from
-// modelsDir. Models that are not present on disk are skipped with a warning.
-func NewEngine(modelsDir string, logger *zap.Logger) (*Engine, error) {
-	info, err := os.Stat(modelsDir)
+// cfg.ModelsDir. Models that are not present on disk are skipped with a warning.
+func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
+	info, err := os.Stat(cfg.ModelsDir)
 	if err != nil {
 		return nil, fmt.Errorf("ml: models directory: %w", err)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("ml: %s is not a directory", modelsDir)
+		return nil, fmt.Errorf("ml: %s is not a directory", cfg.ModelsDir)
 	}
 
-	mgr := NewModelManager(nil)
+	var pubKeyBytes []byte
+	if cfg.VerifyPubKeyHex != "" {
+		b, err := hex.DecodeString(cfg.VerifyPubKeyHex)
+		if err != nil {
+			return nil, fmt.Errorf("ml: invalid verify_pubkey hex: %w", err)
+		}
+		pubKeyBytes = b
+	}
+	mgr := NewModelManager(pubKeyBytes)
 
 	modelFiles := map[string]string{
-		modelPEClassifier:   "pe_classifier.onnx",
-		modelBehaviorLSTM:   "behavior_lstm.onnx",
-		modelNetworkAnomaly: "network_anomaly.onnx",
-		modelRansomware:     "ransomware.onnx",
+		modelPEClassifier:   or(cfg.PEClassifierFile, defaultFilePEClassifier),
+		modelBehaviorLSTM:   or(cfg.BehaviorLSTMFile, defaultFileBehaviorLSTM),
+		modelNetworkAnomaly: or(cfg.NetworkAnomalyFile, defaultFileNetworkAnomaly),
+		modelRansomware:     or(cfg.RansomwareFile, defaultFileRansomware),
 	}
 	for name, file := range modelFiles {
-		p := filepath.Join(modelsDir, file)
+		p := filepath.Join(cfg.ModelsDir, file)
 		if _, statErr := os.Stat(p); statErr != nil {
 			logger.Warn("ml: model not found, skipping",
 				zap.String("model", name), zap.String("path", p))
@@ -97,6 +129,11 @@ func NewEngine(modelsDir string, logger *zap.Logger) (*Engine, error) {
 		}
 	}
 
+	peThr := cfg.PEMaliciousThreshold
+	if peThr <= 0 || peThr > 1 {
+		peThr = defaultPEMaliciousThreshold
+	}
+
 	return &Engine{
 		models:         mgr,
 		peExtractor:    &features.PEFeatureExtractor{},
@@ -104,7 +141,15 @@ func NewEngine(modelsDir string, logger *zap.Logger) (*Engine, error) {
 		netExtractor:   &features.NetworkFeatureExtractor{},
 		logger:         logger,
 		enabled:        true,
+		peThreshold:    peThr,
 	}, nil
+}
+
+func or(val, fallback string) string {
+	if val != "" {
+		return val
+	}
+	return fallback
 }
 
 // ScoreFile classifies an executable file (PE/ELF/Mach-O) as malicious or
@@ -146,7 +191,7 @@ func (e *Engine) ScoreFile(ctx context.Context, path string) (*FileScore, error)
 		Score:      malScore,
 		Confidence: softmaxConfidence(output),
 		Category:   classifyFileCategory(malScore),
-		Malicious:  malScore >= defaultMalwareThreshold,
+		Malicious:  malScore >= e.peThreshold,
 	}, nil
 }
 

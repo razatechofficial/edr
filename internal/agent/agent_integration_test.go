@@ -27,13 +27,7 @@ func TestProcessCycleWritesAlertFile(t *testing.T) {
 				ID:       "PROC-TEST",
 				Name:     "Any process with path",
 				Severity: "high",
-				When: struct {
-					ParentIn            []string "yaml:\"parent_in\""
-					ChildIn             []string "yaml:\"child_in\""
-					ProcessPathContains []string "yaml:\"process_path_contains\""
-					CommandLineContains []string "yaml:\"command_line_contains\""
-					CommandLineAll      []string "yaml:\"command_line_all_contains\""
-				}{
+				When: rules.Condition{
 					ProcessPathContains: []string{"/"},
 				},
 			},

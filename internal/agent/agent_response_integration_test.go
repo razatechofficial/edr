@@ -48,13 +48,7 @@ func TestProcessCycleMonitoringResponseAndAudit(t *testing.T) {
 				ID:       "PROC-CRIT",
 				Name:     "Critical temp shell",
 				Severity: "critical",
-				When: struct {
-					ParentIn            []string "yaml:\"parent_in\""
-					ChildIn             []string "yaml:\"child_in\""
-					ProcessPathContains []string "yaml:\"process_path_contains\""
-					CommandLineContains []string "yaml:\"command_line_contains\""
-					CommandLineAll      []string "yaml:\"command_line_all_contains\""
-				}{
+				When: rules.Condition{
 					ChildIn:             []string{"sh"},
 					CommandLineContains: []string{"/tmp/"},
 				},

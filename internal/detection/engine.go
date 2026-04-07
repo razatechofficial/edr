@@ -2,7 +2,9 @@ package detection
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 
 	"github.com/razatechofficial/edr/internal/detection/ioc"
 	"github.com/razatechofficial/edr/internal/detection/llm"
+	"github.com/razatechofficial/edr/internal/detection/llm/rag"
 	"github.com/razatechofficial/edr/internal/detection/ml"
 	"github.com/razatechofficial/edr/internal/detection/rules"
 	"github.com/razatechofficial/edr/internal/schema"
@@ -35,6 +38,35 @@ type EngineConfig struct {
 	IOCIPDBPath     string
 	IOCDomainDBPath string
 	MLModelsDir     string
+
+	// ML model filenames (basename only, resolved under MLModelsDir).
+	// Empty strings fall back to built-in defaults in ml.NewEngine.
+	MLModelPEClassifier   string
+	MLModelBehaviorLSTM   string
+	MLModelNetworkAnomaly string
+	MLModelRansomware     string
+
+	// ML detection thresholds (0.0–1.0). Zero values fall back to defaults.
+	MLThresholdPE        float64
+	MLThresholdNetwork   float64
+	MLThresholdBehavior  float64
+	MLThresholdRansomware float64
+
+	// ONNX Runtime settings.
+	MLONNXNumThreads  int
+	MLONNXUseGPU      bool
+	MLONNXGPUDeviceID int
+
+	// Hex-encoded Ed25519 public key for verifying ML model signatures.
+	// Empty disables signature verification.
+	MLVerifyPubKey string
+
+	RAGEnabled        bool
+	RAGStoragePath    string
+	RAGEmbeddingModel string
+	RAGTopK           int
+	RAGChunkSize      int
+	RAGKnowledgeBases []string
 }
 
 // Engine is the main detection orchestrator that runs events through all
@@ -51,6 +83,7 @@ type Engine struct {
 	sequencer  *SequenceEngine
 	ml         *ml.Engine
 	llm        *llm.Engine
+	ragEngine  *rag.Engine
 
 	cfg         EngineConfig
 	alertCh     chan *events.Alert
@@ -135,11 +168,29 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 	}
 
 	if cfg.MLEnabled && cfg.MLModelsDir != "" {
-		me, err := ml.NewEngine(cfg.MLModelsDir, logger)
+		peThr := cfg.MLThresholdPE
+		if peThr <= 0 || peThr > 1 {
+			peThr = 0.80
+		}
+		me, err := ml.NewEngine(ml.Config{
+			ModelsDir:              cfg.MLModelsDir,
+			PEClassifierFile:       cfg.MLModelPEClassifier,
+			BehaviorLSTMFile:       cfg.MLModelBehaviorLSTM,
+			NetworkAnomalyFile:     cfg.MLModelNetworkAnomaly,
+			RansomwareFile:         cfg.MLModelRansomware,
+			VerifyPubKeyHex:        cfg.MLVerifyPubKey,
+			PEMaliciousThreshold:   peThr,
+		}, logger)
 		if err != nil {
 			logger.Warn("engine: ml layer init failed, disabling", zap.Error(err))
 		} else {
 			e.ml = me
+		}
+	}
+
+	if cfg.RAGEnabled && cfg.RAGStoragePath != "" {
+		if err := e.initRAG(cfg); err != nil {
+			logger.Warn("engine: rag layer init failed, disabling", zap.Error(err))
 		}
 	}
 
@@ -158,6 +209,12 @@ func (e *Engine) Start(ctx context.Context) error {
 	ctx, e.cancel = context.WithCancel(ctx)
 	e.running = true
 	e.mu.Unlock()
+
+	if e.ml != nil {
+		if err := ml.InitRuntime(e.cfg.MLONNXNumThreads, e.cfg.MLONNXUseGPU, e.cfg.MLONNXGPUDeviceID); err != nil {
+			e.logger.Warn("engine: ONNX runtime init failed, ML scoring may be unavailable", zap.Error(err))
+		}
+	}
 
 	if e.sigma != nil {
 		e.wg.Add(1)
@@ -178,6 +235,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		zap.Bool("sequencer", e.sequencer != nil),
 		zap.Bool("ml", e.ml != nil),
 		zap.Bool("llm", e.llm != nil),
+		zap.Bool("rag", e.ragEngine != nil),
 	)
 	return nil
 }
@@ -216,6 +274,12 @@ func (e *Engine) Stop() error {
 	}
 	if e.correlator != nil {
 		e.correlator.Stop()
+	}
+	if e.ml != nil {
+		record(ml.ShutdownRuntime())
+	}
+	if e.ragEngine != nil {
+		record(e.ragEngine.Close())
 	}
 	return firstErr
 }
@@ -339,17 +403,21 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		}
 	}
 
+	// Wait for layers 1-4 so ML (layer 5) can use prior behavioral alerts
+	// (e.g. ransomware indicators) for scoring.
+	wg.Wait()
+
+	// Snapshot prior alerts for ML ransomware correlation.
+	resultMu.Lock()
+	priorAlerts := make([]*events.Alert, len(results))
+	copy(priorAlerts, results)
+	resultMu.Unlock()
+
 	// Layer 5: ML model scoring.
 	if e.ml != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer e.recoverLayer("ml")
-			collect(e.scoreWithML(ctx, event))
-		}()
+		defer e.recoverLayer("ml")
+		collect(e.scoreWithML(ctx, event, priorAlerts))
 	}
-
-	wg.Wait()
 
 	alerts := deduplicateAlerts(results)
 	if merged := mergeScores(alerts); merged != nil {
@@ -373,10 +441,28 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 
 	// Layer 6: LLM deep analysis (async, non-blocking).
 	if e.llm != nil && e.cfg.LLMEnabled && shouldEscalateToLLM(alerts) {
-		e.escalateToLLM(event)
+		e.escalateToLLM(event, alerts)
 	}
 
 	return alerts
+}
+
+// IOCMatcher returns the IOC matcher used by layer 1, or nil if IOC
+// detection was not enabled.
+func (e *Engine) IOCMatcher() *ioc.Matcher {
+	return e.ioc
+}
+
+// EnsureIOCMatcher returns the existing IOC matcher or lazily creates one
+// so that threat intel feeds can populate it even when the static IOC
+// databases were not configured at startup.
+func (e *Engine) EnsureIOCMatcher() *ioc.Matcher {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.ioc == nil {
+		e.ioc = ioc.NewMatcher(e.logger)
+	}
+	return e.ioc
 }
 
 // SetLLMEngine attaches an LLM engine for layer 6 deep analysis. It may be
@@ -385,6 +471,22 @@ func (e *Engine) SetLLMEngine(le *llm.Engine) {
 	e.mu.Lock()
 	e.llm = le
 	e.mu.Unlock()
+}
+
+// HotSwapModel atomically replaces a loaded ML model. The caller must supply
+// the raw ONNX bytes and the detached Ed25519 signature (verified only when
+// a public key was configured). Valid model names: pe_classifier,
+// behavior_lstm, network_anomaly, ransomware.
+func (e *Engine) HotSwapModel(name string, data []byte, signature []byte) error {
+	if e.ml == nil {
+		return fmt.Errorf("engine: ml layer is not enabled")
+	}
+	return e.ml.Models().HotSwap(name, data, signature)
+}
+
+// MLEngine returns the underlying ML engine, or nil if ML is disabled.
+func (e *Engine) MLEngine() *ml.Engine {
+	return e.ml
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +501,35 @@ func (e *Engine) recoverLayer(name string) {
 	}
 }
 
-func (e *Engine) scoreWithML(ctx context.Context, event interface{}) []*events.Alert {
+func (e *Engine) mlThresholdPE() float64 {
+	if e.cfg.MLThresholdPE > 0 {
+		return e.cfg.MLThresholdPE
+	}
+	return 0.80
+}
+
+func (e *Engine) mlThresholdNetwork() float64 {
+	if e.cfg.MLThresholdNetwork > 0 {
+		return e.cfg.MLThresholdNetwork
+	}
+	return 0.70
+}
+
+func (e *Engine) mlThresholdBehavior() float64 {
+	if e.cfg.MLThresholdBehavior > 0 {
+		return e.cfg.MLThresholdBehavior
+	}
+	return 0.75
+}
+
+func (e *Engine) mlThresholdRansomware() float64 {
+	if e.cfg.MLThresholdRansomware > 0 {
+		return e.cfg.MLThresholdRansomware
+	}
+	return 0.85
+}
+
+func (e *Engine) scoreWithML(ctx context.Context, event interface{}, priorAlerts []*events.Alert) []*events.Alert {
 	var alerts []*events.Alert
 
 	switch event.(type) {
@@ -413,7 +543,7 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}) []*events.A
 			e.logger.Debug("engine: ml file scoring failed", zap.Error(err))
 			return nil
 		}
-		if score.Malicious {
+		if score.Score >= e.mlThresholdPE() {
 			alerts = append(alerts, &events.Alert{
 				ID:          uuid.New().String(),
 				RuleID:      "ml-pe-classifier",
@@ -433,7 +563,7 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}) []*events.A
 			e.logger.Debug("engine: ml network scoring failed", zap.Error(err))
 			return nil
 		}
-		if score.Score >= 0.7 {
+		if score.Score >= e.mlThresholdNetwork() {
 			alerts = append(alerts, &events.Alert{
 				ID:          uuid.New().String(),
 				RuleID:      "ml-network-anomaly",
@@ -461,7 +591,7 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}) []*events.A
 			e.logger.Debug("engine: ml behavior scoring failed", zap.Error(err))
 			return nil
 		}
-		if score.Score >= 0.7 {
+		if score.Score >= e.mlThresholdBehavior() {
 			alerts = append(alerts, &events.Alert{
 				ID:          uuid.New().String(),
 				RuleID:      "ml-behavior-lstm",
@@ -476,15 +606,115 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}) []*events.A
 		}
 	}
 
+	// Score ransomware when prior behavioral alerts contain ransomware signals.
+	if ransomIndicators := e.extractRansomwareIndicators(priorAlerts); len(ransomIndicators) > 0 {
+		rScore, err := e.ml.ScoreRansomware(ctx, ransomIndicators)
+		if err != nil {
+			e.logger.Debug("engine: ml ransomware scoring failed", zap.Error(err))
+		} else if rScore.Score >= e.mlThresholdRansomware() {
+			alerts = append(alerts, &events.Alert{
+				ID:          uuid.New().String(),
+				RuleID:      "ml-ransomware",
+				RuleName:    "ML Ransomware Classifier",
+				Severity:    mlScoreToSeverity(rScore.Score),
+				Title:       fmt.Sprintf("ML: ransomware activity detected (%.2f)", rScore.Score),
+				Description: fmt.Sprintf("Category %s, confidence %.2f", rScore.Category, rScore.Confidence),
+				Timestamp:   time.Now().UTC(),
+				Tags:        []string{"ml", "ransomware", rScore.Category},
+				RawEvent:    event,
+			})
+		}
+	}
+
 	return alerts
 }
 
-func (e *Engine) escalateToLLM(event interface{}) {
+// extractRansomwareIndicators builds a ransomware indicator map from prior
+// behavioral alerts. Returns nil if no ransomware-related alerts are present.
+func (e *Engine) extractRansomwareIndicators(priorAlerts []*events.Alert) map[string]float64 {
+	var found bool
+	for _, a := range priorAlerts {
+		for _, t := range a.Tags {
+			if t == "ransomware" {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	indicators := make(map[string]float64)
+	for _, a := range priorAlerts {
+		desc := a.Description + " " + a.Title
+		if containsIndicator(desc, "entropy") {
+			indicators["entropy_increase_rate"] = 0.9
+		}
+		if containsIndicator(desc, "mass_file") || containsIndicator(desc, "mass file") {
+			indicators["file_rename_rate"] = 0.8
+			indicators["file_delete_rate"] = 0.7
+		}
+		if containsIndicator(desc, "extension") {
+			indicators["file_type_change_rate"] = 0.9
+			indicators["known_extension_append"] = 0.9
+		}
+		if containsIndicator(desc, "shadow") {
+			indicators["shadow_copy_deletion"] = 1.0
+		}
+		if containsIndicator(desc, "ransom_note") || containsIndicator(desc, "ransom note") {
+			indicators["ransom_note_similarity"] = 0.9
+		}
+		if containsIndicator(desc, "encrypt") {
+			indicators["encryption_api_calls"] = 0.8
+		}
+	}
+	return indicators
+}
+
+func containsIndicator(text, keyword string) bool {
+	return strings.Contains(strings.ToLower(text), strings.ToLower(keyword))
+}
+
+func (e *Engine) escalateToLLM(event interface{}, priorAlerts []*events.Alert) {
 	pid := extractPID(event)
 	eventCtx := &llm.EventContext{Event: event}
+
 	if e.correlator != nil {
 		eventCtx.RecentFiles = e.correlator.GetRecentFiles(pid, Window5m)
 		eventCtx.RecentConnections = e.correlator.GetRecentConnections(pid, Window5m)
+
+		for _, entry := range e.correlator.GetProcessTree(pid, Window5m) {
+			eventCtx.ProcessTree = append(eventCtx.ProcessTree, llm.ProcessInfo{
+				PID: entry.PID, PPID: entry.PPID,
+				Name: entry.Name, Path: entry.Path,
+				Args: entry.Args, User: entry.User,
+			})
+		}
+
+		eventCtx.RecentRegistryChanges = e.correlator.GetRecentRegistryChanges(pid, Window5m)
+	}
+
+	if e.ioc != nil {
+		for _, m := range e.ioc.CheckEvent(event) {
+			entry := fmt.Sprintf("Known malicious %s: %s (source: %s)", m.Type, m.Indicator, m.Source)
+			if m.MalwareFamily != "" {
+				entry += fmt.Sprintf(", family: %s", m.MalwareFamily)
+			}
+			eventCtx.ThreatIntelContext = append(eventCtx.ThreatIntelContext, entry)
+		}
+	}
+
+	for _, a := range priorAlerts {
+		eventCtx.BehavioralIndicators = append(eventCtx.BehavioralIndicators,
+			fmt.Sprintf("[%s] %s (severity: %s)", a.RuleName, a.Title, a.Severity))
+	}
+
+	if e.ragEngine != nil {
+		e.enrichFromRAG(eventCtx)
 	}
 
 	ch := e.llm.AnalyzeAsync(eventCtx)
@@ -526,6 +756,76 @@ func (e *Engine) escalateToLLM(event interface{}) {
 		case <-e.stopCh:
 		}
 	}()
+}
+
+// initRAG creates the RAG engine and indexes the configured knowledge bases.
+func (e *Engine) initRAG(cfg EngineConfig) error {
+	re, err := rag.NewEngine(cfg.RAGStoragePath, cfg.RAGEmbeddingModel, cfg.RAGTopK, cfg.RAGChunkSize)
+	if err != nil {
+		return fmt.Errorf("rag init: %w", err)
+	}
+	ctx := context.Background()
+	for _, kb := range cfg.RAGKnowledgeBases {
+		if err := re.IndexKnowledgeBase(ctx, kb); err != nil {
+			e.logger.Warn("engine: rag knowledge base index failed",
+				zap.String("kb", kb), zap.Error(err))
+		}
+	}
+	e.ragEngine = re
+	return nil
+}
+
+// SetRAGEngine attaches a pre-configured RAG engine. It may be called after
+// construction to defer RAG setup or supply an externally created engine.
+func (e *Engine) SetRAGEngine(re *rag.Engine) {
+	e.mu.Lock()
+	e.ragEngine = re
+	e.mu.Unlock()
+}
+
+// enrichFromRAG queries the RAG engine for knowledge relevant to the event
+// and appends results to the EventContext. Failures are logged and silently
+// ignored so the LLM analysis proceeds without RAG context.
+func (e *Engine) enrichFromRAG(eventCtx *llm.EventContext) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	query := buildRAGQuery(eventCtx)
+	chunks, err := e.ragEngine.Query(ctx, query)
+	if err != nil {
+		e.logger.Debug("engine: rag query failed, continuing without", zap.Error(err))
+		return
+	}
+
+	for _, chunk := range chunks {
+		if chunk.Score < 0.1 {
+			continue
+		}
+		eventCtx.SimilarHistorical = append(eventCtx.SimilarHistorical, map[string]interface{}{
+			"source": chunk.Metadata["source"],
+			"text":   chunk.Text,
+			"score":  chunk.Score,
+		})
+	}
+}
+
+func buildRAGQuery(eventCtx *llm.EventContext) string {
+	var parts []string
+	if eventCtx.Event != nil {
+		if raw, err := json.Marshal(eventCtx.Event); err == nil {
+			parts = append(parts, string(raw))
+		}
+	}
+	for _, ti := range eventCtx.ThreatIntelContext {
+		parts = append(parts, ti)
+	}
+	for _, bi := range eventCtx.BehavioralIndicators {
+		parts = append(parts, bi)
+	}
+	if len(parts) == 0 {
+		return "security event analysis"
+	}
+	return strings.Join(parts, " ")
 }
 
 // ---------------------------------------------------------------------------
