@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"sync"
@@ -41,22 +42,30 @@ func LoadTLSConfig(certPath, keyPath, caPath string, mutualTLS bool) (*tls.Confi
 		cfg.Certificates = []tls.Certificate{cert}
 	}
 
-	var pinnedHash []byte
+	var pinnedSPKIHash []byte
 	if caPath != "" {
 		caPEM, _ := os.ReadFile(caPath)
-		h := sha256.Sum256(caPEM)
-		pinnedHash = h[:]
+		if block, _ := pem.Decode(caPEM); block != nil {
+			if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
+				h := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+				pinnedSPKIHash = h[:]
+			}
+		}
 	}
 
-	if pinnedHash != nil {
+	if pinnedSPKIHash != nil {
 		cfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			for _, raw := range rawCerts {
-				h := sha256.Sum256(raw)
-				if equalBytes(h[:], pinnedHash) {
+				cert, err := x509.ParseCertificate(raw)
+				if err != nil {
+					continue
+				}
+				h := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+				if equalBytes(h[:], pinnedSPKIHash) {
 					return nil
 				}
 			}
-			return fmt.Errorf("auth: certificate pin mismatch")
+			return fmt.Errorf("auth: certificate public key pin mismatch")
 		}
 	}
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/google/uuid"
@@ -56,6 +57,13 @@ func Validate(cfg *Config) error {
 	if cfg.Server.ReconnectSec != 0 {
 		validateMin(&errs, "server.reconnect_sec", cfg.Server.ReconnectSec, 1)
 	}
+	if cfg.Server.MutualTLS && (cfg.Server.TLSCertPath != "" || cfg.Server.TLSKeyPath != "") {
+		validateFileReadable(&errs, "server.tls_cert", cfg.Server.TLSCertPath)
+		validateFileReadable(&errs, "server.tls_key", cfg.Server.TLSKeyPath)
+	}
+	if cfg.Server.CACertPath != "" {
+		validateFileReadable(&errs, "server.ca_cert", cfg.Server.CACertPath)
+	}
 
 	llmProviders := []string{
 		"openai", "anthropic", "grok", "groq", "gemini",
@@ -85,11 +93,20 @@ func Validate(cfg *Config) error {
 		validateThreshold(&errs, "ml.thresholds.ransomware_score", cfg.ML.Thresholds.RansomwareScore)
 		validateThreshold(&errs, "ml.thresholds.network_anomaly", cfg.ML.Thresholds.NetworkAnomaly)
 	}
+	if cfg.ML.Enabled && cfg.ML.ModelsDir != "" {
+		validateDirExists(&errs, "ml.models_dir", cfg.ML.ModelsDir)
+	}
 
 	if cfg.Detection.Behavioral.SensitivityLevel != "" {
 		validateEnum(&errs, "detection.behavioral.sensitivity",
 			cfg.Detection.Behavioral.SensitivityLevel,
 			"low", "medium", "high", "paranoid")
+	}
+	if !cfg.Detection.Sigma.Enabled &&
+		!cfg.Detection.YARA.Enabled &&
+		!cfg.Detection.IOC.Enabled &&
+		!cfg.ML.Enabled {
+		errs.add("at least one detection layer must be enabled: sigma|yara|ioc|ml")
 	}
 
 	validateRange(&errs, "performance.max_cpu_percent", cfg.Performance.MaxCPUPercent, 1, 100)
@@ -145,5 +162,35 @@ func validateMin(errs *ValidationErrors, field string, value, min int) {
 func validateThreshold(errs *ValidationErrors, field string, value float32) {
 	if value < 0 || value > 1 {
 		errs.add("%s must be 0.0–1.0, got %.2f", field, value)
+	}
+}
+
+func validateFileReadable(errs *ValidationErrors, field, path string) {
+	if strings.TrimSpace(path) == "" {
+		errs.add("%s is required", field)
+		return
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		errs.add("%s not readable at %q: %v", field, path, err)
+		return
+	}
+	if st.IsDir() {
+		errs.add("%s must be a file, got directory %q", field, path)
+	}
+}
+
+func validateDirExists(errs *ValidationErrors, field, path string) {
+	if strings.TrimSpace(path) == "" {
+		errs.add("%s is required", field)
+		return
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		errs.add("%s not accessible at %q: %v", field, path, err)
+		return
+	}
+	if !st.IsDir() {
+		errs.add("%s must be a directory, got file %q", field, path)
 	}
 }
