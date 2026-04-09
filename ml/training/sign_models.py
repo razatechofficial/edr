@@ -146,6 +146,32 @@ def verify_model(model_path: Path, public_key: Ed25519PublicKey) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def sign_directory(model_dir: Path, key_path: Path) -> None:
+    """Sign all .onnx files in model_dir using the Ed25519 key at key_path.
+
+    If key_path is a directory, loads model_signing.key from it.
+    If key_path is a file, loads it directly as a PEM private key.
+    """
+    onnx_files = sorted(model_dir.glob("*.onnx"))
+    if not onnx_files:
+        logger.error("No .onnx files found in %s", model_dir)
+        return
+
+    if key_path.is_dir():
+        private_key = load_private_key(key_path)
+    else:
+        from cryptography.hazmat.primitives.serialization import load_pem_private_key
+        priv_bytes = key_path.read_bytes()
+        key = load_pem_private_key(priv_bytes, password=None)
+        if not isinstance(key, Ed25519PrivateKey):
+            raise TypeError("Key is not Ed25519")
+        private_key = key
+
+    for p in onnx_files:
+        sign_model(p, private_key)
+    logger.info("Signed %d models in %s", len(onnx_files), model_dir)
+
+
 def cmd_sign(args: argparse.Namespace) -> None:
     model_dir = Path(args.model_dir)
     key_dir = Path(args.key_dir)
