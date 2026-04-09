@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -107,6 +108,23 @@ func ShutdownRuntime() error {
 	return ort.DestroyEnvironment()
 }
 
+// InferenceGuard controls resource limits for ONNX sessions.
+type InferenceGuard struct {
+	Timeout      time.Duration // max duration for a single prediction
+	MemoryCeilMB int           // max memory per session (advisory)
+	BatchSize    int           // max batch size for batch inference
+}
+
+// DefaultInferenceGuard returns conservative defaults suitable for
+// a 32GB machine running alongside the EDR collector.
+func DefaultInferenceGuard() InferenceGuard {
+	return InferenceGuard{
+		Timeout:      500 * time.Millisecond,
+		MemoryCeilMB: 512,
+		BatchSize:    32,
+	}
+}
+
 // ONNXSession wraps a single ONNX model for inference.
 type ONNXSession struct {
 	session     *ort.AdvancedSession
@@ -117,6 +135,7 @@ type ONNXSession struct {
 	inputTensor  *ort.Tensor[float32]
 	outputTensor *ort.Tensor[float32]
 	mu          sync.RWMutex
+	guard       InferenceGuard
 }
 
 // NewONNXSession loads an ONNX model from disk, discovers its input/output
@@ -166,11 +185,20 @@ func NewONNXSession(modelPath string) (*ONNXSession, error) {
 		outputShape:  outShape,
 		inputTensor:  inTensor,
 		outputTensor: outTensor,
+		guard:        DefaultInferenceGuard(),
 	}, nil
+}
+
+// SetGuard configures resource limits for this session.
+func (s *ONNXSession) SetGuard(g InferenceGuard) {
+	s.mu.Lock()
+	s.guard = g
+	s.mu.Unlock()
 }
 
 // Predict runs inference on the provided input features and returns the model
 // output. Concurrent calls are serialized to protect shared tensor buffers.
+// Inference is aborted if it exceeds the configured timeout guard.
 func (s *ONNXSession) Predict(input []float32) ([]float32, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -183,14 +211,55 @@ func (s *ONNXSession) Predict(input []float32) ([]float32, error) {
 	data := s.inputTensor.GetData()
 	copy(data, input)
 
-	if err := s.session.Run(); err != nil {
-		return nil, fmt.Errorf("onnx: inference: %w", err)
+	type inferResult struct {
+		err error
+	}
+	done := make(chan inferResult, 1)
+
+	go func() {
+		done <- inferResult{err: s.session.Run()}
+	}()
+
+	timeout := s.guard.Timeout
+	if timeout <= 0 {
+		timeout = 500 * time.Millisecond
+	}
+
+	select {
+	case res := <-done:
+		if res.err != nil {
+			return nil, fmt.Errorf("onnx: inference: %w", res.err)
+		}
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("onnx: inference timed out after %v", timeout)
 	}
 
 	out := s.outputTensor.GetData()
 	result := make([]float32, len(out))
 	copy(result, out)
 	return result, nil
+}
+
+// PredictBatch runs inference on multiple inputs (up to guard.BatchSize),
+// returning results for each input.
+func (s *ONNXSession) PredictBatch(inputs [][]float32) ([][]float32, error) {
+	maxBatch := s.guard.BatchSize
+	if maxBatch <= 0 {
+		maxBatch = 32
+	}
+	if len(inputs) > maxBatch {
+		inputs = inputs[:maxBatch]
+	}
+
+	results := make([][]float32, len(inputs))
+	for i, in := range inputs {
+		out, err := s.Predict(in)
+		if err != nil {
+			return nil, fmt.Errorf("onnx: batch[%d]: %w", i, err)
+		}
+		results[i] = out
+	}
+	return results, nil
 }
 
 // InputShape returns the model's expected input tensor dimensions.
