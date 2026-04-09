@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-09T10:57:39Z",
+  "models": [
+    {
+      "name": "pe_classifier",
+      "file": "pe_classifier.onnx",
+      "sha256": "f53ed3b91a5aef9c4eb838f0eff8c3cf2e995f1f1cf15396a722eb1d220b01ec",
+      "source": "synthetic_baseline",
+      "version": "1.0.0-baseline",
+      "size_bytes": 32559
+    },
+    {
+      "name": "behavior_lstm",
+      "file": "behavior_lstm.onnx",
+      "sha256": "70a7c9cb6a44c7c15b07350e30f52ba0fb2c4e2b9851c9165ae8c82ba86f4012",
+      "source": "synthetic_baseline",
+      "version": "1.0.0-baseline",
+      "size_bytes": 252831
+    },
+    {
+      "name": "network_anomaly",
+      "file": "network_anomaly.onnx",
+      "sha256": "9b948b57040df79dc6df40c85cd3fc0694a01658baf982ef0fe35f0ac9580f4e",
+      "source": "synthetic_baseline",
+      "version": "1.0.0-baseline",
+      "size_bytes": 11500
+    },
+    {
+      "name": "ransomware",
+      "file": "ransomware.onnx",
+      "sha256": "e20a70413b889b66c0db48b655b8395b780b6a29729c5f05c2aebb85f0b7bc20",
+      "source": "synthetic_baseline",
+      "version": "1.0.0-baseline",
+      "size_bytes": 8018
+    }
+  ]
+}
