@@ -20,7 +20,19 @@ const (
 	EmbedLocal EmbedderMode = iota
 	// EmbedOpenAI uses the OpenAI embeddings API.
 	EmbedOpenAI
+	// EmbedSecBERT uses a locally-served SecBERT ONNX model for semantic
+	// embeddings in air-gapped deployments. This replaces TF-IDF with
+	// transformer-based embeddings that understand security domain vocabulary.
+	EmbedSecBERT
 )
+
+// SecBERTSession abstracts ONNX-based SecBERT inference so the embedder
+// doesn't depend directly on the ml package (avoids circular imports).
+type SecBERTSession interface {
+	EmbedText(text string) ([]float32, error)
+	Dimension() int
+	Close()
+}
 
 // Embedder generates fixed-dimension text embeddings via a local algorithm or
 // cloud API.
@@ -35,6 +47,9 @@ type Embedder struct {
 	vocab map[string]int
 	idf   []float64
 	docs  int
+
+	// SecBERT mode: ONNX session for transformer embeddings
+	secbert SecBERTSession
 }
 
 // NewEmbedder creates an Embedder. For EmbedLocal, apiKey/model are ignored.
@@ -56,14 +71,31 @@ func NewEmbedder(mode EmbedderMode, apiKey, model string, dimension int) *Embedd
 	}
 }
 
+// SetSecBERT configures the SecBERT ONNX session for transformer embeddings.
+func (e *Embedder) SetSecBERT(session SecBERTSession) {
+	e.secbert = session
+	if session != nil {
+		e.dimension = session.Dimension()
+	}
+}
+
 // Embed returns a vector representation of text.
 func (e *Embedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	switch e.mode {
 	case EmbedOpenAI:
 		return e.embedOpenAI(ctx, text)
+	case EmbedSecBERT:
+		return e.embedSecBERT(text)
 	default:
 		return e.embedLocal(text), nil
 	}
+}
+
+func (e *Embedder) embedSecBERT(text string) ([]float32, error) {
+	if e.secbert == nil {
+		return e.embedLocal(text), nil
+	}
+	return e.secbert.EmbedText(text)
 }
 
 // TrainLocal updates the local TF-IDF vocabulary with a new document.
