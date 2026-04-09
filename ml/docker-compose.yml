@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  train-pe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["train", "--model", "pe", "--data", "/data", "--output", "/models"]
+    volumes:
+      - ../data:/data
+      - ../models:/models
+      - ../keys:/keys:ro
+
+  train-behavior:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["train", "--model", "behavior", "--data", "/data", "--output", "/models"]
+    volumes:
+      - ../data:/data
+      - ../models:/models
+
+  train-network:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["train", "--model", "network", "--data", "/data", "--output", "/models"]
+    volumes:
+      - ../data:/data
+      - ../models:/models
+
+  train-ransomware:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["train", "--model", "ransomware", "--data", "/data", "--output", "/models"]
+    volumes:
+      - ../data:/data
+      - ../models:/models
+
+  export:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["export", "--format", "onnx", "--input", "/checkpoints", "--output", "/models"]
+    volumes:
+      - ../models:/models
+      - ./checkpoints:/checkpoints:ro
+
+  sign:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["sign", "--model", "/models", "--key", "/keys/signing.key"]
+    volumes:
+      - ../models:/models
+      - ../keys:/keys:ro
+
+  validate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["validate", "--model-dir", "/models"]
+    volumes:
+      - ../models:/models:ro
