@@ -27,6 +27,7 @@ go.work.sum
 # env file
 .env
 
+.venv/
 ml/training/.venv/
 
 *.md
