@@ -195,11 +195,11 @@ llm:
 ml:
   # Enable ML model inference.
   # Env: ML_ENABLED
-  enabled: false
+  enabled: true
 
   # Directory containing ONNX model files.
   # Env: ML_MODELS_DIR
-  models_dir: ""
+  models_dir: "./models"
 
   # Automatically download model updates.
   auto_update: false
@@ -208,12 +208,12 @@ ml:
   update_interval_hours: 0
 
   models:
-    pe_classifier: ""
-    behavior_lstm: ""
-    network_anomaly: ""
-    ransomware: ""
+    pe_classifier: "pe_classifier.onnx"
+    behavior_lstm: "behavior_lstm.onnx"
+    network_anomaly: "network_anomaly.onnx"
+    ransomware: "ransomware.onnx"
 
-  # Detection confidence thresholds (0.0–1.0).
+  # Detection confidence thresholds (0.0-1.0).
   thresholds:
     pe_malicious: 0.80
     behavior_anomaly: 0.75
@@ -221,7 +221,7 @@ ml:
     network_anomaly: 0.70
 
   onnx:
-    num_threads: 0
+    num_threads: 4
     use_gpu: false
     gpu_device_id: 0
 

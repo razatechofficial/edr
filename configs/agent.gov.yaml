@@ -71,10 +71,10 @@ ml:
   update_interval_hours: 0
 
   models:
-    pe_classifier: ""
-    behavior_lstm: ""
-    network_anomaly: ""
-    ransomware: ""
+    pe_classifier: "pe_classifier.onnx"
+    behavior_lstm: "behavior_lstm.onnx"
+    network_anomaly: "network_anomaly.onnx"
+    ransomware: "ransomware.onnx"
 
   thresholds:
     pe_malicious: 0.60
@@ -84,7 +84,7 @@ ml:
 
   onnx:
     num_threads: 4
-    use_gpu: true
+    use_gpu: false
     gpu_device_id: 0
 
   verify_pubkey: ""
