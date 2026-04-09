@@ -34,6 +34,8 @@ BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror
 .PHONY: test-bench
 .PHONY: vulncheck
 .PHONY: rules-update intel-update models-update
+.PHONY: models-bootstrap models-validate models-sign
+.PHONY: train-all train-pe train-behavior train-network train-ransomware
 .PHONY: install-linux install-darwin
 .PHONY: package package-deb package-rpm package-pkg package-msi clean fmt lint vet
 
@@ -167,6 +169,33 @@ models-sign:
 	@echo "==> Signing ONNX models"
 	@if [ -z "$(KEY)" ]; then echo "Usage: make models-sign KEY=path/to/key.pem"; exit 1; fi
 	python3 scripts/convert_pretrained.py sign --models-dir $(MODELS_DIR) --key $(KEY)
+
+# ============================================================================
+# ML training targets
+# ============================================================================
+
+TRAIN_DATA   ?= ./data
+TRAIN_OUTPUT ?= $(MODELS_DIR)
+TRAIN_EPOCHS ?= 50
+
+train-all: train-pe train-behavior train-network train-ransomware
+	@echo "==> All models trained"
+
+train-pe:
+	@echo "==> Training PE classifier"
+	cd ml && python3 -m training train --model pe --data $(TRAIN_DATA) --output $(TRAIN_OUTPUT)
+
+train-behavior:
+	@echo "==> Training behavior LSTM"
+	cd ml && python3 -m training train --model behavior --data $(TRAIN_DATA) --output $(TRAIN_OUTPUT) --epochs $(TRAIN_EPOCHS)
+
+train-network:
+	@echo "==> Training network anomaly detector"
+	cd ml && python3 -m training train --model network --data $(TRAIN_DATA) --output $(TRAIN_OUTPUT) --epochs $(TRAIN_EPOCHS)
+
+train-ransomware:
+	@echo "==> Training ransomware detector"
+	cd ml && python3 -m training train --model ransomware --data $(TRAIN_DATA) --output $(TRAIN_OUTPUT)
 
 # ============================================================================
 # Install targets
