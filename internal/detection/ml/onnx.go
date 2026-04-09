@@ -4,27 +4,101 @@ package ml
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
 
 var (
-	runtimeOnce sync.Once
-	runtimeErr  error
+	runtimeOnce    sync.Once
+	runtimeErr     error
+	globalOpts     *ort.SessionOptions
+	globalOptsMu   sync.Mutex
 )
 
 // InitRuntime initializes the ONNX Runtime globally. Must be called before
 // creating any sessions. Safe for concurrent calls; only the first invocation
-// takes effect.
+// takes effect. numThreads controls intra/inter-op parallelism (0 = ORT
+// default). useGPU and gpuDeviceID are reserved for future CUDA support.
 func InitRuntime(numThreads int, useGPU bool, gpuDeviceID int) error {
 	runtimeOnce.Do(func() {
+		if p := discoverLibraryPath(); p != "" {
+			ort.SetSharedLibraryPath(p)
+		}
+
 		if err := ort.InitializeEnvironment(); err != nil {
 			runtimeErr = fmt.Errorf("onnx: initialize environment: %w", err)
 			return
 		}
+
+		opts, err := ort.NewSessionOptions()
+		if err != nil {
+			runtimeErr = fmt.Errorf("onnx: create session options: %w", err)
+			return
+		}
+
+		if numThreads > 0 {
+			if err := opts.SetIntraOpNumThreads(numThreads); err != nil {
+				runtimeErr = fmt.Errorf("onnx: set intra-op threads: %w", err)
+				return
+			}
+			if err := opts.SetInterOpNumThreads(numThreads); err != nil {
+				runtimeErr = fmt.Errorf("onnx: set inter-op threads: %w", err)
+				return
+			}
+		}
+
+		globalOptsMu.Lock()
+		globalOpts = opts
+		globalOptsMu.Unlock()
 	})
 	return runtimeErr
+}
+
+// discoverLibraryPath attempts to locate the ONNX Runtime shared library
+// adjacent to the executable or in well-known system paths.
+func discoverLibraryPath() string {
+	var libName string
+	switch runtime.GOOS {
+	case "darwin":
+		libName = "libonnxruntime.dylib"
+	case "linux":
+		libName = "libonnxruntime.so"
+	case "windows":
+		libName = "onnxruntime.dll"
+	default:
+		return ""
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), libName)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	candidates := []string{
+		filepath.Join("/usr/lib", libName),
+		filepath.Join("/usr/local/lib", libName),
+	}
+	if runtime.GOOS == "darwin" {
+		candidates = append(candidates, filepath.Join("/opt/homebrew/lib", libName))
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+func getSessionOptions() *ort.SessionOptions {
+	globalOptsMu.Lock()
+	defer globalOptsMu.Unlock()
+	return globalOpts
 }
 
 // ShutdownRuntime tears down the ONNX Runtime environment. Call once at
@@ -76,7 +150,7 @@ func NewONNXSession(modelPath string) (*ONNXSession, error) {
 		[]string{outputs[0].Name},
 		[]ort.Value{inTensor},
 		[]ort.Value{outTensor},
-		nil,
+		getSessionOptions(),
 	)
 	if err != nil {
 		_ = inTensor.Destroy()
