@@ -154,6 +154,20 @@ models-update:
 	fi
 	@echo "Model update complete"
 
+models-bootstrap:
+	@echo "==> Generating baseline ONNX models"
+	python3 scripts/convert_pretrained.py baseline --output $(MODELS_DIR)
+	@echo "Baseline models ready in $(MODELS_DIR)/"
+
+models-validate:
+	@echo "==> Validating ONNX models"
+	python3 ml/training/export_onnx.py validate --model-dir $(MODELS_DIR)
+
+models-sign:
+	@echo "==> Signing ONNX models"
+	@if [ -z "$(KEY)" ]; then echo "Usage: make models-sign KEY=path/to/key.pem"; exit 1; fi
+	python3 scripts/convert_pretrained.py sign --models-dir $(MODELS_DIR) --key $(KEY)
+
 # ============================================================================
 # Install targets
 # ============================================================================
