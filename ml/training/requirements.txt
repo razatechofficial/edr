@@ -10,6 +10,7 @@ onnxruntime>=1.16,<2.0
 skl2onnx>=1.16,<2.0
 onnxmltools>=1.12,<2.0
 thrember>=0.2
+lief>=0.14,<1.0
 cryptography>=41.0,<43.0
 matplotlib>=3.8,<4.0
 seaborn>=0.13,<1.0
