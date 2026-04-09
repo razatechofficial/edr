@@ -122,6 +122,24 @@ type IdentityScore struct {
 	Category   string  `json:"category"`
 }
 
+// ABTestMode controls how shadow/canary models are evaluated.
+type ABTestMode int
+
+const (
+	// ABTestOff disables A/B testing.
+	ABTestOff ABTestMode = iota
+	// ABTestShadow runs both models, logs both scores, uses only primary.
+	ABTestShadow
+	// ABTestCanary routes a percentage of events to the candidate model.
+	ABTestCanary
+)
+
+// ABTestConfig controls shadow/canary model deployment.
+type ABTestConfig struct {
+	Mode          ABTestMode
+	CanaryPercent float64 // 0-100, used in Canary mode
+}
+
 // Engine orchestrates ML model inference for threat detection.
 type Engine struct {
 	models              *ModelManager
@@ -136,6 +154,9 @@ type Engine struct {
 	logger              *zap.Logger
 	enabled             bool
 	peThreshold         float64
+	abConfig            ABTestConfig
+	shadowModels        *ModelManager
+	inferenceCount      uint64
 }
 
 // NewEngine initializes the ML inference engine, loading available models from
@@ -488,6 +509,45 @@ func (e *Engine) SetEnabled(v bool) { e.enabled = v }
 // Models returns the underlying ModelManager for advanced operations such as
 // hot-swapping or direct session access.
 func (e *Engine) Models() *ModelManager { return e.models }
+
+// SetABTestConfig configures shadow/canary testing mode.
+func (e *Engine) SetABTestConfig(cfg ABTestConfig) { e.abConfig = cfg }
+
+// SetShadowModels configures a secondary model manager for A/B testing.
+func (e *Engine) SetShadowModels(m *ModelManager) { e.shadowModels = m }
+
+// shouldUseCandidate returns true if this inference should route to the
+// candidate model (in canary mode).
+func (e *Engine) shouldUseCandidate() bool {
+	if e.abConfig.Mode != ABTestCanary || e.abConfig.CanaryPercent <= 0 {
+		return false
+	}
+	e.inferenceCount++
+	return float64(e.inferenceCount%100) < e.abConfig.CanaryPercent
+}
+
+// scoreShadow runs the shadow model if A/B testing is active, logging
+// the result but not returning it to the caller.
+func (e *Engine) scoreShadow(modelName string, feats []float32) {
+	if e.abConfig.Mode != ABTestShadow || e.shadowModels == nil {
+		return
+	}
+	session, err := e.shadowModels.Get(modelName)
+	if err != nil {
+		return
+	}
+	output, err := session.Predict(feats)
+	if err != nil {
+		e.logger.Debug("shadow model inference failed",
+			zap.String("model", modelName), zap.Error(err))
+		return
+	}
+	if len(output) > 0 {
+		e.logger.Debug("shadow model score",
+			zap.String("model", modelName),
+			zap.Float32("shadow_score", output[0]))
+	}
+}
 
 // --- helpers ---
 
