@@ -606,6 +606,23 @@ def main() -> None:
     log.info("Replace with production models trained on real data for deployment.")
 
 
+# ===================================================================
+# 6. Aliases for scripts/convert_pretrained.py baseline command
+# ===================================================================
+
+def generate_pe_model(out_path: str) -> None:
+    build_pe_classifier(Path(out_path).parent)
+
+def generate_behavior_model(out_path: str) -> None:
+    build_behavior_lstm(Path(out_path).parent)
+
+def generate_network_model(out_path: str) -> None:
+    build_network_anomaly(Path(out_path).parent)
+
+def generate_ransomware_model(out_path: str) -> None:
+    build_ransomware(Path(out_path).parent)
+
+
 if __name__ == "__main__":
     try:
         main()
