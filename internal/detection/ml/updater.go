@@ -2,17 +2,40 @@ package ml
 
 import (
 	"crypto/ed25519"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
+// ManifestEntry represents a single model version from manifest.json.
+type ManifestEntry struct {
+	Name      string             `json:"name"`
+	Version   string             `json:"version"`
+	File      string             `json:"file"`
+	SHA256    string             `json:"sha256"`
+	Source    string             `json:"source"`
+	Status    string             `json:"status"`
+	SizeBytes int64              `json:"size_bytes"`
+	CreatedAt string             `json:"created_at"`
+	Metrics   map[string]float64 `json:"metrics,omitempty"`
+}
+
+// Manifest is the top-level structure of manifest.json.
+type Manifest struct {
+	Version     string          `json:"version"`
+	GeneratedAt string          `json:"generated_at"`
+	Models      []ManifestEntry `json:"models"`
+}
+
 // ModelManager handles model lifecycle including hot-swapping with optional
-// Ed25519 signature verification.
+// Ed25519 signature verification and manifest-based version tracking.
 type ModelManager struct {
-	mu     sync.RWMutex
-	models map[string]*ONNXSession
-	pubKey ed25519.PublicKey
+	mu       sync.RWMutex
+	models   map[string]*ONNXSession
+	pubKey   ed25519.PublicKey
+	manifest *Manifest
 }
 
 // NewModelManager creates a ModelManager. If pubKey is a valid Ed25519 public
@@ -124,6 +147,59 @@ func (m *ModelManager) Close() {
 		s.Close()
 		delete(m.models, name)
 	}
+}
+
+// LoadManifest reads manifest.json from the models directory for version
+// tracking. This is optional -- models can be loaded without a manifest.
+func (m *ModelManager) LoadManifest(modelsDir string) error {
+	manifestPath := filepath.Join(modelsDir, "manifest.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("ml: read manifest: %w", err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return fmt.Errorf("ml: parse manifest: %w", err)
+	}
+	m.mu.Lock()
+	m.manifest = &manifest
+	m.mu.Unlock()
+	return nil
+}
+
+// ActiveVersion returns the active manifest entry for a model name, or nil.
+func (m *ModelManager) ActiveVersion(name string) *ManifestEntry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.manifest == nil {
+		return nil
+	}
+	for i := range m.manifest.Models {
+		e := &m.manifest.Models[i]
+		if e.Name == name && e.Status == "active" {
+			return e
+		}
+	}
+	return nil
+}
+
+// ModelVersions returns all manifest entries for a given model name.
+func (m *ModelManager) ModelVersions(name string) []ManifestEntry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.manifest == nil {
+		return nil
+	}
+	var result []ManifestEntry
+	for _, e := range m.manifest.Models {
+		if e.Name == name {
+			result = append(result, e)
+		}
+	}
+	return result
 }
 
 func (m *ModelManager) verifyFile(path string) error {
