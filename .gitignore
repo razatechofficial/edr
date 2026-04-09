@@ -29,6 +29,7 @@ go.work.sum
 
 .venv/
 ml/training/.venv/
+__pycache__/
 
 *.md
 /bin/
