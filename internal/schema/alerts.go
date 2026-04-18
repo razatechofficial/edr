@@ -31,6 +31,7 @@ type Alert struct {
 
 	// File context
 	FilePath      string `json:"file_path,omitempty"`
+	FileSHA256    string `json:"file_sha256,omitempty"`
 	FileOperation string `json:"file_operation,omitempty"`
 
 	// Network context
