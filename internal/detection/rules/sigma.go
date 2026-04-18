@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,16 +55,25 @@ func NewSigmaEngine(rulesDir string, logger *zap.Logger) (*SigmaEngine, error) {
 	return e, nil
 }
 
-// LoadRules parses all Sigma YAML files in the configured directory and
-// compiles them into evaluators. Existing rules are replaced atomically.
+// LoadRules parses all Sigma YAML files under the configured directory (recursively)
+// and compiles them into evaluators. Existing rules are replaced atomically.
 func (e *SigmaEngine) LoadRules() error {
 	var files []string
-	for _, pattern := range []string{"*.yml", "*.yaml"} {
-		matches, err := filepath.Glob(filepath.Join(e.rulesDir, pattern))
-		if err != nil {
-			return fmt.Errorf("sigma: glob %s: %w", pattern, err)
+	err := filepath.WalkDir(e.rulesDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		files = append(files, matches...)
+		if d.IsDir() {
+			return nil
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".yml", ".yaml":
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("sigma: walk rules dir: %w", err)
 	}
 
 	evaluators := make([]*sigmaeval.RuleEvaluator, 0, len(files))

@@ -2,6 +2,7 @@ package detection
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/razatechofficial/edr/pkg/events"
@@ -184,6 +185,9 @@ func (d *PrivescDetector) checkSetuidCall(event interface{}, pid uint32) *events
 // ---------------------------------------------------------------------------
 
 func (d *PrivescDetector) checkTokenManipulation(event interface{}, pid uint32) *events.Alert {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
 	cmd := strings.ToLower(extractCommandLine(event))
 	if !containsAny(cmd,
 		"adjusttokenprivileges", "impersonateloggedonuser", "duplicatetokenex",
@@ -216,6 +220,10 @@ var uacBypassIndicators = []string{
 }
 
 func (d *PrivescDetector) checkUACBypass(event interface{}, pid uint32) *events.Alert {
+	// UAC is Windows-only; substring indicators like "mmc" false-positive on other OSes.
+	if runtime.GOOS != "windows" {
+		return nil
+	}
 	cmd := strings.ToLower(extractCommandLine(event))
 	proc := strings.ToLower(extractProcessName(event))
 	if !containsAny(cmd, uacBypassIndicators...) && !containsAny(proc, uacBypassIndicators...) {

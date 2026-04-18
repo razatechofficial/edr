@@ -93,6 +93,12 @@ func discoverLibraryPath() string {
 			return c
 		}
 	}
+	// github.com/yalue/onnxruntime_go defaults to "onnxruntime.so" when unset, which
+	// is wrong on macOS (dlopen then reports onnxruntime.so). Prefer the standard
+	// dylib name so Homebrew/DYLD_LIBRARY_PATH resolution matches upstream releases.
+	if runtime.GOOS == "darwin" {
+		return "libonnxruntime.dylib"
+	}
 	return ""
 }
 
