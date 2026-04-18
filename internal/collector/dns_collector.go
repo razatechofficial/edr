@@ -1,0 +1,211 @@
+package collector
+
+import (
+	"bufio"
+	"context"
+	"math"
+	"os"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/razatechofficial/edr/internal/schema"
+)
+
+// DNSCollector monitors DNS query logs to capture domain resolution events.
+// On Linux it tails /var/log/syslog or journalctl for dnsmasq/systemd-resolved
+// entries. On macOS it reads from /var/log/system.log.
+type DNSCollector struct {
+	endpointID string
+	hostname   string
+	logPath    string
+	mu         sync.Mutex
+	events     []Telemetry
+	cancel     context.CancelFunc
+	seen       map[string]time.Time
+}
+
+func NewDNSCollector(endpointID string) *DNSCollector {
+	hostname, _ := os.Hostname()
+	logPath := dnsLogPath()
+	if logPath == "" {
+		return nil
+	}
+	return &DNSCollector{
+		endpointID: endpointID,
+		hostname:   hostname,
+		logPath:    logPath,
+		seen:       make(map[string]time.Time),
+	}
+}
+
+func dnsLogPath() string {
+	switch runtime.GOOS {
+	case "linux":
+		for _, p := range []string{"/var/log/syslog", "/var/log/messages"} {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	case "darwin":
+		if _, err := os.Stat("/var/log/system.log"); err == nil {
+			return "/var/log/system.log"
+		}
+	}
+	return ""
+}
+
+func (dc *DNSCollector) Name() string { return "dns" }
+
+func (dc *DNSCollector) Collect(_ context.Context) ([]Telemetry, error) {
+	dc.mu.Lock()
+	batch := dc.events
+	dc.events = nil
+	dc.mu.Unlock()
+	return batch, nil
+}
+
+func (dc *DNSCollector) Start(ctx context.Context) error {
+	ctx, dc.cancel = context.WithCancel(ctx)
+	go dc.tailLoop(ctx)
+	return nil
+}
+
+func (dc *DNSCollector) Stop() {
+	if dc.cancel != nil {
+		dc.cancel()
+	}
+}
+
+func (dc *DNSCollector) tailLoop(ctx context.Context) {
+	f, err := os.Open(dc.logPath)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	if fi, err := f.Stat(); err == nil {
+		f.Seek(fi.Size(), 0)
+	}
+
+	scanner := bufio.NewScanner(f)
+	for {
+		for scanner.Scan() {
+			if ctx.Err() != nil {
+				return
+			}
+			line := scanner.Text()
+			if ev, ok := dc.parseDNSLine(line); ok {
+				dc.mu.Lock()
+				dc.events = append(dc.events, ev)
+				dc.mu.Unlock()
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+func (dc *DNSCollector) parseDNSLine(line string) (Telemetry, bool) {
+	lower := strings.ToLower(line)
+
+	var domain string
+	if strings.Contains(lower, "query[") {
+		parts := strings.SplitN(line, "query[", 2)
+		if len(parts) == 2 {
+			rest := parts[1]
+			if idx := strings.Index(rest, "]"); idx >= 0 {
+				rest = rest[idx+1:]
+				fields := strings.Fields(rest)
+				if len(fields) > 0 {
+					domain = strings.TrimRight(fields[0], ".")
+				}
+			}
+		}
+	} else if strings.Contains(lower, "resolved") && strings.Contains(lower, "query") {
+		fields := strings.Fields(line)
+		for i, f := range fields {
+			if strings.EqualFold(f, "query") && i+1 < len(fields) {
+				domain = strings.TrimRight(fields[i+1], ".")
+				break
+			}
+		}
+	}
+
+	if domain == "" {
+		return Telemetry{}, false
+	}
+
+	now := time.Now().UTC()
+	if last, exists := dc.seen[domain]; exists && now.Sub(last) < 30*time.Second {
+		return Telemetry{}, false
+	}
+	dc.seen[domain] = now
+
+	ne := &schema.NetworkEvent{
+		BaseEvent: schema.BaseEvent{
+			SchemaVersion: schema.SchemaVersionV1,
+			EventType:     schema.EventNetwork,
+			EndpointID:    dc.endpointID,
+			Timestamp:     now,
+			Hostname:      dc.hostname,
+			OS:            runtime.GOOS,
+		},
+		Protocol: "dns",
+		Domain:   domain,
+		DestPt:   53,
+	}
+
+	return Telemetry{Network: ne}, true
+}
+
+func isDGA(domain string) bool {
+	if len(domain) < 10 {
+		return false
+	}
+	parts := strings.Split(domain, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	label := parts[0]
+	if len(label) < 12 {
+		return false
+	}
+
+	var consonants, digits int
+	for _, c := range label {
+		switch {
+		case c >= '0' && c <= '9':
+			digits++
+		case c == 'b' || c == 'c' || c == 'd' || c == 'f' || c == 'g' || c == 'h' ||
+			c == 'j' || c == 'k' || c == 'l' || c == 'm' || c == 'n' || c == 'p' ||
+			c == 'q' || c == 'r' || c == 's' || c == 't' || c == 'v' || c == 'w' ||
+			c == 'x' || c == 'y' || c == 'z':
+			consonants++
+		}
+	}
+
+	entropy := shannonEntropy(label)
+	ratio := float64(consonants+digits) / float64(len(label))
+	return entropy > 3.5 && ratio > 0.7
+}
+
+func shannonEntropy(s string) float64 {
+	freq := make(map[rune]int)
+	for _, c := range s {
+		freq[c]++
+	}
+	var entropy float64
+	n := float64(len(s))
+	for _, count := range freq {
+		p := float64(count) / n
+		if p > 0 {
+			entropy -= p * math.Log2(p)
+		}
+	}
+	return entropy
+}
