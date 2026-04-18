@@ -97,13 +97,20 @@ func runAgent() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sigCh := make(chan os.Signal, 1)
+	// Buffer so a second interrupt is not lost while graceful shutdown runs.
+	sigCh := make(chan os.Signal, 8)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 
 	go func() {
 		sig := <-sigCh
 		logger.Info("received signal, shutting down", zap.String("signal", sig.String()))
 		cancel()
+		// If something blocks during shutdown (alert I/O, detection engine Stop, etc.),
+		// a second SIGINT/SIGTERM exits the process immediately.
+		sig2 := <-sigCh
+		logger.Warn("received second signal, exiting now", zap.String("signal", sig2.String()))
+		os.Exit(0)
 	}()
 
 	a, err := agent.NewWithFiles(configPath)

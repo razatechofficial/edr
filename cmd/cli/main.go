@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -29,19 +30,46 @@ var (
 	buildDate = "unknown"
 )
 
-const (
-	defaultSocketPath = "/var/run/edr-agent.sock"
-	defaultHTTPAddr   = "http://127.0.0.1:9200"
-	defaultAlertFile  = "/var/log/edr/alerts.jsonl"
-	defaultConfigFile = "/etc/edr/agent.yaml"
-)
+const defaultHTTPAddr = "http://127.0.0.1:9200"
 
 var (
+	defaultSocketPath string
+	defaultAlertFile  string
+	defaultConfigFile string
+
 	socketPath string
 	httpAddr   string
 	alertFile  string
 	configFile string
 )
+
+func init() {
+	platformDefaults()
+	if v := os.Getenv("EDR_CONFIG"); v != "" {
+		defaultConfigFile = v
+	}
+	if v := os.Getenv("EDR_ALERT_FILE"); v != "" {
+		defaultAlertFile = v
+	}
+}
+
+// platformDefaults sets defaults that match cmd/installer layouts (macOS/Linux/Windows).
+func platformDefaults() {
+	switch runtime.GOOS {
+	case "darwin":
+		defaultConfigFile = "/Library/Application Support/EDR/config/agent.yaml"
+		defaultAlertFile = "/Library/Logs/EDR/alerts.jsonl"
+		defaultSocketPath = "/var/run/edr-agent.sock"
+	case "windows":
+		defaultConfigFile = `C:\ProgramData\EDR\config\agent.yaml`
+		defaultAlertFile = `C:\ProgramData\EDR\logs\alerts.jsonl`
+		defaultSocketPath = `\\.\pipe\edr-agent-control`
+	default:
+		defaultConfigFile = "/etc/edr/agent.yaml"
+		defaultAlertFile = "/var/log/edr/alerts.jsonl"
+		defaultSocketPath = "/var/run/edr-agent.sock"
+	}
+}
 
 func main() {
 	root := &cobra.Command{
@@ -58,7 +86,7 @@ func main() {
 	root.PersistentFlags().StringVar(&socketPath, "socket", defaultSocketPath, "agent control socket path")
 	root.PersistentFlags().StringVar(&httpAddr, "addr", defaultHTTPAddr, "agent HTTP control address")
 	root.PersistentFlags().StringVar(&alertFile, "alert-file", defaultAlertFile, "path to alerts JSONL file")
-	root.PersistentFlags().StringVar(&configFile, "config", defaultConfigFile, "path to agent config file")
+	root.PersistentFlags().StringVar(&configFile, "config", defaultConfigFile, "path to agent config (override with EDR_CONFIG)")
 
 	root.AddCommand(
 		newStatusCmd(),
@@ -86,11 +114,11 @@ func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show agent health and runtime status",
-		Long:  "Connects to the agent's local control interface and displays health status, uptime, version, loaded rule count, and resource usage.",
+		Long:  "Connects to the agent's local control interface when available. If the API is not enabled, prints config path, agent id, and PID file status from the on-disk config.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := agentRequest("GET", "/api/v1/status", nil)
 			if err != nil {
-				return fmt.Errorf("agent unreachable: %w", err)
+				return printOfflineStatus(err)
 			}
 
 			var status struct {
@@ -133,6 +161,72 @@ func newStatusCmd() *cobra.Command {
 	}
 }
 
+// yamlConfigPeek is a minimal subset of agent.yaml for edrctl when the control API is down.
+type yamlConfigPeek struct {
+	Agent struct {
+		DataDir string `yaml:"data_dir"`
+		ID      string `yaml:"id"`
+	} `yaml:"agent"`
+	Service struct {
+		PIDFile string `yaml:"pid_file"`
+	} `yaml:"service"`
+}
+
+// printOfflineStatus prints PID/config-based status when the local HTTP/socket API is unavailable.
+func printOfflineStatus(apiErr error) error {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return fmt.Errorf("agent control API unavailable (%v); also cannot read config %s: %w", apiErr, configFile, err)
+	}
+	var peek yamlConfigPeek
+	if err := yaml.Unmarshal(data, &peek); err != nil {
+		return fmt.Errorf("agent control API unavailable (%v); parsing config: %w", apiErr, err)
+	}
+
+	pidPath := peek.Service.PIDFile
+	if pidPath == "" && peek.Agent.DataDir != "" {
+		pidPath = filepath.Join(peek.Agent.DataDir, "agent.pid")
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintf(w, "Control API:\tunavailable (%v)\n", apiErr)
+	fmt.Fprintln(w, "Note:\tThe agent may not expose the local HTTP/socket API in this build; showing on-disk status.")
+	fmt.Fprintf(w, "Config:\t%s\n", configFile)
+	if peek.Agent.ID != "" {
+		fmt.Fprintf(w, "Agent ID:\t%s\n", peek.Agent.ID)
+	}
+	if peek.Agent.DataDir != "" {
+		fmt.Fprintf(w, "Data dir:\t%s\n", peek.Agent.DataDir)
+	}
+
+	if pidPath != "" {
+		fmt.Fprintf(w, "PID file:\t%s\n", pidPath)
+		b, err := os.ReadFile(pidPath)
+		if err != nil {
+			fmt.Fprintf(w, "Process:\tunknown (cannot read PID file: %v)\n", err)
+		} else {
+			pid, convErr := strconv.Atoi(strings.TrimSpace(string(b)))
+			if convErr != nil || pid <= 0 {
+				fmt.Fprintln(w, "Process:\tunknown (invalid PID in file)")
+			} else if pidAlive(pid) {
+				fmt.Fprintf(w, "Process:\trunning (pid %d)\n", pid)
+			} else {
+				fmt.Fprintf(w, "Process:\tnot running (stale pid in file?)\n")
+			}
+		}
+	} else {
+		fmt.Fprintln(w, "PID file:\t(not set; need service.pid_file or agent.data_dir)")
+	}
+
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if runtime.GOOS == "darwin" {
+		fmt.Println("Tip (macOS): sudo launchctl print system/com.razatech.edr-agent")
+	}
+	return nil
+}
+
 // ---------- alerts ----------
 
 // newAlertsCmd returns the alerts command for viewing recent detection alerts
@@ -160,6 +254,9 @@ func newAlertsCmd() *cobra.Command {
 
 			f, err := os.Open(alertFile)
 			if err != nil {
+				if os.IsPermission(err) {
+					return fmt.Errorf("opening alert file %s: %w (try: sudo edrctl alerts --alert-file %s)", alertFile, err, alertFile)
+				}
 				return fmt.Errorf("opening alert file %s: %w", alertFile, err)
 			}
 			defer f.Close()
