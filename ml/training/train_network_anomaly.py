@@ -90,7 +90,20 @@ class AnomalyScorer(nn.Module):
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train network anomaly autoencoder")
-    p.add_argument("--data-path", type=str, default=None, help="Path to CIC-IDS2017 CSV")
+    p.add_argument("--data-path", type=str, default=None, help="Path to CIC-IDS2017 or UNSW-NB15 CSV")
+    p.add_argument(
+        "--max-samples",
+        type=int,
+        default=200_000,
+        help="When using --data-path, cap rows (0 = load entire file; use 0 only on small CSVs)",
+    )
+    p.add_argument(
+        "--dataset",
+        type=str,
+        choices=("auto", "cic-ids2017", "unsw-nb15"),
+        default="auto",
+        help="Override dataset type; default infers from CSV path/name",
+    )
     p.add_argument("--n-normal", type=int, default=10000, help="Synthetic normal samples")
     p.add_argument("--n-anomalous", type=int, default=3000, help="Synthetic anomalous samples")
     p.add_argument("--output-dir", type=str, default="./output")
@@ -106,29 +119,16 @@ def parse_args() -> argparse.Namespace:
 
 def load_data(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray]:
     if args.data_path:
-        logger.info("Loading network data from %s …", args.data_path)
-        import pandas as pd
+        from adapters.network_adapter import load as load_network
 
-        df = pd.read_csv(args.data_path)
-        if "Label" in df.columns:
-            y = (df["Label"] != "BENIGN").astype(np.int32).values
-            df = df.drop(columns=["Label"])
-        else:
-            y = df.iloc[:, -1].values.astype(np.int32)
-            df = df.iloc[:, :-1]
-
-        X = df.values.astype(np.float32)
-        if X.shape[1] != NETWORK_FEATURE_COUNT:
-            logger.warning(
-                "Feature dim %d ≠ expected %d; using first %d or padding",
-                X.shape[1], NETWORK_FEATURE_COUNT, NETWORK_FEATURE_COUNT,
-            )
-            if X.shape[1] > NETWORK_FEATURE_COUNT:
-                X = X[:, :NETWORK_FEATURE_COUNT]
-            else:
-                pad = np.zeros((X.shape[0], NETWORK_FEATURE_COUNT - X.shape[1]), dtype=np.float32)
-                X = np.hstack([X, pad])
+        cfg = {
+            "data_path": args.data_path,
+            "max_samples": args.max_samples if args.max_samples > 0 else 0,
+            "dataset": args.dataset,
+        }
+        X, y, meta = load_network(cfg)
         X = np.nan_to_num(X, nan=0.0, posinf=1.0, neginf=0.0)
+        logger.info("Loaded %s: %s", meta.get("source"), meta.get("file"))
         return X, y
 
     logger.info("Generating synthetic network data …")

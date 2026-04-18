@@ -9,8 +9,8 @@ Usage:
     # Synthetic data (default):
     python train_pe_classifier.py --output-dir ./output
 
-    # Real EMBER2024 dataset:
-    python train_pe_classifier.py --ember-dir /data/ember2024 --output-dir ./output
+    # Real EMBER2018 vectorized features (see elastic/ember; needs tqdm + lief):
+    python train_pe_classifier.py --ember-dir /data/ember2018 --output-dir ./output
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ logger = logging.getLogger("train_pe_classifier")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train PE malware classifier (LightGBM)")
-    p.add_argument("--ember-dir", type=str, default=None, help="Path to EMBER2024 dataset directory")
+    p.add_argument("--ember-dir", type=str, default=None, help="Path to EMBER2018 directory (X_train.dat / y_train.dat)")
     p.add_argument("--n-benign", type=int, default=10000, help="Synthetic benign samples")
     p.add_argument("--n-malicious", type=int, default=10000, help="Synthetic malicious samples")
     p.add_argument("--output-dir", type=str, default="./output", help="Directory for output artifacts")
@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
 
 def load_data(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray]:
     if args.ember_dir:
-        logger.info("Loading EMBER2024 dataset from %s …", args.ember_dir)
+        logger.info("Loading EMBER dataset from %s …", args.ember_dir)
         X, y = load_ember_dataset(args.ember_dir)
         if X.shape[1] != TOTAL_FILE_FEATURES:
             logger.warning(
