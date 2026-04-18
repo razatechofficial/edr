@@ -1,3 +1,5 @@
+//go:build cgo
+
 package rules
 
 import (
@@ -5,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,26 +15,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// YARAMatch represents a YARA rule match.
-type YARAMatch struct {
-	Rule      string
-	Namespace string
-	Tags      []string
-	Strings   []YARAString
-	Meta      map[string]interface{}
-}
-
-// YARAString represents a matched string within a YARA rule.
-type YARAString struct {
-	Name   string
-	Offset uint64
-	Data   []byte
-}
-
 // YARAEngine scans files and memory against compiled YARA rules.
+// ruleSets holds one compiled ruleset per successfully parsed .yar file so a
+// single broken rule does not poison the whole corpus (YARA compilers cannot
+// recover after a parse error).
 type YARAEngine struct {
 	rulesDir    string
-	rules       *yara.Rules
+	ruleSets    []*yara.Rules
 	maxFileSize int64
 	workerCount int
 	scanChan    chan scanRequest
@@ -78,16 +68,40 @@ func NewYARAEngine(rulesDir string, maxFileSizeMB int, workers int, logger *zap.
 	return e, nil
 }
 
-// LoadRules loads and parses all .yar/.yara files from the configured directory.
-func (e *YARAEngine) LoadRules() error {
+// compileOneRuleFile parses a single YARA file into its own ruleset.
+func compileOneRuleFile(path, namespace string) (*yara.Rules, error) {
 	compiler, err := yara.NewCompiler()
 	if err != nil {
-		return fmt.Errorf("yara: new compiler: %w", err)
+		return nil, err
 	}
 	defer compiler.Destroy()
 
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	if err := compiler.AddFile(f, namespace); err != nil {
+		return nil, err
+	}
+	return compiler.GetRules()
+}
+
+// LoadRules loads and parses all .yar/.yara files from the configured directory.
+func (e *YARAEngine) LoadRules() error {
+	e.mu.Lock()
+	for _, rs := range e.ruleSets {
+		if rs != nil {
+			rs.Destroy()
+		}
+	}
+	e.ruleSets = nil
+	e.mu.Unlock()
+
+	var sets []*yara.Rules
 	count := 0
-	err = filepath.WalkDir(e.rulesDir, func(path string, d os.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(e.rulesDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -98,32 +112,32 @@ func (e *YARAEngine) LoadRules() error {
 		if ext != ".yar" && ext != ".yara" {
 			return nil
 		}
-		f, openErr := os.Open(path)
-		if openErr != nil {
-			e.logger.Warn("yara: failed to open rule file", zap.String("path", path), zap.Error(openErr))
+		ns := filepath.Base(filepath.Dir(path))
+		compiled, compErr := compileOneRuleFile(path, ns)
+		if compErr != nil {
+			// Libyara often rejects upstream rules with "unreferenced string" (YARA version drift).
+			// Skip the file either way; avoid flooding default logs — use --debug to see details.
+			msg := strings.ToLower(compErr.Error())
+			if strings.Contains(msg, "unreferenced string") {
+				e.logger.Debug("yara: skipped rule file", zap.String("path", path), zap.Error(compErr))
+			} else {
+				e.logger.Warn("yara: compile error", zap.String("path", path), zap.Error(compErr))
+			}
 			return nil
 		}
-		defer f.Close()
-		if addErr := compiler.AddFile(f, filepath.Base(filepath.Dir(path))); addErr != nil {
-			e.logger.Warn("yara: compile error", zap.String("path", path), zap.Error(addErr))
-			return nil
-		}
+		sets = append(sets, compiled)
 		count++
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("yara: walk rules: %w", err)
 	}
-	compiled, err := compiler.GetRules()
-	if err != nil {
-		return fmt.Errorf("yara: get compiled rules: %w", err)
+	if len(sets) == 0 {
+		return fmt.Errorf("yara: no rules compiled successfully")
 	}
 
 	e.mu.Lock()
-	if e.rules != nil {
-		e.rules.Destroy()
-	}
-	e.rules = compiled
+	e.ruleSets = sets
 	e.mu.Unlock()
 
 	e.logger.Info("yara: rules loaded", zap.Int("files", count))
@@ -156,6 +170,28 @@ func convertMatches(in yara.MatchRules) []YARAMatch {
 	return out
 }
 
+func mergeYARAMatches(a, b []YARAMatch) []YARAMatch {
+	out := make([]YARAMatch, 0, len(a)+len(b))
+	seen := make(map[string]struct{}, len(a)+len(b))
+	for _, m := range a {
+		key := m.Namespace + "\x00" + m.Rule
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, m)
+	}
+	for _, m := range b {
+		key := m.Namespace + "\x00" + m.Rule
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, m)
+	}
+	return out
+}
+
 // ScanFile scans a file on disk against all compiled rules.
 func (e *YARAEngine) ScanFile(ctx context.Context, path string) ([]YARAMatch, error) {
 	info, err := os.Stat(path)
@@ -167,10 +203,10 @@ func (e *YARAEngine) ScanFile(ctx context.Context, path string) ([]YARAMatch, er
 	}
 
 	e.mu.RLock()
-	r := e.rules
+	sets := e.ruleSets
 	timeout := e.timeout
 	e.mu.RUnlock()
-	if r == nil {
+	if len(sets) == 0 {
 		return nil, fmt.Errorf("yara: no rules loaded")
 	}
 	if deadline, ok := ctx.Deadline(); ok {
@@ -178,20 +214,27 @@ func (e *YARAEngine) ScanFile(ctx context.Context, path string) ([]YARAMatch, er
 			timeout = d
 		}
 	}
-	m := yara.MatchRules{}
-	if err := r.ScanFile(path, 0, timeout, &m); err != nil {
-		return nil, fmt.Errorf("yara: scan file %s: %w", path, err)
+	var all []YARAMatch
+	for _, r := range sets {
+		if r == nil {
+			continue
+		}
+		m := yara.MatchRules{}
+		if err := r.ScanFile(path, 0, timeout, &m); err != nil {
+			return nil, fmt.Errorf("yara: scan file %s: %w", path, err)
+		}
+		all = mergeYARAMatches(all, convertMatches(m))
 	}
-	return convertMatches(m), nil
+	return all, nil
 }
 
 // ScanBytes scans in-memory data against all compiled rules.
 func (e *YARAEngine) ScanBytes(ctx context.Context, data []byte) ([]YARAMatch, error) {
 	e.mu.RLock()
-	r := e.rules
+	sets := e.ruleSets
 	timeout := e.timeout
 	e.mu.RUnlock()
-	if r == nil {
+	if len(sets) == 0 {
 		return nil, fmt.Errorf("yara: no rules loaded")
 	}
 	if deadline, ok := ctx.Deadline(); ok {
@@ -199,11 +242,18 @@ func (e *YARAEngine) ScanBytes(ctx context.Context, data []byte) ([]YARAMatch, e
 			timeout = d
 		}
 	}
-	m := yara.MatchRules{}
-	if err := r.ScanMem(data, 0, timeout, &m); err != nil {
-		return nil, fmt.Errorf("yara: scan bytes: %w", err)
+	var all []YARAMatch
+	for _, r := range sets {
+		if r == nil {
+			continue
+		}
+		m := yara.MatchRules{}
+		if err := r.ScanMem(data, 0, timeout, &m); err != nil {
+			return nil, fmt.Errorf("yara: scan bytes: %w", err)
+		}
+		all = mergeYARAMatches(all, convertMatches(m))
 	}
-	return convertMatches(m), nil
+	return all, nil
 }
 
 // ScanFileAsync queues a non-blocking file scan and returns a channel that
@@ -217,12 +267,14 @@ func (e *YARAEngine) ScanFileAsync(path string) <-chan []YARAMatch {
 // Count returns the number of loaded YARA rules.
 func (e *YARAEngine) Count() int {
 	e.mu.RLock()
-	if e.rules == nil {
-		e.mu.RUnlock()
-		return 0
+	defer e.mu.RUnlock()
+	n := 0
+	for _, r := range e.ruleSets {
+		if r == nil {
+			continue
+		}
+		n += len(r.GetRules())
 	}
-	n := len(e.rules.GetRules())
-	e.mu.RUnlock()
 	return n
 }
 
@@ -232,10 +284,12 @@ func (e *YARAEngine) Stop() error {
 		e.cancelFunc()
 	}
 	e.mu.Lock()
-	if e.rules != nil {
-		e.rules.Destroy()
-		e.rules = nil
+	for _, rs := range e.ruleSets {
+		if rs != nil {
+			rs.Destroy()
+		}
 	}
+	e.ruleSets = nil
 	e.mu.Unlock()
 	close(e.scanChan)
 	return nil
