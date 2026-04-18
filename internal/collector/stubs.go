@@ -43,16 +43,54 @@ func (f *FileStubCollector) Collect(context.Context) ([]Telemetry, error) {
 	return nil, nil
 }
 
-// DefaultCollectors returns process plus stub collectors for network, auth, and file domains.
+// StartableCollector extends Collector with a lifecycle Start method needed
+// by collectors that run background goroutines (e.g. KernelCollector).
+type StartableCollector interface {
+	Collector
+	Start(ctx context.Context) error
+	Stop()
+}
+
+// DefaultCollectors returns process, network, auth, and file collectors.
+// Real implementations are used where available; stubs serve as fallbacks.
+// On Linux, a KernelCollector is included when running as root.
 func DefaultCollectors(endpointID string) ([]Collector, error) {
 	pc, err := NewProcessCollector(endpointID)
 	if err != nil {
 		return nil, err
 	}
-	return []Collector{
-		pc,
-		NewNetworkStubCollector(endpointID),
-		NewAuthStubCollector(endpointID),
-		NewFileStubCollector(endpointID),
-	}, nil
+
+	var netCol Collector = NewNetworkStubCollector(endpointID)
+	if nc := NewNetworkCollector(endpointID); nc != nil {
+		netCol = nc
+	}
+
+	var authCol Collector = NewAuthStubCollector(endpointID)
+	if ac := NewAuthCollector(endpointID); ac != nil && ac.logPath != "" {
+		authCol = ac
+	}
+
+	var fileCol Collector
+	fc, fcErr := NewFileCollector(endpointID, nil)
+	if fcErr == nil {
+		fileCol = fc
+	} else {
+		fileCol = NewFileStubCollector(endpointID)
+	}
+
+	cols := []Collector{pc, netCol, authCol, fileCol}
+
+	if kc := NewKernelCollector(endpointID); kc != nil {
+		cols = append(cols, kc)
+	}
+
+	if dc := NewDNSCollector(endpointID); dc != nil {
+		cols = append(cols, dc)
+	}
+
+	if rc := NewRegistryCollector(endpointID); rc != nil {
+		cols = append(cols, rc)
+	}
+
+	return cols, nil
 }
