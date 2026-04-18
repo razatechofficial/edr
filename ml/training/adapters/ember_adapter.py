@@ -39,6 +39,23 @@ EMBER_SECTION_OFFSET = 512
 EMBER_RAW_DIM = 2381
 
 
+def _vectorized_dat_files(data_dir: Path) -> dict[str, Path]:
+    return {
+        "X_train": data_dir / "X_train.dat",
+        "y_train": data_dir / "y_train.dat",
+        "X_test": data_dir / "X_test.dat",
+        "y_test": data_dir / "y_test.dat",
+    }
+
+
+def _missing_vectorized_files(data_dir: Path) -> list[Path]:
+    return [p for p in _vectorized_dat_files(data_dir).values() if not p.is_file()]
+
+
+def _has_raw_jsonl(data_dir: Path) -> bool:
+    return (data_dir / "train_features_0.jsonl").is_file() and (data_dir / "test_features.jsonl").is_file()
+
+
 def _map_ember_to_311(X_ember: np.ndarray) -> np.ndarray:
     """Map EMBER's 2381-dim feature vectors to our 311-dim layout.
 
@@ -81,16 +98,47 @@ def load(config: dict[str, Any] | None = None) -> tuple[np.ndarray, np.ndarray, 
 
     logger.info("Loading EMBER2018 from %s (feature_version=%d) ...", data_dir, version)
 
+    # Only fall back to thrember when the *ember* package is missing.  A single
+    # ``except ImportError`` around both ``import ember`` and ``read_vectorized_features``
+    # incorrectly treats missing tqdm/lief (or similar) as "use thrember", which then
+    # fails with ``No module named 'thrember'``.
+    read_fn = None
+    using_elastic_ember = False
     try:
         import ember
-        X_train, y_train, X_test, y_test = ember.read_vectorized_features(
-            data_dir, feature_version=version
-        )
+
+        read_fn = ember.read_vectorized_features
+        using_elastic_ember = True
     except ImportError:
-        import thrember
-        X_train, y_train, X_test, y_test = thrember.read_vectorized_features(
-            data_dir, feature_version=version
-        )
+        try:
+            import thrember
+
+            read_fn = thrember.read_vectorized_features
+        except ImportError as exc:
+            raise ImportError(
+                "Install EMBER tooling: pip install tqdm lief 'git+https://github.com/elastic/ember.git'. "
+                "For EMBER2024-only layouts (no elastic ember), install: "
+                "pip install 'git+https://github.com/FutureComputing4AI/EMBER2024.git'"
+            ) from exc
+
+    root = Path(data_dir)
+    if using_elastic_ember:
+        missing_dat = _missing_vectorized_files(root)
+        if missing_dat:
+            hint = ""
+            if _has_raw_jsonl(root):
+                hint = (
+                    " Raw JSONL is present. Build vectorized features first (hours of CPU):\n"
+                    "   cd ml/training && ../../.venv/bin/python vectorize_ember2018.py "
+                    f'--data-dir "{root}"'
+                )
+            raise FileNotFoundError(
+                f"EMBER vectorized files not found: {missing_dat[0].name} (and siblings). "
+                "The official tarball only includes JSONL until you run ember.create_vectorized_features."
+                + hint
+            )
+
+    X_train, y_train, X_test, y_test = read_fn(data_dir, feature_version=version)
 
     train_mask = y_train != -1
     test_mask = y_test != -1

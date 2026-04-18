@@ -158,8 +158,9 @@ def load(config: dict[str, Any] | None = None) -> tuple[np.ndarray, np.ndarray, 
         data_path = csv_files[0]
 
     if dataset == "auto":
+        path_hint = str(data_path.resolve()).lower()
         name = data_path.stem.lower()
-        if "unsw" in name or "nb15" in name:
+        if "unsw" in path_hint or "nb15" in path_hint or "unsw" in name or "nb15" in name:
             dataset = "unsw-nb15"
         else:
             dataset = "cic-ids2017"
