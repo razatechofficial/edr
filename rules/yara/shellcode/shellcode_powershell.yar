@@ -46,21 +46,19 @@ rule Shellcode_PowerShell_Cradle
 
     strings:
         $dl1 = "IEX(New-Object Net.WebClient).DownloadString" ascii wide nocase
-        $dl2 = "Invoke-Expression" ascii wide nocase
-        $dl3 = "IWR" ascii wide nocase
         $dl4 = "Invoke-WebRequest" ascii wide nocase
         $dl5 = "Start-BitsTransfer" ascii wide nocase
         $dl6 = "(New-Object System.Net.WebClient).DownloadData" ascii wide nocase
 
-        $exec1 = "IEX" ascii wide nocase
-        $exec2 = "Invoke-Expression" ascii wide nocase
+        $exec1 = "IEX(" ascii wide nocase
         $exec3 = "[ScriptBlock]::Create" ascii wide nocase
 
         $obfusc1 = /\-[Jj][Oo][Ii][Nn]\s*['"]/ ascii wide
-        $obfusc2 = "-replace" ascii wide nocase
         $obfusc3 = "[char]" ascii wide nocase
 
     condition:
-        (1 of ($dl*) and 1 of ($exec*)) or
-        (1 of ($dl*) and 2 of ($obfusc*))
+        filesize < 8MB and (
+            (1 of ($dl1, $dl6) and 1 of ($exec1, $exec3)) or
+            (($dl4 or $dl5) and $exec1 and 1 of ($obfusc1, $obfusc3))
+        )
 }
