@@ -80,4 +80,8 @@ type Alert struct {
 	MITRE       []MITREAttack `json:"mitre,omitempty"`
 	Tags        []string      `json:"tags,omitempty"`
 	RawEvent    interface{}   `json:"raw_event,omitempty"`
+
+	// File context (e.g. YARA file scan). Populated when the detection has a path/hash.
+	FilePath   string `json:"file_path,omitempty"`
+	FileSHA256 string `json:"file_sha256,omitempty"`
 }
