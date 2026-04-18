@@ -39,22 +39,19 @@ logger = logging.getLogger(__name__)
 
 
 def load_ember_dataset(data_dir: str) -> tuple[np.ndarray, np.ndarray]:
-    """Load the EMBER2024 dataset via *thrember*.
+    """Load EMBER2018 vectorized features (``ember``) or EMBER2024-style data (``thrember``).
 
-    Returns ``(X, y)`` where X is ``(n, 311)`` and y is ``{0, 1}``.
-    Samples with label ``-1`` (unlabeled) are dropped.
+    Delegates to ``adapters.ember_adapter.load``, which picks ``ember`` or ``thrember``
+    only for *import* failures.  Dataset read errors (missing ``X_train.dat``, etc.)
+    propagate with a clear message.
+
+    Returns ``(X, y)`` where X is mapped to ``(n, 311)`` and y is ``{0, 1}``.
+    Unlabeled samples are dropped.
     """
-    try:
-        import thrember
+    from adapters.ember_adapter import load as load_ember
 
-        X_train, y_train, X_test, y_test = thrember.load(data_dir)
-        X = np.vstack([X_train, X_test]).astype(np.float32)
-        y = np.concatenate([y_train, y_test]).astype(np.int32)
-        mask = y >= 0
-        return X[mask], y[mask]
-    except Exception as exc:
-        logger.warning("Failed to load EMBER dataset: %s", exc)
-        raise
+    X, y, _ = load_ember({"data_dir": data_dir, "version": 2})
+    return X, y
 
 
 # ---------------------------------------------------------------------------
