@@ -442,6 +442,17 @@ func extractFilePath(event interface{}) string {
 	return ""
 }
 
+// extractFileHashFromEvent returns a pre-computed file hash from the event when present.
+func extractFileHashFromEvent(event interface{}) string {
+	switch ev := event.(type) {
+	case *schema.FileEvent:
+		return strings.TrimSpace(ev.Hash)
+	case schema.FileEvent:
+		return strings.TrimSpace(ev.Hash)
+	}
+	return ""
+}
+
 func extractFileOperation(event interface{}) string {
 	switch ev := event.(type) {
 	case *schema.FileEvent:

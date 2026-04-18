@@ -2,8 +2,12 @@ package detection
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -168,23 +172,28 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 	}
 
 	if cfg.MLEnabled && cfg.MLModelsDir != "" {
-		peThr := cfg.MLThresholdPE
-		if peThr <= 0 || peThr > 1 {
-			peThr = 0.80
-		}
-		me, err := ml.NewEngine(ml.Config{
-			ModelsDir:              cfg.MLModelsDir,
-			PEClassifierFile:       cfg.MLModelPEClassifier,
-			BehaviorLSTMFile:       cfg.MLModelBehaviorLSTM,
-			NetworkAnomalyFile:     cfg.MLModelNetworkAnomaly,
-			RansomwareFile:         cfg.MLModelRansomware,
-			VerifyPubKeyHex:        cfg.MLVerifyPubKey,
-			PEMaliciousThreshold:   peThr,
-		}, logger)
-		if err != nil {
-			logger.Warn("engine: ml layer init failed, disabling", zap.Error(err))
+		// ONNX sessions are created while loading models in ml.NewEngine; runtime must be initialized first.
+		if err := ml.InitRuntime(cfg.MLONNXNumThreads, cfg.MLONNXUseGPU, cfg.MLONNXGPUDeviceID); err != nil {
+			logONNXInitFailure(logger, err)
 		} else {
-			e.ml = me
+			peThr := cfg.MLThresholdPE
+			if peThr <= 0 || peThr > 1 {
+				peThr = 0.80
+			}
+			me, err := ml.NewEngine(ml.Config{
+				ModelsDir:            cfg.MLModelsDir,
+				PEClassifierFile:     cfg.MLModelPEClassifier,
+				BehaviorLSTMFile:     cfg.MLModelBehaviorLSTM,
+				NetworkAnomalyFile:   cfg.MLModelNetworkAnomaly,
+				RansomwareFile:       cfg.MLModelRansomware,
+				VerifyPubKeyHex:      cfg.MLVerifyPubKey,
+				PEMaliciousThreshold: peThr,
+			}, logger)
+			if err != nil {
+				logger.Warn("engine: ml layer init failed, disabling", zap.Error(err))
+			} else {
+				e.ml = me
+			}
 		}
 	}
 
@@ -212,7 +221,7 @@ func (e *Engine) Start(ctx context.Context) error {
 
 	if e.ml != nil {
 		if err := ml.InitRuntime(e.cfg.MLONNXNumThreads, e.cfg.MLONNXUseGPU, e.cfg.MLONNXGPUDeviceID); err != nil {
-			e.logger.Warn("engine: ONNX runtime init failed, ML scoring may be unavailable", zap.Error(err))
+			logONNXInitFailure(e.logger, err)
 		}
 	}
 
@@ -881,6 +890,16 @@ func mergeScores(alerts []*events.Alert) *events.Alert {
 	}
 	tags = append(tags, "composite")
 
+	fp := alerts[0].FilePath
+	h256 := alerts[0].FileSHA256
+	for _, a := range alerts[1:] {
+		if fp == "" && a.FilePath != "" {
+			fp = a.FilePath
+		}
+		if h256 == "" && a.FileSHA256 != "" {
+			h256 = a.FileSHA256
+		}
+	}
 	return &events.Alert{
 		ID:          uuid.New().String(),
 		RuleID:      "composite-detection",
@@ -892,6 +911,8 @@ func mergeScores(alerts []*events.Alert) *events.Alert {
 		MITRE:       deduplicateMITRE(allMITRE),
 		Tags:        tags,
 		RawEvent:    alerts[0].RawEvent,
+		FilePath:    fp,
+		FileSHA256:  h256,
 	}
 }
 
@@ -923,10 +944,33 @@ func iocMatchToAlert(m *ioc.MatchResult, raw interface{}) *events.Alert {
 	}
 }
 
+// maxYARAHashBytes caps hashing work for very large files (SHA-256 of first N bytes).
+const maxYARAHashBytes = 64 << 20
+
 func yaraMatchToAlert(m rules.YARAMatch, raw interface{}) *events.Alert {
 	sev := events.SeverityHigh
 	if s, ok := m.Meta["severity"]; ok {
 		sev = events.Severity(fmt.Sprint(s))
+	}
+	path := extractFilePath(raw)
+	desc := fmt.Sprintf("File matched YARA rule %s with %d string hits", m.Rule, len(m.Strings))
+	if path != "" {
+		desc = fmt.Sprintf("%s; path=%s", desc, path)
+	}
+	hash := extractFileHashFromEvent(raw)
+	if hash == "" && path != "" {
+		var partial bool
+		var err error
+		hash, partial, err = hashFileSHA256Prefix(path, maxYARAHashBytes)
+		if err != nil {
+			desc = fmt.Sprintf("%s; sha256_error=%v", desc, err)
+		} else if hash != "" && partial {
+			desc = fmt.Sprintf("%s; file_sha256=%s (first %d bytes of file)", desc, hash, maxYARAHashBytes)
+		} else if hash != "" {
+			desc = fmt.Sprintf("%s; file_sha256=%s", desc, hash)
+		}
+	} else if hash != "" {
+		desc = fmt.Sprintf("%s; file_sha256=%s", desc, hash)
 	}
 	return &events.Alert{
 		ID:          uuid.New().String(),
@@ -934,11 +978,34 @@ func yaraMatchToAlert(m rules.YARAMatch, raw interface{}) *events.Alert {
 		RuleName:    m.Rule,
 		Severity:    sev,
 		Title:       fmt.Sprintf("YARA match: %s", m.Rule),
-		Description: fmt.Sprintf("File matched YARA rule %s with %d string hits", m.Rule, len(m.Strings)),
+		Description: desc,
 		Timestamp:   time.Now().UTC(),
 		Tags:        m.Tags,
 		RawEvent:    raw,
+		FilePath:    path,
+		FileSHA256:  hash,
 	}
+}
+
+func hashFileSHA256Prefix(path string, maxBytes int64) (hashHex string, partial bool, err error) {
+	fi, statErr := os.Stat(path)
+	if statErr != nil {
+		return "", false, statErr
+	}
+	if !fi.Mode().IsRegular() {
+		return "", false, fmt.Errorf("not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, io.LimitReader(f, maxBytes)); err != nil {
+		return "", false, err
+	}
+	partial = fi.Size() > maxBytes
+	return hex.EncodeToString(h.Sum(nil)), partial, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -995,4 +1062,16 @@ func deduplicateMITRE(attacks []events.MITREAttack) []events.MITREAttack {
 		out = append(out, a)
 	}
 	return out
+}
+
+// logONNXInitFailure uses Info when the shared library is simply missing (typical dev
+// machines); Warn for unexpected init errors.
+func logONNXInitFailure(logger *zap.Logger, err error) {
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "no such file") || strings.Contains(msg, "cannot open shared object file") {
+		logger.Info("engine: ONNX Runtime not found; ML layer disabled - install the library or extend DYLD_LIBRARY_PATH / LD_LIBRARY_PATH",
+			zap.Error(err))
+		return
+	}
+	logger.Warn("engine: ONNX runtime init failed, ML layer disabled", zap.Error(err))
 }
