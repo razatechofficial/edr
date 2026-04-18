@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -28,6 +29,8 @@ var (
 var (
 	flagDataDir    string
 	flagConfigPath string
+	// Optional directory containing models/ and rules/ subfolders (defaults to the installer's directory).
+	flagBundleDir string
 )
 
 func main() {
@@ -43,13 +46,18 @@ func main() {
 	}
 
 	root.PersistentFlags().StringVar(&flagDataDir, "data-dir", "", "override default data directory")
-	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "path to agent configuration file")
+	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "path to agent configuration file (skips unattended enterprise config)")
+	root.PersistentFlags().StringVar(&flagBundleDir, "bundle-dir", "", "directory containing models/ and rules/ to install (default: directory of this installer binary)")
 
 	installCmd := &cobra.Command{
 		Use:   "install",
-		Short: "Deploy agent binary, config, and register platform service",
-		Long:  "Copies the agent binary to the system path, creates data directories, generates an initial config with a unique agent ID, and installs/starts the platform service (systemd on Linux, launchd on macOS, Windows Service on Windows).",
-		RunE:  runInstall,
+		Short: "Deploy agent, bundled ML models, rules, and service (enterprise zero-touch)",
+		Long: `Unattended enterprise install: copies edr-agent and edrctl, installs models/ and rules/ from the same directory as this installer (override with --bundle-dir), writes a full agent.yaml (ML enabled, air-gap safe defaults, unique agent ID), and registers the system service.
+
+Place edr-installer in a folder alongside models/ and rules/ (see "make bundle-enterprise"), then run: sudo ./edr-installer install
+
+Use --config only if you must supply a custom YAML instead of the generated enterprise profile.`,
+		RunE: runInstall,
 	}
 
 	uninstallCmd := &cobra.Command{
@@ -86,15 +94,34 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	paths := platformPaths()
 
 	fmt.Println("==> Creating directories")
-	for _, dir := range []string{paths.binDir, paths.configDir, paths.dataDir, paths.logDir, paths.rulesDir, paths.quarantineDir} {
+	for _, dir := range []string{
+		paths.binDir, paths.configDir, paths.dataDir, paths.logDir, paths.rulesDir,
+		paths.quarantineDir,
+		filepath.Join(paths.dataDir, "models"),
+		filepath.Join(paths.dataDir, "installer", "bin"),
+		filepath.Join(paths.dataDir, "ioc"),
+		filepath.Join(paths.dataDir, "alerts"),
+		filepath.Join(paths.dataDir, "forensics"),
+		filepath.Join(paths.dataDir, "vectordb"),
+	} {
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("creating directory %s: %w", dir, err)
 		}
 		fmt.Printf("    %s\n", dir)
 	}
 
+	if flagConfigPath == "" {
+		bundleRoot, err := resolveBundleRoot()
+		if err != nil {
+			return err
+		}
+		if err := installBundledAssets(bundleRoot, paths); err != nil {
+			return fmt.Errorf("installing bundled payload: %w", err)
+		}
+	}
+
 	fmt.Println("==> Deploying agent binary")
-	agentSrc, err := findAgentBinary()
+	agentSrc, err := findAgentBinary(&paths)
 	if err != nil {
 		return err
 	}
@@ -104,7 +131,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("    %s -> %s\n", agentSrc, agentDst)
 
-	edrctlSrc := findEdrctlBinary()
+	edrctlSrc := findEdrctlBinary(&paths)
 	if edrctlSrc != "" {
 		edrctlDst := filepath.Join(paths.binDir, edrctlBinaryName())
 		if err := copyFile(edrctlSrc, edrctlDst, 0755); err != nil {
@@ -121,7 +148,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("installing config: %w", err)
 		}
 	} else {
-		fmt.Println("==> Generating initial configuration")
+		fmt.Println("==> Generating enterprise configuration (no manual editing required)")
 		if err := generateConfig(configDst, paths); err != nil {
 			return fmt.Errorf("generating config: %w", err)
 		}
@@ -154,13 +181,22 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("    warning: %v\n", err)
 	}
 
+	if runtime.GOOS == "darwin" {
+		fmt.Println("==> Removing consumer first-run LaunchAgent (if present)")
+		removeDarwinFirstRunAgent(paths)
+	}
+
 	fmt.Println("==> Removing service registration")
 	if err := removeService(paths); err != nil {
 		fmt.Printf("    warning: %v\n", err)
 	}
 
 	fmt.Println("==> Removing binaries")
-	for _, name := range []string{agentBinaryName(), edrctlBinaryName()} {
+	binNames := []string{agentBinaryName(), edrctlBinaryName()}
+	if runtime.GOOS == "darwin" {
+		binNames = append(binNames, "edr-installer")
+	}
+	for _, name := range binNames {
 		p := filepath.Join(paths.binDir, name)
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			fmt.Printf("    warning: removing %s: %v\n", p, err)
@@ -205,21 +241,23 @@ func platformPaths() installPaths {
 			quarantineDir: "/var/lib/edr/quarantine",
 		}
 	case "darwin":
+		cfg := "/Library/Application Support/EDR/config"
 		p = installPaths{
 			binDir:        "/usr/local/bin",
-			configDir:     "/Library/Application Support/EDR/config",
+			configDir:     cfg,
 			dataDir:       "/Library/Application Support/EDR",
 			logDir:        "/Library/Logs/EDR",
-			rulesDir:      "/Library/Application Support/EDR/rules",
+			rulesDir:      filepath.Join(cfg, "rules"),
 			quarantineDir: "/Library/Application Support/EDR/quarantine",
 		}
 	case "windows":
+		cfg := `C:\ProgramData\EDR\config`
 		p = installPaths{
 			binDir:        `C:\Program Files\EDR\bin`,
-			configDir:     `C:\ProgramData\EDR\config`,
+			configDir:     cfg,
 			dataDir:       `C:\ProgramData\EDR`,
 			logDir:        `C:\ProgramData\EDR\logs`,
-			rulesDir:      `C:\ProgramData\EDR\rules`,
+			rulesDir:      filepath.Join(cfg, "rules"),
 			quarantineDir: `C:\ProgramData\EDR\quarantine`,
 		}
 	default:
@@ -235,7 +273,6 @@ func platformPaths() installPaths {
 	if flagDataDir != "" {
 		p.dataDir = flagDataDir
 		p.quarantineDir = filepath.Join(flagDataDir, "quarantine")
-		p.rulesDir = filepath.Join(flagDataDir, "rules")
 	}
 
 	return p
@@ -259,23 +296,39 @@ func requirePrivileged() error {
 	return nil
 }
 
-// generateConfig creates an initial agent.yaml with sane defaults and a
-// freshly generated agent ID.
+// generateConfig creates an enterprise agent.yaml: ML on, air-gap friendly,
+// unique agent ID, and paths aligned with installBundledAssets + platform layout.
 func generateConfig(dst string, paths installPaths) error {
 	cfg := config.Defaults()
 
-	cfg.Agent.ID = uuid.NewString()
+	id := uuid.NewString()
+	cfg.Agent.ID = id
 	cfg.Agent.Name = hostname()
 	cfg.Agent.Environment = "enterprise"
+	cfg.Agent.LogLevel = "info"
 	cfg.Agent.DataDir = paths.dataDir
 	cfg.Agent.TempDir = filepath.Join(paths.dataDir, "tmp")
 
-	cfg.Logging.Level = "info"
-	cfg.Logging.AlertFile = filepath.Join(paths.logDir, "alerts.jsonl")
-	cfg.Logging.AuditFile = filepath.Join(paths.logDir, "audit.jsonl")
+	// No control plane until you enroll — safe unattended default.
+	cfg.Server.Endpoint = ""
+	cfg.Server.AirGapMode = true
+	cfg.Server.MutualTLS = false
+	cfg.Server.GRPCPort = 50051
 
-	cfg.Detection.Sigma.RulesDir = paths.rulesDir
+	cfg.LLM.Enabled = false
+	cfg.LLM.RAG.VectorDBPath = filepath.Join(paths.dataDir, "vectordb")
+
+	cfg.ML.Enabled = true
+	cfg.ML.ModelsDir = filepath.Join(paths.dataDir, "models")
+	cfg.ML.AutoUpdate = false
+	cfg.ML.UpdateIntervalH = 0
+	cfg.ML.VerifyPubKey = ""
+
+	cfg.Detection.Sigma.Enabled = true
+	cfg.Detection.Sigma.RulesDir = filepath.Join(paths.rulesDir, "sigma")
+	cfg.Detection.YARA.Enabled = true
 	cfg.Detection.YARA.RulesDir = filepath.Join(paths.rulesDir, "yara")
+	cfg.Detection.IOC.Enabled = true
 	cfg.Detection.IOC.HashDBPath = filepath.Join(paths.dataDir, "ioc", "hashes.db")
 	cfg.Detection.IOC.IPDBPath = filepath.Join(paths.dataDir, "ioc", "ips.db")
 	cfg.Detection.IOC.DomainDBPath = filepath.Join(paths.dataDir, "ioc", "domains.db")
@@ -283,9 +336,21 @@ func generateConfig(dst string, paths installPaths) error {
 	cfg.Response.Quarantine.Dir = paths.quarantineDir
 	cfg.Response.Forensics.OutputDir = filepath.Join(paths.dataDir, "forensics")
 
-	cfg.ML.ModelsDir = filepath.Join(paths.dataDir, "models")
+	cfg.Logging.Level = "info"
+	cfg.Logging.AlertFile = filepath.Join(paths.logDir, "alerts.jsonl")
+	cfg.Logging.AuditFile = filepath.Join(paths.logDir, "audit.jsonl")
 
-	cfg.LLM.RAG.VectorDBPath = filepath.Join(paths.dataDir, "vectordb")
+	cfg.Response.AutoResponse = true
+	cfg.Response.Actions.KillProcess = true
+	cfg.LegacyResponse.AllowKill = true
+	cfg.LegacyResponse.AutoKillEnabled = true
+
+	cfg.Service.EndpointID = id
+	cfg.Service.TickInterval = time.Second
+	cfg.Service.PIDFile = filepath.Join(paths.dataDir, "agent.pid")
+
+	// Absolute path: matches installBundledAssets (rules copied to paths.rulesDir).
+	cfg.RulesFile = filepath.Join(paths.rulesDir, "baseline.yaml")
 
 	cfg.SelfProtect.Enabled = true
 	cfg.SelfProtect.Watchdog = true
@@ -296,6 +361,93 @@ func generateConfig(dst string, paths installPaths) error {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
 	return os.WriteFile(dst, data, 0640)
+}
+
+// resolveBundleRoot returns the directory that contains models/ and rules/ (typically the installer's directory).
+func resolveBundleRoot() (string, error) {
+	if flagBundleDir != "" {
+		abs, err := filepath.Abs(flagBundleDir)
+		if err != nil {
+			return "", err
+		}
+		st, err := os.Stat(abs)
+		if err != nil || !st.IsDir() {
+			return "", fmt.Errorf("bundle-dir is not a directory: %s", flagBundleDir)
+		}
+		return abs, nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve installer path: %w", err)
+	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(exe), nil
+}
+
+// installBundledAssets copies models/ and rules/ from the bundle (release folder) into system paths.
+func installBundledAssets(bundleRoot string, paths installPaths) error {
+	fmt.Println("==> Installing bundled assets (enterprise zero-touch)")
+	if em := embeddedAssets(); em != nil {
+		fmt.Println("    source: embedded in this binary (build: -tags embedbundle)")
+		if err := extractEmbeddedInstallerAssets(em, paths); err != nil {
+			return err
+		}
+		fmt.Printf("    models -> %s\n", filepath.Join(paths.dataDir, "models"))
+		fmt.Printf("    rules  -> %s\n", paths.rulesDir)
+		return nil
+	}
+
+	modelsSrc := filepath.Join(bundleRoot, "models")
+	if st, err := os.Stat(modelsSrc); err == nil && st.IsDir() {
+		dst := filepath.Join(paths.dataDir, "models")
+		if err := copyDir(modelsSrc, dst); err != nil {
+			return fmt.Errorf("copy models: %w", err)
+		}
+		fmt.Printf("    models: %s -> %s\n", modelsSrc, dst)
+	} else {
+		fmt.Fprintf(os.Stderr, "    warning: %s not found — ship a models/ folder next to edr-installer for bundled ML.\n", modelsSrc)
+	}
+
+	rulesSrc := filepath.Join(bundleRoot, "rules")
+	if st, err := os.Stat(rulesSrc); err == nil && st.IsDir() {
+		if err := copyDir(rulesSrc, paths.rulesDir); err != nil {
+			return fmt.Errorf("copy rules: %w", err)
+		}
+		fmt.Printf("    rules:  %s -> %s\n", rulesSrc, paths.rulesDir)
+	} else {
+		fmt.Fprintf(os.Stderr, "    warning: %s not found — ship rules/ next to edr-installer for detection rules.\n", rulesSrc)
+	}
+	return nil
+}
+
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dst, rel)
+		if info.IsDir() {
+			if rel == "." {
+				return os.MkdirAll(out, 0755)
+			}
+			return os.MkdirAll(out, 0755)
+		}
+		if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
+			return err
+		}
+		perm := info.Mode().Perm()
+		if perm == 0 {
+			perm = 0644
+		}
+		return copyFile(path, out, perm)
+	})
 }
 
 // installService registers and starts the platform-appropriate service
@@ -313,17 +465,77 @@ func installService(paths installPaths, agentBin, configPath string) error {
 	}
 }
 
+const darwinAgentLaunchdPlist = "/Library/LaunchDaemons/com.razatech.edr-agent.plist"
+
+// darwinLaunchctlPath resolves launchctl. Some macOS versions only ship /bin/launchctl;
+// a hard-coded /usr/bin/launchctl breaks fork/exec with "no such file or directory".
+func darwinLaunchctlPath() (string, error) {
+	candidates := []string{
+		"/bin/launchctl",
+		"/usr/bin/launchctl",
+	}
+	for _, p := range candidates {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p, nil
+		}
+	}
+	if p, err := exec.LookPath("launchctl"); err == nil {
+		return p, nil
+	}
+	return "", fmt.Errorf("launchctl not found (checked /bin, /usr/bin, and PATH)")
+}
+
 // stopService halts the currently running EDR agent service.
 func stopService() error {
 	switch runtime.GOOS {
 	case "linux":
 		return runCmd("systemctl", "stop", "edr-agent")
 	case "darwin":
-		return runCmd("launchctl", "unload", "/Library/LaunchDaemons/com.razatech.edr-agent.plist")
+		// Best-effort: if launchctl cannot be resolved, plist removal still works.
+		if lc, err := darwinLaunchctlPath(); err == nil {
+			_ = exec.Command(lc, "bootout", "system", darwinAgentLaunchdPlist).Run()
+			_ = exec.Command(lc, "unload", darwinAgentLaunchdPlist).Run()
+		}
+		return nil
 	case "windows":
 		return runCmd("sc", "stop", "EDRAgent")
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
+}
+
+// removeDarwinFirstRunAgent unloads the consumer-package first-run job (LaunchAgent),
+// removes its plist, and removes the bundled first-run script. Safe to call if
+// the consumer .pkg was never installed.
+func removeDarwinFirstRunAgent(paths installPaths) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	plist := "/Library/LaunchAgents/com.razatech.edr.firstrun.plist"
+	if out, err := exec.Command("stat", "-f", "%Su", "/dev/console").Output(); err == nil {
+		user := strings.TrimSpace(string(out))
+		if user != "" && user != "root" && user != "loginwindow" {
+			if uidOut, err := exec.Command("id", "-u", user).Output(); err == nil {
+				uid := strings.TrimSpace(string(uidOut))
+				if uid != "" {
+					target := fmt.Sprintf("gui/%s/com.razatech.edr.firstrun", uid)
+					if lc, err := darwinLaunchctlPath(); err == nil {
+						_ = exec.Command(lc, "bootout", target).Run()
+					}
+				}
+			}
+		}
+	}
+	if err := os.Remove(plist); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("    warning: removing %s: %v\n", plist, err)
+	} else if err == nil {
+		fmt.Printf("    removed %s\n", plist)
+	}
+	script := filepath.Join(paths.dataDir, "first-run-permissions.sh")
+	if err := os.Remove(script); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("    warning: removing %s: %v\n", script, err)
+	} else if err == nil {
+		fmt.Printf("    removed %s\n", script)
 	}
 }
 
@@ -334,7 +546,10 @@ func removeService(paths installPaths) error {
 		_ = runCmd("systemctl", "disable", "edr-agent")
 		return os.Remove("/etc/systemd/system/edr-agent.service")
 	case "darwin":
-		return os.Remove("/Library/LaunchDaemons/com.razatech.edr-agent.plist")
+		if lc, err := darwinLaunchctlPath(); err == nil {
+			_ = exec.Command(lc, "bootout", "system", darwinAgentLaunchdPlist).Run()
+		}
+		return os.Remove(darwinAgentLaunchdPlist)
 	case "windows":
 		return runCmd("sc", "delete", "EDRAgent")
 	default:
@@ -440,11 +655,6 @@ const launchdPlist = `<?xml version="1.0" encoding="UTF-8"?>
     <string>/Library/Logs/EDR/agent.stdout.log</string>
     <key>StandardErrorPath</key>
     <string>/Library/Logs/EDR/agent.stderr.log</string>
-    <key>HardResourceLimits</key>
-    <dict>
-        <key>NumberOfFiles</key>
-        <integer>65536</integer>
-    </dict>
 </dict>
 </plist>
 `
@@ -456,7 +666,7 @@ func installLaunchDaemon(agentBin, configPath string) error {
 		return fmt.Errorf("parsing plist template: %w", err)
 	}
 
-	plistPath := "/Library/LaunchDaemons/com.razatech.edr-agent.plist"
+	plistPath := darwinAgentLaunchdPlist
 	f, err := os.OpenFile(plistPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("creating plist: %w", err)
@@ -476,10 +686,32 @@ func installLaunchDaemon(agentBin, configPath string) error {
 
 	fmt.Printf("    created %s\n", plistPath)
 
-	if err := runCmd("launchctl", "load", plistPath); err != nil {
-		return fmt.Errorf("launchctl load: %w", err)
+	// LaunchDaemons must be root:wheel (not root:staff) or launchctl bootstrap rejects them.
+	// Use absolute paths: pkg postinstall often runs with a minimal PATH (no /usr/sbin).
+	if err := runCmd("/usr/sbin/chown", "root:wheel", plistPath); err != nil {
+		return fmt.Errorf("chown launchd plist: %w", err)
 	}
-	fmt.Println("    daemon loaded")
+	if err := runCmd("/bin/chmod", "644", plistPath); err != nil {
+		return fmt.Errorf("chmod launchd plist: %w", err)
+	}
+
+	lc, err := darwinLaunchctlPath()
+	if err != nil {
+		return err
+	}
+
+	// Remove prior registration if present (upgrade / retry).
+	_ = exec.Command(lc, "bootout", "system", plistPath).Run()
+
+	// Prefer bootstrap; fall back to deprecated load if needed.
+	if err := runCmd(lc, "bootstrap", "system", plistPath); err != nil {
+		if err2 := runCmd(lc, "load", plistPath); err2 != nil {
+			return fmt.Errorf("launchctl bootstrap system: %w (fallback load: %v)", err, err2)
+		}
+		fmt.Println("    daemon registered (launchctl load fallback)")
+		return nil
+	}
+	fmt.Println("    daemon registered (launchctl bootstrap system)")
 	return nil
 }
 
@@ -530,18 +762,39 @@ func edrctlBinaryName() string {
 	return "edrctl"
 }
 
-// findAgentBinary locates the agent binary in common build output paths
-// relative to the installer working directory.
-func findAgentBinary() (string, error) {
+// findAgentBinary locates the agent binary: embedded staging (single-file installer),
+// then paths next to this installer, then dev build outputs.
+func findAgentBinary(paths *installPaths) (string, error) {
 	suffix := fmt.Sprintf("-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		suffix += ".exe"
+	}
+
+	if paths != nil {
+		staged := filepath.Join(paths.dataDir, "installer", "bin", agentBinaryName())
+		if info, err := os.Stat(staged); err == nil && !info.IsDir() {
+			abs, err := filepath.Abs(staged)
+			if err != nil {
+				return "", err
+			}
+			return abs, nil
+		}
 	}
 
 	candidates := []string{
 		filepath.Join("bin", "edr-agent"+suffix),
 		filepath.Join(".", agentBinaryName()),
 		agentBinaryName(),
+	}
+	if exe, err := os.Executable(); err == nil {
+		if exe, err = filepath.EvalSymlinks(exe); err == nil {
+			exeDir := filepath.Dir(exe)
+			candidates = append([]string{
+				filepath.Join(exeDir, "edr-agent"+suffix),
+				filepath.Join(exeDir, agentBinaryName()),
+				filepath.Join(exeDir, "bin", "edr-agent"+suffix),
+			}, candidates...)
+		}
 	}
 
 	for _, c := range candidates {
@@ -553,16 +806,33 @@ func findAgentBinary() (string, error) {
 	return "", fmt.Errorf("agent binary not found; tried: %s", strings.Join(candidates, ", "))
 }
 
-// findEdrctlBinary locates the edrctl binary in common build output paths.
-func findEdrctlBinary() string {
+// findEdrctlBinary locates the edrctl binary (optional).
+func findEdrctlBinary(paths *installPaths) string {
 	suffix := fmt.Sprintf("-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		suffix += ".exe"
 	}
 
+	if paths != nil {
+		staged := filepath.Join(paths.dataDir, "installer", "bin", edrctlBinaryName())
+		if info, err := os.Stat(staged); err == nil && !info.IsDir() {
+			abs, _ := filepath.Abs(staged)
+			return abs
+		}
+	}
+
 	candidates := []string{
 		filepath.Join("bin", "edrctl"+suffix),
 		filepath.Join(".", edrctlBinaryName()),
+	}
+	if exe, err := os.Executable(); err == nil {
+		if exe, err = filepath.EvalSymlinks(exe); err == nil {
+			exeDir := filepath.Dir(exe)
+			candidates = append([]string{
+				filepath.Join(exeDir, "edrctl"+suffix),
+				filepath.Join(exeDir, edrctlBinaryName()),
+			}, candidates...)
+		}
 	}
 
 	for _, c := range candidates {
