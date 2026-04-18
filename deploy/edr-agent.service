@@ -1,0 +1,52 @@
+[Unit]
+Description=EDR Agent - Endpoint Detection and Response
+Documentation=https://github.com/razatechofficial/edr
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/edr-agent --config /etc/edr/agent.yaml
+Restart=always
+RestartSec=5
+WatchdogSec=30
+
+# Dedicated service account
+User=edr
+Group=edr
+
+# Minimal Linux capabilities instead of full root
+AmbientCapabilities=CAP_SYS_PTRACE CAP_KILL CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_SYS_ADMIN CAP_FOWNER
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_KILL CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_SYS_ADMIN CAP_FOWNER
+NoNewPrivileges=yes
+SecureBits=keep-caps
+
+# Filesystem hardening
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/edr /var/log/edr /var/run/edr /tmp/edr
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+
+# Network (agent needs access for isolation and optional forwarding)
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+# System call filtering
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @process @network-io @file-system @io-event @signal kill ptrace
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=512M
+CPUQuota=10%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=edr-agent
+
+[Install]
+WantedBy=multi-user.target
