@@ -3,6 +3,7 @@
 package kernel
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -42,9 +43,10 @@ const (
 	bpfEvtSignal    = 25
 )
 
-// Placeholder for compiled eBPF bytecode. Uncomment after running `make bpf`:
-// //go:embed bpf/edr.bpf.o
-// var bpfBytecode []byte
+// bpfBytecode holds embedded eBPF bytecode when compiled with `make ebpf-link`
+// and the bpf/ directory exists. Build with -tags embed_ebpf to activate.
+// The default empty slice causes loadCollection to fall back to the on-disk path.
+var bpfBytecode []byte
 
 // bpfProcessEvent mirrors the C struct process_event emitted by the eBPF program.
 type bpfProcessEvent struct {
@@ -258,13 +260,12 @@ func (d *EBPFDriver) cleanup() {
 }
 
 func (d *EBPFDriver) loadCollection() (*ebpf.CollectionSpec, error) {
-	// When compiled with go:embed, use the embedded bytecode:
-	// if len(bpfBytecode) > 0 {
-	//     return ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpfBytecode))
-	// }
+	if len(bpfBytecode) > 0 {
+		return ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpfBytecode))
+	}
 	if _, err := os.Stat(bpfObjectPath); err != nil {
 		return nil, fmt.Errorf(
-			"ebpf object not found at %s (compile with 'make bpf'): %w",
+			"ebpf object not found at %s (compile with 'make ebpf-link' or build with -tags embed_ebpf): %w",
 			bpfObjectPath, err,
 		)
 	}
