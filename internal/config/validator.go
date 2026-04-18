@@ -87,6 +87,9 @@ func Validate(cfg *Config) error {
 		validateMin(&errs, "llm.timeout_sec", cfg.LLM.TimeoutSec, 1)
 	}
 
+	if cfg.ML.RequireRuntime && !cfg.ML.Enabled {
+		errs.add("ml.require_runtime is true but ml.enabled is false; enable ml or disable require_runtime")
+	}
 	if cfg.ML.Enabled {
 		validateThreshold(&errs, "ml.thresholds.pe_malicious", cfg.ML.Thresholds.PEMalicious)
 		validateThreshold(&errs, "ml.thresholds.behavior_anomaly", cfg.ML.Thresholds.BehaviorAnomaly)
