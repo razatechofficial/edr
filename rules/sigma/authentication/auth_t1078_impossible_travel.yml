@@ -22,7 +22,8 @@ detection:
             - '172.16.0.0/12'
             - '192.168.0.0/16'
             - '127.0.0.0/8'
-    condition: selection and not filter_internal | count(src_geo.country) by user > 1
+    # sigma-go aggregation fields must be simple identifiers (no dots).
+    condition: selection and not filter_internal | count(src_geo_country) by user > 1
     timeframe: 1h
 falsepositives:
     - Users on VPN services that rotate exit nodes

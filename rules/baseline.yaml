@@ -637,6 +637,8 @@ rules:
     event_type: "file"
     when:
       file_path_contains: ["/tmp/", "\\Temp\\", "\\tmp\\"]
+      # Unix sockets under /tmp (e.g. IDE/sandbox proxies) are not executables
+      file_path_not_contains: [".sock"]
       operation_in: ["create", "write"]
 
   - id: "FILE-010"
@@ -647,6 +649,7 @@ rules:
     event_type: "file"
     when:
       file_path_contains: ["/tmp/", "\\Temp\\"]
+      file_path_not_contains: [".sock"]
       operation_in: ["create"]
 
   - id: "FILE-011"

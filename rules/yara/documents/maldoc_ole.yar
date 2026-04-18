@@ -81,7 +81,7 @@ rule Maldoc_OLE_Obfuscated_VBA
     condition:
         $ole_magic at 0 and
         (4 of ($obfusc*) or ($concat and 2 of ($obfusc*)) or
-         ($b64 and 2 of ($obfusc*)))
+         ($b64 and 2 of ($obfusc*)) or $exec_obfusc)
 }
 
 rule Maldoc_OLE_DDE_Attack
