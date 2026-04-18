@@ -197,6 +197,12 @@ ml:
   # Env: ML_ENABLED
   enabled: true
 
+  # When true, startup fails if ONNX Runtime cannot load or the advanced detection
+  # engine (Sigma/YARA/IOC/ML stack) cannot initialize. Use for production ML or
+  # to verify full rules + models locally (install ONNX; see docs/ENTERPRISE_DEPLOYMENT.md).
+  # Env: ML_REQUIRE_RUNTIME
+  require_runtime: false
+
   # Directory containing ONNX model files.
   # Env: ML_MODELS_DIR
   models_dir: "./models"
@@ -276,13 +282,13 @@ detection:
 # Automated response
 # -----------------------------------------------------------------------------
 response:
-  # Enable automated response actions.
+  # Enable automated response actions (playbook-capable response engine).
   # Env: AUTO_RESPONSE
-  auto_response: false
+  auto_response: true
 
   # Permitted response actions.
   actions:
-    kill_process: false
+    kill_process: true
     quarantine_file: false
     network_isolate: false
     block_hash: false
@@ -408,12 +414,14 @@ service:
 
 logging:
   level: "info"
+  # Empty = <data_dir>/alerts/alerts.jsonl and <data_dir>/audit/audit.jsonl (set by loader).
   alert_file: ""
   audit_file: ""
 
+# Auto-kill: only enable on lab/VM test hosts unless policy requires it.
 response_legacy:
-  allow_kill: false
-  auto_kill_enabled: false
+  allow_kill: true
+  auto_kill_enabled: true
   min_kill_score: 90
   kill_rule_allowlist: []
   protected_processes: []
