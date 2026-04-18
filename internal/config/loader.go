@@ -2,10 +2,15 @@ package config
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 
 	mapstructure "github.com/go-viper/mapstructure/v2"
@@ -37,6 +42,9 @@ func Load(path string) (Config, error) {
 
 	migrateLegacy(&cfg, v)
 	applyResourcePathDefaults(&cfg, path)
+	applyPerformanceDefaults(&cfg)
+	applyDarwinDataDirDefault(&cfg)
+	applyLoggingPathDefaults(&cfg)
 
 	if err := Validate(&cfg); err != nil {
 		return Config{}, err
@@ -78,12 +86,66 @@ func LoadEncrypted(path string, key []byte) (Config, error) {
 
 	migrateLegacy(&cfg, v)
 	applyResourcePathDefaults(&cfg, path)
+	applyPerformanceDefaults(&cfg)
+	applyDarwinDataDirDefault(&cfg)
+	applyLoggingPathDefaults(&cfg)
 
 	if err := Validate(&cfg); err != nil {
 		return Config{}, err
 	}
 
 	return cfg, nil
+}
+
+// LoadSigned loads configuration from a YAML file and verifies an Ed25519
+// detached signature at path+".sig" against the public key PEM at pubKeyPath.
+// If pubKeyPath is empty, it falls back to unsigned Load.
+func LoadSigned(path, pubKeyPath string) (Config, error) {
+	if pubKeyPath == "" {
+		return Load(path)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("reading config %s: %w", path, err)
+	}
+
+	sig, err := os.ReadFile(path + ".sig")
+	if err != nil {
+		return Config{}, fmt.Errorf("reading config signature %s.sig: %w", path, err)
+	}
+
+	pubPEM, err := os.ReadFile(pubKeyPath)
+	if err != nil {
+		return Config{}, fmt.Errorf("reading config signing key %s: %w", pubKeyPath, err)
+	}
+
+	pub, err := parseConfigPubKey(pubPEM)
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing config signing key: %w", err)
+	}
+
+	if !ed25519.Verify(pub, raw, sig) {
+		return Config{}, errors.New("config signature verification failed")
+	}
+
+	return Load(path)
+}
+
+func parseConfigPubKey(pemBytes []byte) (ed25519.PublicKey, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, errors.New("config pubkey: invalid PEM")
+	}
+	raw, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	pub, ok := raw.(ed25519.PublicKey)
+	if !ok {
+		return nil, errors.New("config pubkey: expected Ed25519")
+	}
+	return pub, nil
 }
 
 // loadDotEnv reads a .env file from dir and sets environment variables for
@@ -172,16 +234,67 @@ func migrateLegacy(cfg *Config, v *viper.Viper) {
 	}
 }
 
+// applyPerformanceDefaults maps performance.worker_count <= 0 to runtime.NumCPU()
+// (minimum 1), matching shipped agent.yaml comments ("0 = NumCPU").
+func applyPerformanceDefaults(cfg *Config) {
+	if cfg.Performance.WorkerCount <= 0 {
+		n := runtime.NumCPU()
+		if n < 1 {
+			n = 1
+		}
+		cfg.Performance.WorkerCount = n
+	}
+}
+
+// applyDarwinDataDirDefault replaces the Linux placeholder data_dir with a
+// user-writable path when running on macOS without an explicit override, so
+// `go run` and LaunchAgent-style installs work without root.
+func applyDarwinDataDirDefault(cfg *Config) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if cfg.Agent.DataDir != "/var/lib/edr" {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return
+	}
+	cfg.Agent.DataDir = filepath.Join(home, "Library", "Application Support", "EDR")
+}
+
+// applyLoggingPathDefaults fills empty logging.alert_file / audit_file from
+// agent.data_dir (empty paths would otherwise make alert.Writer open "").
+func applyLoggingPathDefaults(cfg *Config) {
+	dd := cfg.Agent.DataDir
+	if dd == "" {
+		dd = "/var/lib/edr"
+	}
+	if cfg.Logging.AlertFile == "" {
+		cfg.Logging.AlertFile = filepath.Join(dd, "alerts", "alerts.jsonl")
+	}
+	if cfg.Logging.AuditFile == "" {
+		cfg.Logging.AuditFile = filepath.Join(dd, "audit", "audit.jsonl")
+	}
+}
+
 // applyResourcePathDefaults resolves empty detection, ML, and rules paths when
 // the config file lives next to a standard repo layout (configs/agent.yaml →
 // ../rules, ../models) or when Debian-style shipped paths exist under
 // /usr/share/edr.
+//
+// The macOS/Linux installer places bundled rules under <configDir>/rules/
+// (e.g. .../Library/Application Support/EDR/config/rules), not only under
+// <dataDir>/rules; relative rules_file paths must resolve against the config
+// directory first.
 func applyResourcePathDefaults(cfg *Config, configPath string) {
 	if configPath == "" {
 		return
 	}
 	base := filepath.Dir(configPath)
+	// Repo dev: configs/agent.yaml → ../rules; installer: config/agent.yaml → ./rules
 	repoRules := filepath.Clean(filepath.Join(base, "..", "rules"))
+	configRules := filepath.Join(base, "rules")
 	repoModels := filepath.Clean(filepath.Join(base, "..", "models"))
 
 	tryDir := func(path string) bool {
@@ -193,11 +306,11 @@ func applyResourcePathDefaults(cfg *Config, configPath string) {
 		return err == nil && !fi.IsDir()
 	}
 
+	rulesRoots := []string{configRules, repoRules, "/usr/share/edr/rules"}
+
 	if cfg.Detection.Sigma.Enabled && cfg.Detection.Sigma.RulesDir == "" {
-		for _, p := range []string{
-			filepath.Join(repoRules, "sigma"),
-			"/usr/share/edr/rules/sigma",
-		} {
+		for _, root := range rulesRoots {
+			p := filepath.Join(root, "sigma")
 			if tryDir(p) {
 				cfg.Detection.Sigma.RulesDir = p
 				break
@@ -205,10 +318,8 @@ func applyResourcePathDefaults(cfg *Config, configPath string) {
 		}
 	}
 	if cfg.Detection.YARA.Enabled && cfg.Detection.YARA.RulesDir == "" {
-		for _, p := range []string{
-			filepath.Join(repoRules, "yara"),
-			"/usr/share/edr/rules/yara",
-		} {
+		for _, root := range rulesRoots {
+			p := filepath.Join(root, "yara")
 			if tryDir(p) {
 				cfg.Detection.YARA.RulesDir = p
 				break
@@ -216,19 +327,20 @@ func applyResourcePathDefaults(cfg *Config, configPath string) {
 		}
 	}
 	if cfg.Detection.CustomRules.Enabled && cfg.Detection.CustomRules.RulesPath == "" {
-		for _, p := range []string{
-			filepath.Join(repoRules, "custom"),
-			"/usr/share/edr/rules/custom",
-		} {
+		for _, root := range rulesRoots {
+			p := filepath.Join(root, "custom")
 			if tryDir(p) || tryFile(p) {
 				cfg.Detection.CustomRules.RulesPath = p
 				break
 			}
 		}
 		if cfg.Detection.CustomRules.RulesPath == "" {
-			sample := filepath.Join(repoRules, "custom", "sample_rules.yaml")
-			if tryFile(sample) {
-				cfg.Detection.CustomRules.RulesPath = sample
+			for _, root := range rulesRoots {
+				sample := filepath.Join(root, "custom", "sample_rules.yaml")
+				if tryFile(sample) {
+					cfg.Detection.CustomRules.RulesPath = sample
+					break
+				}
 			}
 		}
 	}
@@ -255,9 +367,19 @@ func applyResourcePathDefaults(cfg *Config, configPath string) {
 		cfg.RulesFile = "rules/baseline.yaml"
 	}
 	if !filepath.IsAbs(cfg.RulesFile) {
-		// Keep a working relative path when the process CWD already resolves it
-		// (typical local dev from repo root).
-		if _, err := os.Stat(cfg.RulesFile); err != nil {
+		// Prefer paths next to the config file (installer: .../config/rules/...) before
+		// trusting CWD-relative resolution — launchd has no stable working directory.
+		primary := filepath.Clean(filepath.Join(base, cfg.RulesFile))
+		if tryFile(primary) {
+			cfg.RulesFile = primary
+		} else if _, err := os.Stat(cfg.RulesFile); err == nil {
+			// Repo layout: configs/agent.yaml + ../rules/baseline.yaml — primary misses, but
+			// Stat finds the file relative to process CWD. Freeze to an absolute path so a
+			// later open does not depend on CWD (e.g. launchd).
+			if abs, err := filepath.Abs(cfg.RulesFile); err == nil {
+				cfg.RulesFile = abs
+			}
+		} else {
 			candidates := []string{
 				filepath.Clean(filepath.Join(base, "..", cfg.RulesFile)),
 				filepath.Join(repoRules, "baseline.yaml"),

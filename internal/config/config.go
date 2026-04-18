@@ -129,6 +129,9 @@ type Config struct {
 
 	ML struct {
 		Enabled         bool   `yaml:"enabled" env:"ML_ENABLED"`
+		// RequireRuntime aborts startup when ML is enabled if ONNX Runtime cannot
+		// initialize or the advanced detection engine (including ML) fails to load.
+		RequireRuntime bool `yaml:"require_runtime" env:"ML_REQUIRE_RUNTIME"`
 		ModelsDir       string `yaml:"models_dir" env:"ML_MODELS_DIR"`
 		AutoUpdate      bool   `yaml:"auto_update"`
 		UpdateIntervalH int    `yaml:"update_interval_hours"`
@@ -306,6 +309,7 @@ type Config struct {
 
 	RulesFile             string `yaml:"rules_file"`
 	RulesVerifyPubKeyPath string `yaml:"rules_verify_pubkey_path"`
+	ConfigVerifyPubKey    string `yaml:"config_verify_pubkey"`
 }
 
 // CustomFeed represents an external threat intelligence feed.
