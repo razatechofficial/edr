@@ -1,10 +1,15 @@
 package alert
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,6 +21,7 @@ type Writer struct {
 	alertPath string
 	auditPath string
 	maxBytes  int64
+	encKey    []byte // 32-byte AES-256 key; nil = plaintext
 }
 
 func NewWriter(alertPath, auditPath string, maxBytes int64) *Writer {
@@ -23,6 +29,16 @@ func NewWriter(alertPath, auditPath string, maxBytes int64) *Writer {
 		maxBytes = 5 * 1024 * 1024
 	}
 	return &Writer{alertPath: alertPath, auditPath: auditPath, maxBytes: maxBytes}
+}
+
+// NewEncryptedWriter creates a writer that encrypts each rotated alert file
+// with AES-256-GCM and appends an HMAC-SHA256 integrity tag.
+func NewEncryptedWriter(alertPath, auditPath string, maxBytes int64, encKey []byte) *Writer {
+	w := NewWriter(alertPath, auditPath, maxBytes)
+	if len(encKey) == 32 {
+		w.encKey = encKey
+	}
+	return w
 }
 
 func (w *Writer) WriteAlert(v schema.Alert) error {
@@ -34,13 +50,18 @@ func (w *Writer) WriteAudit(v schema.AuditRecord) error {
 }
 
 func (w *Writer) appendJSON(path string, v any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if path == "" {
+		return fmt.Errorf("alert writer: output path is empty (set logging.alert_file / logging.audit_file or data_dir)")
+	}
+	// 0755 so operators and log forwarders can traverse and read alerts (typical /var/log semantics).
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	if err := w.rotateIfNeeded(path); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	// 0644 so edrctl and SIEM local readers need not run as root.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
@@ -70,11 +91,55 @@ func (w *Writer) rotateIfNeeded(path string) error {
 	if err := os.Rename(path, rotated); err != nil {
 		return err
 	}
+
+	if w.encKey != nil {
+		if err := w.encryptRotatedFile(rotated); err != nil {
+			return fmt.Errorf("encrypt rotated file %s: %w", rotated, err)
+		}
+	}
+
 	sum, err := fileSHA256(rotated)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(rotated+".sha256", []byte(sum+"\n"), 0o640)
+
+	sigData := sum
+	if w.encKey != nil {
+		mac := hmac.New(sha256.New, w.encKey)
+		mac.Write([]byte(sum))
+		sigData = sum + " hmac:" + hex.EncodeToString(mac.Sum(nil))
+	}
+
+	return os.WriteFile(rotated+".sha256", []byte(sigData+"\n"), 0o640)
+}
+
+func (w *Writer) encryptRotatedFile(path string) error {
+	plaintext, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	block, err := aes.NewCipher(w.encKey)
+	if err != nil {
+		return err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return err
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return err
+	}
+
+	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+	encPath := path + ".enc"
+	if err := os.WriteFile(encPath, ciphertext, 0o600); err != nil {
+		return err
+	}
+
+	return os.Rename(encPath, path)
 }
 
 func fileSHA256(path string) (string, error) {
