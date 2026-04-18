@@ -184,12 +184,12 @@ func TestOutputConfidence(t *testing.T) {
 	}
 
 	got := outputConfidence([]float32{0.8})
-	if got != 0.8 {
+	if diff := got - 0.8; diff > 0.001 || diff < -0.001 {
 		t.Errorf("single output 0.8 should return 0.8, got %f", got)
 	}
 
 	got = outputConfidence([]float32{0.3})
-	if got != 0.7 {
+	if diff := got - 0.7; diff > 0.001 || diff < -0.001 {
 		t.Errorf("single output 0.3 should return 0.7, got %f", got)
 	}
 

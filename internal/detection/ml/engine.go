@@ -203,6 +203,14 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 		}
 	}
 
+	if err := mgr.LoadManifest(cfg.ModelsDir); err != nil {
+		logger.Warn("ml: manifest not loaded (non-fatal)", zap.Error(err))
+	} else if mgr.manifest != nil {
+		logger.Info("ml: manifest loaded",
+			zap.String("version", mgr.manifest.Version),
+			zap.Int("model_count", len(mgr.manifest.Models)))
+	}
+
 	peThr := cfg.PEMaliciousThreshold
 	if peThr <= 0 || peThr > 1 {
 		peThr = defaultPEMaliciousThreshold
@@ -305,6 +313,62 @@ func (e *Engine) ScoreProcess(ctx context.Context, eventWindow []interface{}) (*
 		Confidence: outputConfidence(output),
 		Category:   classifyBehaviorCategory(score),
 	}, nil
+}
+
+// ScoreProcessTransformer evaluates a variable-length event window using the
+// behavior_transformer model for deeper contextual analysis.
+func (e *Engine) ScoreProcessTransformer(ctx context.Context, eventWindow []interface{}) (*BehaviorScore, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !e.enabled {
+		return nil, fmt.Errorf("ml: engine is disabled")
+	}
+
+	feats := e.transformerExtract.Extract(eventWindow)
+
+	session, err := e.models.Get(modelBehaviorTransformer)
+	if err != nil {
+		return nil, fmt.Errorf("ml: %w", err)
+	}
+
+	output, err := session.Predict(feats)
+	if err != nil {
+		return nil, fmt.Errorf("ml: behavior_transformer inference: %w", err)
+	}
+	if len(output) < 1 {
+		return nil, fmt.Errorf("ml: behavior_transformer model returned empty output")
+	}
+
+	score := float64(output[0])
+	return &BehaviorScore{
+		Score:      score,
+		Confidence: outputConfidence(output),
+		Category:   classifyBehaviorCategory(score),
+	}, nil
+}
+
+// ScoreProcessEnsemble scores using both LSTM and transformer models (when
+// available), returning the higher-confidence result. Falls back to LSTM-only
+// if the transformer model is not loaded.
+func (e *Engine) ScoreProcessEnsemble(ctx context.Context, eventWindow []interface{}) (*BehaviorScore, error) {
+	lstmScore, lstmErr := e.ScoreProcess(ctx, eventWindow)
+
+	transformerScore, transformerErr := e.ScoreProcessTransformer(ctx, eventWindow)
+	if transformerErr != nil {
+		if lstmErr != nil {
+			return nil, lstmErr
+		}
+		return lstmScore, nil
+	}
+	if lstmErr != nil {
+		return transformerScore, nil
+	}
+
+	if transformerScore.Confidence >= lstmScore.Confidence {
+		return transformerScore, nil
+	}
+	return lstmScore, nil
 }
 
 // ScoreNetwork evaluates a network connection for anomalous behavior.
