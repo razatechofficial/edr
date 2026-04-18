@@ -29,7 +29,24 @@ go.work.sum
 
 .venv/
 ml/training/.venv/
+
+# Populated only when building edr-installer-embedded (see Makefile)
+cmd/installer/bundle/models/
+cmd/installer/bundle/rules/
+cmd/installer/bundle/bin/
 __pycache__/
+
+# Local / build outputs
+.DS_Store
+/agent
+dist/*.pkg
+ml/datasets/
+models/model_signing.key
+models/*.pt
+models/*.npy
+models/*.png
+models/network_cic_train_out/
+models/network_train_out/
 
 *.md
 /bin/
