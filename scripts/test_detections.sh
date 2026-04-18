@@ -156,17 +156,17 @@ else
     log_fail "Suspicious script creation not detected within timeout"
 fi
 
-# ---------- Test 2: EICAR test file ----------
+# ---------- Test 2: Log4Shell IOC string (shipped YARA cve_2021_44228_log4j.yar) ----------
 
-echo "--- Test 2: EICAR test file ---"
+echo "--- Test 2: Log4j JNDI IOC string (YARA Log4Shell rule) ---"
 
-EICAR_FILE="${TEST_DIR}/eicar.com"
-echo 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > "${EICAR_FILE}"
+LOG4J_PROBE="${TEST_DIR}/log4j_yara_probe.txt"
+printf '%s\n' '${jndi:ldap://127.0.0.1/edr-test-probe}' > "${LOG4J_PROBE}"
 
-if wait_for_alert "eicar" 5; then
-    log_pass "EICAR test file detected"
+if wait_for_alert "Log4Shell" 8; then
+    log_pass "Log4Shell YARA probe matched (shipped Exploit_CVE_2021_44228_Log4Shell)"
 else
-    log_skip "EICAR detection (requires YARA rules with EICAR signature)"
+    log_skip "Log4Shell YARA (ensure agent scans file events with rules/yara loaded)"
 fi
 
 # ---------- Test 3: Suspicious process name patterns ----------
