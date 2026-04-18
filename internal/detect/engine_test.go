@@ -111,6 +111,40 @@ func TestEvaluateFile(t *testing.T) {
 	}
 }
 
+func TestEvaluateFilePathNotContains(t *testing.T) {
+	rs := rules.RuleSet{
+		Version: "1",
+		Rules: []rules.Rule{
+			{
+				ID:        "F-tmp",
+				Name:      "Temp drop",
+				Severity:  "high",
+				EventType: "file",
+				When: rules.Condition{
+					FilePathContains:    []string{"/tmp/"},
+					FilePathNotContains: []string{".sock"},
+					OperationIn:         []string{"create"},
+				},
+			},
+		},
+	}
+	e := NewEngine(rs)
+	alerts := e.EvaluateFile(schema.FileEvent{
+		BaseEvent: schema.BaseEvent{
+			SchemaVersion: schema.SchemaVersionV1,
+			EventType:     schema.EventFile,
+			EndpointID:    "ep",
+			Timestamp:     time.Now(),
+		},
+		Path:      "/tmp/sandbox-proxy-12345.sock",
+		Operation: "create",
+		ActorPID:  1,
+	})
+	if len(alerts) != 0 {
+		t.Fatalf("expected 0 alerts for .sock exclusion, got %d", len(alerts))
+	}
+}
+
 func TestEvaluateNetwork(t *testing.T) {
 	rs := rules.RuleSet{
 		Version: "1",

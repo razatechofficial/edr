@@ -158,6 +158,9 @@ func matchFileRule(r rules.Rule, ev schema.FileEvent) bool {
 	if len(w.FilePathContains) > 0 && !anySubstring(ev.Path, w.FilePathContains) {
 		return false
 	}
+	if len(w.FilePathNotContains) > 0 && anySubstring(ev.Path, w.FilePathNotContains) {
+		return false
+	}
 	if len(w.OperationIn) > 0 && !containsAnyFold(ev.Operation, w.OperationIn) {
 		return false
 	}
