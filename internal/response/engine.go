@@ -346,10 +346,16 @@ func NewAuditLogger(path string) (*AuditLogger, error) {
 	if err != nil {
 		return nil, fmt.Errorf("audit logger: open file: %w", err)
 	}
+	key := []byte(os.Getenv("EDR_AUDIT_SIGNING_KEY"))
+	if len(key) == 0 {
+		hostname, _ := os.Hostname()
+		derived := sha256.Sum256([]byte("edr-audit-" + hostname + "-" + path))
+		key = derived[:]
+	}
 	return &AuditLogger{
 		file: f,
 		enc:  json.NewEncoder(f),
-		key:  []byte(os.Getenv("EDR_AUDIT_SIGNING_KEY")),
+		key:  key,
 	}, nil
 }
 
