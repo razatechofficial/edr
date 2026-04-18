@@ -200,12 +200,27 @@ detection:
     lateral_movement_detect: true
 
 response:
-  auto_response: false
+  auto_response: true
+  actions:
+    kill_process: true
+    quarantine_file: false
+    network_isolate: false
+    block_hash: false
+    disable_user: false
+    collect_forensics: false
+    take_snapshot: false
   quarantine:
     dir: "${DATA_DIR}/quarantine"
   forensics:
     output_dir: "${DATA_DIR}/forensics"
     chain_of_custody: true
+
+response_legacy:
+  allow_kill: true
+  auto_kill_enabled: true
+  min_kill_score: 90
+  kill_rule_allowlist: []
+  protected_processes: []
 
 self_protect:
   enabled: true
