@@ -3,15 +3,17 @@ module github.com/razatechofficial/edr
 go 1.25.0
 
 require (
-	github.com/bradleyjkemp/sigma-go v0.6.6
+	github.com/bradleyjkemp/sigma-go v0.6.7-0.20250515115046-0c42bd984cf2
 	github.com/cilium/ebpf v0.21.0
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/google/cel-go v0.27.0
 	github.com/google/uuid v1.6.0
+	github.com/hillu/go-yara/v4 v4.3.4
 	github.com/klauspost/compress v1.18.5
 	github.com/philippgille/chromem-go v0.7.0
+	github.com/prometheus/client_golang v1.23.2
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/spf13/cobra v1.10.2
@@ -21,6 +23,7 @@ require (
 	golang.org/x/crypto v0.49.0
 	golang.org/x/sys v0.42.0
 	google.golang.org/grpc v1.80.0
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -38,12 +41,10 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
-	github.com/hillu/go-yara/v4 v4.3.4 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.15 // indirect
-	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
@@ -65,5 +66,4 @@ require (
 	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260120221211-b8f7ae30c516 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 )
