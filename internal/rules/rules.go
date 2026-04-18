@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -30,8 +31,9 @@ type Condition struct {
 	CommandLineAll      []string `yaml:"command_line_all_contains,omitempty"`
 
 	// File conditions
-	FilePathContains []string `yaml:"file_path_contains,omitempty"`
-	OperationIn      []string `yaml:"operation_in,omitempty"`
+	FilePathContains    []string `yaml:"file_path_contains,omitempty"`
+	FilePathNotContains []string `yaml:"file_path_not_contains,omitempty"`
+	OperationIn         []string `yaml:"operation_in,omitempty"`
 
 	// Network conditions
 	DestIPContains  []string `yaml:"dest_ip_contains,omitempty"`
@@ -50,11 +52,11 @@ type Condition struct {
 func Load(path string) (RuleSet, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return RuleSet{}, err
+		return RuleSet{}, fmt.Errorf("read rules file %q: %w", path, err)
 	}
 	var rs RuleSet
 	if err := yaml.Unmarshal(b, &rs); err != nil {
-		return RuleSet{}, err
+		return RuleSet{}, fmt.Errorf("parse rules file %q: %w", path, err)
 	}
 	return rs, nil
 }
