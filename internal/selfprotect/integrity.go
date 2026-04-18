@@ -219,10 +219,16 @@ func hashFile(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// deriveBackupKey produces a deterministic 32-byte AES-256 key from the
-// hostname and tracked paths. Production deployments should use a
-// hardware-backed key (e.g. TPM or secure enclave).
+// DeriveBackupKey produces a 32-byte AES-256 key. If EDR_BACKUP_KEY is set
+// (hex-encoded, 64 chars), it is decoded and used directly. Otherwise, the
+// key is derived deterministically from hostname + paths. Production
+// deployments SHOULD inject a proper key via the environment or config.
 func deriveBackupKey(paths []string) []byte {
+	if envKey := os.Getenv("EDR_BACKUP_KEY"); len(envKey) == 64 {
+		if b, err := hex.DecodeString(envKey); err == nil && len(b) == 32 {
+			return b
+		}
+	}
 	h := sha256.New()
 	hostname, _ := os.Hostname()
 	h.Write([]byte(hostname))
