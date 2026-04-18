@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,12 +23,15 @@ import (
 	"github.com/razatechofficial/edr/internal/detection/ioc"
 	"github.com/razatechofficial/edr/internal/detection/llm"
 	"github.com/razatechofficial/edr/internal/detection/llm/providers"
+	mlpkg "github.com/razatechofficial/edr/internal/detection/ml"
 	"github.com/razatechofficial/edr/internal/forwarder"
 	"github.com/razatechofficial/edr/internal/pidfile"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/rules"
 	"github.com/razatechofficial/edr/internal/schema"
+	"github.com/razatechofficial/edr/internal/selfprotect"
 	"github.com/razatechofficial/edr/internal/spool"
+	"github.com/razatechofficial/edr/internal/telemetry"
 	"github.com/razatechofficial/edr/internal/threatintel"
 	"github.com/razatechofficial/edr/pkg/events"
 )
@@ -54,6 +59,17 @@ type Agent struct {
 	baselineNet     *baseline.NetworkBaseline
 	baselineProc    *baseline.ProcessBaseline
 	baselineUser    *baseline.UserBaseline
+
+	antiDebug  *selfprotect.AntiDebugger
+	tamper     *selfprotect.TamperDetector
+	integrity  *selfprotect.IntegrityChecker
+	respEngine *response.ResponseEngine
+
+	durableSpool      *telemetry.Spool
+	telExporter       *mlpkg.TelemetryExporter
+	mlAutoUpdater     *mlpkg.AutoUpdater
+	driftDetector     *mlpkg.DriftDetector
+	feedbackIngester  *mlpkg.FeedbackIngester
 }
 
 func NewDefault() (*Agent, error) {
@@ -64,6 +80,11 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.ML.Enabled && cfg.ML.RequireRuntime {
+		if err := mlpkg.InitRuntime(cfg.ML.ONNX.NumThreads, cfg.ML.ONNX.UseGPU, cfg.ML.ONNX.GPUDeviceID); err != nil {
+			return nil, fmt.Errorf("ml.require_runtime: ONNX Runtime init failed: %w", err)
+		}
 	}
 	cols, err := collector.DefaultCollectors(cfg.Service.EndpointID)
 	if err != nil {
@@ -96,6 +117,9 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	}
 
 	if err := a.initAdvancedDetection(); err != nil {
+		if a.cfg.ML.Enabled && a.cfg.ML.RequireRuntime {
+			return nil, fmt.Errorf("advanced detection engine init failed (ml.require_runtime): %w", err)
+		}
 		a.logger.Warn("advanced detection engine init failed, using basic rules only", "error", err)
 	}
 
@@ -105,6 +129,44 @@ func NewWithFiles(configPath string) (*Agent, error) {
 
 	if err := a.initBaseline(); err != nil {
 		a.logger.Warn("baseline engine init failed", "error", err)
+	}
+
+	spoolDir := filepath.Join(cfg.Agent.DataDir, "alert-spool")
+	ds, err := telemetry.NewSpool(spoolDir, zapLogger)
+	if err != nil {
+		a.logger.Warn("durable spool init failed, alerts not crash-resilient", "error", err)
+	} else {
+		a.durableSpool = ds
+		a.logger.Info("durable alert spool enabled", "path", spoolDir)
+	}
+
+	if err := a.initSelfProtect(); err != nil {
+		a.logger.Warn("self-protection init failed", "error", err)
+	}
+
+	if err := a.initResponseEngine(); err != nil {
+		a.logger.Warn("response engine init failed, using basic responder only", "error", err)
+	}
+
+	if cfg.ML.Enabled && cfg.ML.ModelsDir != "" {
+		exportDir := filepath.Join(cfg.Agent.DataDir, "telemetry-export")
+		a.telExporter = mlpkg.NewTelemetryExporter(exportDir, 10000)
+		a.logger.Info("telemetry exporter enabled", "dir", exportDir)
+
+		a.driftDetector = mlpkg.NewDriftDetector(1000, 2.0)
+		a.logger.Info("drift detector enabled")
+
+		feedbackDir := filepath.Join(cfg.Agent.DataDir, "feedback")
+		a.feedbackIngester = mlpkg.NewFeedbackIngester(feedbackDir, a.telExporter, a.zapLogger)
+		a.logger.Info("analyst feedback ingester configured", "dir", feedbackDir)
+
+		if cfg.ML.AutoUpdate {
+			eng := a.advEngine.MLEngine()
+			if eng != nil {
+				a.mlAutoUpdater = mlpkg.NewAutoUpdater(eng, cfg.ML.ModelsDir, cfg.ML.UpdateIntervalH, a.zapLogger)
+				a.logger.Info("ml auto-updater configured", "interval_hours", cfg.ML.UpdateIntervalH)
+			}
+		}
 	}
 
 	if cfg.Forwarder.Enabled {
@@ -324,6 +386,59 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	}
 
+	selfprotect.CheckPrivileges(a.zapLogger)
+
+	if a.antiDebug != nil {
+		go func() {
+			if err := a.antiDebug.Start(ctx); err != nil && ctx.Err() == nil {
+				a.logger.Error("anti-debugger exited", "error", err)
+			}
+		}()
+	}
+	if a.tamper != nil {
+		go func() {
+			if err := a.tamper.Start(ctx); err != nil && ctx.Err() == nil {
+				a.logger.Error("tamper detector exited", "error", err)
+			}
+		}()
+	}
+	if a.integrity != nil {
+		go func() {
+			if err := a.integrity.Start(ctx); err != nil && ctx.Err() == nil {
+				a.logger.Error("integrity checker exited", "error", err)
+			}
+		}()
+	}
+
+	for _, c := range a.collectors {
+		if sc, ok := c.(collector.StartableCollector); ok {
+			if err := sc.Start(ctx); err != nil {
+				a.logger.Error("startable collector failed", "collector", sc.Name(), "error", err)
+			} else {
+				a.logger.Info("startable collector started", "collector", sc.Name())
+				defer sc.Stop()
+			}
+		}
+	}
+
+	if a.mlAutoUpdater != nil {
+		go a.mlAutoUpdater.Run(ctx)
+		a.logger.Info("ml auto-updater started")
+	}
+	if a.feedbackIngester != nil {
+		go a.feedbackIngester.Run(ctx.Done(), 0)
+	}
+
+	if a.durableSpool != nil {
+		defer func() { _ = a.durableSpool.Close() }()
+	}
+	if a.telExporter != nil {
+		defer func() { _ = a.telExporter.Flush() }()
+	}
+	if a.respEngine != nil {
+		defer func() { _ = a.respEngine.Close() }()
+	}
+
 	if a.advEngine != nil {
 		if err := a.advEngine.Start(ctx); err != nil {
 			a.logger.Error("advanced detection engine start failed", "error", err)
@@ -391,6 +506,8 @@ func (a *Agent) drainAdvancedAlerts(ctx context.Context) {
 				Title:         advAlert.Title,
 				Description:   advAlert.Description,
 				Timestamp:     advAlert.Timestamp,
+				FilePath:      advAlert.FilePath,
+				FileSHA256:    advAlert.FileSHA256,
 			}
 			if pe, ok := advAlert.RawEvent.(*schema.ProcessEvent); ok {
 				al.ProcessPID = pe.PID
@@ -398,11 +515,36 @@ func (a *Agent) drainAdvancedAlerts(ctx context.Context) {
 				al.ProcessPath = pe.ProcessPath
 				al.CommandLine = pe.CommandLine
 			}
-			_ = a.writer.WriteAlert(al)
-			a.alertSpool.Push(al)
-			a.logger.Info("advanced detection alert",
-				"rule", al.RuleID, "severity", al.Severity,
-				"title", al.Title, "pid", al.ProcessPID)
+			if fe, ok := advAlert.RawEvent.(*schema.FileEvent); ok {
+				if al.FilePath == "" {
+					al.FilePath = fe.Path
+				}
+				if al.FileSHA256 == "" && fe.Hash != "" {
+					al.FileSHA256 = fe.Hash
+				}
+				al.FileOperation = fe.Operation
+				if al.ProcessPID == 0 && fe.ActorPID != 0 {
+					al.ProcessPID = fe.ActorPID
+				}
+			}
+			// handleAlerts can block on disk I/O; run concurrently so ctx cancellation
+			// is still observed and Run() can finish defers (e.g. advEngine.Stop).
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- a.handleAlerts([]schema.Alert{al})
+			}()
+			select {
+			case <-ctx.Done():
+				return
+			case err := <-errCh:
+				if err != nil {
+					a.logger.Error("handle advanced alert failed", "error", err)
+				}
+				a.logger.Info("advanced detection alert",
+					"rule", al.RuleID, "severity", al.Severity,
+					"title", al.Title, "pid", al.ProcessPID,
+					"file_path", al.FilePath, "file_sha256", al.FileSHA256)
+			}
 		}
 	}
 }
@@ -474,15 +616,55 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 					}
 				}
 			}
-			if tel.File != nil {
-				if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
-					return err
-				}
-				if a.advEngine != nil {
-					fe := *tel.File
-					a.advEngine.Evaluate(ctx, &fe)
-				}
+		if tel.File != nil {
+			if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
+				return err
 			}
+			if a.advEngine != nil {
+				fe := *tel.File
+				a.advEngine.Evaluate(ctx, &fe)
+			}
+		}
+		}
+	}
+
+	if err := a.checkDriftAlerts(); err != nil {
+		a.logger.Error("drift alert check failed", "error", err)
+	}
+	return nil
+}
+
+func (a *Agent) checkDriftAlerts() error {
+	if a.driftDetector == nil {
+		return nil
+	}
+	modelNames := []string{"pe_classifier", "behavior_lstm", "network_anomaly", "ransomware"}
+	for _, name := range modelNames {
+		if a.driftDetector.SampleCount(name) < 100 {
+			continue
+		}
+		if !a.driftDetector.IsDrifting(name) {
+			continue
+		}
+		featureDrift := a.driftDetector.FeatureDriftScore(name)
+		predDrift := a.driftDetector.PredictionDriftScore(name)
+
+		al := schema.Alert{
+			SchemaVersion: schema.SchemaVersionV1,
+			AlertID:       uuid.NewString(),
+			RuleID:        "ml/drift-" + name,
+			EndpointID:    a.cfg.Service.EndpointID,
+			Severity:      schema.SeverityMedium,
+			Score:         50,
+			Title:         fmt.Sprintf("ML model drift detected: %s", name),
+			Description: fmt.Sprintf(
+				"Feature drift: %.2f, prediction drift: %.2f. Model may need retraining.",
+				featureDrift, predDrift),
+			Timestamp: time.Now().UTC(),
+		}
+
+		if err := a.handleAlerts([]schema.Alert{al}); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -491,6 +673,13 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 	for _, al := range alerts {
 		a.alertSpool.Push(al)
+		if a.durableSpool != nil {
+			if data, err := json.Marshal(al); err == nil {
+				if err := a.durableSpool.Write(data); err != nil {
+					a.logger.Error("durable spool write failed", "error", err)
+				}
+			}
+		}
 		if err := a.writer.WriteAlert(al); err != nil {
 			return err
 		}
@@ -499,22 +688,7 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 				a.logger.Error("forward alert failed", "error", err)
 			}
 		}
-		if a.shouldAutoKill(al) {
-			res := a.responder.Execute(schema.ResponseCommand{
-				SchemaVersion: schema.SchemaVersionV1,
-				Action:        schema.ResponseKillProcess,
-				ProcessPID:    al.ProcessPID,
-				ProcessName:   al.ProcessName,
-			})
-			_ = a.writer.WriteAudit(schema.AuditRecord{
-				SchemaVersion: schema.SchemaVersionV1,
-				RecordID:      uuid.NewString(),
-				Action:        "kill_process",
-				Outcome:       map[bool]string{true: "success", false: "failure"}[res.Success],
-				Message:       res.Message,
-				Timestamp:     time.Now().UTC(),
-			})
-		}
+		a.executeAutoResponse(al)
 	}
 	return nil
 }
@@ -525,6 +699,77 @@ func makeRuleAllowlist(ruleIDs []string) map[string]struct{} {
 		out[id] = struct{}{}
 	}
 	return out
+}
+
+func (a *Agent) executeAutoResponse(al schema.Alert) {
+	if !a.shouldAutoKill(al) {
+		return
+	}
+
+	if a.respEngine != nil {
+		ctx := context.Background()
+		if al.ProcessPID > 0 {
+			params := map[string]interface{}{
+				"pid":          al.ProcessPID,
+				"process_name": al.ProcessName,
+				"mode":         "kill",
+				"tree":         al.Score >= 90,
+			}
+			result, err := a.respEngine.Execute(ctx, response.ActionKillProcess, params)
+			outcome := "failure"
+			msg := ""
+			if result != nil && result.Success {
+				outcome = "success"
+				msg = result.Message
+			} else if err != nil {
+				msg = err.Error()
+			}
+
+			_ = a.writer.WriteAudit(schema.AuditRecord{
+				SchemaVersion: schema.SchemaVersionV1,
+				RecordID:      uuid.NewString(),
+				Action:        "kill_process",
+				Outcome:       outcome,
+				Message:       msg,
+				Timestamp:     time.Now().UTC(),
+			})
+		}
+
+		qPath := al.ProcessPath
+		if qPath == "" {
+			qPath = al.FilePath
+		}
+		if a.cfg.Response.Actions.QuarantineFile && qPath != "" {
+			qParams := map[string]interface{}{
+				"path":     qPath,
+				"reason":   al.Title,
+				"alert_id": al.AlertID,
+			}
+			if _, qErr := a.respEngine.Execute(ctx, response.ActionQuarantineFile, qParams); qErr != nil {
+				a.logger.Error("quarantine failed", "path", qPath, "error", qErr)
+			}
+		}
+		return
+	}
+
+	if al.ProcessPID <= 0 {
+		return
+	}
+
+	res := a.responder.Execute(schema.ResponseCommand{
+		SchemaVersion: schema.SchemaVersionV1,
+		Action:        schema.ResponseKillProcess,
+		ProcessPID:    al.ProcessPID,
+		ProcessName:   al.ProcessName,
+	})
+	_ = a.writer.WriteAudit(schema.AuditRecord{
+		SchemaVersion: schema.SchemaVersionV1,
+		RecordID:      uuid.NewString(),
+		Action:        "kill_process",
+		Outcome:       map[bool]string{true: "success", false: "failure"}[res.Success],
+		Message:       res.Message,
+		Timestamp:     time.Now().UTC(),
+	})
 }
 
 func (a *Agent) shouldAutoKill(al schema.Alert) bool {
@@ -539,6 +784,120 @@ func (a *Agent) shouldAutoKill(al schema.Alert) bool {
 	}
 	_, ok := a.killAllow[al.RuleID]
 	return ok
+}
+
+// ---------------------------------------------------------------------------
+// Self-protection
+// ---------------------------------------------------------------------------
+
+func (a *Agent) initSelfProtect() error {
+	sp := a.cfg.SelfProtect
+	if !sp.Enabled {
+		return nil
+	}
+
+	if sp.AntiDebug {
+		a.antiDebug = selfprotect.NewAntiDebugger(a.zapLogger)
+		a.logger.Info("self-protection: anti-debug enabled")
+	}
+
+	if sp.IntegrityCheck {
+		execPath, _ := os.Executable()
+		paths := []string{}
+		if execPath != "" {
+			paths = append(paths, execPath)
+		}
+		if a.cfg.RulesFile != "" {
+			paths = append(paths, a.cfg.RulesFile)
+		}
+		if len(paths) > 0 {
+			backupDir := filepath.Join(a.cfg.Agent.DataDir, "integrity-backups")
+			ic, err := selfprotect.NewIntegrityChecker(paths, backupDir, a.zapLogger)
+			if err != nil {
+				a.logger.Warn("integrity checker init failed", "error", err)
+			} else {
+				a.integrity = ic
+				a.logger.Info("self-protection: integrity checker enabled", "tracked_files", len(paths))
+			}
+		}
+	}
+
+	{
+		ep, _ := os.Executable()
+		protectedPaths := []string{}
+		if ep != "" {
+			protectedPaths = append(protectedPaths, ep)
+		}
+		// Do not watch alert/audit JSONL: the agent appends constantly; fsnotify would flag every write as tampering.
+		if len(protectedPaths) > 0 {
+			a.tamper = selfprotect.NewTamperDetector(protectedPaths, a.zapLogger)
+			a.logger.Info("self-protection: tamper detector enabled", "watched_paths", len(protectedPaths))
+		}
+	}
+
+	if sp.Watchdog {
+		a.logger.Info("self-protection: watchdog enabled (managed externally)")
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Response engine (full playbook-capable engine)
+// ---------------------------------------------------------------------------
+
+func (a *Agent) initResponseEngine() error {
+	if !a.cfg.Response.AutoResponse {
+		return nil
+	}
+
+	auditPath := a.cfg.Logging.AuditFile
+	if auditPath == "" {
+		auditPath = filepath.Join(a.cfg.Agent.DataDir, "audit.jsonl")
+	}
+
+	eng, err := response.NewResponseEngine(a.zapLogger, auditPath)
+	if err != nil {
+		return fmt.Errorf("response engine: %w", err)
+	}
+
+	eng.RegisterHandler(response.ActionKillProcess,
+		response.NewProcessHandler(a.zapLogger, a.cfg.LegacyResponse.ProtectedProcesses))
+	eng.RegisterHandler(response.ActionSuspendProcess,
+		response.NewProcessHandler(a.zapLogger, a.cfg.LegacyResponse.ProtectedProcesses))
+
+	qDir := a.cfg.Response.Quarantine.Dir
+	if qDir == "" {
+		qDir = filepath.Join(a.cfg.Agent.DataDir, "quarantine")
+	}
+	var encKey []byte
+	if a.cfg.Response.Quarantine.EncryptFiles {
+		h := sha256.Sum256([]byte("edr-quarantine-" + a.cfg.Service.EndpointID))
+		encKey = h[:]
+	}
+	fh, err := response.NewFileHandler(a.zapLogger, qDir, encKey)
+	if err != nil {
+		a.logger.Warn("file handler init failed", "error", err)
+	} else {
+		eng.RegisterHandler(response.ActionQuarantineFile, fh)
+	}
+
+	edrServer := a.cfg.Server.Endpoint
+	if edrServer == "" {
+		edrServer = "127.0.0.1"
+	}
+	eng.RegisterHandler(response.ActionNetworkIsolate,
+		response.NewNetworkHandler(a.zapLogger, edrServer, nil))
+	eng.RegisterHandler(response.ActionNetworkRelease,
+		response.NewNetworkHandler(a.zapLogger, edrServer, nil))
+
+	blockDBPath := filepath.Join(a.cfg.Agent.DataDir, "blocked_hashes.json")
+	eng.RegisterHandler(response.ActionBlockHash,
+		response.NewBlockHashHandler(a.zapLogger, blockDBPath))
+
+	a.respEngine = eng
+	a.logger.Info("response engine initialized with playbook support")
+	return nil
 }
 
 // ---------------------------------------------------------------------------
