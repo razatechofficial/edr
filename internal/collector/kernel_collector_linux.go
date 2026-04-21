@@ -5,7 +5,6 @@ package collector
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -122,7 +121,7 @@ func (kc *KernelCollector) parseEvent(data []byte) *Telemetry {
 			return tel
 		}
 	}
-	return kc.parseJSONEvent(data)
+	return MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS)
 }
 
 func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
@@ -212,61 +211,6 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 	}
 
 	return nil
-}
-
-func (kc *KernelCollector) parseJSONEvent(data []byte) *Telemetry {
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil
-	}
-
-	now := time.Now().UTC()
-	base := schema.BaseEvent{
-		SchemaVersion: schema.SchemaVersionV1,
-		EndpointID:    kc.endpointID,
-		Timestamp:     now,
-		Hostname:      kc.hostname,
-		OS:            runtime.GOOS,
-	}
-
-	evType, _ := raw["type"].(string)
-	switch evType {
-	case "process":
-		base.EventType = schema.EventProcess
-		pe := &schema.ProcessEvent{BaseEvent: base}
-		if v, ok := raw["pid"].(float64); ok {
-			pe.PID = int(v)
-		}
-		if v, ok := raw["process_name"].(string); ok {
-			pe.ProcessName = v
-		}
-		return &Telemetry{Process: pe}
-	case "file":
-		base.EventType = schema.EventFile
-		fe := &schema.FileEvent{BaseEvent: base}
-		if v, ok := raw["path"].(string); ok {
-			fe.Path = v
-		}
-		if v, ok := raw["operation"].(string); ok {
-			fe.Operation = v
-		}
-		return &Telemetry{File: fe}
-	case "network":
-		base.EventType = schema.EventNetwork
-		ne := &schema.NetworkEvent{BaseEvent: base}
-		if v, ok := raw["protocol"].(string); ok {
-			ne.Protocol = v
-		}
-		if v, ok := raw["source_ip"].(string); ok {
-			ne.SourceIP = v
-		}
-		if v, ok := raw["dest_ip"].(string); ok {
-			ne.DestIP = v
-		}
-		return &Telemetry{Network: ne}
-	default:
-		return nil
-	}
 }
 
 func readUint32(data []byte) (uint32, []byte) {
