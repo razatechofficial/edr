@@ -563,6 +563,8 @@ After=network-online.target
 Wants=network-online.target
 Documentation=https://github.com/razatechofficial/edr
 
+# eBPF object must exist at /var/lib/edr/bpf/edr.bpf.o for kernel telemetry (see docs/FIRST_LAUNCH_PERMISSIONS.md).
+
 [Service]
 Type=simple
 ExecStart={{.AgentBin}} run --config {{.ConfigPath}}

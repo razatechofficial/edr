@@ -31,7 +31,7 @@ BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror
 .PHONY: build-linux build-darwin build-windows build-all
 .PHONY: bundle-enterprise build-installer-embedded
 .PHONY: ebpf ebpf-link ebpf-install proto
-.PHONY: test test-detection test-response test-race test-coverage
+.PHONY: test test-collector test-detection test-response test-race test-coverage
 .PHONY: run-agent run-agent-ml test-edr-macos-lab
 .PHONY: test-bench
 .PHONY: vulncheck
@@ -138,6 +138,11 @@ proto:
 test:
 	@echo "==> Running all tests"
 	go test ./... -count=1 -timeout 120s
+
+# Collector package without CGO (avoids macOS EndpointSecurity link in CI/dev).
+test-collector:
+	@echo "==> Collector unit tests (CGO_ENABLED=0)"
+	CGO_ENABLED=0 go test ./internal/collector/... -count=1 -timeout 60s
 
 test-detection:
 	@echo "==> Running detection engine tests"

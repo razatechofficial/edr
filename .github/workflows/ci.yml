@@ -29,6 +29,9 @@ jobs:
       - name: Unit tests
         run: make test
 
+      - name: Collector tests (no CGO / no ESF link)
+        run: make test-collector
+
       - name: Race detector
         run: make test-race
 
