@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/razatechofficial/edr/internal/selfprotect"
 	"github.com/razatechofficial/edr/internal/spool"
 	"github.com/razatechofficial/edr/internal/telemetry"
+	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/threatintel"
 	"github.com/razatechofficial/edr/pkg/events"
 )
@@ -72,6 +75,11 @@ type Agent struct {
 	driftDetector    *mlpkg.DriftDetector
 	feedbackIngester *mlpkg.FeedbackIngester
 
+	userLookup     *collector.UsernameCache
+	fileDedup      *collector.FileDeduper
+	fileHashPool   *fileHashPool
+	telemetryRelay *forwarder.TelemetryRelay
+
 	healthMu           sync.Mutex
 	lastHealthSnapshot time.Time
 }
@@ -90,7 +98,8 @@ func NewWithFiles(configPath string) (*Agent, error) {
 			return nil, fmt.Errorf("ml.require_runtime: ONNX Runtime init failed: %w", err)
 		}
 	}
-	cols, err := collector.DefaultCollectors(cfg)
+	users := collector.NewUsernameCache()
+	cols, err := collector.DefaultCollectors(cfg, users)
 	if err != nil {
 		return nil, err
 	}
@@ -116,10 +125,28 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		detector:   detect.NewEngine(rs),
 		responder:  response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
-		killAllow:  makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
-		zapLogger:  zapLogger,
+		killAllow:      makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		zapLogger:      zapLogger,
+		userLookup:     users,
+		fileDedup:      collector.NewFileDeduper(0),
+		fileHashPool:   newFileHashPool(),
 	}
 	collector.LogMonitoringBootstrap(a.logger, cfg)
+
+	telEP := strings.TrimSpace(cfg.Forwarder.TelemetryEndpoint)
+	if telEP == "" {
+		telEP = strings.TrimSpace(cfg.Forwarder.Endpoint)
+	}
+	if telEP != "" {
+		qdir := filepath.Join(cfg.Agent.DataDir, "telemetry-queue")
+		qm, qerr := telemetryqueue.NewManager(qdir, 500<<20)
+		if qerr != nil {
+			a.logger.Warn("telemetry disk queue init failed", "error", qerr)
+		} else {
+			a.telemetryRelay = forwarder.NewTelemetryRelay(telEP, qm, a.logger)
+			a.logger.Info("telemetry relay configured", "endpoint", telEP, "queue_dir", qdir)
+		}
+	}
 
 	if err := a.initAdvancedDetection(); err != nil {
 		if a.cfg.ML.Enabled && a.cfg.ML.RequireRuntime {
@@ -363,16 +390,18 @@ func NewForTesting(cfg config.Config, rs rules.RuleSet) (*Agent, error) {
 
 func NewForTestingWithCollectors(cfg config.Config, rs rules.RuleSet, collectors []collector.Collector) *Agent {
 	a := &Agent{
-		logger:     slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		cfg:        cfg,
-		collectors: collectors,
-		ruleSet:    rs,
-		eventSpool: spool.NewQueue[schema.ProcessEvent](),
-		alertSpool: spool.NewQueue[schema.Alert](),
-		detector:   detect.NewEngine(rs),
-		responder:  response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
-		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),
-		killAllow:  makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		cfg:          cfg,
+		collectors:   collectors,
+		ruleSet:      rs,
+		eventSpool:   spool.NewQueue[schema.ProcessEvent](),
+		alertSpool:   spool.NewQueue[schema.Alert](),
+		detector:     detect.NewEngine(rs),
+		responder:    response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
+		writer:       alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),
+		killAllow:    makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		fileDedup:    collector.NewFileDeduper(0),
+		fileHashPool: newFileHashPool(),
 	}
 	return a
 }
@@ -476,6 +505,13 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.logger.Info("agent started")
 	a.logger.Info("rules loaded", "count", len(a.ruleSet.Rules))
 
+	if a.telemetryRelay != nil {
+		go a.telemetryRelay.Run(ctx)
+	}
+	if a.userLookup != nil && runtime.GOOS == "linux" {
+		go a.userLookup.WatchPasswd(ctx, a.logger)
+	}
+
 	ticker := time.NewTicker(a.cfg.Service.TickInterval)
 	defer ticker.Stop()
 
@@ -569,6 +605,19 @@ func severityToScore(s events.Severity) int {
 	}
 }
 
+func (a *Agent) maybeForwardTelemetry(ctx context.Context, tel *collector.Telemetry) {
+	if a.telemetryRelay == nil || tel == nil {
+		return
+	}
+	line, err := collector.MarshalTelemetryLine(tel)
+	if err != nil || len(line) == 0 {
+		return
+	}
+	if err := a.telemetryRelay.TrySend(ctx, line); err != nil {
+		a.telemetryRelay.Enqueue(line)
+	}
+}
+
 func (a *Agent) ProcessCycle(ctx context.Context) error {
 	if a.forwardDrain != nil {
 		if err := a.forwardDrain.DrainPending(); err != nil {
@@ -580,7 +629,30 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		for _, tel := range telemetries {
+		for i := range telemetries {
+			tel := &telemetries[i]
+			if tel.File != nil && a.fileDedup != nil {
+				fe := tel.File
+				if !a.fileDedup.ShouldEmitFile(fe.EventType, fe.ActorPID, fe.Path, fe.Operation) {
+					continue
+				}
+			}
+			a.maybeForwardTelemetry(ctx, tel)
+			if tel.Fork != nil {
+				ev := forkTelemetryToProcess(*tel.Fork)
+				a.eventSpool.Push(ev)
+				if err := a.handleAlerts(a.detector.EvaluateProcess(ev)); err != nil {
+					return err
+				}
+				if a.advEngine != nil {
+					a.advEngine.Evaluate(ctx, tel.Fork)
+				}
+				if a.baselineEngine != nil {
+					if err := a.handleAlerts(a.feedBaselineProcess(ev)); err != nil {
+						return err
+					}
+				}
+			}
 			if tel.Process != nil {
 				ev := *tel.Process
 				a.eventSpool.Push(ev)
@@ -626,9 +698,23 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 					return err
 				}
 				if a.advEngine != nil {
-					fe := *tel.File
-					a.advEngine.Evaluate(ctx, &fe)
+					a.advEngine.Evaluate(ctx, tel.File)
 				}
+				if a.fileHashPool != nil {
+					a.fileHashPool.Submit(tel.File)
+				}
+			}
+			if tel.Registry != nil {
+				if a.advEngine != nil {
+					a.advEngine.Evaluate(ctx, tel.Registry)
+				}
+				shim := registryTelemetryToFile(*tel.Registry)
+				if err := a.handleAlerts(a.detector.EvaluateFile(shim)); err != nil {
+					return err
+				}
+			}
+			if tel.Injection != nil && a.advEngine != nil {
+				a.advEngine.Evaluate(ctx, tel.Injection)
 			}
 		}
 	}
@@ -1111,4 +1197,32 @@ func (a *Agent) feedBaselineAuth(ev schema.AuthEvent) []schema.Alert {
 	}
 
 	return alerts
+}
+
+func forkTelemetryToProcess(fk schema.ForkEvent) schema.ProcessEvent {
+	be := fk.BaseEvent
+	be.EventType = schema.EventProcess
+	return schema.ProcessEvent{
+		BaseEvent:   be,
+		PID:         fk.ParentPID,
+		ChildPID:    fk.ChildPID,
+		ProcessName: "fork",
+		CommandLine: fmt.Sprintf("clone_flags=%d is_thread=%v is_container=%v", fk.CloneFlags, fk.IsThread, fk.IsContainer),
+		CloneFlags:  fk.CloneFlags,
+	}
+}
+
+func registryTelemetryToFile(re schema.RegistryEvent) schema.FileEvent {
+	be := re.BaseEvent
+	be.EventType = schema.EventFile
+	path := re.KeyPath
+	if re.ValueName != "" {
+		path = path + `\` + re.ValueName
+	}
+	return schema.FileEvent{
+		BaseEvent: be,
+		Path:      path,
+		Operation: re.Operation,
+		ActorPID:  re.ActorPID,
+	}
 }

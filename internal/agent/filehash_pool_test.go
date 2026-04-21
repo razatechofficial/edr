@@ -1,0 +1,67 @@
+package agent
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/razatechofficial/edr/internal/schema"
+)
+
+func TestFileHashPoolKnownFileAndCache(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "small.bin")
+	payload := []byte("hello-hash-test")
+	if err := os.WriteFile(p, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := sha256.Sum256(payload)
+	wantHex := hex.EncodeToString(want[:])
+
+	base := schema.BaseEvent{
+		SchemaVersion: schema.SchemaVersionV1,
+		EventType:     schema.EventFile,
+		EndpointID:    "e",
+		Hostname:      "h",
+		OS:            "linux",
+	}
+	fe := &schema.FileEvent{
+		BaseEvent: base,
+		Path:      p,
+		Operation: "write",
+		ActorPID:  1,
+	}
+	pool := newFileHashPool()
+	pool.Submit(fe)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if fe.Hash == wantHex {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if fe.Hash != wantHex {
+		t.Fatalf("hash got %q want %q", fe.Hash, wantHex)
+	}
+
+	fe2 := &schema.FileEvent{
+		BaseEvent: base,
+		Path:      p,
+		Operation: "write",
+		ActorPID:  1,
+	}
+	pool.Submit(fe2)
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if fe2.Hash == wantHex {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if fe2.Hash != wantHex {
+		t.Fatalf("second hash got %q want %q (cache)", fe2.Hash, wantHex)
+	}
+}
