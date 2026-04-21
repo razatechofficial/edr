@@ -37,6 +37,7 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 		base.EventType = schema.EventProcess
 		pe := &schema.ProcessEvent{BaseEvent: base}
 		pe.PID = jsonInt(raw, "pid", "child_pid", "exit_pid")
+		pe.ChildPID = jsonInt(raw, "child_pid")
 		pe.PPID = jsonInt(raw, "ppid", "parent_pid")
 		pe.ProcessName = firstNonEmpty(
 			jsonString(raw, "process_name"),
@@ -52,6 +53,14 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 			jsonString(raw, "command_line"),
 			jsonString(raw, "args"),
 		)
+		pe.SigningTeamID = jsonString(raw, "signing_team_id")
+		pe.ImageCDHash = jsonString(raw, "image_cdhash")
+		pe.SigningFlags = jsonUint32(raw, "signing_flags")
+		pe.ImageSHA256 = jsonString(raw, "image_sha256")
+		pe.TLSClientJA3 = firstNonEmpty(jsonString(raw, "tls_client_ja3"), jsonString(raw, "ja3"))
+		pe.CloneFlags = jsonUint64(raw, "clone_flags")
+		pe.UnshareFlags = jsonUint64(raw, "unshare_flags")
+		pe.MadviseAdvice = int32(jsonInt(raw, "madvise_advice"))
 		return &Telemetry{Process: pe}
 
 	case "file":
@@ -90,6 +99,38 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 		pe.CommandLine = jsonString(raw, "message")
 		return &Telemetry{Process: pe}
 
+	case "namespace":
+		base.EventType = schema.EventProcess
+		pe := &schema.ProcessEvent{BaseEvent: base}
+		pe.PID = jsonInt(raw, "pid")
+		pe.ProcessName = "namespace"
+		pe.ProcessPath = jsonString(raw, "process_name")
+		pe.UnshareFlags = jsonUint64(raw, "unshare_flags")
+		pe.CommandLine = jsonString(raw, "command_line")
+		return &Telemetry{Process: pe}
+
+	case "madvise":
+		base.EventType = schema.EventProcess
+		pe := &schema.ProcessEvent{BaseEvent: base}
+		pe.PID = jsonInt(raw, "pid")
+		pe.ProcessName = "madvise"
+		pe.ProcessPath = jsonString(raw, "process_name")
+		pe.MadviseAdvice = int32(jsonInt(raw, "madvise_advice"))
+		pe.CommandLine = jsonString(raw, "command_line")
+		return &Telemetry{Process: pe}
+
+	case "wmi", "powershell", "pipe", "bits", "task":
+		base.EventType = schema.EventProcess
+		pe := &schema.ProcessEvent{BaseEvent: base}
+		pe.PID = jsonInt(raw, "pid")
+		pe.ProcessName = evType
+		pe.ProcessPath = jsonString(raw, "path")
+		pe.CommandLine = firstNonEmpty(
+			jsonString(raw, "etw_user_data_prefix_hex"),
+			jsonString(raw, "message"),
+		)
+		return &Telemetry{Process: pe}
+
 	default:
 		return nil
 	}
@@ -118,6 +159,54 @@ func jsonString(m map[string]interface{}, key string) string {
 	default:
 		return ""
 	}
+}
+
+func jsonUint32(m map[string]interface{}, key string) uint32 {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch x := v.(type) {
+	case float64:
+		return uint32(x)
+	case int:
+		return uint32(x)
+	case int64:
+		return uint32(x)
+	case uint64:
+		return uint32(x)
+	case uint32:
+		return x
+	case json.Number:
+		i, _ := x.Int64()
+		return uint32(i)
+	}
+	return 0
+}
+
+func jsonUint64(m map[string]interface{}, keys ...string) uint64 {
+	for _, key := range keys {
+		v, ok := m[key]
+		if !ok || v == nil {
+			continue
+		}
+		switch x := v.(type) {
+		case float64:
+			return uint64(x)
+		case int:
+			return uint64(x)
+		case int64:
+			return uint64(x)
+		case uint64:
+			return x
+		case uint32:
+			return uint64(x)
+		case json.Number:
+			i, _ := x.Int64()
+			return uint64(i)
+		}
+	}
+	return 0
 }
 
 func jsonInt(m map[string]interface{}, keys ...string) int {
