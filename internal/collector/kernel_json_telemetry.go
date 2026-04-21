@@ -3,6 +3,7 @@ package collector
 import (
 	"encoding/json"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,7 +12,8 @@ import (
 
 // MapKernelJSONToTelemetry maps kernel driver JSON (Linux eBPF JSON path, ESF,
 // ETW envelopes) into schema telemetry. Returns nil if the payload is not recognized.
-func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *Telemetry {
+// users resolves numeric UIDs in JSON to usernames for ProcessEvent.User when non-nil.
+func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, users *UsernameCache) *Telemetry {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil
@@ -36,9 +38,25 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 	case "process":
 		base.EventType = schema.EventProcess
 		pe := &schema.ProcessEvent{BaseEvent: base}
-		pe.PID = jsonInt(raw, "pid", "child_pid", "exit_pid")
-		pe.ChildPID = jsonInt(raw, "child_pid")
-		pe.PPID = jsonInt(raw, "ppid", "parent_pid")
+		childPID := jsonInt(raw, "child_pid")
+		exitPID := jsonInt(raw, "exit_pid")
+		loggerPID := jsonInt(raw, "pid")
+		switch {
+		case exitPID != 0:
+			pe.PID = exitPID
+			pe.PPID = jsonInt(raw, "ppid", "parent_pid")
+		case childPID != 0:
+			// ETW process start (and similar): subject is the child process.
+			pe.PID = childPID
+			pe.PPID = jsonInt(raw, "parent_pid", "ppid")
+			if pe.PPID == 0 && loggerPID != 0 {
+				pe.PPID = loggerPID
+			}
+		default:
+			pe.PID = loggerPID
+			pe.PPID = jsonInt(raw, "ppid", "parent_pid")
+		}
+		pe.ChildPID = childPID
 		pe.ProcessName = firstNonEmpty(
 			jsonString(raw, "process_name"),
 			jsonString(raw, "comm"),
@@ -57,11 +75,42 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 		pe.ImageCDHash = jsonString(raw, "image_cdhash")
 		pe.SigningFlags = jsonUint32(raw, "signing_flags")
 		pe.ImageSHA256 = jsonString(raw, "image_sha256")
+		pe.SigningStatus = jsonString(raw, "signing_status")
 		pe.TLSClientJA3 = firstNonEmpty(jsonString(raw, "tls_client_ja3"), jsonString(raw, "ja3"))
 		pe.CloneFlags = jsonUint64(raw, "clone_flags")
 		pe.UnshareFlags = jsonUint64(raw, "unshare_flags")
 		pe.MadviseAdvice = int32(jsonInt(raw, "madvise_advice"))
+		pe.ExecEnv = jsonString(raw, "exec_env")
+		applyProcessUserFromJSON(pe, raw, users)
 		return &Telemetry{Process: pe}
+
+	case "injection":
+		base.EventType = schema.EventInjection
+		ie := &schema.ProcessInjectionEvent{BaseEvent: base}
+		ie.SourcePID = jsonInt(raw, "source_pid")
+		ie.TargetPID = jsonInt(raw, "target_pid")
+		ie.TargetImage = jsonString(raw, "target_image")
+		ie.Technique = jsonString(raw, "technique")
+		return &Telemetry{Injection: ie}
+
+	case "fork":
+		base.EventType = schema.EventFork
+		fk := &schema.ForkEvent{BaseEvent: base}
+		fk.ParentPID = jsonInt(raw, "parent_pid")
+		if fk.ParentPID == 0 {
+			fk.ParentPID = jsonInt(raw, "ppid")
+		}
+		if fk.ParentPID == 0 {
+			fk.ParentPID = jsonInt(raw, "pid")
+		}
+		fk.ChildPID = jsonInt(raw, "child_pid")
+		fk.CloneFlags = jsonUint64(raw, "clone_flags")
+		if fk.CloneFlags&0x100 != 0 { // CLONE_VM
+			fk.IsThread = true
+		}
+		const cloneNsMask = uint64(0x20000 | 0x2000000 | 0x4000000 | 0x8000000 | 0x10000000 | 0x20000000 | 0x40000000)
+		fk.IsContainer = fk.CloneFlags&cloneNsMask != 0
+		return &Telemetry{Fork: fk}
 
 	case "file":
 		base.EventType = schema.EventFile
@@ -72,6 +121,11 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 			fe.Operation = "event"
 		}
 		fe.ActorPID = jsonInt(raw, "pid")
+		fe.WriteFD = jsonInt(raw, "write_fd")
+		fe.BytesWritten = jsonUint64(raw, "bytes_written")
+		fe.OpenFlags = jsonUint32(raw, "open_flags")
+		fe.ChmodMode = jsonUint32(raw, "chmod_mode")
+		fe.FchmodatFlags = jsonUint32(raw, "fchmodat_flags")
 		return &Telemetry{File: fe}
 
 	case "network":
@@ -82,6 +136,7 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 		ne.DestIP = firstNonEmpty(jsonString(raw, "dest_ip"), jsonString(raw, "dst"), jsonString(raw, "dst_addr"))
 		ne.SourcePt = jsonInt(raw, "source_port", "src_port")
 		ne.DestPt = jsonInt(raw, "dest_port", "dst_port")
+		ne.JA3 = firstNonEmpty(jsonString(raw, "tls_client_ja3"), jsonString(raw, "ja3"))
 		return &Telemetry{Network: ne}
 
 	case "dns":
@@ -90,13 +145,25 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 		ne.Domain = firstNonEmpty(jsonString(raw, "query"), jsonString(raw, "domain"), jsonString(raw, "query_name"))
 		return &Telemetry{Network: ne}
 
-	case "module", "mount", "signal", "ptrace", "memory", "registry":
+	case "registry":
+		base.EventType = schema.EventRegistry
+		re := &schema.RegistryEvent{BaseEvent: base}
+		re.KeyPath = firstNonEmpty(jsonString(raw, "key_path"), jsonString(raw, "path"))
+		re.ValueName = jsonString(raw, "value_name")
+		re.Operation = firstNonEmpty(jsonString(raw, "operation"), "event")
+		re.OldData = jsonString(raw, "old_data")
+		re.NewData = jsonString(raw, "new_data")
+		re.ActorPID = jsonInt(raw, "pid")
+		return &Telemetry{Registry: re}
+
+	case "module", "mount", "signal", "ptrace", "memory":
 		base.EventType = schema.EventProcess
 		pe := &schema.ProcessEvent{BaseEvent: base}
 		pe.PID = jsonInt(raw, "pid")
 		pe.ProcessName = evType
 		pe.ProcessPath = firstNonEmpty(jsonString(raw, "path"), jsonString(raw, "module_path"))
 		pe.CommandLine = jsonString(raw, "message")
+		applyProcessUserFromJSON(pe, raw, users)
 		return &Telemetry{Process: pe}
 
 	case "namespace":
@@ -107,6 +174,7 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 		pe.ProcessPath = jsonString(raw, "process_name")
 		pe.UnshareFlags = jsonUint64(raw, "unshare_flags")
 		pe.CommandLine = jsonString(raw, "command_line")
+		applyProcessUserFromJSON(pe, raw, users)
 		return &Telemetry{Process: pe}
 
 	case "madvise":
@@ -117,6 +185,7 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 		pe.ProcessPath = jsonString(raw, "process_name")
 		pe.MadviseAdvice = int32(jsonInt(raw, "madvise_advice"))
 		pe.CommandLine = jsonString(raw, "command_line")
+		applyProcessUserFromJSON(pe, raw, users)
 		return &Telemetry{Process: pe}
 
 	case "wmi", "powershell", "pipe", "bits", "task":
@@ -124,16 +193,65 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 		pe := &schema.ProcessEvent{BaseEvent: base}
 		pe.PID = jsonInt(raw, "pid")
 		pe.ProcessName = evType
-		pe.ProcessPath = jsonString(raw, "path")
-		pe.CommandLine = firstNonEmpty(
-			jsonString(raw, "etw_user_data_prefix_hex"),
-			jsonString(raw, "message"),
+		pe.ProcessPath = firstNonEmpty(
+			jsonString(raw, "path"),
+			jsonString(raw, "task_name"),
+			jsonString(raw, "url"),
 		)
+		pe.CommandLine = firstNonEmpty(
+			jsonString(raw, "script_block"),
+			jsonString(raw, "task_action"),
+			jsonString(raw, "message"),
+			jsonString(raw, "query"),
+			jsonString(raw, "etw_user_data_prefix_hex"),
+		)
+		applyProcessUserFromJSON(pe, raw, users)
 		return &Telemetry{Process: pe}
 
 	default:
 		return nil
 	}
+}
+
+func applyProcessUserFromJSON(pe *schema.ProcessEvent, raw map[string]interface{}, users *UsernameCache) {
+	if pe == nil || users == nil {
+		return
+	}
+	uid := jsonUIDString(raw, "uid", "user_id", "ruid", "euid")
+	if uid == "" {
+		return
+	}
+	pe.User = users.Lookup(uid)
+}
+
+func jsonUIDString(m map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		v, ok := m[key]
+		if !ok || v == nil {
+			continue
+		}
+		switch x := v.(type) {
+		case string:
+			s := strings.TrimSpace(x)
+			if s != "" {
+				return s
+			}
+		case float64:
+			return strconv.FormatInt(int64(x), 10)
+		case int:
+			return strconv.Itoa(x)
+		case int64:
+			return strconv.FormatInt(x, 10)
+		case uint64:
+			return strconv.FormatUint(x, 10)
+		case json.Number:
+			i, err := x.Int64()
+			if err == nil {
+				return strconv.FormatInt(i, 10)
+			}
+		}
+	}
+	return ""
 }
 
 func parseKernelJSONTime(raw map[string]interface{}) time.Time {

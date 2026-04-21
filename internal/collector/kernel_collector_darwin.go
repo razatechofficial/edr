@@ -21,6 +21,7 @@ type KernelCollector struct {
 	endpointID string
 	hostname   string
 	cfg        config.Config
+	users      *UsernameCache
 
 	mu     sync.Mutex
 	events []Telemetry
@@ -28,7 +29,7 @@ type KernelCollector struct {
 }
 
 // NewKernelCollector starts the ESF driver when running as root.
-func NewKernelCollector(endpointID string, cfg config.Config) *KernelCollector {
+func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCache) *KernelCollector {
 	if os.Getuid() != 0 {
 		return nil
 	}
@@ -43,6 +44,7 @@ func NewKernelCollector(endpointID string, cfg config.Config) *KernelCollector {
 		endpointID: endpointID,
 		hostname:   host,
 		cfg:        cfg,
+		users:      users,
 	}
 }
 
@@ -113,7 +115,7 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 			time.Sleep(time.Millisecond)
 			continue
 		}
-		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS)
+		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
 		if tel != nil {
 			kc.maybeEnrichProcessImageHash(tel)
 			kc.mu.Lock()

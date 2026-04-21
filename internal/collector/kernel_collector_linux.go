@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ const (
 	bpfEvtFileWrite = 7
 	bpfEvtFileDel   = 8
 	bpfEvtFileRen   = 9
+	bpfEvtFileChmod = 28
 	bpfEvtNetConn   = 11
 	bpfEvtNetAccept = 12
 	bpfEvtNetBind   = 13
@@ -41,6 +43,7 @@ type KernelCollector struct {
 	endpointID string
 	hostname   string
 	cfg        config.Config
+	users      *UsernameCache
 
 	mu     sync.Mutex
 	events []Telemetry
@@ -49,7 +52,7 @@ type KernelCollector struct {
 
 // NewKernelCollector creates a collector backed by the Linux eBPF driver.
 // Returns nil if running as non-root or if driver init fails.
-func NewKernelCollector(endpointID string, cfg config.Config) *KernelCollector {
+func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCache) *KernelCollector {
 	if os.Getuid() != 0 {
 		return nil
 	}
@@ -64,6 +67,7 @@ func NewKernelCollector(endpointID string, cfg config.Config) *KernelCollector {
 		endpointID: endpointID,
 		hostname:   hostname,
 		cfg:        cfg,
+		users:      users,
 	}
 }
 
@@ -137,7 +141,7 @@ func (kc *KernelCollector) parseEvent(data []byte) *Telemetry {
 			return tel
 		}
 	}
-	return MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS)
+	return MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
 }
 
 func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
@@ -156,6 +160,21 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 
 	switch typ {
 	case bpfEvtProcExec, bpfEvtProcExit, bpfEvtProcFork:
+		switch typ {
+		case bpfEvtProcFork:
+			base.EventType = schema.EventFork
+			fk := &schema.ForkEvent{BaseEvent: base, ParentPID: int(pid)}
+			if len(payload) >= 12 {
+				fk.ChildPID = int(binary.LittleEndian.Uint32(payload[0:4]))
+				fk.CloneFlags = binary.LittleEndian.Uint64(payload[4:12])
+			}
+			if fk.CloneFlags&0x100 != 0 {
+				fk.IsThread = true
+			}
+			const cloneNsMask = uint64(0x20000 | 0x2000000 | 0x4000000 | 0x8000000 | 0x10000000 | 0x20000000 | 0x40000000)
+			fk.IsContainer = fk.CloneFlags&cloneNsMask != 0
+			return &Telemetry{Fork: fk}
+		}
 		base.EventType = schema.EventProcess
 		pe := &schema.ProcessEvent{BaseEvent: base, PID: int(pid)}
 		switch typ {
@@ -169,32 +188,66 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 			_, rest = readLenStr(rest) // skip
 			comm, _ := readLenStr(rest)
 			pe.ProcessName = comm
-		case bpfEvtProcFork:
-			pe.ProcessName = "fork"
-			if len(payload) >= 12 {
-				pe.ChildPID = int(binary.LittleEndian.Uint32(payload[0:4]))
-				pe.CloneFlags = binary.LittleEndian.Uint64(payload[4:12])
-			}
 		case bpfEvtProcExit:
 			pe.ProcessName = "exit"
 		}
+		if kc.users != nil {
+			uid := binary.LittleEndian.Uint32(data[18:22])
+			pe.User = kc.users.Lookup(strconv.FormatUint(uint64(uid), 10))
+		}
 		return &Telemetry{Process: pe}
 
-	case bpfEvtFileOpen, bpfEvtFileWrite, bpfEvtFileDel, bpfEvtFileRen:
+	case bpfEvtFileOpen, bpfEvtFileWrite, bpfEvtFileDel, bpfEvtFileRen, bpfEvtFileChmod:
 		base.EventType = schema.EventFile
 		fe := &schema.FileEvent{BaseEvent: base, ActorPID: int(pid)}
 		switch typ {
 		case bpfEvtFileOpen:
 			fe.Operation = "open"
+			fname, rest := readLenStr(payload)
+			fe.Path = fname
+			if len(rest) >= 4 {
+				fe.OpenFlags = binary.LittleEndian.Uint32(rest[:4])
+			}
 		case bpfEvtFileWrite:
 			fe.Operation = "write"
+			fname, rest := readLenStr(payload)
+			fe.Path = fname
+			if len(rest) >= 8 {
+				fe.BytesWritten = binary.LittleEndian.Uint64(rest[:8])
+				rest = rest[8:]
+			}
+			if len(rest) >= 4 {
+				fe.WriteFD = int(binary.LittleEndian.Uint32(rest[:4]))
+			}
 		case bpfEvtFileDel:
 			fe.Operation = "delete"
+			if fname, _ := readLenStr(payload); fname != "" {
+				fe.Path = fname
+			}
 		case bpfEvtFileRen:
 			fe.Operation = "rename"
-		}
-		if fname, _ := readLenStr(payload); fname != "" {
+			oldp, rest := readLenStr(payload)
+			newp, _ := readLenStr(rest)
+			switch {
+			case oldp != "" && newp != "":
+				fe.Path = oldp + " -> " + newp
+			case oldp != "":
+				fe.Path = oldp
+			default:
+				fe.Path = newp
+			}
+		case bpfEvtFileChmod:
+			fe.Operation = "chmod"
+			fname, rest := readLenStr(payload)
 			fe.Path = fname
+			if len(rest) >= 4 {
+				fe.ChmodMode = binary.LittleEndian.Uint32(rest[:4])
+				rest = rest[4:]
+			}
+			if len(rest) >= 4 {
+				fe.FchmodatFlags = binary.LittleEndian.Uint32(rest[:4])
+			}
+			fe.SUID = fe.ChmodMode&04000 != 0
 		}
 		return &Telemetry{File: fe}
 

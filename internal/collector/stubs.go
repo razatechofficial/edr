@@ -57,7 +57,11 @@ type StartableCollector interface {
 // Real implementations are used where available; stubs serve as fallbacks.
 // Kernel-tier collectors (eBPF / ESF / ETW) attach when monitoring.mode allows,
 // kernel_enabled is true, and the OS driver can start (e.g. Linux root).
-func DefaultCollectors(cfg config.Config) ([]Collector, error) {
+// users resolves UIDs to names for kernel JSON/binary paths; if nil, a new cache is created.
+func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, error) {
+	if users == nil {
+		users = NewUsernameCache()
+	}
 	endpointID := cfg.Service.EndpointID
 	pc, err := NewProcessCollector(endpointID)
 	if err != nil {
@@ -89,7 +93,7 @@ func DefaultCollectors(cfg config.Config) ([]Collector, error) {
 	cols := []Collector{pc, netCol, authCol, fileCol}
 
 	if wantKernelTier(cfg) {
-		if kc := NewKernelCollector(endpointID, cfg); kc != nil {
+		if kc := NewKernelCollector(endpointID, cfg, users); kc != nil {
 			cols = append(cols, kc)
 		}
 	}

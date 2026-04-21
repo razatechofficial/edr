@@ -22,6 +22,7 @@ type KernelCollector struct {
 	endpointID string
 	hostname   string
 	cfg        config.Config
+	users      *UsernameCache
 
 	mu     sync.Mutex
 	events []Telemetry
@@ -114,7 +115,7 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 			time.Sleep(time.Millisecond)
 			continue
 		}
-		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS)
+		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
 		if tel != nil {
 			kc.maybeEnrichProcessImageHash(tel)
 			kc.mu.Lock()

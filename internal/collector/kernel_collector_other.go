@@ -9,7 +9,7 @@ import (
 )
 
 // NewKernelCollector returns nil where no OS-specific kernel collector exists.
-func NewKernelCollector(_ string, _ config.Config) *KernelCollector {
+func NewKernelCollector(_ string, _ config.Config, _ *UsernameCache) *KernelCollector {
 	return nil
 }
 
