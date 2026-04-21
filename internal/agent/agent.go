@@ -115,6 +115,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		killAllow:  makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
 		zapLogger:  zapLogger,
 	}
+	collector.LogMonitoringBootstrap(a.logger, cfg)
 
 	if err := a.initAdvancedDetection(); err != nil {
 		if a.cfg.ML.Enabled && a.cfg.ML.RequireRuntime {
