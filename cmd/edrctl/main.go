@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/razatechofficial/edr/internal/monitoringdoctor"
 	"github.com/razatechofficial/edr/internal/pidfile"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/schema"
@@ -17,7 +18,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: edrctl <alerts|kill|stop>")
+		log.Fatal("usage: edrctl <alerts|kill|stop|monitoring>")
 	}
 	switch os.Args[1] {
 	case "alerts":
@@ -44,6 +45,22 @@ func main() {
 			ProcessName:   "manual",
 		})
 		fmt.Printf("kill result: success=%t message=%s\n", res.Success, res.Message)
+	case "monitoring":
+		if len(os.Args) < 3 {
+			log.Fatal("usage: edrctl monitoring <doctor> [config-path]")
+		}
+		switch os.Args[2] {
+		case "doctor":
+			cfgPath := "configs/agent.yaml"
+			if len(os.Args) >= 4 {
+				cfgPath = os.Args[3]
+			}
+			if err := monitoringdoctor.Print(os.Stdout, cfgPath); err != nil {
+				log.Fatal(err)
+			}
+		default:
+			log.Fatalf("unknown monitoring subcommand: %s", os.Args[2])
+		}
 	case "stop":
 		pidPath := "./alerts/agent.pid"
 		if len(os.Args) >= 3 {
