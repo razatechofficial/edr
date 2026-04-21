@@ -1,11 +1,10 @@
-//go:build !linux
+//go:build !linux && !windows && !(darwin && cgo)
 
 package collector
 
 import "context"
 
-// NewKernelCollector returns nil on non-Linux platforms.
-// eBPF kernel telemetry is only available on Linux.
+// NewKernelCollector returns nil where no OS-specific kernel collector exists.
 func NewKernelCollector(_ string) *KernelCollector {
 	return nil
 }
