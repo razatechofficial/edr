@@ -13,20 +13,20 @@ import (
 	"time"
 	"unsafe"
 
-	"golang.org/x/sys/windows"
 	"github.com/razatechofficial/edr/pkg/events"
+	"golang.org/x/sys/windows"
 )
 
 const (
-	eventTraceRealTimeMode          = 0x00000100
-	wnodeFlagTracedGUID             = 0x00020000
-	eventControlCodeEnableProvider  = 1
-	eventTraceControlStop           = 1
-	traceLevelVerbose               = 5
-	processTraceModeRealTime        = 0x00000100
-	processTraceModeEventRecord     = 0x10000000
-	invalidProcesstraceHandle       = ^uint64(0)
-	filetimeToUnixEpochDelta  int64 = 116444736000000000
+	eventTraceRealTimeMode               = 0x00000100
+	wnodeFlagTracedGUID                  = 0x00020000
+	eventControlCodeEnableProvider       = 1
+	eventTraceControlStop                = 1
+	traceLevelVerbose                    = 5
+	processTraceModeRealTime             = 0x00000100
+	processTraceModeEventRecord          = 0x10000000
+	invalidProcesstraceHandle            = ^uint64(0)
+	filetimeToUnixEpochDelta       int64 = 116444736000000000
 )
 
 var (
@@ -45,6 +45,26 @@ var (
 	dnsClientGUID = windows.GUID{
 		Data1: 0x1C95126E, Data2: 0x7EEA, Data3: 0x49A9,
 		Data4: [8]byte{0xA3, 0xFE, 0xA3, 0x78, 0xB0, 0x3D, 0xDB, 0x4D},
+	}
+	wmiActivityGUID = windows.GUID{
+		Data1: 0x141194EF, Data2: 0x0210, Data3: 0x4338,
+		Data4: [8]byte{0xBC, 0xA5, 0x2B, 0xFF, 0x18, 0x28, 0x29, 0x30},
+	}
+	powershellGUID = windows.GUID{
+		Data1: 0xA0C1853B, Data2: 0x5C3D, Data3: 0x4017,
+		Data4: [8]byte{0xB7, 0x03, 0x33, 0x68, 0x9D, 0x46, 0x54, 0xC8},
+	}
+	kernelObjectGUID = windows.GUID{
+		Data1: 0x47D920E5, Data2: 0x0CF2, Data3: 0x4746,
+		Data4: [8]byte{0x94, 0x1D, 0x94, 0x16, 0x27, 0xD1, 0xFC, 0x01},
+	}
+	bitsClientGUID = windows.GUID{
+		Data1: 0x2F07F7ED, Data2: 0x7968, Data3: 0x4BD6,
+		Data4: [8]byte{0xBB, 0xD8, 0xB3, 0xE5, 0x02, 0x58, 0x46, 0xFF},
+	}
+	taskSchedulerGUID = windows.GUID{
+		Data1: 0x48E5B3B2, Data2: 0xED82, Data3: 0x4617,
+		Data4: [8]byte{0x8E, 0x1F, 0xA6, 0x37, 0xCA, 0x2B, 0x30, 0x91},
 	}
 )
 
@@ -123,17 +143,17 @@ type etwBufferContext struct {
 // etwEventRecord mirrors the Windows EVENT_RECORD structure.
 type etwEventRecord struct {
 	EventHeader       etwEventHeader
-	BufferContext      etwBufferContext
+	BufferContext     etwBufferContext
 	ExtendedDataCount uint16
 	UserDataLength    uint16
 	ExtendedData      uintptr
 	UserData          uintptr
-	UserContext        uintptr
+	UserContext       uintptr
 }
 
 type etwSystemTime struct {
-	Year, Month, DayOfWeek, Day         uint16
-	Hour, Minute, Second, Milliseconds  uint16
+	Year, Month, DayOfWeek, Day        uint16
+	Hour, Minute, Second, Milliseconds uint16
 }
 
 type etwTimeZoneInfo struct {
@@ -164,7 +184,7 @@ type etwEventTrace struct {
 	ParentGuid       windows.GUID
 	MofData          uintptr
 	MofLength        uint32
-	BufferContext     uint32
+	BufferContext    uint32
 }
 
 type etwTraceLogfileHeader struct {
@@ -214,11 +234,40 @@ type providerConfig struct {
 	eventType events.EventType
 }
 
-var etwProviders = []providerConfig{
+var etwCoreProviders = []providerConfig{
 	{"Process", kernelProcessGUID, events.EventProcess},
 	{"File", kernelFileGUID, events.EventFile},
 	{"Network", kernelNetworkGUID, events.EventNetwork},
 	{"DNS", dnsClientGUID, events.EventDNS},
+}
+
+func (d *ETWDriver) providersToStart() []providerConfig {
+	d.mu.RLock()
+	p := d.policy
+	d.mu.RUnlock()
+
+	var out []providerConfig
+	for _, pc := range etwCoreProviders {
+		if d.policyAllows(pc.eventType) {
+			out = append(out, pc)
+		}
+	}
+	if p.ETWWMIActivity {
+		out = append(out, providerConfig{"WMI", wmiActivityGUID, events.EventWMI})
+	}
+	if p.ETWPowerShellScript {
+		out = append(out, providerConfig{"PowerShell", powershellGUID, events.EventPowerShell})
+	}
+	if p.ETWNamedPipeHandles {
+		out = append(out, providerConfig{"KernelObject", kernelObjectGUID, events.EventPipe})
+	}
+	if p.ETWBitsClient {
+		out = append(out, providerConfig{"BitsClient", bitsClientGUID, events.EventBITS})
+	}
+	if p.ETWTaskScheduler {
+		out = append(out, providerConfig{"TaskScheduler", taskSchedulerGUID, events.EventTask})
+	}
+	return out
 }
 
 type etwSession struct {
@@ -273,6 +322,11 @@ func (d *ETWDriver) Capabilities() []events.EventType {
 		events.EventNetwork,
 		events.EventDNS,
 		events.EventRegistry,
+		events.EventWMI,
+		events.EventPowerShell,
+		events.EventPipe,
+		events.EventBITS,
+		events.EventTask,
 	}
 }
 
@@ -289,10 +343,7 @@ func (d *ETWDriver) Start(ctx context.Context, buf *RingBuffer) error {
 		return fmt.Errorf("another etw driver instance is already active")
 	}
 
-	for _, p := range etwProviders {
-		if !d.policyAllows(p.eventType) {
-			continue
-		}
+	for _, p := range d.providersToStart() {
 		sess, err := d.createSession(p.name, p.guid)
 		if err != nil {
 			d.stopAllSessions()
@@ -366,6 +417,16 @@ func (d *ETWDriver) policyAllows(et events.EventType) bool {
 		return d.policy.DNSEvents
 	case events.EventRegistry:
 		return d.policy.RegistryEvents
+	case events.EventWMI:
+		return d.policy.ETWWMIActivity
+	case events.EventPowerShell:
+		return d.policy.ETWPowerShellScript
+	case events.EventPipe:
+		return d.policy.ETWNamedPipeHandles
+	case events.EventBITS:
+		return d.policy.ETWBitsClient
+	case events.EventTask:
+		return d.policy.ETWTaskScheduler
 	default:
 		return true
 	}
@@ -530,6 +591,21 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 		d.decodeNetworkUserData(record, envelope)
 	case dnsClientGUID:
 		envelope["type"] = events.EventDNS
+	case wmiActivityGUID:
+		envelope["type"] = events.EventWMI
+		d.decodeOpaqueETW(record, envelope)
+	case powershellGUID:
+		envelope["type"] = events.EventPowerShell
+		d.decodeOpaqueETW(record, envelope)
+	case kernelObjectGUID:
+		envelope["type"] = events.EventPipe
+		d.decodeOpaqueETW(record, envelope)
+	case bitsClientGUID:
+		envelope["type"] = events.EventBITS
+		d.decodeOpaqueETW(record, envelope)
+	case taskSchedulerGUID:
+		envelope["type"] = events.EventTask
+		d.decodeOpaqueETW(record, envelope)
 	default:
 		envelope["type"] = events.EventProcess
 	}
@@ -587,6 +663,21 @@ func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string
 		return
 	}
 	env["data_length"] = len(ud)
+}
+
+func (d *ETWDriver) decodeOpaqueETW(record *etwEventRecord, env map[string]interface{}) {
+	ud := userDataSlice(record)
+	if ud == nil {
+		return
+	}
+	env["etw_user_data_len"] = len(ud)
+	if len(ud) >= 4 {
+		n := 64
+		if len(ud) < n {
+			n = len(ud)
+		}
+		env["etw_user_data_prefix_hex"] = fmt.Sprintf("%x", ud[:n])
+	}
 }
 
 func userDataSlice(record *etwEventRecord) []byte {

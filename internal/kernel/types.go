@@ -29,6 +29,13 @@ type EventPolicy struct {
 
 	// MutePIDs lists PIDs whose events should be dropped.
 	MutePIDs []uint32
+
+	// Windows-only optional ETW providers (high volume; default off).
+	ETWWMIActivity      bool
+	ETWPowerShellScript bool
+	ETWNamedPipeHandles bool
+	ETWBitsClient       bool
+	ETWTaskScheduler    bool
 }
 
 // DefaultPolicy returns an EventPolicy with all event types enabled.
