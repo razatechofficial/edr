@@ -504,14 +504,25 @@ func (d *EBPFDriver) decodeNetworkEvent(data []byte) error {
 }
 
 func (d *EBPFDriver) decodeSecurityEvent(data []byte, et events.EventType) error {
-	var envelope map[string]interface{}
-	switch et {
-	case events.EventModule:
-		envelope = map[string]interface{}{"type": events.EventModule, "timestamp": time.Now().UTC(), "agent_id": d.agentID}
-	case events.EventMount:
-		envelope = map[string]interface{}{"type": events.EventMount, "timestamp": time.Now().UTC(), "agent_id": d.agentID}
-	default:
-		envelope = map[string]interface{}{"type": events.EventSignal, "timestamp": time.Now().UTC(), "agent_id": d.agentID}
+	var pid uint32
+	if len(data) >= 8 {
+		pid = binary.LittleEndian.Uint32(data[4:8])
+	}
+	evType := et
+	if et == events.EventSignal && len(data) >= 4 {
+		switch binary.LittleEndian.Uint32(data[0:4]) {
+		case bpfEvtPtrace:
+			evType = events.EventPtrace
+		case bpfEvtSignal:
+			evType = events.EventSignal
+		}
+	}
+	envelope := map[string]interface{}{
+		"type":       evType,
+		"timestamp":  time.Now().UTC(),
+		"agent_id":   d.agentID,
+		"pid":        pid,
+		"event_kind": string(et),
 	}
 	return d.writeJSONEvent(envelope)
 }

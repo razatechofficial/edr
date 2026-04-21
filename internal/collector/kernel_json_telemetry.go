@@ -81,7 +81,7 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string) *T
 		ne.Domain = firstNonEmpty(jsonString(raw, "query"), jsonString(raw, "domain"), jsonString(raw, "query_name"))
 		return &Telemetry{Network: ne}
 
-	case "module", "mount", "signal", "ptrace", "memory":
+	case "module", "mount", "signal", "ptrace", "memory", "registry":
 		base.EventType = schema.EventProcess
 		pe := &schema.ProcessEvent{BaseEvent: base}
 		pe.PID = jsonInt(raw, "pid")
