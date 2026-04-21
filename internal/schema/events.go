@@ -27,6 +27,7 @@ type BaseEvent struct {
 type ProcessEvent struct {
 	BaseEvent
 	PID         int      `json:"pid"`
+	ChildPID    int      `json:"child_pid,omitempty"`
 	PPID        int      `json:"ppid"`
 	ParentName  string   `json:"parent_name,omitempty"`
 	ProcessName string   `json:"process_name"`
@@ -34,6 +35,15 @@ type ProcessEvent struct {
 	CommandLine string   `json:"command_line"`
 	User        string   `json:"user"`
 	Hashes      []string `json:"hashes,omitempty"`
+	// Code signing metadata (e.g. macOS ESF exec enrichment).
+	SigningTeamID string `json:"signing_team_id,omitempty"`
+	ImageCDHash   string `json:"image_cdhash,omitempty"`
+	SigningFlags  uint32 `json:"signing_flags,omitempty"`
+	ImageSHA256   string `json:"image_sha256,omitempty"`
+	TLSClientJA3  string `json:"tls_client_ja3,omitempty"`
+	CloneFlags    uint64 `json:"clone_flags,omitempty"`
+	UnshareFlags  uint64 `json:"unshare_flags,omitempty"`
+	MadviseAdvice int32  `json:"madvise_advice,omitempty"`
 }
 
 type FileEvent struct {

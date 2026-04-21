@@ -128,10 +128,10 @@ type Config struct {
 	} `yaml:"llm"`
 
 	ML struct {
-		Enabled         bool   `yaml:"enabled" env:"ML_ENABLED"`
+		Enabled bool `yaml:"enabled" env:"ML_ENABLED"`
 		// RequireRuntime aborts startup when ML is enabled if ONNX Runtime cannot
 		// initialize or the advanced detection engine (including ML) fails to load.
-		RequireRuntime bool `yaml:"require_runtime" env:"ML_REQUIRE_RUNTIME"`
+		RequireRuntime  bool   `yaml:"require_runtime" env:"ML_REQUIRE_RUNTIME"`
 		ModelsDir       string `yaml:"models_dir" env:"ML_MODELS_DIR"`
 		AutoUpdate      bool   `yaml:"auto_update"`
 		UpdateIntervalH int    `yaml:"update_interval_hours"`
@@ -281,6 +281,19 @@ type Config struct {
 		UserlandFallback bool     `yaml:"userland_fallback"`
 		// ChecklistTier is optional reporting hint: userland|kernel_hooks|full_edr (empty = derive at runtime).
 		ChecklistTier string `yaml:"checklist_tier" env:"EDR_MONITORING_CHECKLIST_TIER"`
+
+		// ESFMutePathPrefixes are appended after built-in ESF mutes (macOS only).
+		ESFMutePathPrefixes []string `yaml:"esf_mute_path_prefixes"`
+		// EnrichExecImageSHA256 hashes process image paths for kernel exec events (all OS; I/O heavy).
+		EnrichExecImageSHA256 bool `yaml:"enrich_exec_image_sha256"`
+		// ETW optional providers (Windows only; verbose).
+		ETWWMIActivity      bool `yaml:"etw_wmi_activity"`
+		ETWPowerShellScript bool `yaml:"etw_powershell_script"`
+		ETWNamedPipeHandles bool `yaml:"etw_named_pipe_handles"`
+		ETWBitsClient       bool `yaml:"etw_bits_client"`
+		ETWTaskScheduler    bool `yaml:"etw_task_scheduler"`
+		// HealthSnapshotSec writes monitoring_health.json under data_dir when > 0.
+		HealthSnapshotSec int `yaml:"health_snapshot_sec"`
 	} `yaml:"monitoring"`
 
 	// Legacy fields for backward compatibility with existing agent.example.yaml.

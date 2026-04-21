@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,11 +66,14 @@ type Agent struct {
 	integrity  *selfprotect.IntegrityChecker
 	respEngine *response.ResponseEngine
 
-	durableSpool      *telemetry.Spool
-	telExporter       *mlpkg.TelemetryExporter
-	mlAutoUpdater     *mlpkg.AutoUpdater
-	driftDetector     *mlpkg.DriftDetector
-	feedbackIngester  *mlpkg.FeedbackIngester
+	durableSpool     *telemetry.Spool
+	telExporter      *mlpkg.TelemetryExporter
+	mlAutoUpdater    *mlpkg.AutoUpdater
+	driftDetector    *mlpkg.DriftDetector
+	feedbackIngester *mlpkg.FeedbackIngester
+
+	healthMu           sync.Mutex
+	lastHealthSnapshot time.Time
 }
 
 func NewDefault() (*Agent, error) {
@@ -617,20 +621,30 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 					}
 				}
 			}
-		if tel.File != nil {
-			if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
-				return err
+			if tel.File != nil {
+				if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
+					return err
+				}
+				if a.advEngine != nil {
+					fe := *tel.File
+					a.advEngine.Evaluate(ctx, &fe)
+				}
 			}
-			if a.advEngine != nil {
-				fe := *tel.File
-				a.advEngine.Evaluate(ctx, &fe)
-			}
-		}
 		}
 	}
 
 	if err := a.checkDriftAlerts(); err != nil {
 		a.logger.Error("drift alert check failed", "error", err)
+	}
+
+	sec := a.cfg.Monitoring.HealthSnapshotSec
+	if sec > 0 {
+		a.healthMu.Lock()
+		if time.Since(a.lastHealthSnapshot) >= time.Duration(sec)*time.Second {
+			collector.WriteMonitoringHealth(a.cfg, a.collectors, a.logger)
+			a.lastHealthSnapshot = time.Now()
+		}
+		a.healthMu.Unlock()
 	}
 	return nil
 }
