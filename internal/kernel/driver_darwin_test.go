@@ -30,6 +30,7 @@ func TestESFDriverCapabilities(t *testing.T) {
 		events.EventModule:  true,
 		events.EventMount:   true,
 		events.EventSignal:  true,
+		events.EventPtrace:  true,
 	}
 
 	if len(caps) != len(want) {

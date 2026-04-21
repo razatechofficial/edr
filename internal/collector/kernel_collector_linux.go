@@ -12,8 +12,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/kernel"
 	"github.com/razatechofficial/edr/internal/schema"
+	"github.com/razatechofficial/edr/internal/telemetryenrich"
 )
 
 const (
@@ -38,6 +40,7 @@ type KernelCollector struct {
 	buf        *kernel.RingBuffer
 	endpointID string
 	hostname   string
+	cfg        config.Config
 
 	mu     sync.Mutex
 	events []Telemetry
@@ -46,7 +49,7 @@ type KernelCollector struct {
 
 // NewKernelCollector creates a collector backed by the Linux eBPF driver.
 // Returns nil if running as non-root or if driver init fails.
-func NewKernelCollector(endpointID string) *KernelCollector {
+func NewKernelCollector(endpointID string, cfg config.Config) *KernelCollector {
 	if os.Getuid() != 0 {
 		return nil
 	}
@@ -60,6 +63,18 @@ func NewKernelCollector(endpointID string) *KernelCollector {
 		buf:        kernel.NewRingBuffer(65536),
 		endpointID: endpointID,
 		hostname:   hostname,
+		cfg:        cfg,
+	}
+}
+
+// ExportMonitoringHealth implements ExportMonitoringHealth for monitoring doctor snapshots.
+func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
+	if kc == nil || kc.driver == nil || kc.buf == nil {
+		return nil
+	}
+	return map[string]any{
+		"driver":  kc.driver.Stats(),
+		"ringbuf": kc.buf.Stats(),
 	}
 }
 
@@ -108,6 +123,7 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 
 		tel := kc.parseEvent(data)
 		if tel != nil {
+			kc.maybeEnrichProcessImageHash(tel)
 			kc.mu.Lock()
 			kc.events = append(kc.events, *tel)
 			kc.mu.Unlock()
@@ -142,7 +158,8 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 	case bpfEvtProcExec, bpfEvtProcExit, bpfEvtProcFork:
 		base.EventType = schema.EventProcess
 		pe := &schema.ProcessEvent{BaseEvent: base, PID: int(pid)}
-		if typ == bpfEvtProcExec {
+		switch typ {
+		case bpfEvtProcExec:
 			ppid, rest := readUint32(payload)
 			pe.PPID = int(ppid)
 			filename, rest := readLenStr(rest)
@@ -152,6 +169,14 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 			_, rest = readLenStr(rest) // skip
 			comm, _ := readLenStr(rest)
 			pe.ProcessName = comm
+		case bpfEvtProcFork:
+			pe.ProcessName = "fork"
+			if len(payload) >= 12 {
+				pe.ChildPID = int(binary.LittleEndian.Uint32(payload[0:4]))
+				pe.CloneFlags = binary.LittleEndian.Uint64(payload[4:12])
+			}
+		case bpfEvtProcExit:
+			pe.ProcessName = "exit"
 		}
 		return &Telemetry{Process: pe}
 
@@ -211,6 +236,21 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 	}
 
 	return nil
+}
+
+const maxExecImageHashBytes = 32 << 20
+
+func (kc *KernelCollector) maybeEnrichProcessImageHash(tel *Telemetry) {
+	if !kc.cfg.Monitoring.EnrichExecImageSHA256 || tel == nil || tel.Process == nil {
+		return
+	}
+	p := tel.Process.ProcessPath
+	if p == "" {
+		return
+	}
+	if h := telemetryenrich.FileSHA256Hex(p, maxExecImageHashBytes); h != "" {
+		tel.Process.ImageSHA256 = h
+	}
 }
 
 func readUint32(data []byte) (uint32, []byte) {
