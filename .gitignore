@@ -49,6 +49,7 @@ models/network_cic_train_out/
 models/network_train_out/
 
 *.md
+!docs/*.md
 /bin/
 /alerts/
 
