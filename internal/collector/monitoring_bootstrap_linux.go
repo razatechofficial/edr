@@ -9,8 +9,6 @@ import (
 	"github.com/razatechofficial/edr/internal/config"
 )
 
-const bpfObjectInstallPath = "/var/lib/edr/bpf/edr.bpf.o"
-
 // LogMonitoringBootstrap logs Linux eBPF readiness (object on disk, uid, cap hints).
 func LogMonitoringBootstrap(logger *slog.Logger, cfg config.Config) {
 	if logger == nil {
@@ -24,14 +22,15 @@ func LogMonitoringBootstrap(logger *slog.Logger, cfg config.Config) {
 		logger.Warn("monitoring bootstrap", "tier", "degraded", "reason", "eBPF requires root", "uid", os.Getuid())
 		return
 	}
-	fi, err := os.Stat(bpfObjectInstallPath)
+	p := BPFObjectInstallPath()
+	fi, err := os.Stat(p)
 	if err != nil {
-		logger.Warn("monitoring bootstrap", "tier", "degraded", "reason", "bpf object missing", "path", bpfObjectInstallPath, "error", err)
+		logger.Warn("monitoring bootstrap", "tier", "degraded", "reason", "bpf object missing", "path", p, "error", err)
 		return
 	}
 	if fi.IsDir() {
-		logger.Warn("monitoring bootstrap", "tier", "degraded", "reason", "bpf path is directory", "path", bpfObjectInstallPath)
+		logger.Warn("monitoring bootstrap", "tier", "degraded", "reason", "bpf path is directory", "path", p)
 		return
 	}
-	logger.Info("monitoring bootstrap", "tier", "kernel_hooks", "bpf_object", bpfObjectInstallPath, "size", fi.Size())
+	logger.Info("monitoring bootstrap", "tier", "kernel_hooks", "bpf_object", p, "size", fi.Size())
 }
