@@ -86,7 +86,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 			return nil, fmt.Errorf("ml.require_runtime: ONNX Runtime init failed: %w", err)
 		}
 	}
-	cols, err := collector.DefaultCollectors(cfg.Service.EndpointID)
+	cols, err := collector.DefaultCollectors(cfg)
 	if err != nil {
 		return nil, err
 	}

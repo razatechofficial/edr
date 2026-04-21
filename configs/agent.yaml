@@ -385,6 +385,17 @@ performance:
   batch_interval_ms: 15000
 
 # -----------------------------------------------------------------------------
+# Host monitoring (collectors: userland vs kernel / ESF / ETW)
+# -----------------------------------------------------------------------------
+# Env: EDR_MONITORING_MODE, EDR_MONITORING_KERNEL, EDR_MONITORING_CHECKLIST_TIER
+monitoring:
+  mode: "auto"
+  kernel_enabled: true
+  fim_paths: []
+  userland_fallback: true
+  checklist_tier: ""
+
+# -----------------------------------------------------------------------------
 # Baseline anomaly detection
 # -----------------------------------------------------------------------------
 baseline:

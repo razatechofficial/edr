@@ -2,6 +2,8 @@ package collector
 
 import (
 	"context"
+
+	"github.com/razatechofficial/edr/internal/config"
 )
 
 // NetworkStubCollector is a placeholder for future kernel/socket-level network telemetry.
@@ -53,8 +55,10 @@ type StartableCollector interface {
 
 // DefaultCollectors returns process, network, auth, and file collectors.
 // Real implementations are used where available; stubs serve as fallbacks.
-// On Linux, a KernelCollector is included when running as root.
-func DefaultCollectors(endpointID string) ([]Collector, error) {
+// Kernel-tier collectors (eBPF / ESF / ETW) attach when monitoring.mode allows,
+// kernel_enabled is true, and the OS driver can start (e.g. Linux root).
+func DefaultCollectors(cfg config.Config) ([]Collector, error) {
+	endpointID := cfg.Service.EndpointID
 	pc, err := NewProcessCollector(endpointID)
 	if err != nil {
 		return nil, err
@@ -71,7 +75,11 @@ func DefaultCollectors(endpointID string) ([]Collector, error) {
 	}
 
 	var fileCol Collector
-	fc, fcErr := NewFileCollector(endpointID, nil)
+	fimPaths := cfg.Monitoring.FIMPaths
+	if len(fimPaths) == 0 {
+		fimPaths = nil
+	}
+	fc, fcErr := NewFileCollector(endpointID, fimPaths)
 	if fcErr == nil {
 		fileCol = fc
 	} else {
@@ -80,8 +88,10 @@ func DefaultCollectors(endpointID string) ([]Collector, error) {
 
 	cols := []Collector{pc, netCol, authCol, fileCol}
 
-	if kc := NewKernelCollector(endpointID); kc != nil {
-		cols = append(cols, kc)
+	if wantKernelTier(cfg) {
+		if kc := NewKernelCollector(endpointID); kc != nil {
+			cols = append(cols, kc)
+		}
 	}
 
 	if dc := NewDNSCollector(endpointID); dc != nil {
@@ -93,4 +103,12 @@ func DefaultCollectors(endpointID string) ([]Collector, error) {
 	}
 
 	return cols, nil
+}
+
+func wantKernelTier(cfg config.Config) bool {
+	m := cfg.Monitoring
+	if m.Mode == "userland" {
+		return false
+	}
+	return m.KernelEnabled
 }
