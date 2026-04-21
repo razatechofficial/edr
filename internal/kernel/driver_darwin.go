@@ -52,7 +52,33 @@ static char* esf_event_path(const es_message_t *msg) {
     case ES_EVENT_TYPE_NOTIFY_WRITE:
         return esf_copy_string(msg->event.write.target->path);
     case ES_EVENT_TYPE_NOTIFY_MMAP:
+    case ES_EVENT_TYPE_AUTH_MMAP:
         return esf_copy_string(msg->event.mmap.source->path);
+    case ES_EVENT_TYPE_NOTIFY_MPROTECT:
+        return esf_copy_string(msg->process->executable->path);
+    case ES_EVENT_TYPE_NOTIFY_EXEC:
+        return esf_copy_string(msg->event.exec.target->executable->path);
+    case ES_EVENT_TYPE_NOTIFY_UNLINK:
+        return esf_copy_string(msg->event.unlink.target->path);
+    case ES_EVENT_TYPE_NOTIFY_TRUNCATE:
+        return esf_copy_string(msg->event.truncate.target->path);
+    case ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA:
+        if (msg->event.exchangedata.file1 != NULL) {
+            return esf_copy_string(msg->event.exchangedata.file1->path);
+        }
+        return strdup("");
+    case ES_EVENT_TYPE_NOTIFY_FCNTL:
+        return esf_copy_string(msg->event.fcntl.target->path);
+    case ES_EVENT_TYPE_NOTIFY_RENAME:
+        return esf_copy_string(msg->event.rename.source->path);
+    case ES_EVENT_TYPE_AUTH_COPYFILE:
+        return esf_copy_string(msg->event.copyfile.source->path);
+    case ES_EVENT_TYPE_AUTH_GET_TASK:
+        return esf_copy_string(msg->event.get_task.target->executable->path);
+    case ES_EVENT_TYPE_NOTIFY_SIGNAL:
+        return esf_copy_string(msg->event.signal.target->executable->path);
+    case ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE:
+        return esf_copy_string(msg->event.remote_thread_create.target->executable->path);
     default:
         return strdup("");
     }
@@ -108,14 +134,25 @@ static int esf_subscribe_all(void) {
         ES_EVENT_TYPE_AUTH_CREATE,
         ES_EVENT_TYPE_AUTH_RENAME,
         ES_EVENT_TYPE_AUTH_UNLINK,
+        ES_EVENT_TYPE_AUTH_COPYFILE,
+        ES_EVENT_TYPE_AUTH_MMAP,
+        ES_EVENT_TYPE_AUTH_GET_TASK,
         ES_EVENT_TYPE_AUTH_KEXTLOAD,
         ES_EVENT_TYPE_AUTH_MOUNT,
         ES_EVENT_TYPE_AUTH_SIGNAL,
+        ES_EVENT_TYPE_NOTIFY_EXEC,
         ES_EVENT_TYPE_NOTIFY_FORK,
         ES_EVENT_TYPE_NOTIFY_EXIT,
         ES_EVENT_TYPE_NOTIFY_WRITE,
+        ES_EVENT_TYPE_NOTIFY_UNLINK,
+        ES_EVENT_TYPE_NOTIFY_TRUNCATE,
+        ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA,
+        ES_EVENT_TYPE_NOTIFY_FCNTL,
+        ES_EVENT_TYPE_NOTIFY_RENAME,
+        ES_EVENT_TYPE_NOTIFY_SIGNAL,
         ES_EVENT_TYPE_NOTIFY_MMAP,
         ES_EVENT_TYPE_NOTIFY_MPROTECT,
+        ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE,
     };
     es_return_t ret = es_subscribe(_esf_client, evts, sizeof(evts)/sizeof(evts[0]));
     return (ret == ES_RETURN_SUCCESS) ? 0 : -1;
@@ -159,6 +196,13 @@ var defaultMutePaths = []string{
 	"/Library/Apple/",
 	"/usr/sbin/syslogd",
 	"/usr/libexec/amfid",
+}
+
+// DefaultESFMutePathPrefixes returns a copy of built-in ESF path mute prefixes.
+func DefaultESFMutePathPrefixes() []string {
+	out := make([]string, len(defaultMutePaths))
+	copy(out, defaultMutePaths)
+	return out
 }
 
 const (
@@ -247,6 +291,7 @@ type ESFDriver struct {
 	dropped   atomic.Uint64
 	processed atomic.Uint64
 	errors    atomic.Uint64
+	esfSeq    atomic.Uint64
 }
 
 // NewESFDriver creates a new Endpoint Security Framework driver.
@@ -276,6 +321,7 @@ func (d *ESFDriver) Capabilities() []events.EventType {
 		events.EventModule,
 		events.EventMount,
 		events.EventSignal,
+		events.EventPtrace,
 	}
 }
 
@@ -304,9 +350,9 @@ func (d *ESFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	}
 
 	d.mu.RLock()
-	mutePaths := defaultMutePaths
-	if len(d.policy.MutePaths) > 0 {
-		mutePaths = d.policy.MutePaths
+	mutePaths := d.policy.MutePaths
+	if len(mutePaths) == 0 {
+		mutePaths = defaultMutePaths
 	}
 	d.mu.RUnlock()
 
@@ -386,23 +432,35 @@ func (d *ESFDriver) Stats() DriverStats {
 func mapESFEventType(raw int) events.EventType {
 	switch raw {
 	case int(C.ES_EVENT_TYPE_AUTH_EXEC),
+		int(C.ES_EVENT_TYPE_NOTIFY_EXEC),
 		int(C.ES_EVENT_TYPE_NOTIFY_FORK),
-		int(C.ES_EVENT_TYPE_NOTIFY_EXIT):
+		int(C.ES_EVENT_TYPE_NOTIFY_EXIT),
+		int(C.ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE):
 		return events.EventProcess
 	case int(C.ES_EVENT_TYPE_AUTH_OPEN),
 		int(C.ES_EVENT_TYPE_AUTH_CREATE),
 		int(C.ES_EVENT_TYPE_AUTH_RENAME),
 		int(C.ES_EVENT_TYPE_AUTH_UNLINK),
-		int(C.ES_EVENT_TYPE_NOTIFY_WRITE):
+		int(C.ES_EVENT_TYPE_AUTH_COPYFILE),
+		int(C.ES_EVENT_TYPE_NOTIFY_WRITE),
+		int(C.ES_EVENT_TYPE_NOTIFY_UNLINK),
+		int(C.ES_EVENT_TYPE_NOTIFY_TRUNCATE),
+		int(C.ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA),
+		int(C.ES_EVENT_TYPE_NOTIFY_FCNTL),
+		int(C.ES_EVENT_TYPE_NOTIFY_RENAME):
 		return events.EventFile
 	case int(C.ES_EVENT_TYPE_NOTIFY_MMAP),
-		int(C.ES_EVENT_TYPE_NOTIFY_MPROTECT):
+		int(C.ES_EVENT_TYPE_NOTIFY_MPROTECT),
+		int(C.ES_EVENT_TYPE_AUTH_MMAP):
 		return events.EventMemory
+	case int(C.ES_EVENT_TYPE_AUTH_GET_TASK):
+		return events.EventPtrace
 	case int(C.ES_EVENT_TYPE_AUTH_KEXTLOAD):
 		return events.EventModule
 	case int(C.ES_EVENT_TYPE_AUTH_MOUNT):
 		return events.EventMount
-	case int(C.ES_EVENT_TYPE_AUTH_SIGNAL):
+	case int(C.ES_EVENT_TYPE_AUTH_SIGNAL),
+		int(C.ES_EVENT_TYPE_NOTIFY_SIGNAL):
 		return events.EventSignal
 	default:
 		return events.EventProcess

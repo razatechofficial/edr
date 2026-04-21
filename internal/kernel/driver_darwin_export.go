@@ -50,20 +50,38 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 		if !p.SignalEvents {
 			return
 		}
+	case "ptrace":
+		if !p.PtraceEvents {
+			return
+		}
 	}
 
+	pathGo := safeGoString(pathStr)
 	envelope := map[string]interface{}{
 		"type":      evtType,
 		"timestamp": time.Now().UTC(),
 		"agent_id":  d.agentID,
 		"esf_type":  int(eventType),
+		"seq":       d.esfSeq.Add(1),
 		"pid":       int(pid),
 		"ppid":      int(ppid),
 		"uid":       int(uid),
 		"gid":       int(gid),
 		"comm":      safeGoString(comm),
-		"path":      safeGoString(pathStr),
+		"path":      pathGo,
 		"args":      safeGoString(args),
+	}
+	if esfIsExecEvent(int(eventType)) {
+		if pathGo != "" {
+			tid, cdh, flg := esfExecSigningInfo(pathGo)
+			if tid != "" {
+				envelope["signing_team_id"] = tid
+			}
+			if cdh != "" {
+				envelope["image_cdhash"] = cdh
+			}
+			envelope["signing_flags"] = flg
+		}
 	}
 
 	data, err := json.Marshal(envelope)
