@@ -89,7 +89,7 @@ func DefaultCollectors(cfg config.Config) ([]Collector, error) {
 	cols := []Collector{pc, netCol, authCol, fileCol}
 
 	if wantKernelTier(cfg) {
-		if kc := NewKernelCollector(endpointID); kc != nil {
+		if kc := NewKernelCollector(endpointID, cfg); kc != nil {
 			cols = append(cols, kc)
 		}
 	}

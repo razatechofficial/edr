@@ -2,10 +2,14 @@
 
 package collector
 
-import "context"
+import (
+	"context"
+
+	"github.com/razatechofficial/edr/internal/config"
+)
 
 // NewKernelCollector returns nil where no OS-specific kernel collector exists.
-func NewKernelCollector(_ string) *KernelCollector {
+func NewKernelCollector(_ string, _ config.Config) *KernelCollector {
 	return nil
 }
 
@@ -14,7 +18,7 @@ func NewKernelCollector(_ string) *KernelCollector {
 // cross-platform, but NewKernelCollector always returns nil.
 type KernelCollector struct{}
 
-func (kc *KernelCollector) Name() string                                  { return "kernel" }
+func (kc *KernelCollector) Name() string                                   { return "kernel" }
 func (kc *KernelCollector) Collect(_ context.Context) ([]Telemetry, error) { return nil, nil }
-func (kc *KernelCollector) Start(_ context.Context) error                 { return nil }
-func (kc *KernelCollector) Stop()                                         {}
+func (kc *KernelCollector) Start(_ context.Context) error                  { return nil }
+func (kc *KernelCollector) Stop()                                          {}

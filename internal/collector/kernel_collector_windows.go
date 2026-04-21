@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/kernel"
+	"github.com/razatechofficial/edr/internal/telemetryenrich"
 	"golang.org/x/sys/windows"
 )
 
@@ -19,6 +21,7 @@ type KernelCollector struct {
 	buf        *kernel.RingBuffer
 	endpointID string
 	hostname   string
+	cfg        config.Config
 
 	mu     sync.Mutex
 	events []Telemetry
@@ -36,7 +39,7 @@ func isWindowsElevated() bool {
 }
 
 // NewKernelCollector returns an ETW-backed collector when running elevated.
-func NewKernelCollector(endpointID string) *KernelCollector {
+func NewKernelCollector(endpointID string, cfg config.Config) *KernelCollector {
 	if !isWindowsElevated() {
 		return nil
 	}
@@ -50,6 +53,18 @@ func NewKernelCollector(endpointID string) *KernelCollector {
 		buf:        kernel.NewRingBuffer(65536),
 		endpointID: endpointID,
 		hostname:   host,
+		cfg:        cfg,
+	}
+}
+
+// ExportMonitoringHealth implements ExportMonitoringHealth for monitoring doctor snapshots.
+func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
+	if kc == nil || kc.driver == nil || kc.buf == nil {
+		return nil
+	}
+	return map[string]any{
+		"driver":  kc.driver.Stats(),
+		"ringbuf": kc.buf.Stats(),
 	}
 }
 
@@ -57,6 +72,14 @@ func (kc *KernelCollector) Name() string { return "kernel" }
 
 func (kc *KernelCollector) Start(ctx context.Context) error {
 	ctx, kc.cancel = context.WithCancel(ctx)
+	pol := kernel.DefaultPolicy()
+	m := kc.cfg.Monitoring
+	pol.ETWWMIActivity = m.ETWWMIActivity
+	pol.ETWPowerShellScript = m.ETWPowerShellScript
+	pol.ETWNamedPipeHandles = m.ETWNamedPipeHandles
+	pol.ETWBitsClient = m.ETWBitsClient
+	pol.ETWTaskScheduler = m.ETWTaskScheduler
+	_ = kc.driver.SetPolicy(pol)
 	if err := kc.driver.Start(ctx, kc.buf); err != nil {
 		return err
 	}
@@ -93,9 +116,25 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 		}
 		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS)
 		if tel != nil {
+			kc.maybeEnrichProcessImageHash(tel)
 			kc.mu.Lock()
 			kc.events = append(kc.events, *tel)
 			kc.mu.Unlock()
 		}
+	}
+}
+
+const maxWinExecImageHashBytes = 32 << 20
+
+func (kc *KernelCollector) maybeEnrichProcessImageHash(tel *Telemetry) {
+	if !kc.cfg.Monitoring.EnrichExecImageSHA256 || tel == nil || tel.Process == nil {
+		return
+	}
+	p := tel.Process.ProcessPath
+	if p == "" {
+		return
+	}
+	if h := telemetryenrich.FileSHA256Hex(p, maxWinExecImageHashBytes); h != "" {
+		tel.Process.ImageSHA256 = h
 	}
 }
