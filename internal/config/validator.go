@@ -138,6 +138,15 @@ func Validate(cfg *Config) error {
 			"http", "syslog", "kafka")
 	}
 
+	if cfg.Monitoring.Mode != "" {
+		validateEnum(&errs, "monitoring.mode", cfg.Monitoring.Mode,
+			"auto", "userland", "kernel")
+	}
+	if cfg.Monitoring.ChecklistTier != "" {
+		validateEnum(&errs, "monitoring.checklist_tier", cfg.Monitoring.ChecklistTier,
+			"userland", "kernel_hooks", "full_edr")
+	}
+
 	return errs.err()
 }
 
