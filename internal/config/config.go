@@ -273,6 +273,16 @@ type Config struct {
 		DeviationMult float64 `yaml:"deviation_mult"`
 	} `yaml:"baseline"`
 
+	// Monitoring controls host telemetry collectors (userland vs kernel hooks).
+	Monitoring struct {
+		Mode             string   `yaml:"mode" env:"EDR_MONITORING_MODE"` // auto|userland|kernel
+		KernelEnabled    bool     `yaml:"kernel_enabled" env:"EDR_MONITORING_KERNEL"`
+		FIMPaths         []string `yaml:"fim_paths"`
+		UserlandFallback bool     `yaml:"userland_fallback"`
+		// ChecklistTier is optional reporting hint: userland|kernel_hooks|full_edr (empty = derive at runtime).
+		ChecklistTier string `yaml:"checklist_tier" env:"EDR_MONITORING_CHECKLIST_TIER"`
+	} `yaml:"monitoring"`
+
 	// Legacy fields for backward compatibility with existing agent.example.yaml.
 	// These map to the older flat configuration layout. Use migrateLegacy in the
 	// loader to populate these from old-style YAML keys.
@@ -366,6 +376,10 @@ func Defaults() Config {
 
 	cfg.Baseline.LearningDays = 7
 	cfg.Baseline.DeviationMult = 3.0
+
+	cfg.Monitoring.Mode = "auto"
+	cfg.Monitoring.KernelEnabled = true
+	cfg.Monitoring.UserlandFallback = true
 
 	cfg.Service.TickInterval = time.Second
 	cfg.LegacyResponse.MinKillScore = 90
