@@ -1,10 +1,12 @@
 package monitoringdoctor
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -27,6 +29,8 @@ func Print(w io.Writer, configPath string) error {
 	fmt.Fprintf(w, "monitoring.kernel_enabled: %v\n", cfg.Monitoring.KernelEnabled)
 	fmt.Fprintf(w, "checklist_tier (config):   %q\n", cfg.Monitoring.ChecklistTier)
 	fmt.Fprintf(w, "derived_tier:              %s\n", deriveTier(cfg))
+	fmt.Fprintf(w, "health_snapshot_sec:       %d\n", cfg.Monitoring.HealthSnapshotSec)
+	printMonitoringHealthFile(w, cfg)
 	fmt.Fprintln(w)
 
 	switch runtime.GOOS {
@@ -78,6 +82,7 @@ func printLinux(w io.Writer, cfg config.Config) {
 	} else {
 		fmt.Fprintln(w, "PROCESS/FILE/NET kernel: eligible (root)")
 	}
+	fmt.Fprintln(w, "eBPF extras: sys_enter_unshare, sys_enter_madvise (rebuild bpf object after pull)")
 	fi, err := os.Stat(linuxBPFObject)
 	if err != nil {
 		fmt.Fprintf(w, "eBPF object %s: missing (%v)\n", linuxBPFObject, err)
@@ -112,11 +117,45 @@ func printDarwin(w io.Writer, cfg config.Config) {
 		}
 	}
 	fmt.Fprintln(w, "TCC: root does not grant Full Disk Access; use System Settings or MDM PPPC if paths are empty.")
-	_ = cfg
+	if n := len(cfg.Monitoring.ESFMutePathPrefixes); n > 0 {
+		fmt.Fprintf(w, "config esf_mute_path_prefixes: %d extra prefix(es)\n", n)
+	}
 }
 
 func printWindows(w io.Writer, cfg config.Config) {
 	fmt.Fprintln(w, "Run as elevated Windows Service (Local System) for ETW kernel providers.")
 	fmt.Fprintln(w, "Minifilter/WFP: not loaded (tier-2 driver roadmap).")
-	_ = cfg
+	m := cfg.Monitoring
+	fmt.Fprintf(w, "optional ETW flags: wmi=%v ps=%v pipes=%v bits=%v tasks=%v\n",
+		m.ETWWMIActivity, m.ETWPowerShellScript, m.ETWNamedPipeHandles, m.ETWBitsClient, m.ETWTaskScheduler)
+}
+
+func printMonitoringHealthFile(w io.Writer, cfg config.Config) {
+	if cfg.Agent.DataDir == "" {
+		fmt.Fprintln(w, "monitoring health: (no agent data_dir)")
+		return
+	}
+	p := filepath.Join(cfg.Agent.DataDir, "monitoring_health.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		fmt.Fprintf(w, "monitoring health: %s not readable (%v); enable health_snapshot_sec on a running agent\n", p, err)
+		return
+	}
+	fmt.Fprintf(w, "monitoring health: %s\n", p)
+	var snap map[string]interface{}
+	if err := json.Unmarshal(data, &snap); err != nil {
+		fmt.Fprintf(w, "  (invalid json: %v)\n", err)
+		return
+	}
+	if k, ok := snap["kernel"].(map[string]interface{}); ok {
+		fmt.Fprintf(w, "  kernel keys: %v\n", keysOf(k))
+	}
+}
+
+func keysOf(m map[string]interface{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

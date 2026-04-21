@@ -394,6 +394,14 @@ monitoring:
   fim_paths: []
   userland_fallback: true
   checklist_tier: ""
+  esf_mute_path_prefixes: []
+  enrich_exec_image_sha256: false
+  etw_wmi_activity: false
+  etw_powershell_script: false
+  etw_named_pipe_handles: false
+  etw_bits_client: false
+  etw_task_scheduler: false
+  health_snapshot_sec: 0
 
 # -----------------------------------------------------------------------------
 # Baseline anomaly detection
