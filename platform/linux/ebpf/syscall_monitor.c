@@ -279,4 +279,44 @@ int tracepoint__syscalls__sys_enter_prctl(struct trace_event_raw_sys_enter *ctx)
 	return 0;
 }
 
+SEC("tracepoint/syscalls/sys_enter_unshare")
+int tracepoint__syscalls__sys_enter_unshare(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+
+	struct security_event *evt;
+	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_UNSHARE);
+	evt->arg0 = ctx->args[0];
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_madvise")
+int tracepoint__syscalls__sys_enter_madvise(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+
+	struct security_event *evt;
+	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_MADVISE);
+	evt->arg0 = ctx->args[0];
+	evt->arg1 = ctx->args[1];
+	evt->arg2 = ctx->args[2];
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
 char _license[] SEC("license") = "GPL";

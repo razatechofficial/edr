@@ -41,6 +41,8 @@ const (
 	bpfEvtMount     = 23
 	bpfEvtPtrace    = 24
 	bpfEvtSignal    = 25
+	bpfEvtUnshare   = 26
+	bpfEvtMadvise   = 27
 )
 
 // bpfBytecode holds embedded eBPF bytecode when compiled with `make ebpf-link`
@@ -67,18 +69,40 @@ type bpfProcessEvent struct {
 
 // bpfFileEvent mirrors the C struct file_event emitted by the eBPF program.
 type bpfFileEvent struct {
-	Type       uint32
-	PID       uint32
-	PPID      uint32
-	UID       uint32
-	GID       uint32
-	TS        uint64
-	Comm      [bpfCommLen]byte
-	Filename  [bpfFilenameLen]byte
-	Flags     uint32
-	Mode      uint32
-	BytesW    uint64
-	NewName   [bpfFilenameLen]byte
+	Type     uint32
+	PID      uint32
+	PPID     uint32
+	UID      uint32
+	GID      uint32
+	TS       uint64
+	Comm     [bpfCommLen]byte
+	Filename [bpfFilenameLen]byte
+	Flags    uint32
+	Mode     uint32
+	BytesW   uint64
+	NewName  [bpfFilenameLen]byte
+}
+
+// bpfEventHeader mirrors event_header in platform/linux/ebpf/common.h.
+type bpfEventHeader struct {
+	Type uint32
+	PID  uint32
+	PPID uint32
+	UID  uint32
+	GID  uint32
+	TS   uint64
+	Comm [bpfCommLen]byte
+}
+
+// bpfSecurityEvent mirrors struct security_event (with padding before arg0).
+type bpfSecurityEvent struct {
+	Hdr   bpfEventHeader
+	SysNr uint32
+	_     uint32
+	Arg0  uint64
+	Arg1  uint64
+	Arg2  uint64
+	Path  [bpfFilenameLen]byte
 }
 
 // bpfNetworkEvent mirrors the C struct network_event emitted by the eBPF program.
@@ -108,9 +132,9 @@ type EBPFDriver struct {
 	policy    EventPolicy
 	startTime time.Time
 
-	coll   *ebpf.Collection
-	links  []link.Link
-	reader *ringbuf.Reader
+	coll    *ebpf.Collection
+	links   []link.Link
+	reader  *ringbuf.Reader
 	readers []*ringbuf.Reader
 
 	cancel  context.CancelFunc
@@ -148,6 +172,7 @@ func (d *EBPFDriver) Capabilities() []events.EventType {
 		events.EventModule,
 		events.EventMount,
 		events.EventSignal,
+		events.EventNamespace,
 	}
 }
 
@@ -417,6 +442,16 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeSecurityEvent(raw, events.EventSignal)
+	case bpfEvtUnshare:
+		if !p.ProcessEvents {
+			return nil
+		}
+		return d.decodeLinuxNamespaceEvent(raw)
+	case bpfEvtMadvise:
+		if !p.ProcessEvents {
+			return nil
+		}
+		return d.decodeLinuxMadviseEvent(raw)
 	default:
 		return fmt.Errorf("unknown bpf event type %d", typ)
 	}
@@ -501,6 +536,42 @@ func (d *EBPFDriver) decodeNetworkEvent(data []byte) error {
 	}
 	payload = appendUint16(payload, evt.DstPort)
 	return d.writeRawEvent(uint16(evt.Type), evt, payload)
+}
+
+func (d *EBPFDriver) decodeLinuxNamespaceEvent(data []byte) error {
+	const sz = unsafe.Sizeof(bpfSecurityEvent{})
+	if uintptr(len(data)) < sz {
+		return fmt.Errorf("namespace event truncated: got %d, want >= %d", len(data), sz)
+	}
+	se := (*bpfSecurityEvent)(unsafe.Pointer(&data[0]))
+	env := map[string]interface{}{
+		"type":          events.EventNamespace,
+		"timestamp":     time.Now().UTC(),
+		"agent_id":      d.agentID,
+		"pid":           se.Hdr.PID,
+		"unshare_flags": se.Arg0,
+		"process_name":  nullTerminated(se.Hdr.Comm[:]),
+	}
+	return d.writeJSONEvent(env)
+}
+
+func (d *EBPFDriver) decodeLinuxMadviseEvent(data []byte) error {
+	const sz = unsafe.Sizeof(bpfSecurityEvent{})
+	if uintptr(len(data)) < sz {
+		return fmt.Errorf("madvise event truncated: got %d, want >= %d", len(data), sz)
+	}
+	se := (*bpfSecurityEvent)(unsafe.Pointer(&data[0]))
+	env := map[string]interface{}{
+		"type":           "madvise",
+		"timestamp":      time.Now().UTC(),
+		"agent_id":       d.agentID,
+		"pid":            se.Hdr.PID,
+		"madvise_advice": int32(se.Arg2),
+		"madvise_addr":   se.Arg0,
+		"madvise_len":    se.Arg1,
+		"process_name":   nullTerminated(se.Hdr.Comm[:]),
+	}
+	return d.writeJSONEvent(env)
 }
 
 func (d *EBPFDriver) decodeSecurityEvent(data []byte, et events.EventType) error {

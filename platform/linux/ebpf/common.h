@@ -26,6 +26,8 @@ enum event_type {
 	EVENT_MOUNT         = 23,
 	EVENT_PTRACE        = 24,
 	EVENT_SIGNAL        = 25,
+	EVENT_UNSHARE       = 26,
+	EVENT_MADVISE       = 27,
 };
 
 struct event_header {
