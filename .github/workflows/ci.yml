@@ -23,15 +23,35 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Install bpftool (Ubuntu)
+      - name: Install eBPF build dependencies (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y linux-tools-generic linux-tools-$(uname -r) \
-            || sudo apt-get install -y bpftool
+          sudo apt-get install -y \
+            clang llvm \
+            libbpf-dev \
+            linux-headers-$(uname -r) \
+            linux-tools-$(uname -r) linux-tools-generic \
+            || true
+          if ! pkg-config --exists libbpf 2>/dev/null; then
+            echo "libbpf-dev not found, using vendored headers"
+            bash scripts/install_libbpf_headers.sh
+          fi
 
       - name: Generate vmlinux.h
+        if: runner.os == 'Linux'
         run: bash scripts/gen_vmlinux.sh
+
+      - name: Build eBPF objects
+        if: runner.os == 'Linux'
+        run: make ebpf
+
+      - name: Verify eBPF objects generated
+        if: runner.os == 'Linux'
+        run: |
+          for f in platform/linux/ebpf/*.o; do
+            echo "Generated: $f ($(stat -c%s $f) bytes)"
+          done
 
       - name: Build agent
         run: make build
