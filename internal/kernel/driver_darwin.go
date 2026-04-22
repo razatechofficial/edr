@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && cgo && !nosec
 
 package kernel
 
@@ -307,8 +307,12 @@ import "C"
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -493,11 +497,49 @@ func (d *ESFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	child, d.cancel = context.WithCancel(ctx)
 	d.startTime = time.Now()
 	d.running.Store(true)
+	_ = d.emitFeatureStatusEvent()
 
 	d.wg.Add(1)
 	go d.cache.cleanupLoop(child, &d.wg)
 
 	return nil
+}
+
+func (d *ESFDriver) emitFeatureStatusEvent() error {
+	major, minor := detectMacVersion()
+	hasBTM := major >= 14
+	hasTCCModify := major >= 15
+	env := map[string]interface{}{
+		"type":           "feature_status",
+		"timestamp":      time.Now().UTC(),
+		"agent_id":       d.agentID,
+		"platform":       "darwin",
+		"macos_version":  fmt.Sprintf("%d.%d", major, minor),
+		"has_btm":        hasBTM,
+		"has_tcc_modify": hasTCCModify,
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return d.buf.Write(b)
+}
+
+func detectMacVersion() (int, int) {
+	out, err := exec.Command("sw_vers", "-productVersion").Output()
+	if err != nil {
+		return 0, 0
+	}
+	parts := strings.Split(strings.TrimSpace(string(out)), ".")
+	if len(parts) == 0 {
+		return 0, 0
+	}
+	major, _ := strconv.Atoi(parts[0])
+	minor := 0
+	if len(parts) > 1 {
+		minor, _ = strconv.Atoi(parts[1])
+	}
+	return major, minor
 }
 
 // Stop unsubscribes from all events, deletes the ESF client, and releases resources.
