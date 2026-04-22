@@ -25,7 +25,7 @@ func NewRATPlaybook() *BasePlaybook {
 		PlaybookSteps: []Step{
 			{
 				Name:     "network_isolate_process",
-				Action:   response.ActionNetworkIsolate,
+				Action:   response.OpNetworkIsolate,
 				Required: true,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -36,7 +36,7 @@ func NewRATPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "capture_network_traffic",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -48,7 +48,7 @@ func NewRATPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "memory_dump",
-				Action:   response.ActionMemoryDump,
+				Action:   response.OpMemoryDump,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -60,7 +60,7 @@ func NewRATPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "extract_iocs",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -72,7 +72,7 @@ func NewRATPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "block_c2",
-				Action:   response.ActionBlockHash,
+				Action:   response.OpBlockHash,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -84,7 +84,7 @@ func NewRATPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "kill_rat_process",
-				Action:   response.ActionKillProcess,
+				Action:   response.OpKillProcess,
 				Required: true,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -98,7 +98,7 @@ func NewRATPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "remove_persistence",
-				Action:   response.ActionQuarantineFile,
+				Action:   response.OpQuarantineFile,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -111,7 +111,7 @@ func NewRATPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "yara_scan",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -123,7 +123,7 @@ func NewRATPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "ioc_sweep",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -134,7 +134,7 @@ func NewRATPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "alert_soc",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
