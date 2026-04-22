@@ -9,10 +9,13 @@ const (
 type EventType string
 
 const (
-	EventProcess EventType = "process"
-	EventFile    EventType = "file"
-	EventNetwork EventType = "network"
-	EventAuth    EventType = "auth"
+	EventProcess   EventType = "process"
+	EventFile      EventType = "file"
+	EventNetwork   EventType = "network"
+	EventAuth      EventType = "auth"
+	EventFork      EventType = "fork"
+	EventRegistry  EventType = "registry"
+	EventInjection EventType = "injection"
 )
 
 type BaseEvent struct {
@@ -40,18 +43,58 @@ type ProcessEvent struct {
 	ImageCDHash   string `json:"image_cdhash,omitempty"`
 	SigningFlags  uint32 `json:"signing_flags,omitempty"`
 	ImageSHA256   string `json:"image_sha256,omitempty"`
+	SigningStatus string `json:"signing_status,omitempty"`
 	TLSClientJA3  string `json:"tls_client_ja3,omitempty"`
 	CloneFlags    uint64 `json:"clone_flags,omitempty"`
 	UnshareFlags  uint64 `json:"unshare_flags,omitempty"`
 	MadviseAdvice int32  `json:"madvise_advice,omitempty"`
+	// ExecEnv holds environment entries joined with ASCII RS (0x1e) from ESF NOTIFY_EXEC / AUTH_EXEC.
+	ExecEnv string `json:"exec_env,omitempty"`
 }
 
 type FileEvent struct {
 	BaseEvent
-	Path      string `json:"path"`
-	Operation string `json:"operation"`
-	ActorPID  int    `json:"actor_pid"`
-	Hash      string `json:"hash,omitempty"`
+	Path          string `json:"path"`
+	Operation     string `json:"operation"`
+	ActorPID      int    `json:"actor_pid"`
+	Hash          string `json:"hash,omitempty"`
+	WriteFD        int    `json:"write_fd,omitempty"`
+	BytesWritten   uint64 `json:"bytes_written,omitempty"`
+	OpenFlags      uint32 `json:"open_flags,omitempty"`
+	ChmodMode      uint32 `json:"chmod_mode,omitempty"`
+	FchmodatFlags  uint32 `json:"fchmodat_flags,omitempty"`
+	SUID           bool   `json:"suid,omitempty"`
+	ImpHash        string `json:"imp_hash,omitempty"`
+}
+
+// ProcessInjectionEvent describes cross-process code injection indicators (e.g. ETW-TI).
+type ProcessInjectionEvent struct {
+	BaseEvent
+	SourcePID   int    `json:"source_pid"`
+	TargetPID   int    `json:"target_pid"`
+	TargetImage string `json:"target_image,omitempty"`
+	Technique   string `json:"technique,omitempty"`
+}
+
+// ForkEvent describes process creation via fork/clone (kernel or JSON pipeline).
+type ForkEvent struct {
+	BaseEvent
+	ParentPID   int    `json:"parent_pid"`
+	ChildPID    int    `json:"child_pid"`
+	CloneFlags  uint64 `json:"clone_flags,omitempty"`
+	IsThread    bool   `json:"is_thread,omitempty"`
+	IsContainer bool   `json:"is_container,omitempty"`
+}
+
+// RegistryEvent describes a Windows registry operation or snapshot row.
+type RegistryEvent struct {
+	BaseEvent
+	KeyPath    string `json:"key_path"`
+	ValueName  string `json:"value_name,omitempty"`
+	Operation  string `json:"operation"`
+	OldData    string `json:"old_data,omitempty"`
+	NewData    string `json:"new_data,omitempty"`
+	ActorPID   int    `json:"actor_pid,omitempty"`
 }
 
 type NetworkEvent struct {
@@ -63,13 +106,53 @@ type NetworkEvent struct {
 	DestIP   string `json:"dest_ip"`
 	DestPt   int    `json:"dest_port"`
 	Domain   string `json:"domain,omitempty"`
+	JA3      string `json:"ja3,omitempty"`
 }
 
 type AuthEvent struct {
 	BaseEvent
-	User      string `json:"user"`
-	Outcome   string `json:"outcome"`
-	AuthType  string `json:"auth_type"`
-	SourceIP  string `json:"source_ip,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
+	EventID         uint32   `json:"event_id,omitempty"`
+	User            string   `json:"user"`
+	Outcome         string   `json:"outcome"`
+	AuthType        string   `json:"auth_type"`
+	SourceIP        string   `json:"source_ip,omitempty"`
+	SessionID       string   `json:"session_id,omitempty"`
+	LogonType       string   `json:"logon_type,omitempty"`
+	PrivilegeList   string   `json:"privilege_list,omitempty"`
+	SubjectUser     string   `json:"subject_user,omitempty"`
+	SubjectDomain   string   `json:"subject_domain,omitempty"`
+	TargetUser      string   `json:"target_user,omitempty"`
+	TargetDomain    string   `json:"target_domain,omitempty"`
+	LogonProcess    string   `json:"logon_process,omitempty"`
+	AuthPackage     string   `json:"auth_package,omitempty"`
+	IpAddress       string   `json:"ip_address,omitempty"`
+	IpPort          string   `json:"ip_port,omitempty"`
+	Workstation     string   `json:"workstation,omitempty"`
+	LogonGuid       string   `json:"logon_guid,omitempty"`
+	PrivilegeListV  []string `json:"privilege_list_v2,omitempty"`
+	FailureReason   string   `json:"failure_reason,omitempty"`
+	Status          string   `json:"status,omitempty"`
+	SubStatus       string   `json:"sub_status,omitempty"`
+	Success         bool     `json:"success"`
+	Privileged      bool     `json:"privileged,omitempty"`
+	SubjectLogonID  string   `json:"subject_logon_id,omitempty"`
+}
+
+type TaskEvent struct {
+	BaseEvent
+	EventID     uint32 `json:"event_id,omitempty"`
+	SubjectUser string `json:"subject_user,omitempty"`
+	TaskName    string `json:"task_name,omitempty"`
+	TaskContent string `json:"task_content,omitempty"`
+	Operation   string `json:"operation,omitempty"`
+}
+
+type ServiceEvent struct {
+	BaseEvent
+	EventID     uint32 `json:"event_id,omitempty"`
+	ServiceName string `json:"service_name,omitempty"`
+	ImagePath   string `json:"image_path,omitempty"`
+	ServiceType string `json:"service_type,omitempty"`
+	StartType   string `json:"start_type,omitempty"`
+	AccountName string `json:"account_name,omitempty"`
 }

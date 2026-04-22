@@ -8,10 +8,15 @@ import (
 
 // Telemetry is one unit of host telemetry (at most one payload pointer is set).
 type Telemetry struct {
-	Process *schema.ProcessEvent
-	Network *schema.NetworkEvent
-	Auth    *schema.AuthEvent
-	File    *schema.FileEvent
+	Process   *schema.ProcessEvent
+	Network   *schema.NetworkEvent
+	Auth      *schema.AuthEvent
+	Task      *schema.TaskEvent
+	Service   *schema.ServiceEvent
+	File      *schema.FileEvent
+	Fork      *schema.ForkEvent
+	Registry  *schema.RegistryEvent
+	Injection *schema.ProcessInjectionEvent
 }
 
 // Collector gathers host telemetry for the detection engine.
