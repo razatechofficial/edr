@@ -40,7 +40,7 @@ func isWindowsElevated() bool {
 }
 
 // NewKernelCollector returns an ETW-backed collector when running elevated.
-func NewKernelCollector(endpointID string, cfg config.Config) *KernelCollector {
+func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCache) *KernelCollector {
 	if !isWindowsElevated() {
 		return nil
 	}
@@ -55,6 +55,7 @@ func NewKernelCollector(endpointID string, cfg config.Config) *KernelCollector {
 		endpointID: endpointID,
 		hostname:   host,
 		cfg:        cfg,
+		users:      users,
 	}
 }
 

@@ -693,6 +693,36 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 					}
 				}
 			}
+			if tel.Task != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Task.BaseEvent,
+					ProcessName: "task_scheduler",
+					ProcessPath: tel.Task.TaskName,
+					CommandLine: tel.Task.Operation,
+					User:        tel.Task.SubjectUser,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+				if a.advEngine != nil {
+					a.advEngine.Evaluate(ctx, &pe)
+				}
+			}
+			if tel.Service != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Service.BaseEvent,
+					ProcessName: "service_install",
+					ProcessPath: tel.Service.ImagePath,
+					CommandLine: tel.Service.ServiceName,
+					User:        tel.Service.AccountName,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+				if a.advEngine != nil {
+					a.advEngine.Evaluate(ctx, &pe)
+				}
+			}
 			if tel.File != nil {
 				if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
 					return err
