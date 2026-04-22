@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,24 @@ type SigmaEngine struct {
 	logger     *zap.Logger
 	watcher    *fsnotify.Watcher
 	cancelFunc context.CancelFunc
+	regexCache sync.Map
+}
+
+var sigmaFieldMap = map[string]string{
+	"ImagePath":      "Image",
+	"ProcessPath":    "Image",
+	"CommandLine":    "CommandLine",
+	"ProcessName":    "Image",
+	"ParentName":     "ParentImage",
+	"DstIP":          "DestinationIp",
+	"DstPort":        "DestinationPort",
+	"SrcIP":          "SourceIp",
+	"Path":           "TargetFilename",
+	"RegistryPath":   "TargetObject",
+	"RegistryValue":  "Details",
+	"Operation":      "EventType",
+	"DNSQuery":       "QueryName",
+	"ProcessHashSHA": "Hashes",
 }
 
 // NewSigmaEngine loads all .yml/.yaml Sigma rules from rulesDir and prepares
@@ -115,6 +134,7 @@ func (e *SigmaEngine) LoadRules() error {
 // Evaluate tests an event (as a flat key-value map) against every loaded
 // Sigma rule and returns alerts for all matches.
 func (e *SigmaEngine) Evaluate(event map[string]interface{}) []*events.Alert {
+	event = normalizeSigmaEvent(event)
 	e.mu.RLock()
 	evals := e.evaluators
 	e.mu.RUnlock()
@@ -161,6 +181,34 @@ func (e *SigmaEngine) Evaluate(event map[string]interface{}) []*events.Alert {
 		alerts = append(alerts, alert)
 	}
 	return alerts
+}
+
+func normalizeSigmaEvent(in map[string]interface{}) map[string]interface{} {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string]interface{}, len(in)+8)
+	for k, v := range in {
+		out[k] = v
+		if mapped, ok := sigmaFieldMap[k]; ok {
+			if _, exists := out[mapped]; !exists {
+				out[mapped] = v
+			}
+		}
+	}
+	return out
+}
+
+func (e *SigmaEngine) cachedRegex(expr string) (*regexp.Regexp, error) {
+	if v, ok := e.regexCache.Load(expr); ok {
+		return v.(*regexp.Regexp), nil
+	}
+	rx, err := regexp.Compile(expr)
+	if err != nil {
+		return nil, err
+	}
+	e.regexCache.Store(expr, rx)
+	return rx, nil
 }
 
 // SetRuleEnabled toggles a specific Sigma rule by ID at runtime.
