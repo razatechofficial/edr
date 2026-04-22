@@ -1,6 +1,8 @@
 package detection
 
 import (
+	"math"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -27,12 +29,13 @@ func (s *ScoringEngine) Score(d *Detection) {
 	if base == 0 {
 		base = severityBase(d.Severity)
 	}
+	d.BaseScore = base
 	conf := d.Confidence
 	if conf <= 0 {
 		conf = 0.7
 	}
 	assetMul := 1.0
-	if h := strings.TrimSpace(extractHost(d.Event)); h != "" {
+	if h := strings.TrimSpace(eventPayloadHost(d.Event)); h != "" {
 		if m, ok := s.assetValues[h]; ok && m > 0 {
 			assetMul = m
 		}
@@ -41,6 +44,11 @@ func (s *ScoringEngine) Score(d *Detection) {
 	if fp <= 0 {
 		fp = 0.05
 	}
+	if name := extractProcessNameForScoring(d.Event); s.isKnownGood(name) {
+		fp = math.Min(fp+0.4, 1.0)
+		conf = math.Max(conf-0.3, 0.0)
+		d.FalsePositiveScore = fp
+	}
 	recency := 1.0
 	if !d.Timestamp.IsZero() {
 		ageMins := time.Since(d.Timestamp).Minutes()
@@ -48,8 +56,21 @@ func (s *ScoringEngine) Score(d *Detection) {
 			recency = 1.0 / (1.0 + (ageMins / 60.0))
 		}
 	}
-	score := base * conf * assetMul * (1.0 - fp) * recency
-	d.Confidence = clamp01(score)
+	out := base * conf * assetMul * (1.0 - fp) * recency
+	d.Score = clamp01(out)
+	d.Confidence = clamp01(out)
+}
+
+func (s *ScoringEngine) isKnownGood(name string) bool {
+	if name == "" {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(name)))
+	if base == "" {
+		return false
+	}
+	_, ok := s.knownGood[base]
+	return ok
 }
 
 func defaultTechniqueScores() map[string]float64 {
@@ -95,13 +116,3 @@ func clamp01(v float64) float64 {
 	return v
 }
 
-func extractHost(event interface{}) string {
-	m, ok := event.(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	if v, ok := m["hostname"]; ok {
-		return strings.TrimSpace(v.(string))
-	}
-	return ""
-}
