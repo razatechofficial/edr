@@ -50,6 +50,32 @@ static __always_inline bool pid_is_filtered(void)
 	return bpf_map_lookup_elem(&file_pid_filter, &pid) != NULL;
 }
 
+static __always_inline int starts_with(const char *s, const char *pfx)
+{
+	int i = 0;
+#pragma unroll
+	for (i = 0; i < 64; i++) {
+		char pc = pfx[i];
+		if (pc == '\0')
+			return 1;
+		if (s[i] != pc)
+			return 0;
+	}
+	return 0;
+}
+
+static __always_inline void mark_sensitive(struct file_event *evt)
+{
+	if (starts_with(evt->filename, "/etc/passwd") ||
+	    starts_with(evt->filename, "/etc/shadow") ||
+	    starts_with(evt->filename, "/etc/sudoers") ||
+	    starts_with(evt->filename, "/etc/cron") ||
+	    starts_with(evt->filename, "/etc/ld.so.preload") ||
+	    starts_with(evt->filename, "/etc/systemd/system")) {
+		evt->sensitive_path = 1;
+	}
+}
+
 SEC("tracepoint/syscalls/sys_enter_openat")
 int tracepoint__syscalls__sys_enter_openat(struct trace_event_raw_sys_enter *ctx)
 {
@@ -69,6 +95,7 @@ int tracepoint__syscalls__sys_enter_openat(struct trace_event_raw_sys_enter *ctx
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), filename);
 	evt->flags = (__u32)ctx->args[2];
 	evt->mode  = (__u32)ctx->args[3];
+	mark_sensitive(evt);
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
@@ -89,7 +116,7 @@ int tracepoint__syscalls__sys_enter_write(struct trace_event_raw_sys_enter *ctx)
 	fill_header(&evt->hdr, EVENT_FILE_WRITE);
 
 	/* write(2): args[0]=fd, args[2]=count */
-	evt->flags = (__u32)ctx->args[0];
+	evt->write_fd = (__u32)ctx->args[0];
 	evt->bytes_written = ctx->args[2];
 
 	bpf_ringbuf_submit(evt, 0);
@@ -111,7 +138,7 @@ int tracepoint__syscalls__sys_enter_pwrite64(struct trace_event_raw_sys_enter *c
 	fill_header(&evt->hdr, EVENT_FILE_WRITE);
 
 	/* pwrite64(2): args[0]=fd, args[2]=count */
-	evt->flags = (__u32)ctx->args[0];
+	evt->write_fd = (__u32)ctx->args[0];
 	evt->bytes_written = ctx->args[2];
 
 	bpf_ringbuf_submit(evt, 0);
@@ -136,6 +163,7 @@ int tracepoint__syscalls__sys_enter_unlinkat(struct trace_event_raw_sys_enter *c
 	const char *pathname = (const char *)ctx->args[1];
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), pathname);
 	evt->flags = (__u32)ctx->args[2];
+	mark_sensitive(evt);
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
@@ -161,7 +189,48 @@ int tracepoint__syscalls__sys_enter_renameat2(struct trace_event_raw_sys_enter *
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), oldname);
 	bpf_probe_read_user_str(evt->new_filename, sizeof(evt->new_filename), newname);
 	evt->flags = (__u32)ctx->args[4];
+	mark_sensitive(evt);
 
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_fchmodat")
+int tracepoint__syscalls__sys_enter_fchmodat(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+
+	struct file_event *evt;
+	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_FILE_CHMOD);
+
+	/* fchmodat(2): args[0]=dfd, args[1]=pathname, args[2]=mode, args[3]=flag */
+	const char *pathname = (const char *)ctx->args[1];
+	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), pathname);
+	evt->mode = (__u32)ctx->args[2];
+	evt->flags = (__u32)ctx->args[3];
+	mark_sensitive(evt);
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("kprobe/mem_write")
+int kprobe_mem_write(struct pt_regs *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct file_event *evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_PROC_MEM_WRITE);
+	bpf_probe_read_kernel_str(evt->filename, sizeof(evt->filename), "/proc/self/mem");
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }

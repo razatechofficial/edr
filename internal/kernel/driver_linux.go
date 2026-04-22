@@ -34,6 +34,14 @@ const (
 	bpfEvtFileWrite = 7
 	bpfEvtFileDel   = 8
 	bpfEvtFileRen   = 9
+	bpfEvtFileChmod = 28
+	bpfEvtBPFLoad   = 29
+	bpfEvtBPFMapAccess = 30
+	bpfEvtCgroupAttach = 31
+	bpfEvtCgroupMkdir = 32
+	bpfEvtSeccomp = 33
+	bpfEvtProcMemWrite = 34
+	bpfEvtDNSQuery = 35
 	bpfEvtNetConn   = 11
 	bpfEvtNetAccept = 12
 	bpfEvtNetBind   = 13
@@ -78,8 +86,12 @@ type bpfFileEvent struct {
 	Comm     [bpfCommLen]byte
 	Filename [bpfFilenameLen]byte
 	Flags    uint32
+	WriteFD  uint32
 	Mode     uint32
+	_        uint32 // C reserved_align before bytes_written
 	BytesW   uint64
+	SensitivePath uint8
+	_       [7]byte
 	NewName  [bpfFilenameLen]byte
 }
 
@@ -102,7 +114,12 @@ type bpfSecurityEvent struct {
 	Arg0  uint64
 	Arg1  uint64
 	Arg2  uint64
+	BPFCmd uint32
+	BPFProgType uint32
+	BPFMapID uint32
+	Mode uint32
 	Path  [bpfFilenameLen]byte
+	MapName [64]byte
 }
 
 // bpfNetworkEvent mirrors the C struct network_event emitted by the eBPF program.
@@ -123,6 +140,8 @@ type bpfNetworkEvent struct {
 	DstAddr6 [16]byte
 	IsIPv6   uint8
 	Dir      uint8
+	DNSQuery [254]byte
+	DNSQType uint16
 }
 
 // EBPFDriver implements Driver using eBPF tracepoints and ring buffers on Linux.
@@ -134,6 +153,7 @@ type EBPFDriver struct {
 
 	coll    *ebpf.Collection
 	links   []link.Link
+	ownProgIDs []uint32
 	reader  *ringbuf.Reader
 	readers []*ringbuf.Reader
 
@@ -215,11 +235,13 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 
 	d.startTime = time.Now()
 	d.running.Store(true)
+	d.collectOwnProgramIDs()
 
 	d.wg.Add(len(d.readers))
 	for _, r := range d.readers {
 		go d.eventLoop(child, r)
 	}
+	go d.watchdogLoop(child)
 
 	return nil
 }
@@ -417,7 +439,7 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeProcessEvent(raw)
-	case bpfEvtFileOpen, bpfEvtFileWrite, bpfEvtFileDel, bpfEvtFileRen:
+	case bpfEvtFileOpen, bpfEvtFileWrite, bpfEvtFileDel, bpfEvtFileRen, bpfEvtFileChmod:
 		if !p.FileEvents {
 			return nil
 		}
@@ -427,6 +449,11 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeNetworkEvent(raw)
+	case bpfEvtDNSQuery:
+		if !p.DNSEvents {
+			return nil
+		}
+		return d.decodeDNSQueryEvent(raw)
 	case bpfEvtModule:
 		if !p.ModuleEvents {
 			return nil
@@ -452,6 +479,10 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeLinuxMadviseEvent(raw)
+	case bpfEvtBPFLoad, bpfEvtBPFMapAccess, bpfEvtCgroupAttach, bpfEvtCgroupMkdir, bpfEvtSeccomp:
+		return d.decodeAdvancedSecurityEvent(raw)
+	case bpfEvtProcMemWrite:
+		return d.decodeProcMemWriteEvent(raw)
 	default:
 		return fmt.Errorf("unknown bpf event type %d", typ)
 	}
@@ -498,12 +529,19 @@ func (d *EBPFDriver) decodeFileEvent(data []byte) error {
 	case bpfEvtFileWrite:
 		payload = appendString(payload, nullTerminated(evt.Filename[:]))
 		payload = appendUint64(payload, evt.BytesW)
-		payload = appendUint32(payload, 0)
+		payload = appendUint32(payload, evt.WriteFD)
 	case bpfEvtFileDel:
 		payload = appendString(payload, nullTerminated(evt.Filename[:]))
 	case bpfEvtFileRen:
 		payload = appendString(payload, nullTerminated(evt.Filename[:]))
 		payload = appendString(payload, nullTerminated(evt.NewName[:]))
+	case bpfEvtFileChmod:
+		payload = appendString(payload, nullTerminated(evt.Filename[:]))
+		payload = appendUint32(payload, evt.Mode)
+		payload = appendUint32(payload, evt.Flags)
+	}
+	if evt.SensitivePath != 0 {
+		payload = append(payload, []byte("|sensitive")...)
 	}
 	return d.writeRawEvent(uint16(evt.Type), evt, payload)
 }
@@ -596,6 +634,75 @@ func (d *EBPFDriver) decodeSecurityEvent(data []byte, et events.EventType) error
 		"event_kind": string(et),
 	}
 	return d.writeJSONEvent(envelope)
+}
+
+func (d *EBPFDriver) decodeAdvancedSecurityEvent(data []byte) error {
+	const sz = unsafe.Sizeof(bpfSecurityEvent{})
+	if uintptr(len(data)) < sz {
+		return fmt.Errorf("security event truncated: got %d, want >= %d", len(data), sz)
+	}
+	se := (*bpfSecurityEvent)(unsafe.Pointer(&data[0]))
+	operation := "security"
+	switch se.Hdr.Type {
+	case bpfEvtBPFLoad:
+		operation = "bpf_load"
+	case bpfEvtBPFMapAccess:
+		operation = "bpf_map_access"
+	case bpfEvtCgroupAttach:
+		operation = "cgroup_attach"
+	case bpfEvtCgroupMkdir:
+		operation = "cgroup_mkdir"
+	case bpfEvtSeccomp:
+		operation = "seccomp_filter_install"
+	}
+	env := map[string]interface{}{
+		"type":          "process",
+		"timestamp":     time.Now().UTC(),
+		"agent_id":      d.agentID,
+		"pid":           se.Hdr.PID,
+		"operation":     operation,
+		"path":          nullTerminated(se.Path[:]),
+		"bpf_cmd":       se.BPFCmd,
+		"bpf_prog_type": se.BPFProgType,
+		"bpf_map_id":    se.BPFMapID,
+		"bpf_map_name":  nullTerminated(se.MapName[:]),
+	}
+	return d.writeJSONEvent(env)
+}
+
+func (d *EBPFDriver) decodeProcMemWriteEvent(data []byte) error {
+	const sz = unsafe.Sizeof(bpfFileEvent{})
+	if uintptr(len(data)) < sz {
+		return fmt.Errorf("proc_mem event truncated: got %d, want >= %d", len(data), sz)
+	}
+	fe := (*bpfFileEvent)(unsafe.Pointer(&data[0]))
+	env := map[string]interface{}{
+		"type":       "injection",
+		"timestamp":  time.Now().UTC(),
+		"agent_id":   d.agentID,
+		"source_pid": fe.PID,
+		"target_pid": fe.PID,
+		"technique":  "proc_mem_write",
+		"path":       nullTerminated(fe.Filename[:]),
+	}
+	return d.writeJSONEvent(env)
+}
+
+func (d *EBPFDriver) decodeDNSQueryEvent(data []byte) error {
+	const sz = unsafe.Sizeof(bpfNetworkEvent{})
+	if uintptr(len(data)) < sz {
+		return fmt.Errorf("dns event truncated: got %d, want >= %d", len(data), sz)
+	}
+	ne := (*bpfNetworkEvent)(unsafe.Pointer(&data[0]))
+	env := map[string]interface{}{
+		"type":      "dns",
+		"timestamp": time.Now().UTC(),
+		"agent_id":  d.agentID,
+		"pid":       ne.PID,
+		"query":     nullTerminated(ne.DNSQuery[:]),
+		"dns_type":  ne.DNSQType,
+	}
+	return d.writeJSONEvent(env)
 }
 
 func (d *EBPFDriver) writeRawEvent(typ uint16, hdr interface{}, payload []byte) error {
