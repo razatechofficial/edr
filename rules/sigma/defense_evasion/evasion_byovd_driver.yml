@@ -1,0 +1,19 @@
+title: BYOVD — Bring Your Own Vulnerable Driver
+id: byovd-001
+status: experimental
+description: Known vulnerable driver loaded for kernel exploitation
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  category: driver_load
+  product: windows
+detection:
+  selection:
+    Hashes|contains:
+      - "e3a902b4-a2b0-4e6e-aa6b-e88e52c0a803"
+      - "dbutil_2_3.sys"
+      - "gdrv.sys"
+      - "cpuz141_x64.sys"
+  condition: selection
+level: critical

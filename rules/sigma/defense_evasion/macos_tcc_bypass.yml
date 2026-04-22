@@ -1,0 +1,15 @@
+title: macOS TCC Database Modification
+id: macos-tcc-001
+status: stable
+description: Non-system process modifying TCC privacy database
+tags:
+  - attack.defense_evasion
+  - attack.t1548
+logsource:
+  category: file_event
+  product: macos
+detection:
+  selection:
+    TargetFilename|contains: "TCC.db"
+  condition: selection
+level: high

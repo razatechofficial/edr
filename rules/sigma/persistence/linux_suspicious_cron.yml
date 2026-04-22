@@ -1,0 +1,19 @@
+title: Suspicious Cron Job Creation
+id: linux-cron-001
+status: stable
+description: Cron job created by non-root process writing to system cron dirs
+tags:
+  - attack.persistence
+  - attack.t1053.003
+logsource:
+  category: file_event
+  product: linux
+detection:
+  selection:
+    TargetFilename|startswith:
+      - "/etc/cron.d/"
+      - "/etc/cron.daily/"
+      - "/etc/cron.hourly/"
+      - "/var/spool/cron/"
+  condition: selection
+level: high
