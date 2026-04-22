@@ -319,4 +319,86 @@ int tracepoint__syscalls__sys_enter_madvise(struct trace_event_raw_sys_enter *ct
 	return 0;
 }
 
+SEC("lsm/bpf")
+int BPF_PROG(lsm_bpf_prog, int cmd, union bpf_attr *attr, unsigned int size)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_BPF_LOAD);
+	evt->bpf_cmd = (__u32)cmd;
+	if (attr)
+		evt->bpf_prog_type = BPF_CORE_READ(attr, prog_type);
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("lsm/bpf_map")
+int BPF_PROG(lsm_bpf_map_prog, struct bpf_map *map, fmode_t fmode)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_BPF_MAP_ACCESS);
+	evt->bpf_map_id = BPF_CORE_READ(map, id);
+	bpf_probe_read_kernel_str(evt->map_name, sizeof(evt->map_name), BPF_CORE_READ(map, name));
+	evt->mode = (__u32)fmode;
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/cgroup/cgroup_attach_task")
+int tp_cgroup_attach(void *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_CGROUP_ATTACH);
+	bpf_get_current_comm(evt->path, sizeof(evt->path));
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/cgroup/cgroup_mkdir")
+int tp_cgroup_mkdir(void *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_CGROUP_MKDIR);
+	bpf_get_current_comm(evt->path, sizeof(evt->path));
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_seccomp")
+int tp_seccomp(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	if ((__u64)ctx->args[0] != 1)
+		return 0;
+	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_SECCOMP);
+	evt->arg0 = ctx->args[0];
+	evt->arg1 = ctx->args[1];
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
 char _license[] SEC("license") = "GPL";

@@ -10,6 +10,7 @@
 #define MAX_FILENAME_LEN 256
 #define MAX_ARGS_LEN     512
 #define MAX_PATH_LEN     256
+#define MAX_DNS_QNAME_LEN 253
 
 enum event_type {
 	EVENT_PROCESS_EXEC  = 1,
@@ -19,6 +20,7 @@ enum event_type {
 	EVENT_FILE_WRITE    = 7,
 	EVENT_FILE_DELETE   = 8,
 	EVENT_FILE_RENAME   = 9,
+	EVENT_FILE_CHMOD    = 28,
 	EVENT_NET_CONNECT   = 11,
 	EVENT_NET_ACCEPT    = 12,
 	EVENT_NET_BIND      = 13,
@@ -28,6 +30,13 @@ enum event_type {
 	EVENT_SIGNAL        = 25,
 	EVENT_UNSHARE       = 26,
 	EVENT_MADVISE       = 27,
+	EVENT_BPF_LOAD      = 29,
+	EVENT_BPF_MAP_ACCESS = 30,
+	EVENT_CGROUP_ATTACH = 31,
+	EVENT_CGROUP_MKDIR  = 32,
+	EVENT_SECCOMP       = 33,
+	EVENT_PROC_MEM_WRITE = 34,
+	EVENT_DNS_QUERY     = 35,
 };
 
 struct event_header {
@@ -53,9 +62,13 @@ struct process_event {
 struct file_event {
 	struct event_header hdr;
 	char   filename[MAX_FILENAME_LEN];
-	__u32  flags;
+	__u32  flags;          /* openat: O_*; unlinkat/renameat2: AT_* / rename flags */
+	__u32  write_fd;       /* write/pwrite64: fd; otherwise 0 */
 	__u32  mode;
+	__u32  reserved_align; /* padding before bytes_written; keep zero */
 	__u64  bytes_written;
+	__u8   sensitive_path;
+	__u8   _pad_sensitive[7];
 	char   new_filename[MAX_FILENAME_LEN];
 };
 
@@ -70,6 +83,8 @@ struct network_event {
 	__u8  dst_addr6[16];
 	__u8  is_ipv6;
 	__u8  direction;
+	char  dns_query[MAX_DNS_QNAME_LEN + 1];
+	__u16 dns_qtype;
 };
 
 struct security_event {
@@ -78,7 +93,12 @@ struct security_event {
 	__u64 arg0;
 	__u64 arg1;
 	__u64 arg2;
+	__u32 bpf_cmd;
+	__u32 bpf_prog_type;
+	__u32 bpf_map_id;
+	__u32 mode;
 	char  path[MAX_PATH_LEN];
+	char  map_name[64];
 };
 
 #endif /* __EDR_COMMON_H__ */

@@ -175,4 +175,33 @@ int tracepoint__syscalls__sys_enter_bind(struct trace_event_raw_sys_enter *ctx)
 	return 0;
 }
 
+SEC("tracepoint/syscalls/sys_enter_sendto")
+int tp_dns_sendto(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	const struct sockaddr *uaddr = (const struct sockaddr *)ctx->args[4];
+	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_DNS_QUERY);
+	evt->direction = 0;
+	if (parse_sockaddr(evt, uaddr) < 0) {
+		bpf_ringbuf_discard(evt, 0);
+		return 0;
+	}
+	if (evt->dst_port != 53) {
+		bpf_ringbuf_discard(evt, 0);
+		return 0;
+	}
+	const unsigned char *buf = (const unsigned char *)ctx->args[1];
+	unsigned char qname[MAX_DNS_QNAME_LEN + 1] = {};
+	bpf_probe_read_user(qname, sizeof(qname), buf + 12);
+	bpf_probe_read_kernel_str(evt->dns_query, sizeof(evt->dns_query), qname);
+	evt->dns_qtype = 1;
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
 char _license[] SEC("license") = "GPL";
