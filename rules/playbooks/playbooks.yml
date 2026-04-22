@@ -1,0 +1,122 @@
+playbooks:
+  - id: "PB-001"
+    name: "Process Injection Response"
+    triggers:
+      - technique: "T1055"
+        min_severity: P1
+        min_confidence: 0.8
+    approval_required: false
+    actions:
+      - action: collect_forensics
+        params:
+          collect: [process_tree, memory_dump, network_state, file_artifacts]
+      - action: kill_process
+        params:
+          target: "{{detection.event.pid}}"
+          include_children: true
+      - action: alert
+        params:
+          channel: "soc"
+          priority: "P1"
+
+  - id: "PB-002"
+    name: "Ransomware Containment"
+    triggers:
+      - technique: "T1486"
+        min_severity: P0
+    approval_required: false
+    actions:
+      - action: snapshot_create
+        params:
+          reason: "Pre-isolation snapshot"
+      - action: network_isolate
+        params:
+          allow_list: ["{{agent_ip}}"]
+          duration_minutes: 60
+      - action: collect_forensics
+        params:
+          collect: [process_tree, memory_dump, open_files, network_connections]
+      - action: alert
+        params:
+          channel: "soc"
+          priority: "P0"
+          page: true
+
+  - id: "PB-003"
+    name: "Credential Dumping Response"
+    triggers:
+      - technique: "T1003"
+        min_severity: P0
+    approval_required: false
+    actions:
+      - action: kill_process
+        params:
+          target: "{{detection.event.source_pid}}"
+      - action: collect_forensics
+        params:
+          collect: [process_memory, lsass_handles, network_state]
+      - action: user_disable
+        params:
+          username: "{{detection.event.user}}"
+          scope: "local"
+          require_approval: true
+      - action: alert
+        params:
+          channel: "soc"
+          priority: "P0"
+
+  - id: "PB-004"
+    name: "Lateral Movement Block"
+    triggers:
+      - technique: "T1021"
+        min_severity: P1
+    approval_required: false
+    actions:
+      - action: network_block
+        params:
+          direction: "outbound"
+          dst_ip: "{{detection.event.dst_ip}}"
+          dst_port: "{{detection.event.dst_port}}"
+          duration_minutes: 30
+      - action: collect_forensics
+        params:
+          collect: [network_state, process_tree]
+      - action: alert
+        params:
+          channel: "soc"
+          priority: "P1"
+
+  - id: "PB-005"
+    name: "Malware File Quarantine"
+    triggers:
+      - source: yara
+        namespace: "malware"
+        min_severity: P1
+    approval_required: false
+    actions:
+      - action: file_quarantine
+        params:
+          path: "{{detection.event.path}}"
+          quarantine_dir: "{{quarantine_dir}}"
+      - action: kill_process
+        params:
+          target: "{{detection.event.pid}}"
+      - action: alert
+        params:
+          channel: "soc"
+
+  - id: "PB-006"
+    name: "Suspicious Process — Analyst Review"
+    triggers:
+      - min_severity: P2
+        max_confidence: 0.6
+    approval_required: true
+    approval_timeout_seconds: 1800
+    actions:
+      - action: collect_forensics
+        params:
+          collect: [process_tree, network_state]
+      - action: alert
+        params:
+          channel: "soc"
+          priority: "P2"
