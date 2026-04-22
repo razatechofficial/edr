@@ -229,6 +229,20 @@ type Config struct {
 			OutputDir      string `yaml:"output_dir"`
 			ChainOfCustody bool   `yaml:"chain_of_custody"`
 		} `yaml:"forensics"`
+
+		// PlaybooksPath is the YAML file for automated playbooks (e.g. rules/playbooks/playbooks.yml).
+		PlaybooksPath string `yaml:"playbooks_path"`
+		// ForensicsDir overrides Forensics.OutputDir for the response layer / collect_forensics.
+		ForensicsDir string `yaml:"forensics_dir"`
+		// QuarantineDir overrides Quarantine.Dir for template {{quarantine_dir}} when set.
+		QuarantineDir string `yaml:"quarantine_dir"`
+		Approval      struct {
+			Mode        string `yaml:"mode"` // auto|webhook|file
+			WebhookURL  string `yaml:"webhook_url"`
+			CallbackURL string `yaml:"callback_url"`
+			ApprovalDir string `yaml:"approval_dir"`
+			TimeoutSec  int    `yaml:"timeout_sec"`
+		} `yaml:"approval"`
 	} `yaml:"response"`
 
 	ThreatIntel struct {
@@ -320,15 +334,15 @@ type Config struct {
 	} `yaml:"response_legacy"`
 
 	Forwarder struct {
-		Enabled             bool   `yaml:"enabled"`
-		Mode                string `yaml:"mode"`
-		Endpoint            string `yaml:"endpoint"`
-		TelemetryEndpoint   string `yaml:"telemetry_endpoint"`
-		SyslogAddr   string   `yaml:"syslog_addr"`
-		KafkaBrokers []string `yaml:"kafka_brokers"`
-		KafkaTopic   string   `yaml:"kafka_topic"`
-		RetryMax     int      `yaml:"retry_max"`
-		SpoolPath    string   `yaml:"spool_path"`
+		Enabled           bool     `yaml:"enabled"`
+		Mode              string   `yaml:"mode"`
+		Endpoint          string   `yaml:"endpoint"`
+		TelemetryEndpoint string   `yaml:"telemetry_endpoint"`
+		SyslogAddr        string   `yaml:"syslog_addr"`
+		KafkaBrokers      []string `yaml:"kafka_brokers"`
+		KafkaTopic        string   `yaml:"kafka_topic"`
+		RetryMax          int      `yaml:"retry_max"`
+		SpoolPath         string   `yaml:"spool_path"`
 	} `yaml:"forwarder"`
 
 	RulesFile             string `yaml:"rules_file"`

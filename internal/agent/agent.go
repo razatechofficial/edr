@@ -64,10 +64,11 @@ type Agent struct {
 	baselineProc    *baseline.ProcessBaseline
 	baselineUser    *baseline.UserBaseline
 
-	antiDebug  *selfprotect.AntiDebugger
-	tamper     *selfprotect.TamperDetector
-	integrity  *selfprotect.IntegrityChecker
-	respEngine *response.ResponseEngine
+	antiDebug     *selfprotect.AntiDebugger
+	tamper        *selfprotect.TamperDetector
+	integrity     *selfprotect.IntegrityChecker
+	respEngine    *response.ActionEngine
+	responseLayer response.ResponseEngine
 
 	durableSpool     *telemetry.Spool
 	telExporter      *mlpkg.TelemetryExporter
@@ -178,6 +179,9 @@ func NewWithFiles(configPath string) (*Agent, error) {
 
 	if err := a.initResponseEngine(); err != nil {
 		a.logger.Warn("response engine init failed, using basic responder only", "error", err)
+	}
+	if err := a.initResponseLayer(); err != nil {
+		a.logger.Warn("response playbook layer init failed", "error", err)
 	}
 
 	if cfg.ML.Enabled && cfg.ML.ModelsDir != "" {
@@ -510,6 +514,15 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.logger.Info("agent started")
 	a.logger.Info("rules loaded", "count", len(a.ruleSet.Rules))
 
+	if a.responseLayer != nil {
+		a.responseLayer.Start(ctx)
+		defer func() {
+			if s, ok := a.responseLayer.(interface{ Stop() }); ok {
+				s.Stop()
+			}
+		}()
+	}
+
 	if a.telemetryRelay != nil {
 		go a.telemetryRelay.Run(ctx)
 	}
@@ -541,6 +554,14 @@ func (a *Agent) drainAdvancedAlerts(ctx context.Context) {
 		case advAlert, ok := <-a.advEngine.Alerts():
 			if !ok {
 				return
+			}
+			if a.responseLayer != nil && advAlert != nil {
+				d := detection.FromAlert(advAlert)
+				go func(det detection.Detection) {
+					if err := a.responseLayer.Handle(ctx, det); err != nil {
+						a.logger.Error("response layer handle failed", "error", err)
+					}
+				}(d)
 			}
 			al := schema.Alert{
 				SchemaVersion: schema.SchemaVersionV1,
@@ -982,7 +1003,7 @@ func (a *Agent) executeAutoResponse(al schema.Alert) {
 				"mode":         "kill",
 				"tree":         al.Score >= 90,
 			}
-			result, err := a.respEngine.Execute(ctx, response.ActionKillProcess, params)
+			result, err := a.respEngine.Execute(ctx, response.OpKillProcess, params)
 			outcome := "failure"
 			msg := ""
 			if result != nil && result.Success {
@@ -1012,7 +1033,7 @@ func (a *Agent) executeAutoResponse(al schema.Alert) {
 				"reason":   al.Title,
 				"alert_id": al.AlertID,
 			}
-			if _, qErr := a.respEngine.Execute(ctx, response.ActionQuarantineFile, qParams); qErr != nil {
+			if _, qErr := a.respEngine.Execute(ctx, response.OpQuarantineFile, qParams); qErr != nil {
 				a.logger.Error("quarantine failed", "path", qPath, "error", qErr)
 			}
 		}
@@ -1128,9 +1149,9 @@ func (a *Agent) initResponseEngine() error {
 		return fmt.Errorf("response engine: %w", err)
 	}
 
-	eng.RegisterHandler(response.ActionKillProcess,
+	eng.RegisterHandler(response.OpKillProcess,
 		response.NewProcessHandler(a.zapLogger, a.cfg.LegacyResponse.ProtectedProcesses))
-	eng.RegisterHandler(response.ActionSuspendProcess,
+	eng.RegisterHandler(response.OpSuspendProcess,
 		response.NewProcessHandler(a.zapLogger, a.cfg.LegacyResponse.ProtectedProcesses))
 
 	qDir := a.cfg.Response.Quarantine.Dir
@@ -1146,24 +1167,95 @@ func (a *Agent) initResponseEngine() error {
 	if err != nil {
 		a.logger.Warn("file handler init failed", "error", err)
 	} else {
-		eng.RegisterHandler(response.ActionQuarantineFile, fh)
+		eng.RegisterHandler(response.OpQuarantineFile, fh)
 	}
 
 	edrServer := a.cfg.Server.Endpoint
 	if edrServer == "" {
 		edrServer = "127.0.0.1"
 	}
-	eng.RegisterHandler(response.ActionNetworkIsolate,
+	eng.RegisterHandler(response.OpNetworkIsolate,
 		response.NewNetworkHandler(a.zapLogger, edrServer, nil))
-	eng.RegisterHandler(response.ActionNetworkRelease,
+	eng.RegisterHandler(response.OpNetworkRelease,
 		response.NewNetworkHandler(a.zapLogger, edrServer, nil))
 
 	blockDBPath := filepath.Join(a.cfg.Agent.DataDir, "blocked_hashes.json")
-	eng.RegisterHandler(response.ActionBlockHash,
+	eng.RegisterHandler(response.OpBlockHash,
 		response.NewBlockHashHandler(a.zapLogger, blockDBPath))
 
 	a.respEngine = eng
 	a.logger.Info("response engine initialized with playbook support")
+	return nil
+}
+
+func (a *Agent) initResponseLayer() error {
+	if a.respEngine == nil || !a.cfg.Response.AutoResponse {
+		return nil
+	}
+	pp := a.cfg.Response.PlaybooksPath
+	candidates := []string{}
+	if pp != "" {
+		candidates = append(candidates, pp)
+		if !filepath.IsAbs(pp) {
+			candidates = append(candidates, filepath.Join(a.cfg.Agent.DataDir, pp))
+		}
+	} else {
+		candidates = append(candidates,
+			filepath.Join("rules", "playbooks", "playbooks.yml"),
+			filepath.Join(a.cfg.Agent.DataDir, "rules", "playbooks", "playbooks.yml"),
+		)
+	}
+	var found string
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			found = c
+			break
+		}
+	}
+	if found == "" {
+		a.logger.Info("YAML playbooks not loaded (file missing or not configured)", "candidates", candidates)
+		return nil
+	}
+	pp = found
+	fd := a.cfg.Response.ForensicsDir
+	if fd == "" {
+		fd = a.cfg.Response.Forensics.OutputDir
+	}
+	if fd == "" {
+		fd = filepath.Join(a.cfg.Agent.DataDir, "forensics")
+	}
+	qd := a.cfg.Response.QuarantineDir
+	if qd == "" {
+		qd = a.cfg.Response.Quarantine.Dir
+	}
+	if qd == "" {
+		qd = filepath.Join(a.cfg.Agent.DataDir, "quarantine")
+	}
+	agentIP := a.cfg.Server.Endpoint
+	if agentIP == "" {
+		agentIP = "127.0.0.1"
+	}
+	re, err := response.NewEngine(response.EngineConfig{
+		PlaybooksPath: pp,
+		ForensicsDir:  fd,
+		QuarantineDir: qd,
+		AgentIP:       agentIP,
+		HostID:        a.cfg.Service.EndpointID,
+		Logger:        a.zapLogger,
+		Approval: response.ApprovalConfig{
+			Mode:        a.cfg.Response.Approval.Mode,
+			WebhookURL:  a.cfg.Response.Approval.WebhookURL,
+			CallbackURL: a.cfg.Response.Approval.CallbackURL,
+			ApprovalDir: a.cfg.Response.Approval.ApprovalDir,
+			TimeoutSec:  a.cfg.Response.Approval.TimeoutSec,
+		},
+		ActionEng: a.respEngine,
+	})
+	if err != nil {
+		return err
+	}
+	a.responseLayer = re
+	a.logger.Info("response playbook layer ready", "playbooks", pp)
 	return nil
 }
 

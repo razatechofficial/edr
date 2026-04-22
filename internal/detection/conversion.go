@@ -6,6 +6,11 @@ import (
 	"github.com/razatechofficial/edr/pkg/events"
 )
 
+// FromAlert converts a pipeline alert to a [Detection] for the response layer and other consumers.
+func FromAlert(a *events.Alert) Detection {
+	return alertToDetection(a)
+}
+
 func alertToDetection(a *events.Alert) Detection {
 	d := Detection{
 		ID:          a.ID,
