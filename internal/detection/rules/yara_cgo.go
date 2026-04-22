@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hillu/go-yara/v4"
@@ -29,6 +30,7 @@ type YARAEngine struct {
 	mu          sync.RWMutex
 	cancelFunc  context.CancelFunc
 	timeout     time.Duration
+	droppedJobs atomic.Uint64
 }
 
 type scanRequest struct {
@@ -260,8 +262,27 @@ func (e *YARAEngine) ScanBytes(ctx context.Context, data []byte) ([]YARAMatch, e
 // will receive the match results when the worker pool processes the request.
 func (e *YARAEngine) ScanFileAsync(path string) <-chan []YARAMatch {
 	ch := make(chan []YARAMatch, 1)
-	e.scanChan <- scanRequest{path: path, resultCh: ch}
+	select {
+	case e.scanChan <- scanRequest{path: path, resultCh: ch}:
+	default:
+		e.droppedJobs.Add(1)
+		ch <- nil
+	}
 	return ch
+}
+
+func (e *YARAEngine) SubmitAsync(req scanRequest) bool {
+	select {
+	case e.scanChan <- req:
+		return true
+	default:
+		e.droppedJobs.Add(1)
+		return false
+	}
+}
+
+func (e *YARAEngine) DroppedJobs() uint64 {
+	return e.droppedJobs.Load()
 }
 
 // Count returns the number of loaded YARA rules.
