@@ -5,9 +5,28 @@ OUT="platform/linux/ebpf/vmlinux.h"
 FALLBACK="platform/linux/ebpf/vmlinux_fallback.h"
 VENDOR_BPF="platform/linux/ebpf/libbpf/bpf/bpf_helpers.h"
 
-if ! command -v clang >/dev/null 2>&1; then
-	echo "ERROR: clang not found. Install with: apt-get install clang" >&2
-	echo "  or: brew install llvm" >&2
+find_clang_bpf() {
+	for candidate in \
+		"${CLANG:-}" \
+		"/opt/homebrew/opt/llvm/bin/clang" \
+		"/usr/local/opt/llvm/bin/clang" \
+		"clang-17" "clang-16" "clang-15" "clang"; do
+		[ -z "$candidate" ] && continue
+		if command -v "$candidate" >/dev/null 2>&1; then
+			if "$candidate" --target=bpf -print-targets 2>&1 | grep -q bpf; then
+				echo "$candidate"
+				return 0
+			fi
+		fi
+	done
+	echo ""
+}
+
+CLANG_BPF=$(find_clang_bpf)
+if [ -z "$CLANG_BPF" ]; then
+	echo "ERROR: No clang with BPF backend found." >&2
+	echo "  macOS:  brew install llvm" >&2
+	echo "  Ubuntu: apt-get install clang llvm" >&2
 	exit 1
 fi
 
