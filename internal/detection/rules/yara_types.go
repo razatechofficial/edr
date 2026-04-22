@@ -15,3 +15,18 @@ type YARAString struct {
 	Offset uint64
 	Data   []byte
 }
+
+// YARAScanResult is delivered asynchronously from the YARA worker pool to the detection engine.
+type YARAScanResult struct {
+	Matches []YARAMatch
+	Event   interface{}
+	Path    string
+}
+
+type scanRequest struct {
+	path     string
+	data     []byte
+	resultCh chan<- []YARAMatch
+	event    interface{}
+	async    bool
+}

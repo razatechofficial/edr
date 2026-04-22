@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -16,27 +15,25 @@ import (
 	"go.uber.org/zap"
 )
 
+// yaraRulesBundle is atomically swapped on reload; readers take a snapshot with Load.
+type yaraRulesBundle struct {
+	sets []*yara.Rules
+}
+
 // YARAEngine scans files and memory against compiled YARA rules.
-// ruleSets holds one compiled ruleset per successfully parsed .yar file so a
-// single broken rule does not poison the whole corpus (YARA compilers cannot
-// recover after a parse error).
+// One compiled ruleset per successfully parsed .yar file so a single
+// broken rule does not poison the whole corpus.
 type YARAEngine struct {
+	rules       atomic.Pointer[yaraRulesBundle]
 	rulesDir    string
-	ruleSets    []*yara.Rules
 	maxFileSize int64
 	workerCount int
 	scanChan    chan scanRequest
 	logger      *zap.Logger
-	mu          sync.RWMutex
 	cancelFunc  context.CancelFunc
 	timeout     time.Duration
 	droppedJobs atomic.Uint64
-}
-
-type scanRequest struct {
-	path     string
-	data     []byte
-	resultCh chan<- []YARAMatch
+	asyncSink   chan<- YARAScanResult
 }
 
 // NewYARAEngine creates a YARA scanning engine backed by a worker pool.
@@ -70,6 +67,25 @@ func NewYARAEngine(rulesDir string, maxFileSizeMB int, workers int, logger *zap.
 	return e, nil
 }
 
+// SetAsyncSink receives one YARAScanResult per async file job (non-blocking; drops on full buffer).
+func (e *YARAEngine) SetAsyncSink(ch chan<- YARAScanResult) {
+	e.asyncSink = ch
+}
+
+// EnqueueFileScan queues a file scan; results are delivered only if SetAsyncSink was called.
+func (e *YARAEngine) EnqueueFileScan(path string, event interface{}) bool {
+	if e.asyncSink == nil {
+		return false
+	}
+	select {
+	case e.scanChan <- scanRequest{path: path, event: event, async: true}:
+		return true
+	default:
+		e.droppedJobs.Add(1)
+		return false
+	}
+}
+
 // compileOneRuleFile parses a single YARA file into its own ruleset.
 func compileOneRuleFile(path, namespace string) (*yara.Rules, error) {
 	compiler, err := yara.NewCompiler()
@@ -90,17 +106,8 @@ func compileOneRuleFile(path, namespace string) (*yara.Rules, error) {
 	return compiler.GetRules()
 }
 
-// LoadRules loads and parses all .yar/.yara files from the configured directory.
+// LoadRules compiles a new rules bundle and atomically swaps it in. Failsures leave the previous bundle.
 func (e *YARAEngine) LoadRules() error {
-	e.mu.Lock()
-	for _, rs := range e.ruleSets {
-		if rs != nil {
-			rs.Destroy()
-		}
-	}
-	e.ruleSets = nil
-	e.mu.Unlock()
-
 	var sets []*yara.Rules
 	count := 0
 	err := filepath.WalkDir(e.rulesDir, func(path string, d os.DirEntry, walkErr error) error {
@@ -117,8 +124,6 @@ func (e *YARAEngine) LoadRules() error {
 		ns := filepath.Base(filepath.Dir(path))
 		compiled, compErr := compileOneRuleFile(path, ns)
 		if compErr != nil {
-			// Libyara often rejects upstream rules with "unreferenced string" (YARA version drift).
-			// Skip the file either way; avoid flooding default logs — use --debug to see details.
 			msg := strings.ToLower(compErr.Error())
 			if strings.Contains(msg, "unreferenced string") {
 				e.logger.Debug("yara: skipped rule file", zap.String("path", path), zap.Error(compErr))
@@ -135,15 +140,33 @@ func (e *YARAEngine) LoadRules() error {
 		return fmt.Errorf("yara: walk rules: %w", err)
 	}
 	if len(sets) == 0 {
+		if e.rules.Load() != nil {
+			return fmt.Errorf("yara: no rules compiled successfully; keeping previous bundle")
+		}
 		return fmt.Errorf("yara: no rules compiled successfully")
 	}
-
-	e.mu.Lock()
-	e.ruleSets = sets
-	e.mu.Unlock()
-
+	newB := &yaraRulesBundle{sets: sets}
+	old := e.rules.Swap(newB)
+	if old != nil {
+		go func(prev *yaraRulesBundle) {
+			time.Sleep(2 * time.Second)
+			for _, r := range prev.sets {
+				if r != nil {
+					r.Destroy()
+				}
+			}
+		}(old)
+	}
 	e.logger.Info("yara: rules loaded", zap.Int("files", count))
 	return nil
+}
+
+func (e *YARAEngine) activeRules() []*yara.Rules {
+	b := e.rules.Load()
+	if b == nil {
+		return nil
+	}
+	return b.sets
 }
 
 func convertMatches(in yara.MatchRules) []YARAMatch {
@@ -204,13 +227,11 @@ func (e *YARAEngine) ScanFile(ctx context.Context, path string) ([]YARAMatch, er
 		return nil, fmt.Errorf("yara: file %s exceeds max size (%d > %d)", path, info.Size(), e.maxFileSize)
 	}
 
-	e.mu.RLock()
-	sets := e.ruleSets
-	timeout := e.timeout
-	e.mu.RUnlock()
+	sets := e.activeRules()
 	if len(sets) == 0 {
 		return nil, fmt.Errorf("yara: no rules loaded")
 	}
+	timeout := e.timeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if d := time.Until(deadline); d > 0 && d < timeout {
 			timeout = d
@@ -232,13 +253,11 @@ func (e *YARAEngine) ScanFile(ctx context.Context, path string) ([]YARAMatch, er
 
 // ScanBytes scans in-memory data against all compiled rules.
 func (e *YARAEngine) ScanBytes(ctx context.Context, data []byte) ([]YARAMatch, error) {
-	e.mu.RLock()
-	sets := e.ruleSets
-	timeout := e.timeout
-	e.mu.RUnlock()
+	sets := e.activeRules()
 	if len(sets) == 0 {
 		return nil, fmt.Errorf("yara: no rules loaded")
 	}
+	timeout := e.timeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if d := time.Until(deadline); d > 0 && d < timeout {
 			timeout = d
@@ -271,6 +290,7 @@ func (e *YARAEngine) ScanFileAsync(path string) <-chan []YARAMatch {
 	return ch
 }
 
+// SubmitAsync queues a custom scan request (used by tests).
 func (e *YARAEngine) SubmitAsync(req scanRequest) bool {
 	select {
 	case e.scanChan <- req:
@@ -281,16 +301,16 @@ func (e *YARAEngine) SubmitAsync(req scanRequest) bool {
 	}
 }
 
+// DroppedJobs returns the number of jobs dropped due to a full queue.
 func (e *YARAEngine) DroppedJobs() uint64 {
 	return e.droppedJobs.Load()
 }
 
 // Count returns the number of loaded YARA rules.
 func (e *YARAEngine) Count() int {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	sets := e.activeRules()
 	n := 0
-	for _, r := range e.ruleSets {
+	for _, r := range sets {
 		if r == nil {
 			continue
 		}
@@ -299,20 +319,20 @@ func (e *YARAEngine) Count() int {
 	return n
 }
 
-// Stop drains the worker pool and releases resources.
+// Stop cancels workers and releases rule memory.
 func (e *YARAEngine) Stop() error {
 	if e.cancelFunc != nil {
 		e.cancelFunc()
 	}
-	e.mu.Lock()
-	for _, rs := range e.ruleSets {
-		if rs != nil {
-			rs.Destroy()
+	close(e.scanChan)
+	b := e.rules.Swap(nil)
+	if b != nil {
+		for _, rs := range b.sets {
+			if rs != nil {
+				rs.Destroy()
+			}
 		}
 	}
-	e.ruleSets = nil
-	e.mu.Unlock()
-	close(e.scanChan)
 	return nil
 }
 
@@ -331,7 +351,17 @@ func (e *YARAEngine) worker(ctx context.Context) {
 			} else if req.path != "" {
 				matches, _ = e.ScanFile(ctx, req.path)
 			}
-			req.resultCh <- matches
+			if req.async && e.asyncSink != nil {
+				select {
+				case e.asyncSink <- YARAScanResult{Matches: matches, Event: req.event, Path: req.path}:
+				default:
+					e.droppedJobs.Add(1)
+				}
+				continue
+			}
+			if req.resultCh != nil {
+				req.resultCh <- matches
+			}
 		}
 	}
 }
