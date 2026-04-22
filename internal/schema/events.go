@@ -176,3 +176,26 @@ type MemoryEvent struct {
 	Size          uint64 `json:"size,omitempty"`
 	Protect       uint32 `json:"protect,omitempty"`
 }
+
+type ContainerEvent struct {
+	BaseEvent
+	Operation   string `json:"operation,omitempty"`
+	PID         int    `json:"pid,omitempty"`
+	ProcessName string `json:"process_name,omitempty"`
+	Path        string `json:"path,omitempty"`
+	Mode        uint32 `json:"mode,omitempty"`
+}
+
+type SecurityPolicyEvent struct {
+	BaseEvent
+	Operation string `json:"operation,omitempty"`
+	PID       int    `json:"pid,omitempty"`
+	Flags     uint64 `json:"flags,omitempty"`
+}
+
+type TamperEvent struct {
+	BaseEvent
+	Component string `json:"component,omitempty"`
+	ProgramID uint32 `json:"program_id,omitempty"`
+	Message   string `json:"message,omitempty"`
+}

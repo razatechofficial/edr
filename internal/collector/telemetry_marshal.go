@@ -20,6 +20,9 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 		Service   *schema.ServiceEvent           `json:"service,omitempty"`
 		Credential *schema.CredentialAccessEvent `json:"credential,omitempty"`
 		Memory    *schema.MemoryEvent            `json:"memory,omitempty"`
+		Container *schema.ContainerEvent         `json:"container,omitempty"`
+		SecPolicy *schema.SecurityPolicyEvent    `json:"security_policy,omitempty"`
+		Tamper    *schema.TamperEvent            `json:"tamper,omitempty"`
 		File      *schema.FileEvent              `json:"file,omitempty"`
 		Fork      *schema.ForkEvent              `json:"fork,omitempty"`
 		Registry  *schema.RegistryEvent          `json:"registry,omitempty"`
@@ -40,6 +43,12 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 		w.Kind, w.Credential = "credential_access", t.Credential
 	case t.Memory != nil:
 		w.Kind, w.Memory = "memory", t.Memory
+	case t.Container != nil:
+		w.Kind, w.Container = "container", t.Container
+	case t.SecPolicy != nil:
+		w.Kind, w.SecPolicy = "security_policy", t.SecPolicy
+	case t.Tamper != nil:
+		w.Kind, w.Tamper = "tamper", t.Tamper
 	case t.File != nil:
 		w.Kind, w.File = "file", t.File
 	case t.Fork != nil:

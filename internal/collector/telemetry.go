@@ -15,6 +15,9 @@ type Telemetry struct {
 	Service   *schema.ServiceEvent
 	Credential *schema.CredentialAccessEvent
 	Memory    *schema.MemoryEvent
+	Container *schema.ContainerEvent
+	SecPolicy *schema.SecurityPolicyEvent
+	Tamper    *schema.TamperEvent
 	File      *schema.FileEvent
 	Fork      *schema.ForkEvent
 	Registry  *schema.RegistryEvent
