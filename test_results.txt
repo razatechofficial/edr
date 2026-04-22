@@ -1,0 +1,77 @@
+?   	github.com/razatechofficial/edr/cmd/agent	[no test files]
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b519/cli.test: exec format error
+FAIL	github.com/razatechofficial/edr/cmd/cli	0.009s
+?   	github.com/razatechofficial/edr/cmd/controlplane	[no test files]
+?   	github.com/razatechofficial/edr/cmd/edrctl	[no test files]
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b533/installer.test: exec format error
+FAIL	github.com/razatechofficial/edr/cmd/installer	0.004s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b539/agent.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/agent	0.005s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b542/alert.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/alert	0.006s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b545/baseline.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/baseline	0.015s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b548/collector.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/collector	0.011s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b550/collectors.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/collectors	0.011s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b553/comms.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/comms	0.011s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b630/config.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/config	0.007s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b635/controlplane.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/controlplane	0.017s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b638/detect.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/detect	0.011s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b641/detection.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/detection	0.008s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b644/ioc.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/detection/ioc	0.008s
+?   	github.com/razatechofficial/edr/internal/detection/llm	[no test files]
+?   	github.com/razatechofficial/edr/internal/detection/llm/providers	[no test files]
+?   	github.com/razatechofficial/edr/internal/detection/llm/rag	[no test files]
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b650/ml.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/detection/ml	0.015s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b653/features.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/detection/ml/features	0.012s
+?   	github.com/razatechofficial/edr/internal/detection/ml/models	[no test files]
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b658/rules.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/detection/rules	0.011s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b660/forensics.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/forensics	0.016s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b664/forwarder.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/forwarder	0.007s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b667/kernel.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/kernel	0.021s
+?   	github.com/razatechofficial/edr/internal/monitoringdoctor	[no test files]
+?   	github.com/razatechofficial/edr/internal/observability	[no test files]
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b672/pidfile.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/pidfile	0.024s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b674/platform.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/platform	0.020s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b678/response.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/response	0.005s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b680/playbooks.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/response/playbooks	0.007s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b684/rules.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/rules	0.011s
+?   	github.com/razatechofficial/edr/internal/schema	[no test files]
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b688/selfprotect.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/selfprotect	0.008s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b691/spool.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/spool	0.006s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b694/telemetry.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/telemetry	0.004s
+?   	github.com/razatechofficial/edr/internal/telemetryenrich	[no test files]
+?   	github.com/razatechofficial/edr/internal/telemetryqueue	[no test files]
+?   	github.com/razatechofficial/edr/internal/testutil	[no test files]
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b701/threatintel.test: exec format error
+FAIL	github.com/razatechofficial/edr/internal/threatintel	0.006s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b703/events.test: exec format error
+FAIL	github.com/razatechofficial/edr/pkg/events	0.008s
+?   	github.com/razatechofficial/edr/pkg/protocol	[no test files]
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b708/benchmark.test: exec format error
+FAIL	github.com/razatechofficial/edr/tests/benchmark	0.011s
+fork/exec /var/folders/39/8qqmzbfx4rg031tz04b3yx5w0000gn/T/go-build3322943358/b711/integration.test: exec format error
+FAIL	github.com/razatechofficial/edr/tests/integration	0.012s
+FAIL
