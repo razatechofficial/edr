@@ -788,6 +788,52 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 					return err
 				}
 			}
+			if tel.Persistence != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Persistence.BaseEvent,
+					PID:         int(tel.Persistence.PID),
+					ProcessName: "persistence",
+					ProcessPath: tel.Persistence.ExecutablePath,
+					CommandLine: tel.Persistence.Technique,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+			}
+			if tel.Privacy != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Privacy.BaseEvent,
+					PID:         int(tel.Privacy.AccessingPID),
+					ProcessName: "privacy",
+					ProcessPath: tel.Privacy.AccessingProcess,
+					CommandLine: tel.Privacy.Operation,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+			}
+			if tel.Gatekeeper != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Gatekeeper.BaseEvent,
+					PID:         int(tel.Gatekeeper.PID),
+					ProcessName: "gatekeeper_bypass",
+					ProcessPath: tel.Gatekeeper.FilePath,
+					CommandLine: tel.Gatekeeper.ProcessPath,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+			}
+			if tel.Dropped != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Dropped.BaseEvent,
+					ProcessName: "dropped_events",
+					CommandLine: tel.Dropped.EventClass,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+			}
 			if tel.File != nil {
 				if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
 					return err

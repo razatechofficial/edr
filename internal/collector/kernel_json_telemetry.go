@@ -113,6 +113,10 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		pe.UnshareFlags = jsonUint64(raw, "unshare_flags")
 		pe.MadviseAdvice = int32(jsonInt(raw, "madvise_advice"))
 		pe.ExecEnv = jsonString(raw, "exec_env")
+		if tg := jsonString(raw, "tags"); tg != "" {
+			pe.Tags = strings.Split(tg, ",")
+		}
+		pe.Severity = jsonString(raw, "severity")
 		applyProcessUserFromJSON(pe, raw, users)
 		return &Telemetry{Process: pe}
 
@@ -146,6 +150,48 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		me.Size = jsonUint64(raw, "size", "region_size")
 		me.Protect = jsonUint32(raw, "protect")
 		return &Telemetry{Memory: me}
+
+	case "persistence":
+		base.EventType = schema.EventProcess
+		pe := &schema.PersistenceEvent{BaseEvent: base}
+		pe.Technique = jsonString(raw, "technique")
+		pe.ExecutablePath = firstNonEmpty(jsonString(raw, "executable_path"), jsonString(raw, "path"))
+		pe.ItemType = jsonString(raw, "item_type")
+		pe.IsLegacy = jsonInt(raw, "legacy") == 1
+		pe.IsManaged = jsonInt(raw, "managed") == 1
+		pe.UID = uint32(jsonInt(raw, "uid"))
+		pe.PID = uint32(jsonInt(raw, "pid"))
+		pe.ProcessPath = jsonString(raw, "process_path")
+		return &Telemetry{Persistence: pe}
+
+	case "privacy":
+		base.EventType = schema.EventProcess
+		pe := &schema.PrivacyEvent{BaseEvent: base}
+		pe.Operation = jsonString(raw, "operation")
+		pe.Service = jsonString(raw, "service")
+		pe.AuthValue = jsonInt(raw, "auth_value")
+		pe.AuthReason = jsonString(raw, "auth_reason")
+		pe.AccessingPID = uint32(jsonInt(raw, "accessing_pid", "pid"))
+		pe.AccessingProcess = firstNonEmpty(jsonString(raw, "accessing_process"), jsonString(raw, "process_name"))
+		return &Telemetry{Privacy: pe}
+
+	case "gatekeeper_bypass":
+		base.EventType = schema.EventProcess
+		ge := &schema.GatekeeperBypassEvent{BaseEvent: base}
+		ge.FilePath = jsonString(raw, "file_path")
+		ge.PID = uint32(jsonInt(raw, "pid"))
+		ge.ProcessPath = jsonString(raw, "process_path")
+		ge.SigningStatus = jsonString(raw, "signing_status")
+		return &Telemetry{Gatekeeper: ge}
+
+	case "dropped_events":
+		base.EventType = schema.EventProcess
+		de := &schema.DroppedEventsEvent{BaseEvent: base}
+		de.EventClass = jsonString(raw, "event_class")
+		de.GapSize = jsonUint64(raw, "gap_size")
+		de.LastSeq = jsonUint64(raw, "last_seq")
+		de.CurrentSeq = jsonUint64(raw, "current_seq")
+		return &Telemetry{Dropped: de}
 
 	case "fork":
 		base.EventType = schema.EventFork

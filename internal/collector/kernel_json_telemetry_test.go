@@ -116,3 +116,20 @@ func TestMapKernelJSON_ContainerSecurityTamperMappings(t *testing.T) {
 		t.Fatalf("expected tamper telemetry, got %+v", tel)
 	}
 }
+
+func TestMapKernelJSON_MacExtendedMappings(t *testing.T) {
+	pRaw := `{"type":"persistence","technique":"btm_launch_item","executable_path":"/tmp/a","item_type":"user_agent","uid":501,"pid":12}`
+	if tel := MapKernelJSONToTelemetry([]byte(pRaw), "e", "h", "darwin", nil); tel == nil || tel.Persistence == nil {
+		t.Fatalf("expected persistence telemetry, got %+v", tel)
+	}
+
+	prRaw := `{"type":"privacy","operation":"tcc_db_write","accessing_pid":77,"accessing_process":"x"}`
+	if tel := MapKernelJSONToTelemetry([]byte(prRaw), "e", "h", "darwin", nil); tel == nil || tel.Privacy == nil {
+		t.Fatalf("expected privacy telemetry, got %+v", tel)
+	}
+
+	gRaw := `{"type":"gatekeeper_bypass","file_path":"/tmp/a","pid":12,"process_path":"/bin/rm"}`
+	if tel := MapKernelJSONToTelemetry([]byte(gRaw), "e", "h", "darwin", nil); tel == nil || tel.Gatekeeper == nil {
+		t.Fatalf("expected gatekeeper telemetry, got %+v", tel)
+	}
+}
