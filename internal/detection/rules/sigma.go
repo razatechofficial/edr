@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sigma "github.com/bradleyjkemp/sigma-go"
@@ -21,13 +22,19 @@ import (
 	"github.com/razatechofficial/edr/pkg/events"
 )
 
+// compiledSigmaSet is swapped atomically on successful reload.
+type compiledSigmaSet struct {
+	evaluators  []*sigmaeval.RuleEvaluator
+	enabled     map[string]bool
+	byCategory  map[string][]*sigmaeval.RuleEvaluator
+}
+
 // SigmaEngine evaluates events against Sigma detection rules.
 type SigmaEngine struct {
 	rulesDir   string
-	evaluators []*sigmaeval.RuleEvaluator
-	enabled    map[string]bool
+	current    atomic.Pointer[compiledSigmaSet]
 	mapper     *MITREMapper
-	mu         sync.RWMutex
+	mu         sync.Mutex
 	logger     *zap.Logger
 	watcher    *fsnotify.Watcher
 	cancelFunc context.CancelFunc
@@ -64,7 +71,6 @@ func NewSigmaEngine(rulesDir string, logger *zap.Logger) (*SigmaEngine, error) {
 
 	e := &SigmaEngine{
 		rulesDir: rulesDir,
-		enabled:  make(map[string]bool),
 		mapper:   NewMITREMapper(),
 		logger:   logger,
 	}
@@ -74,8 +80,8 @@ func NewSigmaEngine(rulesDir string, logger *zap.Logger) (*SigmaEngine, error) {
 	return e, nil
 }
 
-// LoadRules parses all Sigma YAML files under the configured directory (recursively)
-// and compiles them into evaluators. Existing rules are replaced atomically.
+// LoadRules builds a new compiledSigmaSet in memory and atomically replaces
+// the current set on success. An empty new compile does not clobber a prior set.
 func (e *SigmaEngine) LoadRules() error {
 	var files []string
 	err := filepath.WalkDir(e.rulesDir, func(path string, d fs.DirEntry, walkErr error) error {
@@ -115,13 +121,37 @@ func (e *SigmaEngine) LoadRules() error {
 		evaluators = append(evaluators, sigmaeval.ForRule(rule))
 	}
 
+	if len(evaluators) == 0 {
+		e.mu.Lock()
+		had := e.current.Load() != nil
+		e.mu.Unlock()
+		if had {
+			return fmt.Errorf("sigma: reload produced zero rules; keeping previous set")
+		}
+		return fmt.Errorf("sigma: no rules could be loaded")
+	}
+
 	e.mu.Lock()
-	e.evaluators = evaluators
-	for _, ev := range evaluators {
-		if _, ok := e.enabled[ev.ID]; !ok {
-			e.enabled[ev.ID] = true
+	old := e.current.Load()
+	enabled := make(map[string]bool)
+	if old != nil {
+		for k, v := range old.enabled {
+			enabled[k] = v
 		}
 	}
+	for _, ev := range evaluators {
+		if _, ok := enabled[ev.ID]; !ok {
+			enabled[ev.ID] = true
+		}
+	}
+	byCategory := buildSigmaCategoryIndex(evaluators)
+	set := &compiledSigmaSet{
+		evaluators: evaluators,
+		enabled:    enabled,
+		byCategory: byCategory,
+	}
+	e.current.Store(set)
+	e.warmRegexCache()
 	e.mu.Unlock()
 
 	e.logger.Info("sigma: rules loaded",
@@ -131,22 +161,58 @@ func (e *SigmaEngine) LoadRules() error {
 	return nil
 }
 
-// Evaluate tests an event (as a flat key-value map) against every loaded
-// Sigma rule and returns alerts for all matches.
+func buildSigmaCategoryIndex(evals []*sigmaeval.RuleEvaluator) map[string][]*sigmaeval.RuleEvaluator {
+	out := make(map[string][]*sigmaeval.RuleEvaluator)
+	for _, ev := range evals {
+		cat := strings.ToLower(strings.TrimSpace(ev.Logsource.Category))
+		if cat == "" {
+			cat = "_uncat"
+		}
+		out[cat] = append(out[cat], ev)
+	}
+	return out
+}
+
+// sigmaEventCategory maps normalized telemetry event_type to a Sigma logsource category.
+func sigmaEventCategory(m map[string]interface{}) string {
+	t := strings.ToLower(stringField(m, "event_type", "type"))
+	switch t {
+	case "process":
+		return "process_creation"
+	case "file":
+		return "file_event"
+	case "network":
+		return "network_connection"
+	case "registry":
+		return "registry_set"
+	case "auth", "authentication":
+		return "authentication"
+	case "file_access":
+		return "file_access"
+	default:
+		return ""
+	}
+}
+
+// Evaluate tests an event (as a flat key-value map) against loaded rules.
 func (e *SigmaEngine) Evaluate(event map[string]interface{}) []*events.Alert {
 	event = normalizeSigmaEvent(event)
-	e.mu.RLock()
-	evals := e.evaluators
-	e.mu.RUnlock()
+	set := e.current.Load()
+	if set == nil {
+		return nil
+	}
+	cat := sigmaEventCategory(event)
+	evals := set.evaluators
+	if cat != "" {
+		if sub := set.byCategory[cat]; len(sub) > 0 {
+			evals = sub
+		}
+	}
 
 	var alerts []*events.Alert
 	ctx := context.Background()
-
 	for _, eval := range evals {
-		e.mu.RLock()
-		enabled := e.enabled[eval.ID]
-		e.mu.RUnlock()
-		if !enabled {
+		if !set.enabled[eval.ID] {
 			continue
 		}
 		result, err := eval.Matches(ctx, event)
@@ -183,6 +249,18 @@ func (e *SigmaEngine) Evaluate(event map[string]interface{}) []*events.Alert {
 	return alerts
 }
 
+// stringField is a local duplicate for logsource-style lookups without importing detection.
+func stringField(m map[string]interface{}, keys ...string) string {
+	for _, want := range keys {
+		for k, v := range m {
+			if strings.EqualFold(k, want) {
+				return fmt.Sprint(v)
+			}
+		}
+	}
+	return ""
+}
+
 func normalizeSigmaEvent(in map[string]interface{}) map[string]interface{} {
 	if len(in) == 0 {
 		return in
@@ -199,6 +277,10 @@ func normalizeSigmaEvent(in map[string]interface{}) map[string]interface{} {
 	return out
 }
 
+func (e *SigmaEngine) warmRegexCache() {
+	_, _ = e.cachedRegex(`.*`)
+}
+
 func (e *SigmaEngine) cachedRegex(expr string) (*regexp.Regexp, error) {
 	if v, ok := e.regexCache.Load(expr); ok {
 		return v.(*regexp.Regexp), nil
@@ -211,29 +293,42 @@ func (e *SigmaEngine) cachedRegex(expr string) (*regexp.Regexp, error) {
 	return rx, nil
 }
 
-// SetRuleEnabled toggles a specific Sigma rule by ID at runtime.
-func (e *SigmaEngine) SetRuleEnabled(ruleID string, enabled bool) {
+// SetRuleEnabled toggles a specific Sigma rule by ID (copy-on-write on the set).
+func (e *SigmaEngine) SetRuleEnabled(ruleID string, on bool) {
 	e.mu.Lock()
-	e.enabled[ruleID] = enabled
-	e.mu.Unlock()
+	defer e.mu.Unlock()
+	old := e.current.Load()
+	if old == nil {
+		return
+	}
+	en := make(map[string]bool, len(old.enabled)+1)
+	for k, v := range old.enabled {
+		en[k] = v
+	}
+	en[ruleID] = on
+	e.current.Store(&compiledSigmaSet{
+		evaluators: old.evaluators,
+		enabled:    en,
+		byCategory: old.byCategory,
+	})
 }
 
 // EnabledRuleCount returns number of currently enabled rules.
 func (e *SigmaEngine) EnabledRuleCount() int {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	set := e.current.Load()
+	if set == nil {
+		return 0
+	}
 	n := 0
-	for _, ev := range e.evaluators {
-		if e.enabled[ev.ID] {
+	for _, ev := range set.evaluators {
+		if set.enabled[ev.ID] {
 			n++
 		}
 	}
 	return n
 }
 
-// EventToMap converts a typed event struct (e.g., ProcessEvent, FileEvent,
-// NetworkEvent) into the flat map[string]interface{} required by Sigma evaluation.
-// It uses JSON round-tripping so any struct with json tags is supported.
+// EventToMap converts a typed event struct to a flat map.
 func EventToMap(event interface{}) map[string]interface{} {
 	if event == nil {
 		return nil
@@ -253,8 +348,7 @@ func EventToMap(event interface{}) map[string]interface{} {
 	return m
 }
 
-// WatchAndReload watches the rules directory for file changes and reloads
-// rules automatically. It blocks until the context is cancelled.
+// WatchAndReload watches the rules directory for file changes and reloads.
 func (e *SigmaEngine) WatchAndReload(ctx context.Context) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -311,10 +405,11 @@ func (e *SigmaEngine) WatchAndReload(ctx context.Context) error {
 
 // Count returns the number of currently loaded Sigma rules.
 func (e *SigmaEngine) Count() int {
-	e.mu.RLock()
-	n := len(e.evaluators)
-	e.mu.RUnlock()
-	return n
+	set := e.current.Load()
+	if set == nil {
+		return 0
+	}
+	return len(set.evaluators)
 }
 
 // Stop cancels the directory watcher and releases resources.
