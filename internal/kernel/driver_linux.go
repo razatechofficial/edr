@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,35 +24,35 @@ import (
 )
 
 const (
-	bpfCommLen      = 16
-	bpfFilenameLen  = 256
-	bpfArgsLen      = 512
-	bpfObjectPath   = "/var/lib/edr/bpf/edr.bpf.o"
-	rawHeaderSize   = 26
-	bpfEvtProcExec  = 1
-	bpfEvtProcExit  = 2
-	bpfEvtProcFork  = 3
-	bpfEvtFileOpen  = 6
-	bpfEvtFileWrite = 7
-	bpfEvtFileDel   = 8
-	bpfEvtFileRen   = 9
-	bpfEvtFileChmod = 28
-	bpfEvtBPFLoad   = 29
+	bpfCommLen         = 16
+	bpfFilenameLen     = 256
+	bpfArgsLen         = 512
+	bpfObjectPath      = "/var/lib/edr/bpf/edr.bpf.o"
+	rawHeaderSize      = 26
+	bpfEvtProcExec     = 1
+	bpfEvtProcExit     = 2
+	bpfEvtProcFork     = 3
+	bpfEvtFileOpen     = 6
+	bpfEvtFileWrite    = 7
+	bpfEvtFileDel      = 8
+	bpfEvtFileRen      = 9
+	bpfEvtFileChmod    = 28
+	bpfEvtBPFLoad      = 29
 	bpfEvtBPFMapAccess = 30
 	bpfEvtCgroupAttach = 31
-	bpfEvtCgroupMkdir = 32
-	bpfEvtSeccomp = 33
+	bpfEvtCgroupMkdir  = 32
+	bpfEvtSeccomp      = 33
 	bpfEvtProcMemWrite = 34
-	bpfEvtDNSQuery = 35
-	bpfEvtNetConn   = 11
-	bpfEvtNetAccept = 12
-	bpfEvtNetBind   = 13
-	bpfEvtModule    = 22
-	bpfEvtMount     = 23
-	bpfEvtPtrace    = 24
-	bpfEvtSignal    = 25
-	bpfEvtUnshare   = 26
-	bpfEvtMadvise   = 27
+	bpfEvtDNSQuery     = 35
+	bpfEvtNetConn      = 11
+	bpfEvtNetAccept    = 12
+	bpfEvtNetBind      = 13
+	bpfEvtModule       = 22
+	bpfEvtMount        = 23
+	bpfEvtPtrace       = 24
+	bpfEvtSignal       = 25
+	bpfEvtUnshare      = 26
+	bpfEvtMadvise      = 27
 )
 
 // bpfBytecode holds embedded eBPF bytecode when compiled with `make ebpf-link`
@@ -77,22 +79,22 @@ type bpfProcessEvent struct {
 
 // bpfFileEvent mirrors the C struct file_event emitted by the eBPF program.
 type bpfFileEvent struct {
-	Type     uint32
-	PID      uint32
-	PPID     uint32
-	UID      uint32
-	GID      uint32
-	TS       uint64
-	Comm     [bpfCommLen]byte
-	Filename [bpfFilenameLen]byte
-	Flags    uint32
-	WriteFD  uint32
-	Mode     uint32
-	_        uint32 // C reserved_align before bytes_written
-	BytesW   uint64
+	Type          uint32
+	PID           uint32
+	PPID          uint32
+	UID           uint32
+	GID           uint32
+	TS            uint64
+	Comm          [bpfCommLen]byte
+	Filename      [bpfFilenameLen]byte
+	Flags         uint32
+	WriteFD       uint32
+	Mode          uint32
+	_             uint32 // C reserved_align before bytes_written
+	BytesW        uint64
 	SensitivePath uint8
-	_       [7]byte
-	NewName  [bpfFilenameLen]byte
+	_             [7]byte
+	NewName       [bpfFilenameLen]byte
 }
 
 // bpfEventHeader mirrors event_header in platform/linux/ebpf/common.h.
@@ -108,18 +110,18 @@ type bpfEventHeader struct {
 
 // bpfSecurityEvent mirrors struct security_event (with padding before arg0).
 type bpfSecurityEvent struct {
-	Hdr   bpfEventHeader
-	SysNr uint32
-	_     uint32
-	Arg0  uint64
-	Arg1  uint64
-	Arg2  uint64
-	BPFCmd uint32
+	Hdr         bpfEventHeader
+	SysNr       uint32
+	_           uint32
+	Arg0        uint64
+	Arg1        uint64
+	Arg2        uint64
+	BPFCmd      uint32
 	BPFProgType uint32
-	BPFMapID uint32
-	Mode uint32
-	Path  [bpfFilenameLen]byte
-	MapName [64]byte
+	BPFMapID    uint32
+	Mode        uint32
+	Path        [bpfFilenameLen]byte
+	MapName     [64]byte
 }
 
 // bpfNetworkEvent mirrors the C struct network_event emitted by the eBPF program.
@@ -151,11 +153,11 @@ type EBPFDriver struct {
 	policy    EventPolicy
 	startTime time.Time
 
-	coll    *ebpf.Collection
-	links   []link.Link
+	coll       *ebpf.Collection
+	links      []link.Link
 	ownProgIDs []uint32
-	reader  *ringbuf.Reader
-	readers []*ringbuf.Reader
+	reader     *ringbuf.Reader
+	readers    []*ringbuf.Reader
 
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -166,6 +168,15 @@ type EBPFDriver struct {
 	dropped   atomic.Uint64
 	processed atomic.Uint64
 	errors    atomic.Uint64
+	features  linuxFeatureSet
+}
+
+type linuxFeatureSet struct {
+	HasBTF       bool
+	HasBPFLSM    bool
+	HasCgroupBPF bool
+	KernelMajor  int
+	KernelMinor  int
 }
 
 // NewEBPFDriver creates a new eBPF-based kernel driver. Requires root privileges.
@@ -203,6 +214,7 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	}
 
 	d.buf = buf
+	d.features = probeLinuxFeatures()
 
 	var child context.Context
 	child, d.cancel = context.WithCancel(ctx)
@@ -236,6 +248,7 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	d.startTime = time.Now()
 	d.running.Store(true)
 	d.collectOwnProgramIDs()
+	_ = d.emitFeatureStatusEvent()
 
 	d.wg.Add(len(d.readers))
 	for _, r := range d.readers {
@@ -341,6 +354,9 @@ func (d *EBPFDriver) attachTracepoints() error {
 		}
 		group := rest[:sep]
 		tp := rest[sep+2:]
+		if !d.features.HasCgroupBPF && group == "cgroup" {
+			continue
+		}
 		l, err := link.Tracepoint(group, tp, prog, nil)
 		if err != nil {
 			return fmt.Errorf("attaching %s (%s/%s): %w", name, group, tp, err)
@@ -736,6 +752,58 @@ func (d *EBPFDriver) writeJSONEvent(envelope map[string]interface{}) error {
 		return fmt.Errorf("marshaling event: %w", err)
 	}
 	return d.buf.Write(data)
+}
+
+func probeLinuxFeatures() linuxFeatureSet {
+	f := linuxFeatureSet{
+		HasBTF:       fileExists("/sys/kernel/btf/vmlinux"),
+		HasBPFLSM:    fileExists("/sys/kernel/security/lsm") && strings.Contains(readFileOrEmpty("/sys/kernel/security/lsm"), "bpf"),
+		HasCgroupBPF: fileExists("/sys/fs/cgroup"),
+	}
+	rel := strings.TrimSpace(readFileOrEmpty("/proc/sys/kernel/osrelease"))
+	parts := strings.Split(rel, ".")
+	if len(parts) >= 2 {
+		f.KernelMajor, _ = strconv.Atoi(parts[0])
+		minor := parts[1]
+		if i := strings.IndexByte(minor, '-'); i > 0 {
+			minor = minor[:i]
+		}
+		f.KernelMinor, _ = strconv.Atoi(minor)
+	}
+	return f
+}
+
+func (d *EBPFDriver) emitFeatureStatusEvent() error {
+	env := map[string]interface{}{
+		"type":           "feature_status",
+		"timestamp":      time.Now().UTC(),
+		"agent_id":       d.agentID,
+		"has_btf":        boolToInt(d.features.HasBTF),
+		"has_bpf_lsm":    boolToInt(d.features.HasBPFLSM),
+		"has_cgroup_bpf": boolToInt(d.features.HasCgroupBPF),
+		"kernel_version": fmt.Sprintf("%d.%d", d.features.KernelMajor, d.features.KernelMinor),
+	}
+	return d.writeJSONEvent(env)
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func readFileOrEmpty(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func nullTerminated(b []byte) string {
