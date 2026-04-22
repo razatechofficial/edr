@@ -3,6 +3,8 @@ package detection
 import (
 	"context"
 	"time"
+
+	"github.com/razatechofficial/edr/internal/schema"
 )
 
 // DetectionEngineAPI is the event-stream oriented detection interface.
@@ -13,6 +15,25 @@ type DetectionEngineAPI interface {
 	Stats() EngineStats
 }
 
+// EventPayload is a union of strong schema event pointers. At most one non-
+// Unstructured field should be set. Unstructured holds map-shaped events
+// (e.g. Sigma) when a typed form is not available.
+type EventPayload struct {
+	Process      *schema.ProcessEvent
+	File         *schema.FileEvent
+	Network      *schema.NetworkEvent
+	Registry     *schema.RegistryEvent
+	Auth         *schema.AuthEvent
+	Injection    *schema.ProcessInjectionEvent
+	Memory       *schema.MemoryEvent
+	Credential   *schema.CredentialAccessEvent
+	Container    *schema.ContainerEvent
+	Persistence  *schema.PersistenceEvent
+	Privacy      *schema.PrivacyEvent
+	Tamper       *schema.TamperEvent
+	Unstructured map[string]interface{}
+}
+
 type Detection struct {
 	ID                 string
 	Timestamp          time.Time
@@ -20,10 +41,12 @@ type Detection struct {
 	RuleName           string
 	Severity           Severity
 	Confidence         float64
+	BaseScore          float64
+	Score              float64
 	TechniqueID        string
 	TacticName         string
 	Source             DetectionSource
-	Event              interface{}
+	Event              *EventPayload
 	Context            []interface{}
 	Tags               []string
 	Description        string
@@ -47,6 +70,7 @@ const (
 	SourceYARA
 	SourceBehavioral
 	SourceML
+	SourceDedup
 )
 
 type EngineStats struct {

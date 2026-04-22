@@ -13,7 +13,7 @@ func alertToDetection(a *events.Alert) Detection {
 		RuleID:      a.RuleID,
 		RuleName:    a.RuleName,
 		Severity:    alertSeverityToP(a.Severity),
-		Event:       a.RawEvent,
+		Event:       EventPayloadFromInterface(a.RawEvent),
 		Tags:        append([]string(nil), a.Tags...),
 		Description: a.Description,
 		Source:      sourceFromRule(a.RuleID),
@@ -49,6 +49,8 @@ func sourceFromRule(ruleID string) DetectionSource {
 		return SourceML
 	case len(ruleID) >= 10 && ruleID[:10] == "behavioral":
 		return SourceBehavioral
+	case len(ruleID) >= 6 && ruleID[:6] == "dedup-":
+		return SourceDedup
 	default:
 		return SourceSigma
 	}
@@ -64,7 +66,7 @@ func detectionToAlert(d Detection) *events.Alert {
 		Description: d.Description,
 		Timestamp:   d.Timestamp,
 		Tags:        append([]string(nil), d.Tags...),
-		RawEvent:    d.Event,
+		RawEvent:    rawEventFromPayload(d.Event),
 		MITRE: []events.MITREAttack{{
 			TechniqueID: d.TechniqueID,
 			TacticName:  d.TacticName,
