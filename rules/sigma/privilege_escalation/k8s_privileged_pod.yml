@@ -1,0 +1,17 @@
+title: Kubernetes Privileged Pod Creation
+id: k8s-001
+status: experimental
+description: Pod created with privileged security context
+tags:
+  - attack.privilege_escalation
+  - attack.t1611
+logsource:
+  category: kubernetes
+  service: audit
+detection:
+  selection:
+    verb: create
+    objectRef.resource: pods
+    requestObject.spec.containers[*].securityContext.privileged: "true"
+  condition: selection
+level: high
