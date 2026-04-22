@@ -1,5 +1,8 @@
 //go:build linux
 
+// BLOCKER: Reading /proc/<pid>/mem is restricted (ptrace, dumpable, or same user); a full
+// forensics capture usually needs a coordinated kernel or crash dump path, not a blind read.
+
 package actions
 
 import (

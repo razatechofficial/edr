@@ -1,5 +1,8 @@
 //go:build darwin
 
+// BLOCKER: Real memory capture needs task_for_pid, exception state, and proper entitlements;
+// the implementation below is intentionally a marker until those are granted in the distribution.
+
 package actions
 
 import (

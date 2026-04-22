@@ -1,5 +1,8 @@
 //go:build windows
 
+// BLOCKER: Production memory dumps need dbghelp!MiniDumpWriteDump with the right process
+// handle and SeDebugPrivilege; a placeholder file is not sufficient for analysis.
+
 package actions
 
 import (
