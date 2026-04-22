@@ -27,6 +27,10 @@ PACKAGE_DIR := dist
 CLANG      ?= clang
 BPF_ARCH   := $(shell uname -m 2>/dev/null | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' || echo "x86")
 BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror
+LIBBPF_SYSTEM := $(shell pkg-config --cflags libbpf 2>/dev/null)
+LIBBPF_VENDOR := -Iplatform/linux/ebpf/libbpf
+LIBBPF_DEFAULT := -I/usr/include
+BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/linux/ebpf
 
 .PHONY: build-linux build-darwin build-windows build-all
 .PHONY: bundle-enterprise build-installer-embedded
@@ -110,7 +114,7 @@ ebpf: $(VMLINUX_H) $(EBPF_OBJ)
 	@echo "==> eBPF programs compiled"
 
 platform/linux/ebpf/%.o: platform/linux/ebpf/%.c platform/linux/ebpf/common.h $(VMLINUX_H)
-	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
+	$(CLANG) $(BPF_CFLAGS) $(BPF_INCLUDES) -c $< -o $@
 
 ebpf-link: $(EBPF_OBJ)
 	@echo "==> Linking eBPF objects into single edr.bpf.o"
