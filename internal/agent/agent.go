@@ -754,6 +754,40 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 					a.advEngine.Evaluate(ctx, &pe)
 				}
 			}
+			if tel.Container != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Container.BaseEvent,
+					PID:         tel.Container.PID,
+					ProcessName: "container_event",
+					ProcessPath: tel.Container.Path,
+					CommandLine: tel.Container.Operation,
+					User:        tel.Container.ProcessName,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+			}
+			if tel.SecPolicy != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.SecPolicy.BaseEvent,
+					PID:         tel.SecPolicy.PID,
+					ProcessName: "security_policy",
+					CommandLine: tel.SecPolicy.Operation,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+			}
+			if tel.Tamper != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Tamper.BaseEvent,
+					ProcessName: "tamper",
+					CommandLine: tel.Tamper.Message,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+			}
 			if tel.File != nil {
 				if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
 					return err

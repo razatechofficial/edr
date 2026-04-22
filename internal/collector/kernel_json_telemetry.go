@@ -36,6 +36,38 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 
 	switch evType {
 	case "process":
+		if op := strings.ToLower(jsonString(raw, "operation")); op == "cgroup_attach" || op == "cgroup_mkdir" {
+			base.EventType = schema.EventProcess
+			ce := &schema.ContainerEvent{
+				BaseEvent:    base,
+				Operation:    op,
+				PID:          jsonInt(raw, "pid"),
+				ProcessName:  firstNonEmpty(jsonString(raw, "process_name"), jsonString(raw, "comm")),
+				Path:         jsonString(raw, "path"),
+				Mode:         jsonUint32(raw, "mode"),
+			}
+			return &Telemetry{Container: ce}
+		}
+		if op := strings.ToLower(jsonString(raw, "operation")); op == "seccomp_filter_install" {
+			base.EventType = schema.EventProcess
+			sp := &schema.SecurityPolicyEvent{
+				BaseEvent: base,
+				Operation: op,
+				PID:       jsonInt(raw, "pid"),
+				Flags:     jsonUint64(raw, "flags", "arg1"),
+			}
+			return &Telemetry{SecPolicy: sp}
+		}
+		if op := strings.ToLower(jsonString(raw, "operation")); strings.Contains(op, "ebpf_program_missing") {
+			base.EventType = schema.EventProcess
+			te := &schema.TamperEvent{
+				BaseEvent:  base,
+				Component:  "ebpf_program",
+				ProgramID:  jsonUint32(raw, "program_id"),
+				Message:    op,
+			}
+			return &Telemetry{Tamper: te}
+		}
 		base.EventType = schema.EventProcess
 		pe := &schema.ProcessEvent{BaseEvent: base}
 		childPID := jsonInt(raw, "child_pid")

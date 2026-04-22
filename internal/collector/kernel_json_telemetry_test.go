@@ -96,3 +96,23 @@ func TestMapKernelJSON_ProcessUIDResolvesUser(t *testing.T) {
 		t.Fatalf("cache mismatch %q vs %q", tel.Process.User, u2)
 	}
 }
+
+func TestMapKernelJSON_ContainerSecurityTamperMappings(t *testing.T) {
+	containerRaw := `{"type":"process","pid":10,"operation":"cgroup_attach","path":"/sys/fs/cgroup/x"}`
+	tel := MapKernelJSONToTelemetry([]byte(containerRaw), "e", "h", "linux", nil)
+	if tel == nil || tel.Container == nil || tel.Container.Operation != "cgroup_attach" {
+		t.Fatalf("expected container telemetry, got %+v", tel)
+	}
+
+	secRaw := `{"type":"process","pid":11,"operation":"seccomp_filter_install","flags":1}`
+	tel = MapKernelJSONToTelemetry([]byte(secRaw), "e", "h", "linux", nil)
+	if tel == nil || tel.SecPolicy == nil {
+		t.Fatalf("expected sec policy telemetry, got %+v", tel)
+	}
+
+	tamperRaw := `{"type":"process","pid":12,"operation":"ebpf_program_missing","program_id":77}`
+	tel = MapKernelJSONToTelemetry([]byte(tamperRaw), "e", "h", "linux", nil)
+	if tel == nil || tel.Tamper == nil || tel.Tamper.ProgramID != 77 {
+		t.Fatalf("expected tamper telemetry, got %+v", tel)
+	}
+}
