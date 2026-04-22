@@ -23,18 +23,18 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Install eBPF build dependencies (Ubuntu)
+      - name: Install eBPF build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y \
-            clang llvm \
-            libbpf-dev \
+          sudo apt-get install -y clang-16 llvm-16 libbpf-dev \
             linux-headers-$(uname -r) \
             linux-tools-$(uname -r) linux-tools-generic \
-            || true
+            || sudo apt-get install -y clang llvm libbpf-dev
+          clang-16 --target=bpf -print-targets 2>&1 | grep -q bpf \
+            || clang --target=bpf -print-targets 2>&1 | grep -q bpf \
+            || (echo "ERROR: no BPF-capable clang found" && exit 1)
           if ! pkg-config --exists libbpf 2>/dev/null; then
-            echo "libbpf-dev not found, using vendored headers"
             bash scripts/install_libbpf_headers.sh
           fi
 
@@ -125,10 +125,18 @@ jobs:
       - name: Build all platforms
         run: make build-all
 
-      - name: Darwin nosec build matrix
+      - name: Build darwin amd64 (nosec)
         run: |
-          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go test -tags nosec ./internal/kernel/... -c
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go test -tags nosec ./internal/kernel/... -c
+          GOOS=darwin GOARCH=amd64 go build -tags nosec ./...
+
+      - name: Build darwin arm64 (nosec)
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -tags nosec ./...
+
+      - name: Build darwin arm64 (full, requires ESF SDK)
+        if: runner.os == 'macOS'
+        run: |
+          GOOS=darwin GOARCH=arm64 go build ./...
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
