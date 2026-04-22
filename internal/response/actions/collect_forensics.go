@@ -1,10 +1,13 @@
 package actions
 
 import (
+	"archive/tar"
 	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -199,7 +202,7 @@ func (c *ForensicCollector) collectNetworkState() []NetworkConnection {
 	if runtime.GOOS == "linux" {
 		return parseProcNet("tcp", "/proc/net/tcp")
 	}
-	// other OS: return empty
+	// non-Linux: /proc is unavailable; extend with eBPF, iproute, or per-OS net libraries if required.
 	return nil
 }
 
@@ -228,6 +231,69 @@ func (c *ForensicCollector) collectOpenFiles(ctx context.Context) []OpenFileInfo
 }
 
 func (c *ForensicCollector) compressDir(dir string) error {
-	_ = dir
-	return nil
+	if dir == "" {
+		return nil
+	}
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return err
+	}
+	tgz := dir + ".tar.gz"
+	f, err := os.Create(tgz)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gw := gzip.NewWriter(f)
+	defer gw.Close()
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			hdr, err := tar.FileInfoHeader(info, "")
+			if err != nil {
+				return err
+			}
+			hdr.Name = rel + string(filepath.Separator)
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+			return nil
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = rel
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		sf, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		_, cpyErr := io.Copy(tw, sf)
+		_ = sf.Close()
+		return cpyErr
+	})
 }
