@@ -1,0 +1,23 @@
+playbooks:
+  - id: "PB-002"
+    name: "Ransomware Containment (integration)"
+    triggers:
+      - technique: "T1486"
+        min_severity: P0
+    approval_required: false
+    actions:
+      - action: snapshot_create
+        params:
+          reason: "Pre-isolation snapshot"
+      - action: network_isolate
+        params:
+          allow_list: ["{{agent_ip}}"]
+          duration_minutes: 60
+      - action: collect_forensics
+        params:
+          collect: [process_tree, memory_dump, open_files, network_connections]
+      - action: alert
+        params:
+          channel: "soc"
+          priority: "P0"
+          page: true
