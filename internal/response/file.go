@@ -66,23 +66,23 @@ func NewFileHandler(logger *zap.Logger, quarantineDir string, encryptionKey []by
 func (h *FileHandler) Execute(ctx context.Context, params map[string]interface{}) (*StepResult, error) {
 	srcPath := stringParam(params, "path")
 	if srcPath == "" {
-		return failResult(ActionQuarantineFile, "path parameter required"),
+		return failResult(OpQuarantineFile, "path parameter required"),
 			fmt.Errorf("file handler: missing path param")
 	}
 
 	info, err := os.Stat(srcPath)
 	if err != nil {
-		return failResult(ActionQuarantineFile, fmt.Sprintf("stat %s: %s", srcPath, err)),
+		return failResult(OpQuarantineFile, fmt.Sprintf("stat %s: %s", srcPath, err)),
 			fmt.Errorf("file handler: stat %s: %w", srcPath, err)
 	}
 	if info.IsDir() {
-		return failResult(ActionQuarantineFile, "cannot quarantine a directory"),
+		return failResult(OpQuarantineFile, "cannot quarantine a directory"),
 			fmt.Errorf("file handler: %s is a directory", srcPath)
 	}
 
 	hash, err := sha256File(srcPath)
 	if err != nil {
-		return failResult(ActionQuarantineFile, err.Error()), err
+		return failResult(OpQuarantineFile, err.Error()), err
 	}
 
 	baseName := fmt.Sprintf("%s_%s", time.Now().UTC().Format("20060102T150405Z"), filepath.Base(srcPath))
@@ -92,12 +92,12 @@ func (h *FileHandler) Execute(ctx context.Context, params map[string]interface{}
 	if len(h.encKey) == 32 {
 		nonce, encErr := h.encryptAndMove(srcPath, dstPath)
 		if encErr != nil {
-			return failResult(ActionQuarantineFile, encErr.Error()), encErr
+			return failResult(OpQuarantineFile, encErr.Error()), encErr
 		}
 		nonceHex = hex.EncodeToString(nonce)
 	} else {
 		if mvErr := moveFile(srcPath, dstPath); mvErr != nil {
-			return failResult(ActionQuarantineFile, mvErr.Error()), mvErr
+			return failResult(OpQuarantineFile, mvErr.Error()), mvErr
 		}
 	}
 
@@ -119,7 +119,7 @@ func (h *FileHandler) Execute(ctx context.Context, params map[string]interface{}
 		h.logger.Error("failed to write quarantine manifest", zap.Error(err))
 	}
 
-	return okResult(ActionQuarantineFile,
+	return okResult(OpQuarantineFile,
 		fmt.Sprintf("quarantined %s → %s (sha256:%s)", srcPath, dstPath, hash[:16])), nil
 }
 

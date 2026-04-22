@@ -21,10 +21,10 @@ import (
 //   - macOS: xattr quarantine flag (com.apple.quarantine)
 //   - Windows: AppLocker hash rules via PowerShell
 type BlockHashHandler struct {
-	logger   *zap.Logger
-	dbPath   string
-	mu       sync.Mutex
-	blocked  map[string]blockEntry
+	logger  *zap.Logger
+	dbPath  string
+	mu      sync.Mutex
+	blocked map[string]blockEntry
 }
 
 type blockEntry struct {
@@ -53,7 +53,7 @@ func NewBlockHashHandler(logger *zap.Logger, dbPath string) *BlockHashHandler {
 func (h *BlockHashHandler) Execute(ctx context.Context, params map[string]interface{}) (*StepResult, error) {
 	hash := stringParam(params, "hash")
 	if hash == "" {
-		return failResult(ActionBlockHash, "hash parameter required"),
+		return failResult(OpBlockHash, "hash parameter required"),
 			fmt.Errorf("block hash: missing hash param")
 	}
 	hash = strings.ToLower(hash)
@@ -77,7 +77,7 @@ func (h *BlockHashHandler) Execute(ctx context.Context, params map[string]interf
 		h.logger.Warn("OS-level block failed (deny-list still updated)", zap.Error(err))
 	}
 
-	return okResult(ActionBlockHash, fmt.Sprintf("hash %s blocked", hash[:16])), nil
+	return okResult(OpBlockHash, fmt.Sprintf("hash %s blocked", hash[:16])), nil
 }
 
 // Rollback removes the hash from the deny-list.

@@ -23,25 +23,25 @@ import (
 // ForensicsManifest describes the contents and chain of custody for a
 // forensics collection package.
 type ForensicsManifest struct {
-	PackageID   string            `json:"package_id"`
-	AlertID     string            `json:"alert_id"`
-	Hostname    string            `json:"hostname"`
-	Platform    string            `json:"platform"`
-	CollectedAt time.Time         `json:"collected_at"`
-	CollectedBy string            `json:"collected_by"`
-	Artifacts   []ArtifactRecord  `json:"artifacts"`
-	SHA256      string            `json:"sha256"`
-	Encrypted   bool              `json:"encrypted"`
+	PackageID   string           `json:"package_id"`
+	AlertID     string           `json:"alert_id"`
+	Hostname    string           `json:"hostname"`
+	Platform    string           `json:"platform"`
+	CollectedAt time.Time        `json:"collected_at"`
+	CollectedBy string           `json:"collected_by"`
+	Artifacts   []ArtifactRecord `json:"artifacts"`
+	SHA256      string           `json:"sha256"`
+	Encrypted   bool             `json:"encrypted"`
 }
 
 // ArtifactRecord describes a single artifact collected during forensics.
 type ArtifactRecord struct {
-	Type     string `json:"type"`
-	Path     string `json:"path"`
-	SHA256   string `json:"sha256,omitempty"`
-	Size     int64  `json:"size"`
-	Collected bool  `json:"collected"`
-	Error    string `json:"error,omitempty"`
+	Type      string `json:"type"`
+	Path      string `json:"path"`
+	SHA256    string `json:"sha256,omitempty"`
+	Size      int64  `json:"size"`
+	Collected bool   `json:"collected"`
+	Error     string `json:"error,omitempty"`
 }
 
 // ForensicsHandler implements ActionHandler for comprehensive evidence
@@ -76,7 +76,7 @@ func (h *ForensicsHandler) Execute(ctx context.Context, params map[string]interf
 	pid, _ := intParam(params, "pid")
 
 	if err := os.MkdirAll(h.outputDir, 0o750); err != nil {
-		return failResult(ActionCollectForensics, err.Error()),
+		return failResult(OpCollectForensics, err.Error()),
 			fmt.Errorf("forensics handler: create output dir: %w", err)
 	}
 
@@ -84,7 +84,7 @@ func (h *ForensicsHandler) Execute(ctx context.Context, params map[string]interf
 	packageID := fmt.Sprintf("dfir_%s_%s", alertID, ts)
 	workDir := filepath.Join(h.outputDir, packageID)
 	if err := os.MkdirAll(workDir, 0o750); err != nil {
-		return failResult(ActionCollectForensics, err.Error()),
+		return failResult(OpCollectForensics, err.Error()),
 			fmt.Errorf("forensics handler: create work dir: %w", err)
 	}
 
@@ -107,7 +107,7 @@ func (h *ForensicsHandler) Execute(ctx context.Context, params map[string]interf
 	// Package into tarball.
 	tarPath := filepath.Join(h.outputDir, packageID+".tar.gz")
 	if err := createTarGz(tarPath, workDir); err != nil {
-		return failResult(ActionCollectForensics, fmt.Sprintf("create tarball: %s", err)),
+		return failResult(OpCollectForensics, fmt.Sprintf("create tarball: %s", err)),
 			fmt.Errorf("forensics handler: tar: %w", err)
 	}
 
@@ -156,7 +156,7 @@ func (h *ForensicsHandler) Execute(ctx context.Context, params map[string]interf
 		}
 	}
 
-	return okResult(ActionCollectForensics,
+	return okResult(OpCollectForensics,
 		fmt.Sprintf("forensics package %s: %d/%d artifacts collected, saved to %s",
 			packageID, collected, len(artifacts), finalPath)), nil
 }
