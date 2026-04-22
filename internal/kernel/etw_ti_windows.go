@@ -4,9 +4,11 @@ package kernel
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -17,6 +19,8 @@ import (
 type tiCapability struct {
 	probed atomic.Bool
 	ok     atomic.Bool
+	status atomic.Value // string
+	reason atomic.Value // string
 }
 
 var threatIntelGUID = windows.GUID{
@@ -48,27 +52,106 @@ type TIEvent struct {
 func (c *tiCapability) set(ok bool) {
 	c.probed.Store(true)
 	c.ok.Store(ok)
+	if ok {
+		c.status.Store("active_unprivileged")
+		c.reason.Store("")
+	}
 }
 
 func (c *tiCapability) enabled() bool {
 	return c.probed.Load() && c.ok.Load()
 }
 
+func (c *tiCapability) setStatus(status, reason string) {
+	c.status.Store(status)
+	c.reason.Store(reason)
+}
+
+func (c *tiCapability) getStatus() (string, string) {
+	s, _ := c.status.Load().(string)
+	r, _ := c.reason.Load().(string)
+	return s, r
+}
+
 func (d *ETWDriver) probeThreatIntelProviders() bool {
 	if len(d.sessions) == 0 {
 		d.tiCap.set(false)
+		d.tiCap.setStatus("disabled", "no_etw_session")
+		d.emitTIStatusEvent()
+		return false
+	}
+	if err := enableSeDebugPrivilege(); err != nil {
+		d.tiCap.setStatus("degraded_no_privilege", err.Error())
+		d.emitTIStatusEvent()
 		return false
 	}
 	if err := trySubscribeETWTI(d.sessions[0]); err == nil {
 		d.tiCap.set(true)
+		d.tiCap.setStatus("active_unprivileged", "")
+		d.emitTIStatusEvent()
 		return true
 	}
 	if err := ensureTIPPLService(); err == nil {
 		d.tiCap.set(true)
+		d.tiCap.setStatus("active_ppl", "")
+		d.emitTIStatusEvent()
 		return true
 	}
 	d.tiCap.set(false)
+	d.tiCap.setStatus("degraded_subscription_failed", "ti provider enable failed")
+	d.emitTIStatusEvent()
 	return false
+}
+
+// ETW-TI Provider: Microsoft-Windows-Threat-Intelligence
+// Full PPL (Protected Process Light) subscription requires:
+//  1. An ELAM (Early Launch Anti-Malware) driver signed by Microsoft
+//  2. Membership in Microsoft Virus Initiative (MVI)
+//  3. WHQL signing of the ELAM driver
+//  4. SERVICE_PROTECTED_ANTIMALWARE_LIGHT service type
+//
+// Fallback (implemented here): SeDebugPrivilege subscription
+//   - Works on Windows 10/11 with admin + SeDebugPrivilege
+//   - Does NOT receive all TI events (some opcodes PPL-only)
+//   - Sufficient for development and testing
+//
+// Production path: integrate ELAM driver via etw_ti_service_windows.go
+// once MVI membership and WHQL signing are obtained.
+func enableSeDebugPrivilege() error {
+	var tok windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_ADJUST_PRIVILEGES|windows.TOKEN_QUERY, &tok); err != nil {
+		return err
+	}
+	defer tok.Close()
+	var luid windows.LUID
+	if err := windows.LookupPrivilegeValue(nil, windows.StringToUTF16Ptr("SeDebugPrivilege"), &luid); err != nil {
+		return err
+	}
+	tp := windows.Tokenprivileges{
+		PrivilegeCount: 1,
+	}
+	tp.Privileges[0].Luid = luid
+	tp.Privileges[0].Attributes = windows.SE_PRIVILEGE_ENABLED
+	if err := windows.AdjustTokenPrivileges(tok, false, &tp, 0, nil, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *ETWDriver) emitTIStatusEvent() {
+	st, rsn := d.tiCap.getStatus()
+	env := map[string]interface{}{
+		"type":      "ti_status",
+		"timestamp": time.Now().UTC(),
+		"agent_id":  d.agentID,
+		"status":    st,
+		"reason":    rsn,
+	}
+	if d.buf != nil {
+		if b, err := json.Marshal(env); err == nil {
+			_ = d.buf.Write(b)
+		}
+	}
 }
 
 func trySubscribeETWTI(session *etwSession) error {
