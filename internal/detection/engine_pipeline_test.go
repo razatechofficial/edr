@@ -16,7 +16,7 @@ func TestEngineProcessAndDedup(t *testing.T) {
 		running: true,
 		alertCh: make(chan *events.Alert, 16),
 		scorer:  NewScoringEngine(),
-		deduper: NewAlertDeduper(2 * time.Second),
+		deduper: NewAlertDeduper(2*time.Second, ""),
 	}
 	ev := map[string]interface{}{
 		"event_type":  "process",

@@ -1,0 +1,9 @@
+goos: darwin
+goarch: amd64
+pkg: github.com/razatechofficial/edr/internal/detection
+cpu: Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
+BenchmarkDetectionEngine_Process-12    	 1670725	      3738 ns/op
+BenchmarkDetectionEngine_Process-12    	 1431750	      4678 ns/op
+BenchmarkDetectionEngine_Process-12    	 1494352	      4449 ns/op
+PASS
+ok  	github.com/razatechofficial/edr/internal/detection	32.503s
