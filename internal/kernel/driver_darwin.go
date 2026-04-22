@@ -12,10 +12,92 @@ package kernel
 #include <string.h>
 
 extern void goESFEventCallback(int eventType, int pid, int ppid, int uid, int gid,
-    const char *comm, const char *path, const char *args);
+    const char *comm, const char *path, const char *exec_args, const char *exec_env);
 extern int goESFAuthCallback(int eventType, int pid, const char *comm, const char *path);
 
 static es_client_t *_esf_client = NULL;
+
+#define ESF_ARG_SEP ((char)0x1e)
+
+static char *esf_join_exec_args(const es_message_t *msg) {
+    if (msg->event_type != ES_EVENT_TYPE_AUTH_EXEC && msg->event_type != ES_EVENT_TYPE_NOTIFY_EXEC) {
+        return strdup("");
+    }
+    const es_event_exec_t *ex = &msg->event.exec;
+    size_t cap = 512;
+    size_t len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        return strdup("");
+    }
+    buf[0] = '\0';
+    size_t n = es_exec_arg_count(ex);
+    for (size_t i = 0; i < n; i++) {
+        es_string_token_t t = es_exec_arg(ex, i);
+        if (t.data == NULL || t.length == 0) {
+            continue;
+        }
+        size_t add = t.length + (len > 0 ? 1u : 0u);
+        if (len + add + 1 > cap) {
+            while (len + add + 1 > cap) {
+                cap *= 2;
+            }
+            char *nb = (char *)realloc(buf, cap);
+            if (!nb) {
+                free(buf);
+                return strdup("");
+            }
+            buf = nb;
+        }
+        if (len > 0) {
+            buf[len++] = ESF_ARG_SEP;
+        }
+        memcpy(buf + len, t.data, t.length);
+        len += t.length;
+        buf[len] = '\0';
+    }
+    return buf;
+}
+
+static char *esf_join_exec_env(const es_message_t *msg) {
+    if (msg->event_type != ES_EVENT_TYPE_AUTH_EXEC && msg->event_type != ES_EVENT_TYPE_NOTIFY_EXEC) {
+        return strdup("");
+    }
+    const es_event_exec_t *ex = &msg->event.exec;
+    size_t cap = 1024;
+    size_t len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        return strdup("");
+    }
+    buf[0] = '\0';
+    size_t n = es_exec_env_count(ex);
+    for (size_t i = 0; i < n; i++) {
+        es_string_token_t t = es_exec_env(ex, i);
+        if (t.data == NULL || t.length == 0) {
+            continue;
+        }
+        size_t add = t.length + (len > 0 ? 1u : 0u);
+        if (len + add + 1 > cap) {
+            while (len + add + 1 > cap) {
+                cap *= 2;
+            }
+            char *nb = (char *)realloc(buf, cap);
+            if (!nb) {
+                free(buf);
+                return strdup("");
+            }
+            buf = nb;
+        }
+        if (len > 0) {
+            buf[len++] = ESF_ARG_SEP;
+        }
+        memcpy(buf + len, t.data, t.length);
+        len += t.length;
+        buf[len] = '\0';
+    }
+    return buf;
+}
 
 static char* esf_copy_string(es_string_token_t tok) {
     if (tok.length == 0 || tok.data == NULL) {
@@ -79,6 +161,26 @@ static char* esf_event_path(const es_message_t *msg) {
         return esf_copy_string(msg->event.signal.target->executable->path);
     case ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE:
         return esf_copy_string(msg->event.remote_thread_create.target->executable->path);
+#ifdef ES_EVENT_TYPE_NOTIFY_BIND
+    case ES_EVENT_TYPE_NOTIFY_BIND:
+        return esf_copy_string(msg->process->executable->path);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_CONNECT
+    case ES_EVENT_TYPE_NOTIFY_CONNECT:
+        return esf_copy_string(msg->process->executable->path);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR
+    case ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR:
+        return esf_copy_string(msg->event.deleteextattr.target->path);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_ADD
+    case ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_ADD:
+        return esf_copy_string(msg->process->executable->path);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_REMOVE
+    case ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_REMOVE:
+        return esf_copy_string(msg->process->executable->path);
+#endif
     default:
         return strdup("");
     }
@@ -103,8 +205,18 @@ static void esf_handle_message(es_client_t *client, const es_message_t *msg) {
         }
     }
 
+    char *exec_args = esf_join_exec_args(msg);
+    char *exec_env = esf_join_exec_env(msg);
+    if (!exec_args) {
+        exec_args = strdup("");
+    }
+    if (!exec_env) {
+        exec_env = strdup("");
+    }
     goESFEventCallback((int)msg->event_type, (int)pid, (int)ppid,
-        (int)uid, (int)gid, comm, path, "");
+        (int)uid, (int)gid, comm, path, exec_args, exec_env);
+    free(exec_args);
+    free(exec_env);
 
     free(comm);
     free(path);
@@ -153,6 +265,21 @@ static int esf_subscribe_all(void) {
         ES_EVENT_TYPE_NOTIFY_MMAP,
         ES_EVENT_TYPE_NOTIFY_MPROTECT,
         ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE,
+#ifdef ES_EVENT_TYPE_NOTIFY_BIND
+        ES_EVENT_TYPE_NOTIFY_BIND,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_CONNECT
+        ES_EVENT_TYPE_NOTIFY_CONNECT,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR
+        ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_ADD
+        ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_ADD,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_REMOVE
+        ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_REMOVE,
+#endif
     };
     es_return_t ret = es_subscribe(_esf_client, evts, sizeof(evts)/sizeof(evts[0]));
     return (ret == ES_RETURN_SUCCESS) ? 0 : -1;

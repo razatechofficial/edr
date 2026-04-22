@@ -6,12 +6,14 @@ import "C"
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
 //export goESFEventCallback
 func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C.int,
-	comm *C.char, pathStr *C.char, args *C.char) {
+	comm *C.char, pathStr *C.char, execArgs *C.char, execEnv *C.char) {
 
 	d := globalESF.Load()
 	if d == nil {
@@ -57,6 +59,10 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 	}
 
 	pathGo := safeGoString(pathStr)
+	argTok := safeGoString(execArgs)
+	envTok := safeGoString(execEnv)
+	// C bridge uses ASCII RS (0x1e) between argv/env tokens; expose human spacing in "args".
+	argsDisplay := strings.ReplaceAll(argTok, "\x1e", " ")
 	envelope := map[string]interface{}{
 		"type":      evtType,
 		"timestamp": time.Now().UTC(),
@@ -69,8 +75,10 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 		"gid":       int(gid),
 		"comm":      safeGoString(comm),
 		"path":      pathGo,
-		"args":      safeGoString(args),
+		"args":      argsDisplay,
+		"exec_env":  envTok,
 	}
+	classifyAppleScriptEnvelope(envelope, pathGo, argsDisplay)
 	if esfIsExecEvent(int(eventType)) {
 		if pathGo != "" {
 			tid, cdh, flg := esfExecSigningInfo(pathGo)
@@ -81,6 +89,7 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 				envelope["image_cdhash"] = cdh
 			}
 			envelope["signing_flags"] = flg
+			envelope["signing_status"] = esfSigningStatus(flg)
 		}
 	}
 
@@ -95,6 +104,25 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 		return
 	}
 	d.processed.Add(1)
+}
+
+func classifyAppleScriptEnvelope(envelope map[string]interface{}, pathGo, args string) {
+	base := strings.ToLower(filepath.Base(pathGo))
+	if !strings.Contains(base, "osascript") && !strings.Contains(base, "osacompile") && !strings.Contains(strings.ToLower(args), "-e") {
+		return
+	}
+	tags := []string{"applescript"}
+	if strings.Contains(strings.ToLower(args), "-e") {
+		tags = append(tags, "inline_script")
+	}
+	envelope["tags"] = strings.Join(tags, ",")
+	if p, ok := envelope["path"].(string); ok {
+		lp := strings.ToLower(p)
+		if strings.Contains(lp, "chrome") || strings.Contains(lp, "safari") || strings.Contains(lp, "firefox") ||
+			strings.Contains(lp, "outlook") || strings.Contains(lp, "mail") || strings.Contains(lp, "word") || strings.Contains(lp, "excel") {
+			envelope["severity"] = "P1"
+		}
+	}
 }
 
 //export goESFAuthCallback
@@ -148,6 +176,18 @@ func goESFAuthCallback(eventType C.int, pid C.int, comm *C.char, pathStr *C.char
 		d.cache.set(pathKey, AuthAllow)
 		return 0
 	}
+}
+
+// esfSigningStatus maps SecCode signature flags to a coarse signed/adhoc/unsigned label.
+func esfSigningStatus(flags uint32) string {
+	const secCodeSignatureAdhoc = 0x00000002
+	if flags == 0 {
+		return "unsigned"
+	}
+	if flags&secCodeSignatureAdhoc != 0 {
+		return "adhoc"
+	}
+	return "signed"
 }
 
 func safeGoString(s *C.char) string {
