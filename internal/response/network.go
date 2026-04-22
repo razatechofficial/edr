@@ -43,16 +43,16 @@ func (h *NetworkHandler) Execute(ctx context.Context, params map[string]interfac
 	switch mode {
 	case "isolate":
 		if err := h.isolate(ctx); err != nil {
-			return failResult(ActionNetworkIsolate, err.Error()), err
+			return failResult(OpNetworkIsolate, err.Error()), err
 		}
-		return okResult(ActionNetworkIsolate, "host network isolated"), nil
+		return okResult(OpNetworkIsolate, "host network isolated"), nil
 	case "release":
 		if err := h.release(ctx); err != nil {
-			return failResult(ActionNetworkRelease, err.Error()), err
+			return failResult(OpNetworkRelease, err.Error()), err
 		}
-		return okResult(ActionNetworkRelease, "host network released"), nil
+		return okResult(OpNetworkRelease, "host network released"), nil
 	default:
-		return failResult(ActionNetworkIsolate, fmt.Sprintf("unknown network mode %q", mode)),
+		return failResult(OpNetworkIsolate, fmt.Sprintf("unknown network mode %q", mode)),
 			fmt.Errorf("network handler: unknown mode %q", mode)
 	}
 }

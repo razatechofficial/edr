@@ -60,12 +60,12 @@ func NewMemoryHandler(logger *zap.Logger, outputDir string, encryptionKey []byte
 func (h *MemoryHandler) Execute(ctx context.Context, params map[string]interface{}) (*StepResult, error) {
 	pid, err := intParam(params, "pid")
 	if err != nil || pid <= 0 {
-		return failResult(ActionMemoryDump, "valid pid required"),
+		return failResult(OpMemoryDump, "valid pid required"),
 			fmt.Errorf("memory handler: invalid pid: %w", err)
 	}
 
 	if err := os.MkdirAll(h.outputDir, 0o750); err != nil {
-		return failResult(ActionMemoryDump, err.Error()),
+		return failResult(OpMemoryDump, err.Error()),
 			fmt.Errorf("memory handler: create output dir: %w", err)
 	}
 
@@ -84,7 +84,7 @@ func (h *MemoryHandler) Execute(ctx context.Context, params map[string]interface
 		err = fmt.Errorf("memory dump not supported on %s", runtime.GOOS)
 	}
 	if err != nil {
-		return failResult(ActionMemoryDump, err.Error()), err
+		return failResult(OpMemoryDump, err.Error()), err
 	}
 
 	if len(h.encKey) == 32 {
@@ -118,7 +118,7 @@ func (h *MemoryHandler) Execute(ctx context.Context, params map[string]interface
 		_ = os.WriteFile(metaPath, metaData, 0o640)
 	}
 
-	return okResult(ActionMemoryDump,
+	return okResult(OpMemoryDump,
 		fmt.Sprintf("memory dump for pid %d saved to %s (%d bytes)", pid, dumpPath, sz)), nil
 }
 
