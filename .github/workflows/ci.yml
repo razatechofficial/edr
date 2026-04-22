@@ -23,6 +23,16 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Install bpftool (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y linux-tools-generic linux-tools-$(uname -r) \
+            || sudo apt-get install -y bpftool
+
+      - name: Generate vmlinux.h
+        run: bash scripts/gen_vmlinux.sh
+
       - name: Build agent
         run: make build
 
@@ -94,6 +104,11 @@ jobs:
 
       - name: Build all platforms
         run: make build-all
+
+      - name: Darwin nosec build matrix
+        run: |
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go test -tags nosec ./internal/kernel/... -c
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go test -tags nosec ./internal/kernel/... -c
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4

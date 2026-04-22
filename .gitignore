@@ -52,6 +52,7 @@ models/network_train_out/
 !docs/*.md
 /bin/
 /alerts/
+platform/linux/ebpf/vmlinux.h
 
 # Editor/IDE
 # .idea/
