@@ -1,0 +1,117 @@
+chains:
+  - id: "CHAIN-001"
+    name: "Office App Spawning Shell"
+    description: "Office application spawning command interpreter"
+    technique: "T1566.001"
+    tactic: "Initial Access"
+    severity: "P1"
+    confidence: 0.85
+    window_seconds: 30
+    steps:
+      - id: step1
+        event_type: process_creation
+        conditions:
+          Image|endswith:
+            - "\\WINWORD.EXE"
+            - "\\EXCEL.EXE"
+            - "\\POWERPNT.EXE"
+            - "\\OUTLOOK.EXE"
+            - "\\AcroRd32.exe"
+      - id: step2
+        event_type: process_creation
+        parent_matches: step1
+        conditions:
+          Image|endswith:
+            - "\\cmd.exe"
+            - "\\powershell.exe"
+            - "\\wscript.exe"
+            - "\\cscript.exe"
+            - "\\mshta.exe"
+
+  - id: "CHAIN-002"
+    name: "PowerShell Download + Execute"
+    technique: "T1059.001"
+    tactic: "Execution"
+    severity: "P1"
+    confidence: 0.8
+    window_seconds: 60
+    steps:
+      - id: step1
+        event_type: process_creation
+        conditions:
+          Image|endswith: "\\powershell.exe"
+          CommandLine|contains:
+            - "DownloadString"
+            - "DownloadFile"
+            - "WebClient"
+            - "Invoke-Expression"
+      - id: step2
+        event_type: network_connection
+        same_pid: step1
+        conditions:
+          DestinationPort:
+            - "8080"
+            - "8443"
+
+  - id: "CHAIN-003"
+    name: "Ransomware Pattern"
+    technique: "T1486"
+    tactic: "Impact"
+    severity: "P0"
+    confidence: 0.95
+    window_seconds: 10
+    steps:
+      - id: step1
+        event_type: file_event
+        count_threshold: 20
+        conditions:
+          operation: rename
+
+  - id: "CHAIN-004"
+    name: "LSASS Dump via Process Access"
+    technique: "T1003.001"
+    tactic: "Credential Access"
+    severity: "P0"
+    confidence: 0.95
+    window_seconds: 5
+    steps:
+      - id: step1
+        event_type: process_injection
+        conditions:
+          TargetProcess: "lsass.exe"
+
+  - id: "CHAIN-005"
+    name: "Lateral Movement via SMB + Remote Exec"
+    technique: "T1021.002"
+    tactic: "Lateral Movement"
+    severity: "P1"
+    confidence: 0.85
+    window_seconds: 120
+    steps:
+      - id: step1
+        event_type: network_connection
+        conditions:
+          DestinationPort: "445"
+      - id: step2
+        event_type: process_creation
+        conditions:
+          Image|endswith: "\\services.exe"
+          ParentImage|endswith: "\\services.exe"
+
+  - id: "CHAIN-006"
+    name: "Credential Access then Lateral Movement"
+    technique: "T1078"
+    tactic: "Lateral Movement"
+    severity: "P0"
+    confidence: 0.9
+    window_seconds: 300
+    steps:
+      - id: step1
+        event_type: credential_access
+      - id: step2
+        event_type: network_connection
+        conditions:
+          DestinationPort:
+            - "445"
+            - "3389"
+            - "22"
