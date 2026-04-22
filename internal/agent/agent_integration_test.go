@@ -7,9 +7,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/rules"
+	"github.com/razatechofficial/edr/internal/schema"
 )
+
+type staticProcessCollector struct {
+	event collector.Telemetry
+}
+
+func (s staticProcessCollector) Name() string { return "static_process" }
+
+func (s staticProcessCollector) Collect(context.Context) ([]collector.Telemetry, error) {
+	return []collector.Telemetry{s.event}, nil
+}
 
 func TestProcessCycleWritesAlertFile(t *testing.T) {
 	dir := t.TempDir()
@@ -34,10 +46,25 @@ func TestProcessCycleWritesAlertFile(t *testing.T) {
 		},
 	}
 
-	a, err := NewForTesting(cfg, rs)
-	if err != nil {
-		t.Fatalf("new test agent: %v", err)
+	mockProcess := &schema.ProcessEvent{
+		BaseEvent: schema.BaseEvent{
+			SchemaVersion: schema.SchemaVersionV1,
+			EventType:     schema.EventProcess,
+			EndpointID:    cfg.Service.EndpointID,
+			Timestamp:     time.Now().UTC(),
+			Hostname:      "test-host",
+			OS:            "darwin",
+		},
+		PID:         os.Getpid(),
+		PPID:        os.Getppid(),
+		ProcessName: "test-process",
+		ProcessPath: os.Args[0],
+		CommandLine: os.Args[0],
+		User:        "tester",
 	}
+	a := NewForTestingWithCollectors(cfg, rs, []collector.Collector{
+		staticProcessCollector{event: collector.Telemetry{Process: mockProcess}},
+	})
 	if err := a.ProcessCycle(context.Background()); err != nil {
 		t.Fatalf("process cycle: %v", err)
 	}
