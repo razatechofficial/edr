@@ -50,6 +50,9 @@ type ProcessEvent struct {
 	MadviseAdvice int32  `json:"madvise_advice,omitempty"`
 	// ExecEnv holds environment entries joined with ASCII RS (0x1e) from ESF NOTIFY_EXEC / AUTH_EXEC.
 	ExecEnv string `json:"exec_env,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	Ancestors []AncestorInfo `json:"ancestors,omitempty"`
 }
 
 type FileEvent struct {
@@ -198,4 +201,48 @@ type TamperEvent struct {
 	Component string `json:"component,omitempty"`
 	ProgramID uint32 `json:"program_id,omitempty"`
 	Message   string `json:"message,omitempty"`
+}
+
+type AncestorInfo struct {
+	PID       uint32 `json:"pid,omitempty"`
+	Path      string `json:"path,omitempty"`
+	SigningID string `json:"signing_id,omitempty"`
+}
+
+type PersistenceEvent struct {
+	BaseEvent
+	Technique      string `json:"technique,omitempty"`
+	ExecutablePath string `json:"executable_path,omitempty"`
+	ItemType       string `json:"item_type,omitempty"`
+	IsLegacy       bool   `json:"is_legacy,omitempty"`
+	IsManaged      bool   `json:"is_managed,omitempty"`
+	UID            uint32 `json:"uid,omitempty"`
+	PID            uint32 `json:"pid,omitempty"`
+	ProcessPath    string `json:"process_path,omitempty"`
+}
+
+type PrivacyEvent struct {
+	BaseEvent
+	Operation        string `json:"operation,omitempty"`
+	Service          string `json:"service,omitempty"`
+	AuthValue        int    `json:"auth_value,omitempty"`
+	AuthReason       string `json:"auth_reason,omitempty"`
+	AccessingPID     uint32 `json:"accessing_pid,omitempty"`
+	AccessingProcess string `json:"accessing_process,omitempty"`
+}
+
+type GatekeeperBypassEvent struct {
+	BaseEvent
+	FilePath      string `json:"file_path,omitempty"`
+	PID           uint32 `json:"pid,omitempty"`
+	ProcessPath   string `json:"process_path,omitempty"`
+	SigningStatus string `json:"signing_status,omitempty"`
+}
+
+type DroppedEventsEvent struct {
+	BaseEvent
+	EventClass string `json:"event_class,omitempty"`
+	GapSize    uint64 `json:"gap_size,omitempty"`
+	LastSeq    uint64 `json:"last_seq,omitempty"`
+	CurrentSeq uint64 `json:"current_seq,omitempty"`
 }

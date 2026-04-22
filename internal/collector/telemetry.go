@@ -18,6 +18,10 @@ type Telemetry struct {
 	Container *schema.ContainerEvent
 	SecPolicy *schema.SecurityPolicyEvent
 	Tamper    *schema.TamperEvent
+	Persistence *schema.PersistenceEvent
+	Privacy   *schema.PrivacyEvent
+	Gatekeeper *schema.GatekeeperBypassEvent
+	Dropped   *schema.DroppedEventsEvent
 	File      *schema.FileEvent
 	Fork      *schema.ForkEvent
 	Registry  *schema.RegistryEvent

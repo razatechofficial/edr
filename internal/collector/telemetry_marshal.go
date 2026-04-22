@@ -23,6 +23,10 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 		Container *schema.ContainerEvent         `json:"container,omitempty"`
 		SecPolicy *schema.SecurityPolicyEvent    `json:"security_policy,omitempty"`
 		Tamper    *schema.TamperEvent            `json:"tamper,omitempty"`
+		Persistence *schema.PersistenceEvent     `json:"persistence,omitempty"`
+		Privacy   *schema.PrivacyEvent           `json:"privacy,omitempty"`
+		Gatekeeper *schema.GatekeeperBypassEvent `json:"gatekeeper,omitempty"`
+		Dropped   *schema.DroppedEventsEvent     `json:"dropped_events,omitempty"`
 		File      *schema.FileEvent              `json:"file,omitempty"`
 		Fork      *schema.ForkEvent              `json:"fork,omitempty"`
 		Registry  *schema.RegistryEvent          `json:"registry,omitempty"`
@@ -49,6 +53,14 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 		w.Kind, w.SecPolicy = "security_policy", t.SecPolicy
 	case t.Tamper != nil:
 		w.Kind, w.Tamper = "tamper", t.Tamper
+	case t.Persistence != nil:
+		w.Kind, w.Persistence = "persistence", t.Persistence
+	case t.Privacy != nil:
+		w.Kind, w.Privacy = "privacy", t.Privacy
+	case t.Gatekeeper != nil:
+		w.Kind, w.Gatekeeper = "gatekeeper_bypass", t.Gatekeeper
+	case t.Dropped != nil:
+		w.Kind, w.Dropped = "dropped_events", t.Dropped
 	case t.File != nil:
 		w.Kind, w.File = "file", t.File
 	case t.Fork != nil:
