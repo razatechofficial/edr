@@ -1,6 +1,7 @@
 package detection
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -9,15 +10,20 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
 	"github.com/razatechofficial/edr/internal/detection/rules"
 )
 
 type BehavioralEngine struct {
-	chains  []ChainDefinition
-	windows map[string]*ChainWindow
-	mu      sync.Mutex
+	chains     []ChainDefinition
+	windows    map[string]*ChainWindow
+	mu         sync.Mutex
+	logger     *zap.Logger
+	evictEvery time.Duration
+	evictStop  chan struct{}
+	evictOnce  sync.Once
 }
 
 type behavioralFile struct {
@@ -49,17 +55,75 @@ type ChainWindow struct {
 	ChainID   string
 	HostID    string
 	Steps     []interface{}
+	StepByID  map[string]interface{} // last event that matched a step id (for parent/same links)
 	LastMatch time.Time
 	ExpiresAt time.Time
 	StepIndex int
 }
 
-func NewBehavioralEngine(path string) (*BehavioralEngine, error) {
-	b := &BehavioralEngine{windows: make(map[string]*ChainWindow)}
+func NewBehavioralEngine(path string, logger *zap.Logger) (*BehavioralEngine, error) {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	b := &BehavioralEngine{
+		windows:    make(map[string]*ChainWindow),
+		logger:     logger,
+		evictEvery: 30 * time.Second,
+	}
 	if err := b.Reload(path); err != nil {
 		return nil, err
 	}
 	return b, nil
+}
+
+// SetEvictInterval overrides the 30s eviction ticker (tests).
+func (e *BehavioralEngine) SetEvictInterval(d time.Duration) {
+	if d > 0 {
+		e.evictEvery = d
+	}
+}
+
+// Start runs periodic expired-window eviction until ctx is cancelled.
+func (e *BehavioralEngine) Start(ctx context.Context) {
+	e.evictOnce.Do(func() {
+		if e.evictEvery <= 0 {
+			e.evictEvery = 30 * time.Second
+		}
+		e.evictStop = make(chan struct{})
+		go e.evictionLoop(ctx)
+	})
+}
+
+func (e *BehavioralEngine) evictionLoop(ctx context.Context) {
+	tick := time.NewTicker(e.evictEvery)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-e.evictStop:
+			return
+		case <-tick.C:
+			n := e.evictExpired()
+			if n > 0 && e.logger != nil {
+				e.logger.Debug("behavioral engine: evicted expired windows", zap.Int("count", n))
+			}
+		}
+	}
+}
+
+func (e *BehavioralEngine) evictExpired() int {
+	now := time.Now().UTC()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	cleared := 0
+	for key, w := range e.windows {
+		if w != nil && now.After(w.ExpiresAt) {
+			delete(e.windows, key)
+			cleared++
+		}
+	}
+	return cleared
 }
 
 func (e *BehavioralEngine) Reload(path string) error {
@@ -111,9 +175,12 @@ func (e *BehavioralEngine) Process(event interface{}) []Detection {
 			w = &ChainWindow{
 				ChainID:   c.ID,
 				HostID:    hostID,
+				StepByID:  make(map[string]interface{}),
 				ExpiresAt: now.Add(time.Duration(c.WindowSeconds) * time.Second),
 			}
 			e.windows[wkey] = w
+		} else if w.StepByID == nil {
+			w.StepByID = make(map[string]interface{})
 		}
 		step := c.Steps[w.StepIndex]
 		if !eventMatchesType(evm, step.EventType) {
@@ -122,7 +189,14 @@ func (e *BehavioralEngine) Process(event interface{}) []Detection {
 		if !matchConditions(evm, step.Conditions) {
 			continue
 		}
+		if w.StepByID == nil {
+			w.StepByID = make(map[string]interface{})
+		}
+		if !stepEnforcesLinks(step, evm, w, event) {
+			continue
+		}
 		w.Steps = append(w.Steps, event)
+		w.StepByID[step.ID] = event
 		w.LastMatch = now
 		w.ExpiresAt = now.Add(time.Duration(c.WindowSeconds) * time.Second)
 		w.StepIndex++
@@ -141,7 +215,7 @@ func (e *BehavioralEngine) Process(event interface{}) []Detection {
 				TechniqueID: c.Technique,
 				TacticName:  c.Tactic,
 				Source:      SourceBehavioral,
-				Event:       event,
+				Event:       EventPayloadFromInterface(event),
 				Context:     append([]interface{}(nil), w.Steps...),
 				Tags:        []string{"behavioral", strings.ToLower(c.Tactic)},
 				Description: c.Description,
@@ -150,6 +224,48 @@ func (e *BehavioralEngine) Process(event interface{}) []Detection {
 		}
 	}
 	return out
+}
+
+func stepEnforcesLinks(step ChainStep, evm map[string]interface{}, w *ChainWindow, event interface{}) bool {
+	if step.ParentMatches != "" {
+		ref, ok := w.StepByID[step.ParentMatches]
+		if !ok || ref == nil {
+			return false
+		}
+		refPID := eventMapPID(ref)
+		curPPID := ppidFromMap(evm)
+		if curPPID != refPID {
+			return false
+		}
+	}
+	if step.SamePID != "" {
+		ref, ok := w.StepByID[step.SamePID]
+		if !ok || ref == nil {
+			return false
+		}
+		if eventMapPID(event) != eventMapPID(ref) {
+			return false
+		}
+	}
+	return true
+}
+
+func eventMapPID(v interface{}) int {
+	if v == nil {
+		return 0
+	}
+	if m, ok := v.(map[string]interface{}); ok {
+		return atoiDefault(stringField(m, "pid", "PID"), 0)
+	}
+	m := rules.EventToMap(v)
+	if m == nil {
+		return 0
+	}
+	return atoiDefault(stringField(m, "pid", "PID"), 0)
+}
+
+func ppidFromMap(m map[string]interface{}) int {
+	return atoiDefault(stringField(m, "ppid", "PPID", "parent_pid", "ParentProcessId", "ParentPid"), 0)
 }
 
 func parseSeverity(s string) Severity {
