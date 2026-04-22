@@ -39,12 +39,12 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		if op := strings.ToLower(jsonString(raw, "operation")); op == "cgroup_attach" || op == "cgroup_mkdir" {
 			base.EventType = schema.EventProcess
 			ce := &schema.ContainerEvent{
-				BaseEvent:    base,
-				Operation:    op,
-				PID:          jsonInt(raw, "pid"),
-				ProcessName:  firstNonEmpty(jsonString(raw, "process_name"), jsonString(raw, "comm")),
-				Path:         jsonString(raw, "path"),
-				Mode:         jsonUint32(raw, "mode"),
+				BaseEvent:   base,
+				Operation:   op,
+				PID:         jsonInt(raw, "pid"),
+				ProcessName: firstNonEmpty(jsonString(raw, "process_name"), jsonString(raw, "comm")),
+				Path:        jsonString(raw, "path"),
+				Mode:        jsonUint32(raw, "mode"),
 			}
 			return &Telemetry{Container: ce}
 		}
@@ -61,10 +61,10 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		if op := strings.ToLower(jsonString(raw, "operation")); strings.Contains(op, "ebpf_program_missing") {
 			base.EventType = schema.EventProcess
 			te := &schema.TamperEvent{
-				BaseEvent:  base,
-				Component:  "ebpf_program",
-				ProgramID:  jsonUint32(raw, "program_id"),
-				Message:    op,
+				BaseEvent: base,
+				Component: "ebpf_program",
+				ProgramID: jsonUint32(raw, "program_id"),
+				Message:   op,
 			}
 			return &Telemetry{Tamper: te}
 		}
@@ -192,6 +192,23 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		de.LastSeq = jsonUint64(raw, "last_seq")
 		de.CurrentSeq = jsonUint64(raw, "current_seq")
 		return &Telemetry{Dropped: de}
+
+	case "ti_status":
+		base.EventType = schema.EventProcess
+		ts := &schema.TIStatusEvent{BaseEvent: base}
+		ts.Status = jsonString(raw, "status")
+		ts.Reason = jsonString(raw, "reason")
+		return &Telemetry{TIStatus: ts}
+
+	case "feature_status":
+		base.EventType = schema.EventProcess
+		fs := &schema.FeatureStatusEvent{BaseEvent: base}
+		features := map[string]bool{}
+		for _, k := range []string{"has_bpf_lsm", "has_cgroup_bpf", "has_btf"} {
+			features[k] = jsonInt(raw, k) == 1
+		}
+		fs.Features = features
+		return &Telemetry{FeatureStatus: fs}
 
 	case "fork":
 		base.EventType = schema.EventFork

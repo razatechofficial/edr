@@ -116,20 +116,20 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	zapLogger, _ := zap.NewProduction()
 
 	a := &Agent{
-		logger:     slog.Default(),
-		cfg:        cfg,
-		collectors: cols,
-		ruleSet:    rs,
-		eventSpool: spool.NewQueue[schema.ProcessEvent](),
-		alertSpool: spool.NewQueue[schema.Alert](),
-		detector:   detect.NewEngine(rs),
-		responder:  response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
-		writer:     alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
-		killAllow:      makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
-		zapLogger:      zapLogger,
-		userLookup:     users,
-		fileDedup:      collector.NewFileDeduper(0),
-		fileHashPool:   newFileHashPool(),
+		logger:       slog.Default(),
+		cfg:          cfg,
+		collectors:   cols,
+		ruleSet:      rs,
+		eventSpool:   spool.NewQueue[schema.ProcessEvent](),
+		alertSpool:   spool.NewQueue[schema.Alert](),
+		detector:     detect.NewEngine(rs),
+		responder:    response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
+		writer:       alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
+		killAllow:    makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		zapLogger:    zapLogger,
+		userLookup:   users,
+		fileDedup:    collector.NewFileDeduper(0),
+		fileHashPool: newFileHashPool(),
 	}
 	collector.LogMonitoringBootstrap(a.logger, cfg)
 
@@ -829,6 +829,26 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 					BaseEvent:   tel.Dropped.BaseEvent,
 					ProcessName: "dropped_events",
 					CommandLine: tel.Dropped.EventClass,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+			}
+			if tel.TIStatus != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.TIStatus.BaseEvent,
+					ProcessName: "ti_status",
+					CommandLine: tel.TIStatus.Status + ":" + tel.TIStatus.Reason,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+			}
+			if tel.FeatureStatus != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.FeatureStatus.BaseEvent,
+					ProcessName: "feature_status",
+					CommandLine: "feature_coverage",
 				}
 				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
 					return err
