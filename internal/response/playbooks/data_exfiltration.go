@@ -24,7 +24,7 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 		PlaybookSteps: []Step{
 			{
 				Name:     "network_isolate",
-				Action:   response.ActionNetworkIsolate,
+				Action:   response.OpNetworkIsolate,
 				Required: true,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -35,7 +35,7 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "suspend_process",
-				Action:   response.ActionSuspendProcess,
+				Action:   response.OpSuspendProcess,
 				Required: true,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -47,7 +47,7 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "network_forensics",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -59,7 +59,7 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "memory_dump",
-				Action:   response.ActionMemoryDump,
+				Action:   response.OpMemoryDump,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -71,7 +71,7 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "kill_process_tree",
-				Action:   response.ActionKillProcess,
+				Action:   response.OpKillProcess,
 				Required: true,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -85,7 +85,7 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "quarantine_tool",
-				Action:   response.ActionQuarantineFile,
+				Action:   response.OpQuarantineFile,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -98,7 +98,7 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "collect_forensics",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -110,7 +110,7 @@ func NewDataExfiltrationPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "alert_soc",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{

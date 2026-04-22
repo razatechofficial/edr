@@ -24,7 +24,7 @@ func NewCredentialDumpPlaybook() *BasePlaybook {
 		PlaybookSteps: []Step{
 			{
 				Name:     "suspend_dumping_process",
-				Action:   response.ActionSuspendProcess,
+				Action:   response.OpSuspendProcess,
 				Required: true,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -36,7 +36,7 @@ func NewCredentialDumpPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "memory_dump",
-				Action:   response.ActionMemoryDump,
+				Action:   response.OpMemoryDump,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -48,7 +48,7 @@ func NewCredentialDumpPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "kill_process",
-				Action:   response.ActionKillProcess,
+				Action:   response.OpKillProcess,
 				Required: true,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -62,7 +62,7 @@ func NewCredentialDumpPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "quarantine_tool",
-				Action:   response.ActionQuarantineFile,
+				Action:   response.OpQuarantineFile,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -75,7 +75,7 @@ func NewCredentialDumpPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "force_password_rotation",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -86,7 +86,7 @@ func NewCredentialDumpPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "block_tool_hash",
-				Action:   response.ActionBlockHash,
+				Action:   response.OpBlockHash,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -97,7 +97,7 @@ func NewCredentialDumpPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "collect_forensics",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
@@ -109,7 +109,7 @@ func NewCredentialDumpPlaybook() *BasePlaybook {
 			},
 			{
 				Name:     "alert_soc",
-				Action:   response.ActionCollectForensics,
+				Action:   response.OpCollectForensics,
 				Required: false,
 				Params: func(alert *events.Alert) map[string]interface{} {
 					return map[string]interface{}{
