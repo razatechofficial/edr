@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,9 +53,9 @@ type EngineConfig struct {
 	MLModelRansomware     string
 
 	// ML detection thresholds (0.0–1.0). Zero values fall back to defaults.
-	MLThresholdPE        float64
-	MLThresholdNetwork   float64
-	MLThresholdBehavior  float64
+	MLThresholdPE         float64
+	MLThresholdNetwork    float64
+	MLThresholdBehavior   float64
 	MLThresholdRansomware float64
 
 	// ONNX Runtime settings.
@@ -88,6 +90,9 @@ type Engine struct {
 	ml         *ml.Engine
 	llm        *llm.Engine
 	ragEngine  *rag.Engine
+	chain      *BehavioralEngine
+	scorer     *ScoringEngine
+	deduper    *AlertDeduper
 
 	cfg         EngineConfig
 	alertCh     chan *events.Alert
@@ -100,6 +105,11 @@ type Engine struct {
 	wg      sync.WaitGroup
 	stopCh  chan struct{}
 	llmWg   sync.WaitGroup
+
+	eventsProcessed   atomic.Uint64
+	detectionsEmitted atomic.Uint64
+	droppedEvents     atomic.Uint64
+	lastLatencyNanos  atomic.Int64
 }
 
 // NewEngine creates and initializes all detection layers. Layers whose
@@ -116,6 +126,8 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 		alertCh:     make(chan *events.Alert, cfg.WorkerCount*64),
 		logger:      logger,
 		stopCh:      make(chan struct{}),
+		scorer:      NewScoringEngine(),
+		deduper:     NewAlertDeduper(5 * time.Minute),
 	}
 
 	if cfg.IOCEnabled {
@@ -168,6 +180,12 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 			NewInjectionDetector(logger),
 			NewRATDetector(logger),
 			NewRansomwareDetector(logger),
+		}
+		chainPath := filepath.Join("rules", "behavioral", "chains.yml")
+		if ch, err := NewBehavioralEngine(chainPath); err == nil {
+			e.chain = ch
+		} else {
+			logger.Warn("engine: behavioral chain init failed", zap.Error(err))
 		}
 	}
 
@@ -310,12 +328,14 @@ func (e *Engine) Alerts() <-chan *events.Alert {
 //   - Layer 5 (ML): model inference when applicable (<15ms target)
 //   - Layer 6 (LLM): async deep analysis if layers 1-5 produced medium+ severity
 func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Alert {
+	start := time.Now()
 	e.mu.RLock()
 	if !e.running {
 		e.mu.RUnlock()
 		return nil
 	}
 	e.mu.RUnlock()
+	e.eventsProcessed.Add(1)
 
 	var (
 		resultMu sync.Mutex
@@ -411,6 +431,18 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 			}()
 		}
 	}
+	if e.chain != nil {
+		ds := e.chain.Process(event)
+		for _, d := range ds {
+			if e.scorer != nil {
+				e.scorer.Score(&d)
+			}
+			if e.deduper != nil && e.deduper.IsDuplicate(d) {
+				continue
+			}
+			collect([]*events.Alert{detectionToAlert(d)})
+		}
+	}
 
 	// Wait for layers 1-4 so ML (layer 5) can use prior behavioral alerts
 	// (e.g. ransomware indicators) for scoring.
@@ -443,6 +475,7 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 			default:
 				e.logger.Warn("engine: alert channel full, dropping alert",
 					zap.String("rule_id", a.RuleID))
+				e.droppedEvents.Add(1)
 			}
 		}
 	}
@@ -452,8 +485,56 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 	if e.llm != nil && e.cfg.LLMEnabled && shouldEscalateToLLM(alerts) {
 		e.escalateToLLM(event, alerts)
 	}
+	e.detectionsEmitted.Add(uint64(len(alerts)))
+	e.lastLatencyNanos.Store(time.Since(start).Nanoseconds())
 
 	return alerts
+}
+
+// Process implements DetectionEngineAPI without disrupting existing Evaluate users.
+func (e *Engine) Process(ctx context.Context, event interface{}) []Detection {
+	alerts := e.Evaluate(ctx, event)
+	out := make([]Detection, 0, len(alerts))
+	for _, a := range alerts {
+		out = append(out, alertToDetection(a))
+	}
+	return out
+}
+
+// Reload hot-reloads all rule-backed engines.
+func (e *Engine) Reload() error {
+	if e.sigma != nil {
+		if err := e.sigma.LoadRules(); err != nil {
+			return err
+		}
+	}
+	if e.yara != nil {
+		if err := e.yara.LoadRules(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Stats returns high-level runtime counters for monitoring.
+func (e *Engine) Stats() EngineStats {
+	rc := RuleCount{}
+	if e.sigma != nil {
+		rc.Sigma = e.sigma.Count()
+	}
+	if e.yara != nil {
+		rc.YARA = e.yara.Count()
+	}
+	if e.sequencer != nil {
+		rc.Behavioral = len(e.behavioral)
+	}
+	return EngineStats{
+		EventsProcessed:   e.eventsProcessed.Load(),
+		DetectionsEmitted: e.detectionsEmitted.Load(),
+		RulesLoaded:       rc,
+		ProcessingLatency: time.Duration(e.lastLatencyNanos.Load()),
+		DroppedEvents:     e.droppedEvents.Load(),
+	}
 }
 
 // IOCMatcher returns the IOC matcher used by layer 1, or nil if IOC
