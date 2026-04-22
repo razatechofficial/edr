@@ -54,8 +54,20 @@ func TestKillProcessAction_IncludeChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	ppid := uint32(parent.Process.Pid)
+	children, err := getChildPIDs(ctx, ppid)
+	if err != nil || len(children) < 1 {
+		_ = parent.Process.Kill()
+		_, _ = parent.Process.Wait()
+		t.Skip("no child PIDs visible for tree-kill test")
+	}
 	k := &KillProcessAction{PID: ppid, IncludeChildren: true}
 	if err := k.Execute(ctx); err != nil {
 		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	for _, cpid := range children {
+		if verifyPIDExists(cpid) {
+			t.Fatalf("child %d still live after tree kill (include_children)", cpid)
+		}
 	}
 }
