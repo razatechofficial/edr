@@ -92,7 +92,12 @@ func (a *NetworkIsolateAction) Execute(ctx context.Context) (rollback func(conte
 			return exec.CommandContext(rctx, "sh", "-c", "iptables-restore < "+backup).Run()
 		}
 	} else {
-		// darwin: document-only minimal rollback
+		// BLOCKER: macOS isolation uses pf(4). A production agent must load a dedicated anchor
+		// in /etc/pf.anchors (e.g. "edr_isolate") and reference it from /etc/pf.conf; toggling
+		// global packet filter rules without operator review is unsafe. This path does not
+		// run pfctl -E by default. Effective isolation typically requires running as root,
+		// a persistent anchor file, and matching pfctl -f reload semantics; the PrepareCommands
+		// list documents intended hook points. Rollback is a no-op here until a real anchor is wired.
 		backup := a.BackupPath
 		rollback = func(_ context.Context) error { return nil }
 		_ = backup

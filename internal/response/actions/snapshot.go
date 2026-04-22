@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Environment is the host hypervisor / cloud class.
@@ -25,6 +27,7 @@ const (
 // SnapshotAction is a pluggable volume snapshot; cloud calls are stubs without credentials.
 type SnapshotAction struct {
 	Reason string
+	Logger *zap.Logger
 }
 
 // Execute takes a best-effort snapshot in supported environments.
@@ -46,6 +49,11 @@ func (a *SnapshotAction) Execute(ctx context.Context) (err error) {
 		// No generic API without host integration
 		return nil
 	case EnvBareMetal:
+		if a.Logger != nil {
+			a.Logger.Warn("take_snapshot: bare metal or unknown environment has no built-in volume snapshot; enable cloud/VMware APIs to snapshot disks",
+				zap.String("reason", a.Reason),
+			)
+		}
 		return nil
 	}
 	return nil
