@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -296,6 +297,8 @@ type ETWDriver struct {
 	dropped   atomic.Uint64
 	processed atomic.Uint64
 	errors    atomic.Uint64
+
+	tiCap tiCapability
 }
 
 // globalETW holds the active ETWDriver for the event record callback.
@@ -365,6 +368,7 @@ func (d *ETWDriver) Start(ctx context.Context, buf *RingBuffer) error {
 
 	d.startTime = time.Now()
 	d.running.Store(true)
+	_ = d.probeThreatIntelProviders()
 	return nil
 }
 
@@ -591,6 +595,7 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 		d.decodeNetworkUserData(record, envelope)
 	case dnsClientGUID:
 		envelope["type"] = events.EventDNS
+		d.decodeDNSClient(record, envelope)
 	case wmiActivityGUID:
 		envelope["type"] = events.EventWMI
 		d.decodeOpaqueETW(record, envelope)
@@ -605,6 +610,9 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 		d.decodeOpaqueETW(record, envelope)
 	case taskSchedulerGUID:
 		envelope["type"] = events.EventTask
+		d.decodeOpaqueETW(record, envelope)
+	case threatIntelGUID:
+		envelope["type"] = "injection"
 		d.decodeOpaqueETW(record, envelope)
 	default:
 		envelope["type"] = events.EventProcess
@@ -657,27 +665,51 @@ func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]in
 	}
 }
 
+func ip4FromDWordLE(v uint32) string {
+	return net.IPv4(byte(v&0xff), byte((v>>8)&0xff), byte((v>>16)&0xff), byte((v>>24)&0xff)).String()
+}
+
 func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string]interface{}) {
 	ud := userDataSlice(record)
-	if ud == nil || len(ud) < 12 {
+	if ud == nil {
+		env["data_length"] = 0
 		return
 	}
 	env["data_length"] = len(ud)
+	// Kernel network provider layouts vary by OS build; try common IPv4 tuple placements.
+	if len(ud) >= 20 {
+		sport := binary.LittleEndian.Uint16(ud[8:10])
+		dport := binary.LittleEndian.Uint16(ud[10:12])
+		saddr := binary.LittleEndian.Uint32(ud[12:16])
+		daddr := binary.LittleEndian.Uint32(ud[16:20])
+		if saddr != 0 || daddr != 0 {
+			env["src"] = ip4FromDWordLE(saddr)
+			env["dst"] = ip4FromDWordLE(daddr)
+			env["src_port"] = int(sport)
+			env["dest_port"] = int(dport)
+			env["protocol"] = "tcp"
+			return
+		}
+	}
+	if len(ud) >= 16 {
+		saddr := binary.LittleEndian.Uint32(ud[4:8])
+		daddr := binary.LittleEndian.Uint32(ud[8:12])
+		if saddr != 0 && daddr != 0 {
+			env["src"] = ip4FromDWordLE(saddr)
+			env["dst"] = ip4FromDWordLE(daddr)
+			if len(ud) >= 14 {
+				env["src_port"] = int(binary.LittleEndian.Uint16(ud[12:14]))
+			}
+			if len(ud) >= 16 {
+				env["dest_port"] = int(binary.LittleEndian.Uint16(ud[14:16]))
+			}
+			env["protocol"] = "tcp"
+		}
+	}
 }
 
 func (d *ETWDriver) decodeOpaqueETW(record *etwEventRecord, env map[string]interface{}) {
-	ud := userDataSlice(record)
-	if ud == nil {
-		return
-	}
-	env["etw_user_data_len"] = len(ud)
-	if len(ud) >= 4 {
-		n := 64
-		if len(ud) < n {
-			n = len(ud)
-		}
-		env["etw_user_data_prefix_hex"] = fmt.Sprintf("%x", ud[:n])
-	}
+	d.decodeStructuredETW(record, env)
 }
 
 func userDataSlice(record *etwEventRecord) []byte {

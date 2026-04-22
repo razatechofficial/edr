@@ -93,6 +93,28 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		ie.Technique = jsonString(raw, "technique")
 		return &Telemetry{Injection: ie}
 
+	case "credential_access":
+		base.EventType = schema.EventProcess
+		ce := &schema.CredentialAccessEvent{BaseEvent: base}
+		ce.Technique = jsonString(raw, "technique")
+		ce.SourcePID = uint32(jsonInt(raw, "source_pid"))
+		ce.SourceProcess = jsonString(raw, "source_process")
+		ce.TargetPath = firstNonEmpty(jsonString(raw, "target_path"), jsonString(raw, "target_process"))
+		ce.AccessMask = jsonUint32(raw, "access_mask")
+		ce.Severity = jsonString(raw, "severity")
+		return &Telemetry{Credential: ce}
+
+	case "memory":
+		base.EventType = schema.EventProcess
+		me := &schema.MemoryEvent{BaseEvent: base}
+		me.Operation = jsonString(raw, "operation")
+		me.TargetPID = uint32(jsonInt(raw, "target_pid"))
+		me.TargetProcess = jsonString(raw, "target_process")
+		me.Address = jsonUint64(raw, "address")
+		me.Size = jsonUint64(raw, "size", "region_size")
+		me.Protect = jsonUint32(raw, "protect")
+		return &Telemetry{Memory: me}
+
 	case "fork":
 		base.EventType = schema.EventFork
 		fk := &schema.ForkEvent{BaseEvent: base}
@@ -156,7 +178,7 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		re.ActorPID = jsonInt(raw, "pid")
 		return &Telemetry{Registry: re}
 
-	case "module", "mount", "signal", "ptrace", "memory":
+	case "module", "mount", "signal", "ptrace":
 		base.EventType = schema.EventProcess
 		pe := &schema.ProcessEvent{BaseEvent: base}
 		pe.PID = jsonInt(raw, "pid")
