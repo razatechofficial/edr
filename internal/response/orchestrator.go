@@ -3,8 +3,11 @@ package response
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/razatechofficial/edr/internal/detection"
 	"go.uber.org/zap"
@@ -24,11 +27,12 @@ type EngineConfig struct {
 
 // ApprovalConfig mirrors agent YAML.
 type ApprovalConfig struct {
-	Mode        string
-	WebhookURL  string
-	CallbackURL string
-	ApprovalDir string
-	TimeoutSec  int
+	Mode               string
+	WebhookURL         string
+	CallbackURL        string
+	CallbackListenAddr string
+	ApprovalDir        string
+	TimeoutSec         int
 }
 
 // standardLayer implements [ResponseEngine].
@@ -40,6 +44,10 @@ type standardLayer struct {
 	cmap     map[string]Containment
 	rollCtx  context.Context
 	rollStop context.CancelFunc
+	// callbackSrv serves GET /approve/{id} and /reject/{id} for webhook approval mode.
+	callbackSrv  *http.Server
+	callbackAddr string
+	approvalMode string
 
 	actionsExec         atomic.Uint64
 	actionsOK           atomic.Uint64
@@ -58,13 +66,21 @@ func NewEngine(cfg EngineConfig) (ResponseEngine, error) {
 	if cfg.AgentIP == "" {
 		cfg.AgentIP = "127.0.0.1"
 	}
+	sl := &standardLayer{
+		rm:           NewRollbackManager(),
+		logger:       cfg.Logger,
+		cmap:         make(map[string]Containment),
+		callbackAddr: strings.TrimSpace(cfg.Approval.CallbackListenAddr),
+		approvalMode: strings.TrimSpace(strings.ToLower(cfg.Approval.Mode)),
+	}
 	exec := &DefaultActionExecutor{
-		Eng:           cfg.ActionEng,
-		Logger:        cfg.Logger,
-		ForensicsDir:  cfg.ForensicsDir,
-		QuarantineDir: cfg.QuarantineDir,
-		HostID:        cfg.HostID,
-		AgentIP:       cfg.AgentIP,
+		Eng:                 cfg.ActionEng,
+		Logger:              cfg.Logger,
+		ForensicsDir:        cfg.ForensicsDir,
+		QuarantineDir:       cfg.QuarantineDir,
+		HostID:              cfg.HostID,
+		AgentIP:             cfg.AgentIP,
+		RegisterContainment: sl.RegisterContainment,
 	}
 	gw := buildApprovalGateway(cfg.Approval, cfg.Logger)
 	pbPath := cfg.PlaybooksPath
@@ -75,12 +91,7 @@ func NewEngine(cfg EngineConfig) (ResponseEngine, error) {
 	if err != nil {
 		return nil, err
 	}
-	sl := &standardLayer{
-		pb:     pb,
-		rm:     NewRollbackManager(),
-		logger: cfg.Logger,
-		cmap:   make(map[string]Containment),
-	}
+	sl.pb = pb
 	exec.OnForensic = func() { sl.forensicCollections.Add(1) }
 	return sl, nil
 }
@@ -111,6 +122,9 @@ func (s *standardLayer) Start(ctx context.Context) {
 	s.rollCtx, s.rollStop = context.WithCancel(ctx)
 	s.mu.Unlock()
 	go s.rm.AutoRollbackLoop(s.rollCtx)
+	if s.approvalMode == "webhook" && s.callbackAddr != "" {
+		s.startApprovalCallback()
+	}
 }
 
 // Handle runs the playbook engine for a detection.
@@ -188,8 +202,58 @@ func (s *standardLayer) Stats() ResponseStats {
 // Stop cancels background workers (optional; not in interface).
 func (s *standardLayer) Stop() {
 	s.mu.Lock()
+	if s.callbackSrv != nil {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = s.callbackSrv.Shutdown(shutCtx)
+		cancel()
+		s.callbackSrv = nil
+	}
 	if s.rollStop != nil {
 		s.rollStop()
 	}
 	s.mu.Unlock()
+}
+
+// startApprovalCallback serves GET /approve/{id} and /reject/{id} and calls [SubmitApprovalResult].
+func (s *standardLayer) startApprovalCallback() {
+	if s.logger == nil {
+		s.logger = zap.NewNop()
+	}
+	mux := http.NewServeMux()
+	writeOK := func(w http.ResponseWriter, r *http.Request, id string, approved bool) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if id == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("missing id\n"))
+			return
+		}
+		SubmitApprovalResult(id, approved)
+		if s.logger != nil {
+			s.logger.Info("approval callback", zap.String("id", id), zap.Bool("approved", approved), zap.String("path", r.URL.Path))
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok\n"))
+	}
+	mux.HandleFunc("/approve/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/approve/"), "/")
+		writeOK(w, r, id, true)
+	})
+	mux.HandleFunc("/reject/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/reject/"), "/")
+		writeOK(w, r, id, false)
+	})
+	srv := &http.Server{Addr: s.callbackAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	s.mu.Lock()
+	s.callbackSrv = srv
+	s.mu.Unlock()
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if s.logger != nil {
+				s.logger.Error("approval callback server failed", zap.Error(err), zap.String("addr", s.callbackAddr))
+			}
+		}
+	}()
 }

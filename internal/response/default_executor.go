@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/razatechofficial/edr/internal/detection"
@@ -21,13 +22,23 @@ type DefaultActionExecutor struct {
 	HostID        string
 	AgentIP       string
 	OnForensic    func() // optional: called after successful collect_forensics
+	// RegisterContainment, when set by [NewEngine], records isolations/quarantines/blocks in [RollbackManager].
+	RegisterContainment func(Containment)
 }
 
 // Execute runs one playbook op (panic-free at boundary when called from [PlaybookEngine]).
-func (e *DefaultActionExecutor) Execute(ctx context.Context, op string, params map[string]interface{}, d detection.Detection) error {
+func (e *DefaultActionExecutor) Execute(ctx context.Context, op string, params map[string]interface{}, d detection.Detection) (err error) {
 	if e == nil {
 		return nil
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			if e.Logger != nil {
+				e.Logger.Error("playbook op panic", zap.String("op", op), zap.Any("recover", r))
+			}
+			err = fmt.Errorf("playbook op %q panicked: %v", op, r)
+		}
+	}()
 	log := e.Logger
 	if log == nil {
 		log = zap.NewNop()
@@ -135,10 +146,15 @@ func (e *DefaultActionExecutor) runNetworkIsolate(ctx context.Context, params ma
 		AgentIP:         e.AgentIP,
 		BackupPath:      "",
 	}
-	_, err := act.Execute(ctx)
-	_ = d
+	rollback, err := act.Execute(ctx)
+	if err != nil {
+		return err
+	}
+	if rollback != nil {
+		e.registerContainment(d, ActionNetworkIsolate, "network", dur, rollback)
+	}
 	_ = log
-	return err
+	return nil
 }
 
 func (e *DefaultActionExecutor) runNetworkBlock(ctx context.Context, params map[string]interface{}, d detection.Detection, log *zap.Logger) error {
@@ -150,7 +166,19 @@ func (e *DefaultActionExecutor) runNetworkBlock(ctx context.Context, params map[
 		DurationMinutes: intParamAny(params, "duration_minutes"),
 		RuleID:          uuid.NewString(),
 	}
-	return act.Execute(ctx)
+	rollback, err := act.Execute(ctx)
+	if err != nil {
+		return err
+	}
+	if rollback != nil {
+		target := strings.TrimSpace(stringParamAny(params, "dst_ip") + ":" + stringParamAny(params, "dst_port"))
+		if target == ":" {
+			target = "network"
+		}
+		e.registerContainment(d, ActionNetworkBlock, target, act.DurationMinutes, rollback)
+	}
+	_ = log
+	return nil
 }
 
 func (e *DefaultActionExecutor) runQuarantine(ctx context.Context, params map[string]interface{}, d detection.Detection, log *zap.Logger) error {
@@ -160,14 +188,19 @@ func (e *DefaultActionExecutor) runQuarantine(ctx context.Context, params map[st
 		qd = e.QuarantineDir
 	}
 	act := &actions.FileQuarantineAction{Path: path, QuarantineDir: qd, DetectionID: d.ID}
-	_, err := act.Execute(ctx)
+	rollback, err := act.Execute(ctx)
+	if err != nil {
+		return err
+	}
+	if rollback != nil {
+		e.registerContainment(d, ActionFileQuarantine, path, 0, rollback)
+	}
 	_ = log
-	return err
+	return nil
 }
 
 func (e *DefaultActionExecutor) runSnapshot(ctx context.Context, params map[string]interface{}, log *zap.Logger) error {
-	_ = log
-	act := &actions.SnapshotAction{Reason: stringParamAny(params, "reason")}
+	act := &actions.SnapshotAction{Reason: stringParamAny(params, "reason"), Logger: log}
 	return act.Execute(ctx)
 }
 
@@ -229,6 +262,28 @@ func boolParamAny(m map[string]interface{}, k string) bool {
 	}
 	b, _ := v.(bool)
 	return b
+}
+
+func (e *DefaultActionExecutor) registerContainment(d detection.Detection, act Action, target string, durationMin int, rollback func(context.Context) error) {
+	if e == nil || e.RegisterContainment == nil || rollback == nil {
+		return
+	}
+	id := uuid.NewString()
+	var exp time.Time
+	if durationMin > 0 {
+		exp = time.Now().Add(time.Duration(durationMin) * time.Minute)
+	}
+	e.RegisterContainment(Containment{
+		ID:         id,
+		HostID:     e.HostID,
+		Action:     act,
+		Target:     target,
+		AppliedAt:  time.Now(),
+		ExpiresAt:  exp,
+		Detection:  d,
+		Status:     ContainmentActive,
+		RollbackFn: rollback,
+	})
 }
 
 func intParamAny(m map[string]interface{}, k string) int {

@@ -56,8 +56,30 @@ func (a *NetworkBlockAction) ApplyCommands() []string {
 	}
 }
 
-// Execute applies the block (panic-safe; may no-op on unsupported).
-func (a *NetworkBlockAction) Execute(ctx context.Context) (err error) {
+// buildRollbackFromCommands runs the first non-comment rollback line (same shell strategy as apply).
+func (a *NetworkBlockAction) buildRollback() func(context.Context) error {
+	rbs := a.RollbackCommands()
+	if len(rbs) == 0 {
+		return nil
+	}
+	rl := strings.TrimSpace(rbs[0])
+	if strings.HasPrefix(rl, "#") {
+		return nil
+	}
+	return func(rctx context.Context) error {
+		if runtime.GOOS == "windows" {
+			fs := strings.Fields(rl)
+			if len(fs) < 2 {
+				return nil
+			}
+			return exec.CommandContext(rctx, fs[0], fs[1:]...).Run()
+		}
+		return exec.CommandContext(rctx, "sh", "-c", rl).Run()
+	}
+}
+
+// Execute applies the block. Returns a rollback (when apply is non-noop) and error.
+func (a *NetworkBlockAction) Execute(ctx context.Context) (rollback func(context.Context) error, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("network_block panic: %v", r)
@@ -65,18 +87,25 @@ func (a *NetworkBlockAction) Execute(ctx context.Context) (err error) {
 	}()
 	cmds := a.ApplyCommands()
 	if len(cmds) == 0 {
-		return nil
+		return nil, nil
 	}
 	line := strings.TrimSpace(cmds[0])
 	if strings.HasPrefix(line, "#") {
-		return nil
+		return nil, nil
 	}
 	if runtime.GOOS == "windows" {
 		fs := strings.Fields(line)
 		if len(fs) < 2 {
-			return nil
+			return nil, nil
 		}
-		return exec.CommandContext(ctx, fs[0], fs[1:]...).Run()
+		if err = exec.CommandContext(ctx, fs[0], fs[1:]...).Run(); err != nil {
+			return nil, err
+		}
+	} else {
+		if err = exec.CommandContext(ctx, "sh", "-c", line).Run(); err != nil {
+			return nil, err
+		}
 	}
-	return exec.CommandContext(ctx, "sh", "-c", line).Run()
+	rb := a.buildRollback()
+	return rb, nil
 }
