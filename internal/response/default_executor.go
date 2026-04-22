@@ -13,6 +13,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// integrationTestNetworkIsolateHook, when set by this package's tests, bypasses real firewall
+// commands so the pipeline can run in CI without mutating iptables/pf.
+var integrationTestNetworkIsolateHook func(ctx context.Context, e *DefaultActionExecutor, params map[string]interface{}, d detection.Detection, log *zap.Logger) error
+
 // DefaultActionExecutor dispatches YAML playbook op strings to handlers and [ActionEngine] ops.
 type DefaultActionExecutor struct {
 	Eng           *ActionEngine
@@ -129,6 +133,9 @@ func (e *DefaultActionExecutor) runAlert(_ context.Context, params map[string]in
 }
 
 func (e *DefaultActionExecutor) runNetworkIsolate(ctx context.Context, params map[string]interface{}, d detection.Detection, log *zap.Logger) error {
+	if integrationTestNetworkIsolateHook != nil {
+		return integrationTestNetworkIsolateHook(ctx, e, params, d, log)
+	}
 	allow := []string{}
 	if a, ok := params["allow_list"].([]interface{}); ok {
 		for _, v := range a {

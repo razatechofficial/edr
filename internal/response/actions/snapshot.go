@@ -91,7 +91,8 @@ func fileExists(p string) bool {
 }
 
 func (a *SnapshotAction) createAWSSnapshot(_ context.Context) error {
-	// No AWS SDK: stub
+	// BLOCKER: real EC2 EBS CreateSnapshot needs AWS SDK, IAM with ec2:CreateSnapshot, and
+	// volume/instance context; the agent has no hard dependency on AWS here.
 	return nil
 }
 func (a *SnapshotAction) createAzureSnapshot(_ context.Context) error { return nil }

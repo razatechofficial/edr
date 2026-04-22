@@ -33,7 +33,18 @@ func NewProcessHandler(logger *zap.Logger, protected []string) *ProcessHandler {
 
 // Execute performs a kill or suspend action based on the "mode" param.
 // Required params: "pid" (int). Optional: "mode" ("kill"|"suspend"), "tree" (bool).
-func (h *ProcessHandler) Execute(ctx context.Context, params map[string]interface{}) (*StepResult, error) {
+func (h *ProcessHandler) Execute(ctx context.Context, params map[string]interface{}) (out *StepResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if h.logger != nil {
+				h.logger.Error("process handler panicked", zap.Any("recover", r))
+			}
+			err = fmt.Errorf("process handler panic: %v", r)
+			if out == nil {
+				out = failResult(OpKillProcess, "handler panicked")
+			}
+		}
+	}()
 	pid, err := intParam(params, "pid")
 	if err != nil {
 		return failResult(OpKillProcess, "invalid pid parameter"), err
