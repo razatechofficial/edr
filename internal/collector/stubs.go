@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/razatechofficial/edr/internal/config"
 )
@@ -74,7 +75,7 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 	}
 
 	var authCol Collector = NewAuthStubCollector(endpointID)
-	if ac := NewAuthCollector(endpointID); ac != nil && ac.logPath != "" {
+	if ac := NewAuthCollector(endpointID, cfg.Agent.DataDir); ac != nil && (runtime.GOOS == "windows" || ac.logPath != "") {
 		authCol = ac
 	}
 

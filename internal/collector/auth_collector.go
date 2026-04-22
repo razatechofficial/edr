@@ -19,6 +19,7 @@ import (
 type AuthCollector struct {
 	endpointID string
 	hostname   string
+	dataDir    string
 	logPath    string
 	lastOffset int64
 
@@ -26,12 +27,13 @@ type AuthCollector struct {
 	events []schema.AuthEvent
 }
 
-func NewAuthCollector(endpointID string) *AuthCollector {
+func NewAuthCollector(endpointID, dataDir string) *AuthCollector {
 	hostname, _ := os.Hostname()
 	logPath := detectAuthLogPath()
 	return &AuthCollector{
 		endpointID: endpointID,
 		hostname:   hostname,
+		dataDir:    dataDir,
 		logPath:    logPath,
 	}
 }
@@ -39,6 +41,9 @@ func NewAuthCollector(endpointID string) *AuthCollector {
 func (ac *AuthCollector) Name() string { return "auth" }
 
 func (ac *AuthCollector) Collect(_ context.Context) ([]Telemetry, error) {
+	if runtime.GOOS == "windows" {
+		return authWindowsSecurityTelemetry(ac)
+	}
 	if ac.logPath == "" {
 		return nil, nil
 	}
