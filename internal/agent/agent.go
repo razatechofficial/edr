@@ -723,6 +723,37 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 					a.advEngine.Evaluate(ctx, &pe)
 				}
 			}
+			if tel.Credential != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Credential.BaseEvent,
+					PID:         int(tel.Credential.SourcePID),
+					ProcessName: "credential_access",
+					ProcessPath: tel.Credential.TargetPath,
+					CommandLine: tel.Credential.Technique,
+					User:        tel.Credential.SourceProcess,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+				if a.advEngine != nil {
+					a.advEngine.Evaluate(ctx, &pe)
+				}
+			}
+			if tel.Memory != nil {
+				pe := schema.ProcessEvent{
+					BaseEvent:   tel.Memory.BaseEvent,
+					PID:         int(tel.Memory.TargetPID),
+					ProcessName: "memory_event",
+					ProcessPath: tel.Memory.TargetProcess,
+					CommandLine: tel.Memory.Operation,
+				}
+				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
+					return err
+				}
+				if a.advEngine != nil {
+					a.advEngine.Evaluate(ctx, &pe)
+				}
+			}
 			if tel.File != nil {
 				if err := a.handleAlerts(a.detector.EvaluateFile(*tel.File)); err != nil {
 					return err
