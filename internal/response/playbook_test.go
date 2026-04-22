@@ -152,6 +152,26 @@ func TestTemplateMissing(t *testing.T) {
 	}
 }
 
+func TestMatchTrigger_SigmaAndBehavioral(t *testing.T) {
+	t.Parallel()
+	sigmaTr := &Trigger{Technique: "T1001", MinSeverity: "P1", Source: "sigma"}
+	sigmaDet := detection.Detection{TechniqueID: "T1001", Severity: detection.P1, Source: detection.SourceSigma}
+	if !matchTrigger(sigmaTr, sigmaDet) {
+		t.Fatal("expected sigma trigger to match sigma detection")
+	}
+	if matchTrigger(sigmaTr, detection.Detection{TechniqueID: "T1001", Severity: detection.P1, Source: detection.SourceYARA}) {
+		t.Fatal("sigma trigger must not match YARA-sourced detection")
+	}
+	behTr := &Trigger{Technique: "T1002", MinSeverity: "P1", Source: "behavioral"}
+	behDet := detection.Detection{TechniqueID: "T1002", Severity: detection.P1, Source: detection.SourceBehavioral}
+	if !matchTrigger(behTr, behDet) {
+		t.Fatal("expected behavioral trigger to match behavioral detection")
+	}
+	if matchTrigger(behTr, detection.Detection{TechniqueID: "T1002", Severity: detection.P1, Source: detection.SourceSigma}) {
+		t.Fatal("behavioral trigger must not match sigma-sourced detection")
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
