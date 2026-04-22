@@ -156,3 +156,23 @@ type ServiceEvent struct {
 	StartType   string `json:"start_type,omitempty"`
 	AccountName string `json:"account_name,omitempty"`
 }
+
+type CredentialAccessEvent struct {
+	BaseEvent
+	Technique     string `json:"technique,omitempty"`
+	SourcePID     uint32 `json:"source_pid,omitempty"`
+	SourceProcess string `json:"source_process,omitempty"`
+	TargetPath    string `json:"target_path,omitempty"`
+	AccessMask    uint32 `json:"access_mask,omitempty"`
+	Severity      string `json:"severity,omitempty"`
+}
+
+type MemoryEvent struct {
+	BaseEvent
+	Operation     string `json:"operation,omitempty"`
+	TargetPID     uint32 `json:"target_pid,omitempty"`
+	TargetProcess string `json:"target_process,omitempty"`
+	Address       uint64 `json:"address,omitempty"`
+	Size          uint64 `json:"size,omitempty"`
+	Protect       uint32 `json:"protect,omitempty"`
+}
