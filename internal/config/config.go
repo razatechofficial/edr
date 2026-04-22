@@ -320,9 +320,10 @@ type Config struct {
 	} `yaml:"response_legacy"`
 
 	Forwarder struct {
-		Enabled      bool     `yaml:"enabled"`
-		Mode         string   `yaml:"mode"`
-		Endpoint     string   `yaml:"endpoint"`
+		Enabled             bool   `yaml:"enabled"`
+		Mode                string `yaml:"mode"`
+		Endpoint            string `yaml:"endpoint"`
+		TelemetryEndpoint   string `yaml:"telemetry_endpoint"`
 		SyslogAddr   string   `yaml:"syslog_addr"`
 		KafkaBrokers []string `yaml:"kafka_brokers"`
 		KafkaTopic   string   `yaml:"kafka_topic"`
