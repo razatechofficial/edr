@@ -225,9 +225,14 @@ func (a *Agent) initAdvancedDetection() error {
 	if a.cfg.Detection.CustomRules.Enabled {
 		customRulesPath = a.cfg.Detection.CustomRules.RulesPath
 	}
+	dataDir := a.cfg.Agent.DataDir
+	if dataDir == "" {
+		dataDir = "/var/lib/edr"
+	}
 	ecfg := detection.EngineConfig{
 		BehavioralEnabled: true,
 		SigmaEnabled:      a.cfg.Detection.Sigma.Enabled,
+		DataDir:           dataDir,
 		YARAEnabled:       a.cfg.Detection.YARA.Enabled,
 		IOCEnabled:        a.cfg.Detection.IOC.Enabled,
 		MLEnabled:         a.cfg.ML.Enabled,
