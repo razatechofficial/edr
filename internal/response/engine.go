@@ -138,7 +138,29 @@ func (e *ActionEngine) Execute(ctx context.Context, key OpKey, params map[string
 	}
 
 	start := time.Now()
-	result, err := handler.Execute(ctx, params)
+	var result *StepResult
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				e.logger.Error("action handler panicked",
+					zap.String("action", string(key)),
+					zap.Any("recover", r),
+				)
+				err = fmt.Errorf("response engine: handler panicked: %v", r)
+				if result == nil {
+					result = &StepResult{
+						Action:    key,
+						Success:   false,
+						Message:   fmt.Sprintf("panic: %v", r),
+						Timestamp: start,
+						Params:    params,
+					}
+				}
+			}
+		}()
+		result, err = handler.Execute(ctx, params)
+	}()
 	elapsed := time.Since(start)
 
 	if result == nil {

@@ -298,15 +298,14 @@ func lookupEventVar(key string, d detection.Detection, agentIP, quarantineDir st
 	path := strings.TrimPrefix(key, "detection.event.")
 	ev := d.Event
 	if ev == nil {
-		return "", true
+		return "", false
 	}
 	if ev.Unstructured != nil {
 		if v, ok := ev.Unstructured[strings.ReplaceAll(path, ".", "_")]; ok {
 			return fmt.Sprint(v), true
 		}
 	}
-	switch {
-	case ev.Process != nil:
+	if ev.Process != nil {
 		if path == "pid" {
 			return fmt.Sprintf("%d", ev.Process.PID), true
 		}
@@ -316,14 +315,16 @@ func lookupEventVar(key string, d detection.Detection, agentIP, quarantineDir st
 		if path == "path" {
 			return ev.Process.ProcessPath, true
 		}
-	case ev.File != nil:
+	}
+	if ev.File != nil {
 		if path == "path" {
 			return ev.File.Path, true
 		}
 		if path == "pid" || path == "actor_pid" {
 			return fmt.Sprintf("%d", ev.File.ActorPID), true
 		}
-	case ev.Network != nil:
+	}
+	if ev.Network != nil {
 		if path == "dst_ip" || path == "dest_ip" {
 			return ev.Network.DestIP, true
 		}
@@ -333,10 +334,11 @@ func lookupEventVar(key string, d detection.Detection, agentIP, quarantineDir st
 		if path == "pid" {
 			return fmt.Sprintf("%d", ev.Network.PID), true
 		}
-	case ev.Injection != nil:
+	}
+	if ev.Injection != nil {
 		if path == "source_pid" {
 			return fmt.Sprintf("%d", ev.Injection.SourcePID), true
 		}
 	}
-	return "", true
+	return "", false
 }
