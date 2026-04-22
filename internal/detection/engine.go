@@ -73,6 +73,9 @@ type EngineConfig struct {
 	RAGTopK           int
 	RAGChunkSize      int
 	RAGKnowledgeBases []string
+
+	// DataDir is the agent data directory (dedup_state.json, etc.). Empty disables on-disk dedup state.
+	DataDir string
 }
 
 // Engine is the main detection orchestrator that runs events through all
@@ -93,6 +96,7 @@ type Engine struct {
 	chain      *BehavioralEngine
 	scorer     *ScoringEngine
 	deduper    *AlertDeduper
+	yaraAsyncCh chan rules.YARAScanResult
 
 	cfg         EngineConfig
 	alertCh     chan *events.Alert
@@ -127,7 +131,7 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 		logger:      logger,
 		stopCh:      make(chan struct{}),
 		scorer:      NewScoringEngine(),
-		deduper:     NewAlertDeduper(5 * time.Minute),
+		deduper:     NewAlertDeduper(5*time.Minute, cfg.DataDir),
 	}
 
 	if cfg.IOCEnabled {
@@ -145,6 +149,8 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 			logger.Warn("engine: yara layer init failed, disabling", zap.Error(err))
 		} else {
 			e.yara = ye
+			e.yaraAsyncCh = make(chan rules.YARAScanResult, 256)
+			ye.SetAsyncSink(e.yaraAsyncCh)
 		}
 	}
 
@@ -182,7 +188,7 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 			NewRansomwareDetector(logger),
 		}
 		chainPath := filepath.Join("rules", "behavioral", "chains.yml")
-		if ch, err := NewBehavioralEngine(chainPath); err == nil {
+		if ch, err := NewBehavioralEngine(chainPath, logger); err == nil {
 			e.chain = ch
 		} else {
 			logger.Warn("engine: behavioral chain init failed", zap.Error(err))
@@ -243,6 +249,17 @@ func (e *Engine) Start(ctx context.Context) error {
 		}
 	}
 
+	if e.deduper != nil {
+		e.deduper.Start()
+	}
+	if e.chain != nil {
+		e.chain.Start(ctx)
+	}
+	if e.yara != nil && e.yaraAsyncCh != nil {
+		e.wg.Add(1)
+		go e.yaraResultPump(ctx)
+	}
+
 	if e.sigma != nil {
 		e.wg.Add(1)
 		go func() {
@@ -285,6 +302,9 @@ func (e *Engine) Stop() error {
 	}
 	e.wg.Wait()
 	e.llmWg.Wait()
+	if e.deduper != nil {
+		e.deduper.Stop()
+	}
 	close(e.alertCh)
 
 	var firstErr error
@@ -367,25 +387,12 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		}()
 	}
 
-	// Layer 2: YARA — file scanning (file events only).
+	// Layer 2: YARA — async file scan (non-blocking; results via yaraResultPump -> alertCh).
 	if e.yara != nil && isFileEvent(event) {
 		if path := extractFilePath(event); path != "" {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer e.recoverLayer("yara")
-				yaraMatches, err := e.yara.ScanFile(ctx, path)
-				if err != nil {
-					e.logger.Debug("engine: yara scan failed",
-						zap.String("path", path), zap.Error(err))
-					return
-				}
-				alerts := make([]*events.Alert, 0, len(yaraMatches))
-				for _, ym := range yaraMatches {
-					alerts = append(alerts, yaraMatchToAlert(ym, event))
-				}
-				collect(alerts)
-			}()
+			if !e.yara.EnqueueFileScan(path, event) {
+				e.logger.Debug("engine: yara async queue full or sink unset", zap.String("path", path))
+			}
 		}
 	}
 
@@ -432,14 +439,7 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		}
 	}
 	if e.chain != nil {
-		ds := e.chain.Process(event)
-		for _, d := range ds {
-			if e.scorer != nil {
-				e.scorer.Score(&d)
-			}
-			if e.deduper != nil && e.deduper.IsDuplicate(d) {
-				continue
-			}
+		for _, d := range e.chain.Process(event) {
 			collect([]*events.Alert{detectionToAlert(d)})
 		}
 	}
@@ -460,10 +460,11 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		collect(e.scoreWithML(ctx, event, priorAlerts))
 	}
 
-	alerts := deduplicateAlerts(results)
+	alerts := results
 	if merged := mergeScores(alerts); merged != nil {
 		alerts = append(alerts, merged)
 	}
+	alerts = e.postProcessAlerts(alerts)
 
 	// Publish to consumer channel under RLock so Stop cannot close the
 	// channel while we are sending.
@@ -582,6 +583,100 @@ func (e *Engine) MLEngine() *ml.Engine {
 // ---------------------------------------------------------------------------
 // Layer helpers
 // ---------------------------------------------------------------------------
+
+func (e *Engine) yaraResultPump(ctx context.Context) {
+	defer e.wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-e.stopCh:
+			return
+		case res, ok := <-e.yaraAsyncCh:
+			if !ok {
+				return
+			}
+			e.processYARAScanResult(res)
+		}
+	}
+}
+
+func (e *Engine) processYARAScanResult(res rules.YARAScanResult) {
+	for _, ym := range res.Matches {
+		a := yaraMatchToAlert(ym, res.Event)
+		d := alertToDetection(a)
+		if e.scorer != nil {
+			e.scorer.Score(&d)
+		}
+		if e.deduper != nil && e.deduper.IsDuplicate(d) {
+			continue
+		}
+		out := detectionToAlert(d)
+		out.FilePath = a.FilePath
+		out.FileSHA256 = a.FileSHA256
+		out.Title = a.Title
+		e.mu.RLock()
+		running := e.running
+		e.mu.RUnlock()
+		if !running {
+			return
+		}
+		select {
+		case e.alertCh <- out:
+			e.detectionsEmitted.Add(1)
+		case <-e.stopCh:
+			return
+		default:
+			e.droppedEvents.Add(1)
+		}
+	}
+}
+
+// postProcessAlerts scores all alerts, applies AlertDeduper, and prepends
+// deduplication window summaries. YARA async path does the same in processYARAScanResult.
+func (e *Engine) postProcessAlerts(in []*events.Alert) []*events.Alert {
+	var pre []*events.Alert
+	if e.deduper != nil {
+		for _, d := range e.deduper.DrainExpired() {
+			if e.scorer != nil {
+				e.scorer.Score(&d)
+			}
+			pre = append(pre, detectionToAlert(d))
+		}
+	}
+	out := make([]*events.Alert, 0, len(in)+len(pre))
+	out = append(out, pre...)
+	for _, a := range in {
+		d := alertToDetection(a)
+		if e.scorer != nil {
+			e.scorer.Score(&d)
+		}
+		if e.deduper != nil && e.deduper.IsDuplicate(d) {
+			continue
+		}
+		a2 := detectionToAlert(d)
+		if a.FilePath != "" {
+			a2.FilePath = a.FilePath
+		}
+		if a.FileSHA256 != "" {
+			a2.FileSHA256 = a.FileSHA256
+		}
+		if a.Title != "" {
+			a2.Title = a.Title
+		}
+		if a.Description != "" {
+			a2.Description = a.Description
+		}
+		if len(a.MITRE) > 0 {
+			a2.MITRE = a.MITRE
+		}
+		if len(a.Tags) > 0 {
+			a2.Tags = a.Tags
+		}
+		out = append(out, a2)
+	}
+	return out
+}
 
 func (e *Engine) recoverLayer(name string) {
 	if r := recover(); r != nil {
@@ -922,24 +1017,6 @@ func buildRAGQuery(eventCtx *llm.EventContext) string {
 // Alert post-processing
 // ---------------------------------------------------------------------------
 
-// deduplicateAlerts removes duplicate alerts sharing the same RuleID within
-// a single evaluation pass. The first occurrence wins.
-func deduplicateAlerts(alerts []*events.Alert) []*events.Alert {
-	if len(alerts) <= 1 {
-		return alerts
-	}
-	seen := make(map[string]struct{}, len(alerts))
-	out := make([]*events.Alert, 0, len(alerts))
-	for _, a := range alerts {
-		if _, dup := seen[a.RuleID]; dup {
-			continue
-		}
-		seen[a.RuleID] = struct{}{}
-		out = append(out, a)
-	}
-	return out
-}
-
 // mergeScores creates a composite alert when multiple detection layers fired
 // for the same event. The composite inherits the highest severity and
 // aggregates MITRE references and tags from all contributing alerts. Returns
@@ -1028,11 +1105,46 @@ func iocMatchToAlert(m *ioc.MatchResult, raw interface{}) *events.Alert {
 // maxYARAHashBytes caps hashing work for very large files (SHA-256 of first N bytes).
 const maxYARAHashBytes = 64 << 20
 
-func yaraMatchToAlert(m rules.YARAMatch, raw interface{}) *events.Alert {
-	sev := events.SeverityHigh
-	if s, ok := m.Meta["severity"]; ok {
-		sev = events.Severity(fmt.Sprint(s))
+// yaraNamespaceDefault maps rule directory namespace to default detection severity.
+var yaraNamespaceDefault = map[string]Severity{
+	"malware":   P0,
+	"shellcode": P0,
+	"exploits":  P1,
+	"webshells": P1,
+	"lolbins":   P1,
+	"packers":   P2,
+	"documents": P2,
+	"cloud":     P1,
+	"linux":     P1,
+	"macos":     P1,
+}
+
+func yaraMatchSeverity(namespace string, meta map[string]interface{}) Severity {
+	if s, ok := meta["severity"]; ok {
+		return parseYARASeverityString(fmt.Sprint(s))
 	}
+	if s, ok := yaraNamespaceDefault[strings.ToLower(strings.TrimSpace(namespace))]; ok {
+		return s
+	}
+	return P2
+}
+
+func parseYARASeverityString(s string) Severity {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "critical", "p0":
+		return P0
+	case "high", "p1":
+		return P1
+	case "medium", "p2":
+		return P2
+	default:
+		return P3
+	}
+}
+
+func yaraMatchToAlert(m rules.YARAMatch, raw interface{}) *events.Alert {
+	dsev := yaraMatchSeverity(m.Namespace, m.Meta)
+	evsev := pToAlertSeverity(dsev)
 	path := extractFilePath(raw)
 	desc := fmt.Sprintf("File matched YARA rule %s with %d string hits", m.Rule, len(m.Strings))
 	if path != "" {
@@ -1057,7 +1169,7 @@ func yaraMatchToAlert(m rules.YARAMatch, raw interface{}) *events.Alert {
 		ID:          uuid.New().String(),
 		RuleID:      fmt.Sprintf("yara-%s", m.Rule),
 		RuleName:    m.Rule,
-		Severity:    sev,
+		Severity:    evsev,
 		Title:       fmt.Sprintf("YARA match: %s", m.Rule),
 		Description: desc,
 		Timestamp:   time.Now().UTC(),
