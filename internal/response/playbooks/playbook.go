@@ -1,7 +1,7 @@
 // Package playbooks provides pre-built automated response sequences for
 // common threat scenarios. Each playbook implements the response.Playbook
 // interface and can be executed atomically with rollback via the
-// ResponseEngine.
+// [response.ActionEngine].
 package playbooks
 
 import (
@@ -19,7 +19,7 @@ type Step = response.PlaybookStep
 // that knows how to drive the engine through its steps.
 type Playbook interface {
 	response.Playbook
-	Execute(ctx context.Context, engine *response.ResponseEngine, alert *events.Alert) ([]*response.StepResult, error)
+	Execute(ctx context.Context, engine *response.ActionEngine, alert *events.Alert) ([]*response.StepResult, error)
 }
 
 // BasePlaybook provides default implementations for the Playbook interface.
@@ -42,7 +42,7 @@ func (b *BasePlaybook) Steps() []response.PlaybookStep { return b.PlaybookSteps 
 
 // Execute drives the response engine through every step, delegating rollback
 // semantics to the engine's ExecutePlaybook method.
-func (b *BasePlaybook) Execute(ctx context.Context, engine *response.ResponseEngine, alert *events.Alert) ([]*response.StepResult, error) {
+func (b *BasePlaybook) Execute(ctx context.Context, engine *response.ActionEngine, alert *events.Alert) ([]*response.StepResult, error) {
 	return engine.ExecutePlaybook(ctx, b, alert)
 }
 

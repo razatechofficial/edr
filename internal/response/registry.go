@@ -52,7 +52,7 @@ func (h *RegistryHandler) Execute(ctx context.Context, params map[string]interfa
 	case "restore":
 		return h.restoreKey(params)
 	default:
-		return failResult(ActionRegistryDelete, fmt.Sprintf("unknown mode %q", mode)),
+		return failResult(OpRegistryDelete, fmt.Sprintf("unknown mode %q", mode)),
 			fmt.Errorf("registry handler: unknown mode %q", mode)
 	}
 }
@@ -83,19 +83,19 @@ func (h *RegistryHandler) deleteKey(params map[string]interface{}) (*StepResult,
 	valueName := stringParam(params, "value_name")
 
 	if keyPath == "" {
-		return failResult(ActionRegistryDelete, "registry path required"),
+		return failResult(OpRegistryDelete, "registry path required"),
 			fmt.Errorf("registry handler: path required")
 	}
 
 	hive, err := parseHive(hiveName)
 	if err != nil {
-		return failResult(ActionRegistryDelete, err.Error()), err
+		return failResult(OpRegistryDelete, err.Error()), err
 	}
 
 	// Back up before deleting.
 	k, err := registry.OpenKey(hive, keyPath, registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
-		return failResult(ActionRegistryDelete, fmt.Sprintf("open key: %s", err)),
+		return failResult(OpRegistryDelete, fmt.Sprintf("open key: %s", err)),
 			fmt.Errorf("registry handler: open key %s: %w", keyPath, err)
 	}
 	defer k.Close()
@@ -115,42 +115,42 @@ func (h *RegistryHandler) deleteKey(params map[string]interface{}) (*StepResult,
 			}
 		}
 		if err := k.DeleteValue(valueName); err != nil {
-			return failResult(ActionRegistryDelete, fmt.Sprintf("delete value: %s", err)),
+			return failResult(OpRegistryDelete, fmt.Sprintf("delete value: %s", err)),
 				fmt.Errorf("registry handler: delete value %s\\%s: %w", keyPath, valueName, err)
 		}
-		return okResult(ActionRegistryDelete,
+		return okResult(OpRegistryDelete,
 			fmt.Sprintf("deleted registry value %s\\%s", keyPath, valueName)), nil
 	}
 
 	// Delete the entire key.
 	if err := registry.DeleteKey(hive, keyPath); err != nil {
-		return failResult(ActionRegistryDelete, fmt.Sprintf("delete key: %s", err)),
+		return failResult(OpRegistryDelete, fmt.Sprintf("delete key: %s", err)),
 			fmt.Errorf("registry handler: delete key %s: %w", keyPath, err)
 	}
-	return okResult(ActionRegistryDelete, fmt.Sprintf("deleted registry key %s", keyPath)), nil
+	return okResult(OpRegistryDelete, fmt.Sprintf("deleted registry key %s", keyPath)), nil
 }
 
 func (h *RegistryHandler) restoreKey(params map[string]interface{}) (*StepResult, error) {
 	keyPath := stringParam(params, "path")
 	backup, ok := h.backups[keyPath]
 	if !ok {
-		return failResult(ActionRegistryRestore, "no backup found"),
+		return failResult(OpRegistryRestore, "no backup found"),
 			fmt.Errorf("registry handler: no backup for %s", keyPath)
 	}
 
 	k, _, err := registry.CreateKey(backup.Key, backup.Path, registry.SET_VALUE)
 	if err != nil {
-		return failResult(ActionRegistryRestore, err.Error()),
+		return failResult(OpRegistryRestore, err.Error()),
 			fmt.Errorf("registry handler: create key: %w", err)
 	}
 	defer k.Close()
 
 	if err := setRegistryValue(k, backup.ValueName, backup.ValueType, backup.Data); err != nil {
-		return failResult(ActionRegistryRestore, err.Error()),
+		return failResult(OpRegistryRestore, err.Error()),
 			fmt.Errorf("registry handler: set value: %w", err)
 	}
 	delete(h.backups, keyPath)
-	return okResult(ActionRegistryRestore,
+	return okResult(OpRegistryRestore,
 		fmt.Sprintf("restored registry value %s\\%s", keyPath, backup.ValueName)), nil
 }
 

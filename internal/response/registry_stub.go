@@ -22,7 +22,7 @@ func NewRegistryHandler(logger *zap.Logger) *RegistryHandler {
 
 // Execute returns an error on non-Windows platforms.
 func (h *RegistryHandler) Execute(_ context.Context, _ map[string]interface{}) (*StepResult, error) {
-	return failResult(ActionRegistryDelete, "registry operations only supported on Windows"),
+	return failResult(OpRegistryDelete, "registry operations only supported on Windows"),
 		fmt.Errorf("registry handler: not supported on this platform")
 }
 
