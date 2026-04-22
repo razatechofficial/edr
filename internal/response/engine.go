@@ -487,6 +487,7 @@ type ResponseEngine interface {
 	Release(containmentID string) error
 	Stats() ResponseStats
 	Start(ctx context.Context)
+	Stop() // cancels background workers and optional HTTP callback server
 }
 
 // Action is the semantic action type for containments and statistics (int enum per product spec).

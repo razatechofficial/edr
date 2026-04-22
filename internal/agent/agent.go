@@ -516,11 +516,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	if a.responseLayer != nil {
 		a.responseLayer.Start(ctx)
-		defer func() {
-			if s, ok := a.responseLayer.(interface{ Stop() }); ok {
-				s.Stop()
-			}
-		}()
+		defer a.responseLayer.Stop()
 	}
 
 	if a.telemetryRelay != nil {

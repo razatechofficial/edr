@@ -139,6 +139,16 @@ func matchTrigger(t *Trigger, d detection.Detection) bool {
 			}
 		}
 	}
+	if t.Source == "sigma" {
+		if d.Source != detection.SourceSigma {
+			return false
+		}
+	}
+	if t.Source == "behavioral" {
+		if d.Source != detection.SourceBehavioral {
+			return false
+		}
+	}
 	return true
 }
 
