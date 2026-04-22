@@ -49,9 +49,9 @@ type ProcessEvent struct {
 	UnshareFlags  uint64 `json:"unshare_flags,omitempty"`
 	MadviseAdvice int32  `json:"madvise_advice,omitempty"`
 	// ExecEnv holds environment entries joined with ASCII RS (0x1e) from ESF NOTIFY_EXEC / AUTH_EXEC.
-	ExecEnv string `json:"exec_env,omitempty"`
-	Tags    []string `json:"tags,omitempty"`
-	Severity string `json:"severity,omitempty"`
+	ExecEnv   string         `json:"exec_env,omitempty"`
+	Tags      []string       `json:"tags,omitempty"`
+	Severity  string         `json:"severity,omitempty"`
 	Ancestors []AncestorInfo `json:"ancestors,omitempty"`
 }
 
@@ -61,13 +61,13 @@ type FileEvent struct {
 	Operation     string `json:"operation"`
 	ActorPID      int    `json:"actor_pid"`
 	Hash          string `json:"hash,omitempty"`
-	WriteFD        int    `json:"write_fd,omitempty"`
-	BytesWritten   uint64 `json:"bytes_written,omitempty"`
-	OpenFlags      uint32 `json:"open_flags,omitempty"`
-	ChmodMode      uint32 `json:"chmod_mode,omitempty"`
-	FchmodatFlags  uint32 `json:"fchmodat_flags,omitempty"`
-	SUID           bool   `json:"suid,omitempty"`
-	ImpHash        string `json:"imp_hash,omitempty"`
+	WriteFD       int    `json:"write_fd,omitempty"`
+	BytesWritten  uint64 `json:"bytes_written,omitempty"`
+	OpenFlags     uint32 `json:"open_flags,omitempty"`
+	ChmodMode     uint32 `json:"chmod_mode,omitempty"`
+	FchmodatFlags uint32 `json:"fchmodat_flags,omitempty"`
+	SUID          bool   `json:"suid,omitempty"`
+	ImpHash       string `json:"imp_hash,omitempty"`
 }
 
 // ProcessInjectionEvent describes cross-process code injection indicators (e.g. ETW-TI).
@@ -92,12 +92,12 @@ type ForkEvent struct {
 // RegistryEvent describes a Windows registry operation or snapshot row.
 type RegistryEvent struct {
 	BaseEvent
-	KeyPath    string `json:"key_path"`
-	ValueName  string `json:"value_name,omitempty"`
-	Operation  string `json:"operation"`
-	OldData    string `json:"old_data,omitempty"`
-	NewData    string `json:"new_data,omitempty"`
-	ActorPID   int    `json:"actor_pid,omitempty"`
+	KeyPath   string `json:"key_path"`
+	ValueName string `json:"value_name,omitempty"`
+	Operation string `json:"operation"`
+	OldData   string `json:"old_data,omitempty"`
+	NewData   string `json:"new_data,omitempty"`
+	ActorPID  int    `json:"actor_pid,omitempty"`
 }
 
 type NetworkEvent struct {
@@ -114,31 +114,31 @@ type NetworkEvent struct {
 
 type AuthEvent struct {
 	BaseEvent
-	EventID         uint32   `json:"event_id,omitempty"`
-	User            string   `json:"user"`
-	Outcome         string   `json:"outcome"`
-	AuthType        string   `json:"auth_type"`
-	SourceIP        string   `json:"source_ip,omitempty"`
-	SessionID       string   `json:"session_id,omitempty"`
-	LogonType       string   `json:"logon_type,omitempty"`
-	PrivilegeList   string   `json:"privilege_list,omitempty"`
-	SubjectUser     string   `json:"subject_user,omitempty"`
-	SubjectDomain   string   `json:"subject_domain,omitempty"`
-	TargetUser      string   `json:"target_user,omitempty"`
-	TargetDomain    string   `json:"target_domain,omitempty"`
-	LogonProcess    string   `json:"logon_process,omitempty"`
-	AuthPackage     string   `json:"auth_package,omitempty"`
-	IpAddress       string   `json:"ip_address,omitempty"`
-	IpPort          string   `json:"ip_port,omitempty"`
-	Workstation     string   `json:"workstation,omitempty"`
-	LogonGuid       string   `json:"logon_guid,omitempty"`
-	PrivilegeListV  []string `json:"privilege_list_v2,omitempty"`
-	FailureReason   string   `json:"failure_reason,omitempty"`
-	Status          string   `json:"status,omitempty"`
-	SubStatus       string   `json:"sub_status,omitempty"`
-	Success         bool     `json:"success"`
-	Privileged      bool     `json:"privileged,omitempty"`
-	SubjectLogonID  string   `json:"subject_logon_id,omitempty"`
+	EventID        uint32   `json:"event_id,omitempty"`
+	User           string   `json:"user"`
+	Outcome        string   `json:"outcome"`
+	AuthType       string   `json:"auth_type"`
+	SourceIP       string   `json:"source_ip,omitempty"`
+	SessionID      string   `json:"session_id,omitempty"`
+	LogonType      string   `json:"logon_type,omitempty"`
+	PrivilegeList  string   `json:"privilege_list,omitempty"`
+	SubjectUser    string   `json:"subject_user,omitempty"`
+	SubjectDomain  string   `json:"subject_domain,omitempty"`
+	TargetUser     string   `json:"target_user,omitempty"`
+	TargetDomain   string   `json:"target_domain,omitempty"`
+	LogonProcess   string   `json:"logon_process,omitempty"`
+	AuthPackage    string   `json:"auth_package,omitempty"`
+	IpAddress      string   `json:"ip_address,omitempty"`
+	IpPort         string   `json:"ip_port,omitempty"`
+	Workstation    string   `json:"workstation,omitempty"`
+	LogonGuid      string   `json:"logon_guid,omitempty"`
+	PrivilegeListV []string `json:"privilege_list_v2,omitempty"`
+	FailureReason  string   `json:"failure_reason,omitempty"`
+	Status         string   `json:"status,omitempty"`
+	SubStatus      string   `json:"sub_status,omitempty"`
+	Success        bool     `json:"success"`
+	Privileged     bool     `json:"privileged,omitempty"`
+	SubjectLogonID string   `json:"subject_logon_id,omitempty"`
 }
 
 type TaskEvent struct {
@@ -245,4 +245,16 @@ type DroppedEventsEvent struct {
 	GapSize    uint64 `json:"gap_size,omitempty"`
 	LastSeq    uint64 `json:"last_seq,omitempty"`
 	CurrentSeq uint64 `json:"current_seq,omitempty"`
+}
+
+type TIStatusEvent struct {
+	BaseEvent
+	Status string `json:"status,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type FeatureStatusEvent struct {
+	BaseEvent
+	Features map[string]bool `json:"features,omitempty"`
+	Degraded []string        `json:"degraded,omitempty"`
 }

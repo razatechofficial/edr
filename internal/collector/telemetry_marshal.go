@@ -12,25 +12,27 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 		return nil, nil
 	}
 	w := struct {
-		Kind      string                         `json:"kind"`
-		Process   *schema.ProcessEvent           `json:"process,omitempty"`
-		Network   *schema.NetworkEvent           `json:"network,omitempty"`
-		Auth      *schema.AuthEvent              `json:"auth,omitempty"`
-		Task      *schema.TaskEvent              `json:"task,omitempty"`
-		Service   *schema.ServiceEvent           `json:"service,omitempty"`
-		Credential *schema.CredentialAccessEvent `json:"credential,omitempty"`
-		Memory    *schema.MemoryEvent            `json:"memory,omitempty"`
-		Container *schema.ContainerEvent         `json:"container,omitempty"`
-		SecPolicy *schema.SecurityPolicyEvent    `json:"security_policy,omitempty"`
-		Tamper    *schema.TamperEvent            `json:"tamper,omitempty"`
-		Persistence *schema.PersistenceEvent     `json:"persistence,omitempty"`
-		Privacy   *schema.PrivacyEvent           `json:"privacy,omitempty"`
-		Gatekeeper *schema.GatekeeperBypassEvent `json:"gatekeeper,omitempty"`
-		Dropped   *schema.DroppedEventsEvent     `json:"dropped_events,omitempty"`
-		File      *schema.FileEvent              `json:"file,omitempty"`
-		Fork      *schema.ForkEvent              `json:"fork,omitempty"`
-		Registry  *schema.RegistryEvent          `json:"registry,omitempty"`
-		Injection *schema.ProcessInjectionEvent `json:"injection,omitempty"`
+		Kind          string                        `json:"kind"`
+		Process       *schema.ProcessEvent          `json:"process,omitempty"`
+		Network       *schema.NetworkEvent          `json:"network,omitempty"`
+		Auth          *schema.AuthEvent             `json:"auth,omitempty"`
+		Task          *schema.TaskEvent             `json:"task,omitempty"`
+		Service       *schema.ServiceEvent          `json:"service,omitempty"`
+		Credential    *schema.CredentialAccessEvent `json:"credential,omitempty"`
+		Memory        *schema.MemoryEvent           `json:"memory,omitempty"`
+		Container     *schema.ContainerEvent        `json:"container,omitempty"`
+		SecPolicy     *schema.SecurityPolicyEvent   `json:"security_policy,omitempty"`
+		Tamper        *schema.TamperEvent           `json:"tamper,omitempty"`
+		Persistence   *schema.PersistenceEvent      `json:"persistence,omitempty"`
+		Privacy       *schema.PrivacyEvent          `json:"privacy,omitempty"`
+		Gatekeeper    *schema.GatekeeperBypassEvent `json:"gatekeeper,omitempty"`
+		Dropped       *schema.DroppedEventsEvent    `json:"dropped_events,omitempty"`
+		TIStatus      *schema.TIStatusEvent         `json:"ti_status,omitempty"`
+		FeatureStatus *schema.FeatureStatusEvent    `json:"feature_status,omitempty"`
+		File          *schema.FileEvent             `json:"file,omitempty"`
+		Fork          *schema.ForkEvent             `json:"fork,omitempty"`
+		Registry      *schema.RegistryEvent         `json:"registry,omitempty"`
+		Injection     *schema.ProcessInjectionEvent `json:"injection,omitempty"`
 	}{}
 	switch {
 	case t.Process != nil:
@@ -61,6 +63,10 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 		w.Kind, w.Gatekeeper = "gatekeeper_bypass", t.Gatekeeper
 	case t.Dropped != nil:
 		w.Kind, w.Dropped = "dropped_events", t.Dropped
+	case t.TIStatus != nil:
+		w.Kind, w.TIStatus = "ti_status", t.TIStatus
+	case t.FeatureStatus != nil:
+		w.Kind, w.FeatureStatus = "feature_status", t.FeatureStatus
 	case t.File != nil:
 		w.Kind, w.File = "file", t.File
 	case t.Fork != nil:
