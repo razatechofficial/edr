@@ -230,8 +230,10 @@ type Config struct {
 			ChainOfCustody bool   `yaml:"chain_of_custody"`
 		} `yaml:"forensics"`
 
-		// PlaybooksPath is the YAML file for automated playbooks (e.g. rules/playbooks/playbooks.yml).
+		// PlaybooksPath is the full path to the YAML file (takes precedence over PlaybooksDir).
 		PlaybooksPath string `yaml:"playbooks_path"`
+		// PlaybooksDir is a directory containing playbooks.yml; used when PlaybooksPath is empty.
+		PlaybooksDir string `yaml:"playbooks_dir"`
 		// ForensicsDir overrides Forensics.OutputDir for the response layer / collect_forensics.
 		ForensicsDir string `yaml:"forensics_dir"`
 		// QuarantineDir overrides Quarantine.Dir for template {{quarantine_dir}} when set.
@@ -240,8 +242,10 @@ type Config struct {
 			Mode        string `yaml:"mode"` // auto|webhook|file
 			WebhookURL  string `yaml:"webhook_url"`
 			CallbackURL string `yaml:"callback_url"`
-			ApprovalDir string `yaml:"approval_dir"`
-			TimeoutSec  int    `yaml:"timeout_sec"`
+			// CallbackListenAddr is the HTTP bind address for /approve and /reject (e.g. ":18765"). Empty disables the callback server.
+			CallbackListenAddr string `yaml:"callback_listen_addr"`
+			ApprovalDir        string `yaml:"approval_dir"`
+			TimeoutSec         int    `yaml:"timeout_sec"`
 		} `yaml:"approval"`
 	} `yaml:"response"`
 

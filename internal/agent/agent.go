@@ -1200,6 +1200,14 @@ func (a *Agent) initResponseLayer() error {
 			candidates = append(candidates, filepath.Join(a.cfg.Agent.DataDir, pp))
 		}
 	} else {
+		if pd := strings.TrimSpace(a.cfg.Response.PlaybooksDir); pd != "" {
+			candidates = append(candidates,
+				filepath.Join(pd, "playbooks.yml"),
+			)
+			if !filepath.IsAbs(pd) {
+				candidates = append(candidates, filepath.Join(a.cfg.Agent.DataDir, pd, "playbooks.yml"))
+			}
+		}
 		candidates = append(candidates,
 			filepath.Join("rules", "playbooks", "playbooks.yml"),
 			filepath.Join(a.cfg.Agent.DataDir, "rules", "playbooks", "playbooks.yml"),
@@ -1243,11 +1251,12 @@ func (a *Agent) initResponseLayer() error {
 		HostID:        a.cfg.Service.EndpointID,
 		Logger:        a.zapLogger,
 		Approval: response.ApprovalConfig{
-			Mode:        a.cfg.Response.Approval.Mode,
-			WebhookURL:  a.cfg.Response.Approval.WebhookURL,
-			CallbackURL: a.cfg.Response.Approval.CallbackURL,
-			ApprovalDir: a.cfg.Response.Approval.ApprovalDir,
-			TimeoutSec:  a.cfg.Response.Approval.TimeoutSec,
+			Mode:               a.cfg.Response.Approval.Mode,
+			WebhookURL:         a.cfg.Response.Approval.WebhookURL,
+			CallbackURL:        a.cfg.Response.Approval.CallbackURL,
+			CallbackListenAddr: a.cfg.Response.Approval.CallbackListenAddr,
+			ApprovalDir:        a.cfg.Response.Approval.ApprovalDir,
+			TimeoutSec:         a.cfg.Response.Approval.TimeoutSec,
 		},
 		ActionEng: a.respEngine,
 	})
