@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +27,7 @@ type FileCollector struct {
 
 	mu     sync.Mutex
 	events []schema.FileEvent
+	extras []Telemetry
 	done   chan struct{}
 }
 
@@ -42,9 +45,19 @@ func DefaultFIMPaths() []string {
 		}
 		return out
 	case "darwin":
-		out := []string{"/etc", "/usr/local/bin", "/tmp"}
+		out := []string{
+			"/etc", "/usr/local/bin", "/tmp",
+			"/Library/LaunchAgents", "/Library/LaunchDaemons",
+			"/Library/Keychains",
+			"/Library/Application Support/com.apple.TCC",
+		}
 		if home != "" {
-			out = append(out, home)
+			out = append(out,
+				home,
+				filepath.Join(home, "Library/LaunchAgents"),
+				filepath.Join(home, "Library/Keychains"),
+				filepath.Join(home, "Library/Application Support/com.apple.TCC"),
+			)
 		}
 		return out
 	case "windows":
@@ -99,13 +112,16 @@ func (fc *FileCollector) Name() string { return "file" }
 func (fc *FileCollector) Collect(_ context.Context) ([]Telemetry, error) {
 	fc.mu.Lock()
 	batch := fc.events
+	extras := fc.extras
 	fc.events = nil
+	fc.extras = nil
 	fc.mu.Unlock()
 
-	out := make([]Telemetry, 0, len(batch))
+	out := make([]Telemetry, 0, len(batch)+len(extras))
 	for i := range batch {
 		out = append(out, Telemetry{File: &batch[i]})
 	}
+	out = append(out, extras...)
 	return out, nil
 }
 
@@ -159,7 +175,47 @@ func (fc *FileCollector) handleFSEvent(event fsnotify.Event) {
 
 	fc.mu.Lock()
 	fc.events = append(fc.events, fe)
+	fc.emitDarwinFIMEnrichment(event, fe)
 	fc.mu.Unlock()
+}
+
+func (fc *FileCollector) emitDarwinFIMEnrichment(event fsnotify.Event, fe schema.FileEvent) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	lp := strings.ToLower(fe.Path)
+	if strings.Contains(lp, "tcc.db") && (event.Op.Has(fsnotify.Write) || event.Op.Has(fsnotify.Create)) {
+		fc.extras = append(fc.extras, Telemetry{
+			Privacy: &schema.PrivacyEvent{
+				BaseEvent: schema.BaseEvent{
+					SchemaVersion: schema.SchemaVersionV1,
+					EventType:     schema.EventFile,
+					EndpointID:    fc.endpointID,
+					Timestamp:     fe.Timestamp,
+					Hostname:      fc.hostname,
+					OS:            runtime.GOOS,
+				},
+				Operation: "tcc_db_write",
+			},
+		})
+	}
+	if strings.HasSuffix(lp, ".keychain") || strings.HasSuffix(lp, ".keychain-db") {
+		fc.extras = append(fc.extras, Telemetry{
+			Credential: &schema.CredentialAccessEvent{
+				BaseEvent: schema.BaseEvent{
+					SchemaVersion: schema.SchemaVersionV1,
+					EventType:     schema.EventFile,
+					EndpointID:    fc.endpointID,
+					Timestamp:     fe.Timestamp,
+					Hostname:      fc.hostname,
+					OS:            runtime.GOOS,
+				},
+				Technique:  "keychain_access",
+				TargetPath: fe.Path,
+				Severity:   "P1",
+			},
+		})
+	}
 }
 
 func mapFSOperation(op fsnotify.Op) string {
