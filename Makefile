@@ -89,13 +89,27 @@ EBPF_SRC     := $(wildcard platform/linux/ebpf/*.c)
 EBPF_OBJ     := $(EBPF_SRC:.c=.o)
 EBPF_MERGED  := platform/linux/ebpf/edr.bpf.o
 EBPF_INSTALL := /var/lib/edr/bpf/edr.bpf.o
+VMLINUX_H    := platform/linux/ebpf/vmlinux.h
+VMLINUX_FALLBACK := platform/linux/ebpf/vmlinux_fallback.h
 LLVM_LINK    ?= llvm-link
 BPFTOOL      ?= bpftool
 
-ebpf: $(EBPF_OBJ)
+$(VMLINUX_H):
+	@if command -v $(BPFTOOL) >/dev/null 2>&1 && [ -f /sys/kernel/btf/vmlinux ]; then \
+		echo "==> Generating vmlinux.h from kernel BTF"; \
+		$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > $(VMLINUX_H); \
+	elif [ -f /sys/kernel/btf/vmlinux ]; then \
+		echo "bpftool not found; install bpftool to generate vmlinux.h" >&2; \
+		exit 1; \
+	else \
+		echo "BTF not available on this kernel; using fallback vmlinux.h"; \
+		cp $(VMLINUX_FALLBACK) $(VMLINUX_H); \
+	fi
+
+ebpf: $(VMLINUX_H) $(EBPF_OBJ)
 	@echo "==> eBPF programs compiled"
 
-platform/linux/ebpf/%.o: platform/linux/ebpf/%.c platform/linux/ebpf/common.h
+platform/linux/ebpf/%.o: platform/linux/ebpf/%.c platform/linux/ebpf/common.h $(VMLINUX_H)
 	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
 
 ebpf-link: $(EBPF_OBJ)
