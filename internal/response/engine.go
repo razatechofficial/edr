@@ -13,30 +13,31 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/razatechofficial/edr/internal/detection"
 	"github.com/razatechofficial/edr/pkg/events"
 )
 
-// Action represents a response action type that can be executed by the engine.
-type Action string
+// OpKey is a string identifier for a response operation registered on [ActionEngine].
+type OpKey string
 
 const (
-	ActionKillProcess      Action = "kill_process"
-	ActionSuspendProcess   Action = "suspend_process"
-	ActionQuarantineFile   Action = "quarantine_file"
-	ActionNetworkIsolate   Action = "network_isolate"
-	ActionNetworkRelease   Action = "network_release"
-	ActionBlockHash        Action = "block_hash"
-	ActionMemoryDump       Action = "memory_dump"
-	ActionSnapshot         Action = "snapshot"
-	ActionCollectForensics Action = "collect_forensics"
-	ActionRegistryDelete   Action = "registry_delete"
-	ActionRegistryRestore  Action = "registry_restore"
+	OpKillProcess      OpKey = "kill_process"
+	OpSuspendProcess   OpKey = "suspend_process"
+	OpQuarantineFile   OpKey = "quarantine_file"
+	OpNetworkIsolate   OpKey = "network_isolate"
+	OpNetworkRelease   OpKey = "network_release"
+	OpBlockHash        OpKey = "block_hash"
+	OpMemoryDump       OpKey = "memory_dump"
+	OpSnapshot         OpKey = "snapshot"
+	OpCollectForensics OpKey = "collect_forensics"
+	OpRegistryDelete   OpKey = "registry_delete"
+	OpRegistryRestore  OpKey = "registry_restore"
 )
 
 // StepResult records the outcome of a single playbook step, including timing
 // and whether a rollback is available.
 type StepResult struct {
-	Action    Action        `json:"action"`
+	Action    OpKey         `json:"action"`
 	StepName  string        `json:"step_name"`
 	Success   bool          `json:"success"`
 	Message   string        `json:"message"`
@@ -48,7 +49,7 @@ type StepResult struct {
 // PlaybookStep defines a single step within a Playbook sequence.
 type PlaybookStep struct {
 	Name     string
-	Action   Action
+	Action   OpKey
 	Params   func(alert *events.Alert) map[string]interface{}
 	Required bool // if true, failure aborts the playbook and triggers rollback
 }
@@ -67,18 +68,17 @@ type ActionHandler interface {
 	Rollback(ctx context.Context, params map[string]interface{}) error
 }
 
-// ResponseEngine orchestrates response actions and playbooks, dispatching each
-// action to its registered handler and maintaining an append-only audit log.
-type ResponseEngine struct {
-	actions  map[Action]ActionHandler
+// ActionEngine dispatches registered [OpKey] handlers and maintains an audit log.
+type ActionEngine struct {
+	actions  map[OpKey]ActionHandler
 	logger   *zap.Logger
 	auditLog *AuditLogger
 	mu       sync.RWMutex
 }
 
-// NewResponseEngine creates a ResponseEngine with the given logger and audit
-// log path. Pass an empty auditPath to use the default /var/log/edr/audit.jsonl.
-func NewResponseEngine(logger *zap.Logger, auditPath string) (*ResponseEngine, error) {
+// NewActionEngine creates an ActionEngine with the given logger and audit log path.
+// Pass an empty auditPath to use the default /var/log/edr/audit.jsonl.
+func NewActionEngine(logger *zap.Logger, auditPath string) (*ActionEngine, error) {
 	if auditPath == "" {
 		auditPath = "/var/log/edr/audit.jsonl"
 	}
@@ -87,28 +87,33 @@ func NewResponseEngine(logger *zap.Logger, auditPath string) (*ResponseEngine, e
 		return nil, fmt.Errorf("response engine: open audit log: %w", err)
 	}
 
-	e := &ResponseEngine{
-		actions:  make(map[Action]ActionHandler),
+	e := &ActionEngine{
+		actions:  make(map[OpKey]ActionHandler),
 		logger:   logger,
 		auditLog: al,
 	}
 	return e, nil
 }
 
-// RegisterHandler binds an ActionHandler to the given action type. It is safe
-// to call concurrently, but duplicate registrations overwrite silently.
-func (e *ResponseEngine) RegisterHandler(action Action, handler ActionHandler) {
+// NewResponseEngine returns a new [ActionEngine] (name kept for call-site compatibility).
+func NewResponseEngine(logger *zap.Logger, auditPath string) (*ActionEngine, error) {
+	return NewActionEngine(logger, auditPath)
+}
+
+// RegisterHandler binds an ActionHandler to the given operation. Duplicate
+// registrations overwrite silently.
+func (e *ActionEngine) RegisterHandler(key OpKey, handler ActionHandler) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.actions[action] = handler
+	e.actions[key] = handler
 }
 
 // Execute runs a single response action, logs the result, and returns the step outcome.
-func (e *ResponseEngine) Execute(ctx context.Context, action Action, params map[string]interface{}) (*StepResult, error) {
+func (e *ActionEngine) Execute(ctx context.Context, key OpKey, params map[string]interface{}) (*StepResult, error) {
 	if requiresExplicitApproval(params) && !isApproved(params) {
 		msg := "action blocked: explicit approval required"
 		result := &StepResult{
-			Action:    action,
+			Action:    key,
 			Success:   false,
 			Message:   msg,
 			Timestamp: time.Now(),
@@ -116,7 +121,7 @@ func (e *ResponseEngine) Execute(ctx context.Context, action Action, params map[
 		}
 		_ = e.auditLog.Log(AuditEntry{
 			Timestamp: time.Now(),
-			Action:    action,
+			Action:    string(key),
 			Params:    params,
 			Success:   false,
 			Message:   msg,
@@ -126,10 +131,10 @@ func (e *ResponseEngine) Execute(ctx context.Context, action Action, params map[
 	}
 
 	e.mu.RLock()
-	handler, ok := e.actions[action]
+	handler, ok := e.actions[key]
 	e.mu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("response engine: no handler registered for action %q", action)
+		return nil, fmt.Errorf("response engine: no handler registered for action %q", key)
 	}
 
 	start := time.Now()
@@ -138,7 +143,7 @@ func (e *ResponseEngine) Execute(ctx context.Context, action Action, params map[
 
 	if result == nil {
 		result = &StepResult{
-			Action:    action,
+			Action:    key,
 			Timestamp: start,
 			Duration:  elapsed,
 		}
@@ -146,12 +151,12 @@ func (e *ResponseEngine) Execute(ctx context.Context, action Action, params map[
 		result.Duration = elapsed
 		result.Timestamp = start
 	}
-	result.Action = action
+	result.Action = key
 	result.Params = params
 
 	entry := AuditEntry{
 		Timestamp: start,
-		Action:    action,
+		Action:    string(key),
 		Params:    params,
 		Success:   result.Success,
 		Message:   result.Message,
@@ -165,15 +170,15 @@ func (e *ResponseEngine) Execute(ctx context.Context, action Action, params map[
 
 	if err != nil {
 		e.logger.Error("action failed",
-			zap.String("action", string(action)),
+			zap.String("action", string(key)),
 			zap.Error(err),
 			zap.Duration("elapsed", elapsed),
 		)
-		return result, fmt.Errorf("response engine: execute %s: %w", action, err)
+		return result, fmt.Errorf("response engine: execute %s: %w", key, err)
 	}
 
 	e.logger.Info("action executed",
-		zap.String("action", string(action)),
+		zap.String("action", string(key)),
 		zap.Bool("success", result.Success),
 		zap.Duration("elapsed", elapsed),
 	)
@@ -183,7 +188,7 @@ func (e *ResponseEngine) Execute(ctx context.Context, action Action, params map[
 // ExecutePlaybook runs every step of the playbook in order. If a required step
 // fails, all previously succeeded steps are rolled back in reverse order and
 // the partial results are returned alongside the error.
-func (e *ResponseEngine) ExecutePlaybook(ctx context.Context, pb Playbook, alert *events.Alert) ([]*StepResult, error) {
+func (e *ActionEngine) ExecutePlaybook(ctx context.Context, pb Playbook, alert *events.Alert) ([]*StepResult, error) {
 	steps := pb.Steps()
 	results := make([]*StepResult, 0, len(steps))
 
@@ -267,7 +272,7 @@ func (e *ResponseEngine) ExecutePlaybook(ctx context.Context, pb Playbook, alert
 }
 
 // rollbackCompleted reverses all previously executed steps in reverse order.
-func (e *ResponseEngine) rollbackCompleted(ctx context.Context, steps []PlaybookStep, results []*StepResult, alert *events.Alert) {
+func (e *ActionEngine) rollbackCompleted(ctx context.Context, steps []PlaybookStep, results []*StepResult, alert *events.Alert) {
 	for i := len(results) - 1; i >= 0; i-- {
 		if results[i] == nil || !results[i].Success {
 			continue
@@ -294,7 +299,7 @@ func (e *ResponseEngine) rollbackCompleted(ctx context.Context, steps []Playbook
 
 		_ = e.auditLog.Log(AuditEntry{
 			Timestamp: time.Now(),
-			Action:    Action(fmt.Sprintf("rollback_%s", step.Action)),
+			Action:    fmt.Sprintf("rollback_%s", string(step.Action)),
 			Params:    params,
 			Success:   true,
 			Message:   fmt.Sprintf("rolled back step %q", step.Name),
@@ -304,7 +309,7 @@ func (e *ResponseEngine) rollbackCompleted(ctx context.Context, steps []Playbook
 }
 
 // Close releases resources held by the engine (audit log file handles, etc.).
-func (e *ResponseEngine) Close() error {
+func (e *ActionEngine) Close() error {
 	return e.auditLog.Close()
 }
 
@@ -315,7 +320,7 @@ func (e *ResponseEngine) Close() error {
 // AuditEntry records a single auditable event for compliance and forensic review.
 type AuditEntry struct {
 	Timestamp    time.Time              `json:"timestamp"`
-	Action       Action                 `json:"action"`
+	Action       string                 `json:"action"`
 	Params       map[string]interface{} `json:"params,omitempty"`
 	Success      bool                   `json:"success"`
 	Message      string                 `json:"message"`
@@ -423,7 +428,7 @@ func isApproved(params map[string]interface{}) bool {
 func entryDigest(entry AuditEntry) [32]byte {
 	type digestEntry struct {
 		Timestamp    time.Time              `json:"timestamp"`
-		Action       Action                 `json:"action"`
+		Action       string                 `json:"action"`
 		Params       map[string]interface{} `json:"params,omitempty"`
 		Success      bool                   `json:"success"`
 		Message      string                 `json:"message"`
@@ -446,4 +451,69 @@ func entryDigest(entry AuditEntry) [32]byte {
 		PrevHash:     entry.PrevHash,
 	})
 	return sha256.Sum256(b)
+}
+
+// ---------------------------------------------------------------------------
+// Response pipeline types ([ResponseEngine], containments, stats)
+// ---------------------------------------------------------------------------
+
+// ResponseEngine is the high-level automated response interface (playbooks, containments, stats).
+// The legacy [ActionEngine] executes registered [OpKey] handlers; this type orchestrates on top of it.
+type ResponseEngine interface {
+	Handle(ctx context.Context, d detection.Detection) error
+	ActiveContainments() []Containment
+	Release(containmentID string) error
+	Stats() ResponseStats
+	Start(ctx context.Context)
+}
+
+// Action is the semantic action type for containments and statistics (int enum per product spec).
+type Action int
+
+const (
+	ActionKillProcess Action = iota
+	ActionNetworkIsolate
+	ActionNetworkBlock
+	ActionFileQuarantine
+	ActionFileDelete
+	ActionUserDisable
+	ActionMemoryDump
+	ActionProcessDump
+	ActionSnapshotCreate
+	ActionCollectForensics
+	ActionAlert
+	ActionCustomScript
+)
+
+// Containment records an active or completed response action with optional rollback.
+type Containment struct {
+	ID         string
+	HostID     string
+	Action     Action
+	Target     string
+	AppliedAt  time.Time
+	ExpiresAt  time.Time
+	Detection  detection.Detection
+	ApprovedBy string
+	Status     ContainmentStatus
+	RollbackFn func(ctx context.Context) error
+}
+
+// ContainmentStatus is the lifecycle of a containment record.
+type ContainmentStatus int
+
+const (
+	ContainmentActive ContainmentStatus = iota
+	ContainmentReleased
+	ContainmentFailed
+	ContainmentExpired
+)
+
+// ResponseStats are aggregate response metrics.
+type ResponseStats struct {
+	ActionsExecuted     uint64
+	ActionsSucceeded    uint64
+	ActionsFailed       uint64
+	ActiveContainments  int
+	ForensicCollections uint64
 }

@@ -36,19 +36,19 @@ func NewProcessHandler(logger *zap.Logger, protected []string) *ProcessHandler {
 func (h *ProcessHandler) Execute(ctx context.Context, params map[string]interface{}) (*StepResult, error) {
 	pid, err := intParam(params, "pid")
 	if err != nil {
-		return failResult(ActionKillProcess, "invalid pid parameter"), err
+		return failResult(OpKillProcess, "invalid pid parameter"), err
 	}
 	if pid <= 0 {
-		return failResult(ActionKillProcess, "pid must be positive"), fmt.Errorf("process handler: invalid pid %d", pid)
+		return failResult(OpKillProcess, "pid must be positive"), fmt.Errorf("process handler: invalid pid %d", pid)
 	}
 	if pid == os.Getpid() {
-		return failResult(ActionKillProcess, "refusing self-termination"),
+		return failResult(OpKillProcess, "refusing self-termination"),
 			fmt.Errorf("process handler: refusing to act on own pid %d", pid)
 	}
 
 	name := stringParam(params, "process_name")
 	if h.isProtected(name) {
-		return failResult(ActionKillProcess, fmt.Sprintf("process %q is protected", name)),
+		return failResult(OpKillProcess, fmt.Sprintf("process %q is protected", name)),
 			fmt.Errorf("process handler: %q is protected", name)
 	}
 
@@ -62,23 +62,23 @@ func (h *ProcessHandler) Execute(ctx context.Context, params map[string]interfac
 	case "kill":
 		if tree {
 			if err := h.killTree(ctx, pid); err != nil {
-				return failResult(ActionKillProcess, err.Error()), err
+				return failResult(OpKillProcess, err.Error()), err
 			}
-			return okResult(ActionKillProcess, fmt.Sprintf("process tree rooted at %d terminated", pid)), nil
+			return okResult(OpKillProcess, fmt.Sprintf("process tree rooted at %d terminated", pid)), nil
 		}
 		if err := h.kill(pid); err != nil {
-			return failResult(ActionKillProcess, err.Error()), err
+			return failResult(OpKillProcess, err.Error()), err
 		}
-		return okResult(ActionKillProcess, fmt.Sprintf("process %d terminated", pid)), nil
+		return okResult(OpKillProcess, fmt.Sprintf("process %d terminated", pid)), nil
 
 	case "suspend":
 		if err := h.suspend(pid); err != nil {
-			return failResult(ActionSuspendProcess, err.Error()), err
+			return failResult(OpSuspendProcess, err.Error()), err
 		}
-		return okResult(ActionSuspendProcess, fmt.Sprintf("process %d suspended", pid)), nil
+		return okResult(OpSuspendProcess, fmt.Sprintf("process %d suspended", pid)), nil
 
 	default:
-		return failResult(ActionKillProcess, fmt.Sprintf("unknown mode %q", mode)),
+		return failResult(OpKillProcess, fmt.Sprintf("unknown mode %q", mode)),
 			fmt.Errorf("process handler: unknown mode %q", mode)
 	}
 }
@@ -263,18 +263,18 @@ func boolParam(params map[string]interface{}, key string) bool {
 	return b
 }
 
-func okResult(action Action, msg string) *StepResult {
+func okResult(key OpKey, msg string) *StepResult {
 	return &StepResult{
-		Action:    action,
+		Action:    key,
 		Success:   true,
 		Message:   msg,
 		Timestamp: time.Now(),
 	}
 }
 
-func failResult(action Action, msg string) *StepResult {
+func failResult(key OpKey, msg string) *StepResult {
 	return &StepResult{
-		Action:    action,
+		Action:    key,
 		Success:   false,
 		Message:   msg,
 		Timestamp: time.Now(),

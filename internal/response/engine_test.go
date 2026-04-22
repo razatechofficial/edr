@@ -22,7 +22,7 @@ func (m *mockHandler) Execute(ctx context.Context, params map[string]interface{}
 	if m.execFn != nil {
 		return m.execFn(ctx, params)
 	}
-	return okResult(ActionKillProcess, "mock ok"), nil
+	return okResult(OpKillProcess, "mock ok"), nil
 }
 
 func (m *mockHandler) Rollback(ctx context.Context, params map[string]interface{}) error {
@@ -33,7 +33,7 @@ func (m *mockHandler) Rollback(ctx context.Context, params map[string]interface{
 	return nil
 }
 
-func newTestEngine(t *testing.T) *ResponseEngine {
+func newTestEngine(t *testing.T) *ActionEngine {
 	t.Helper()
 	logger, _ := zap.NewDevelopment()
 	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
@@ -54,26 +54,26 @@ func TestResponseEngineExecute(t *testing.T) {
 			return &StepResult{Success: true, Message: "process killed"}, nil
 		},
 	}
-	engine.RegisterHandler(ActionKillProcess, handler)
+	engine.RegisterHandler(OpKillProcess, handler)
 
-	result, err := engine.Execute(context.Background(), ActionKillProcess, map[string]interface{}{"pid": 1234})
+	result, err := engine.Execute(context.Background(), OpKillProcess, map[string]interface{}{"pid": 1234})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if !result.Success {
 		t.Error("Success = false, want true")
 	}
-	if result.Action != ActionKillProcess {
-		t.Errorf("Action = %q, want %q", result.Action, ActionKillProcess)
+	if result.Action != OpKillProcess {
+		t.Errorf("Action = %q, want %q", result.Action, OpKillProcess)
 	}
 }
 
 func TestResponseEngineExecuteRequiresApproval(t *testing.T) {
 	t.Parallel()
 	engine := newTestEngine(t)
-	engine.RegisterHandler(ActionKillProcess, &mockHandler{})
+	engine.RegisterHandler(OpKillProcess, &mockHandler{})
 
-	_, err := engine.Execute(context.Background(), ActionKillProcess, map[string]interface{}{
+	_, err := engine.Execute(context.Background(), OpKillProcess, map[string]interface{}{
 		"pid":               1234,
 		"requires_approval": true,
 		"approved":          false,
@@ -91,22 +91,22 @@ func TestResponseEnginePlaybookRollback(t *testing.T) {
 	step2Handler := &mockHandler{}
 	failHandler := &mockHandler{
 		execFn: func(_ context.Context, _ map[string]interface{}) (*StepResult, error) {
-			return failResult(ActionNetworkIsolate, "failed"), fmt.Errorf("network error")
+			return failResult(OpNetworkIsolate, "failed"), fmt.Errorf("network error")
 		},
 	}
 
-	engine.RegisterHandler(ActionKillProcess, step1Handler)
-	engine.RegisterHandler(ActionQuarantineFile, step2Handler)
-	engine.RegisterHandler(ActionNetworkIsolate, failHandler)
+	engine.RegisterHandler(OpKillProcess, step1Handler)
+	engine.RegisterHandler(OpQuarantineFile, step2Handler)
+	engine.RegisterHandler(OpNetworkIsolate, failHandler)
 
 	pb := &testPlaybook{
 		name: "rollback-test",
 		steps: []PlaybookStep{
-			{Name: "step1", Action: ActionKillProcess, Required: true,
+			{Name: "step1", Action: OpKillProcess, Required: true,
 				Params: func(_ *events.Alert) map[string]interface{} { return map[string]interface{}{"pid": 1} }},
-			{Name: "step2", Action: ActionQuarantineFile, Required: true,
+			{Name: "step2", Action: OpQuarantineFile, Required: true,
 				Params: func(_ *events.Alert) map[string]interface{} { return map[string]interface{}{"path": "/tmp/x"} }},
-			{Name: "step3-fails", Action: ActionNetworkIsolate, Required: true,
+			{Name: "step3-fails", Action: OpNetworkIsolate, Required: true,
 				Params: func(_ *events.Alert) map[string]interface{} { return map[string]interface{}{} }},
 		},
 	}
@@ -135,7 +135,7 @@ func TestAuditLoggerWritesEntry(t *testing.T) {
 	defer al.Close()
 
 	if err := al.Log(AuditEntry{
-		Action:  ActionKillProcess,
+		Action:  string(OpKillProcess),
 		Success: true,
 		Message: "test entry",
 	}); err != nil {
@@ -151,8 +151,8 @@ func TestAuditLoggerWritesEntry(t *testing.T) {
 	if err := json.Unmarshal(data, &entry); err != nil {
 		t.Fatalf("Unmarshal audit entry: %v", err)
 	}
-	if entry.Action != ActionKillProcess {
-		t.Errorf("Action = %q, want %q", entry.Action, ActionKillProcess)
+	if entry.Action != string(OpKillProcess) {
+		t.Errorf("Action = %q, want %q", entry.Action, string(OpKillProcess))
 	}
 	if !entry.Success {
 		t.Error("Success = false, want true")
@@ -164,6 +164,6 @@ type testPlaybook struct {
 	steps []PlaybookStep
 }
 
-func (p *testPlaybook) Name() string               { return p.name }
-func (p *testPlaybook) Description() string         { return "test playbook" }
-func (p *testPlaybook) Steps() []PlaybookStep       { return p.steps }
+func (p *testPlaybook) Name() string          { return p.name }
+func (p *testPlaybook) Description() string   { return "test playbook" }
+func (p *testPlaybook) Steps() []PlaybookStep { return p.steps }
