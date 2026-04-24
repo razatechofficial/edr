@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,17 +14,24 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/razatechofficial/edr/internal/agent"
+	"github.com/razatechofficial/edr/internal/config"
 )
 
 var (
-	version   = "dev"
-	commit    = "none"
-	buildDate = "unknown"
+	Version   = "dev"
+	BuildTime = "unknown"
+	Commit    = "none"
 )
 
 var (
 	configPath string
+	dataDir    string
+	logLevel   string
 	debug      bool
+	testMode   bool
+	installSvc bool
+	removeSvc  bool
+	showVer    bool
 )
 
 func main() {
@@ -39,7 +47,13 @@ func main() {
 	}
 
 	root.PersistentFlags().StringVar(&configPath, "config", "configs/agent.example.yaml", "path to agent configuration file")
+	root.PersistentFlags().StringVar(&dataDir, "data-dir", "", "override data directory")
+	root.PersistentFlags().StringVar(&logLevel, "log-level", "", "override log level")
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging with console output")
+	root.PersistentFlags().BoolVar(&testMode, "test-mode", false, "run built-in validation suite and exit")
+	root.PersistentFlags().BoolVar(&installSvc, "install", false, "install as system service")
+	root.PersistentFlags().BoolVar(&removeSvc, "uninstall", false, "uninstall system service")
+	root.PersistentFlags().BoolVar(&showVer, "version", false, "print version and exit")
 
 	runCmd := &cobra.Command{
 		Use:   "run",
@@ -53,8 +67,8 @@ func main() {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("edr-agent %s\n  commit:  %s\n  built:   %s\n  go:      %s\n  os/arch: %s/%s\n",
-				version, commit, buildDate, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+			fmt.Printf("edr-agent %s (built %s)\n  commit:  %s\n  go:      %s\n  os/arch: %s/%s\n",
+				Version, BuildTime, Commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		},
 	}
 
@@ -79,6 +93,26 @@ func newLogger() (*zap.Logger, error) {
 }
 
 func runAgent() error {
+	if installSvc && removeSvc {
+		return errors.New("--install and --uninstall are mutually exclusive")
+	}
+	if showVer {
+		fmt.Printf("edr-agent %s (built %s)\n", Version, BuildTime)
+		return nil
+	}
+	if installSvc {
+		return installService()
+	}
+	if removeSvc {
+		return uninstallService()
+	}
+	if dataDir != "" {
+		_ = os.Setenv("DATA_DIR", dataDir)
+	}
+	if logLevel != "" {
+		_ = os.Setenv("LOG_LEVEL", logLevel)
+	}
+
 	logger, err := newLogger()
 	if err != nil {
 		return fmt.Errorf("initializing logger: %w", err)
@@ -86,9 +120,9 @@ func runAgent() error {
 	defer func() { _ = logger.Sync() }()
 
 	logger.Info("starting edr-agent",
-		zap.String("version", version),
-		zap.String("commit", commit),
-		zap.String("built", buildDate),
+		zap.String("version", Version),
+		zap.String("commit", Commit),
+		zap.String("built", BuildTime),
 		zap.String("os", runtime.GOOS),
 		zap.String("arch", runtime.GOARCH),
 		zap.String("config", configPath),
@@ -117,6 +151,18 @@ func runAgent() error {
 	if err != nil {
 		logger.Error("agent initialization failed", zap.Error(err))
 		return fmt.Errorf("agent init: %w", err)
+	}
+	if testMode {
+		cfg, cfgErr := config.Load(configPath)
+		if cfgErr != nil {
+			return fmt.Errorf("config load for test mode: %w", cfgErr)
+		}
+		exitCode := runValidationSuite(ctx, a, &cfg)
+		if exitCode != 0 {
+			return fmt.Errorf("validation suite failed with exit code %d", exitCode)
+		}
+		logger.Info("validation suite passed")
+		return nil
 	}
 
 	logger.Info("agent initialized, entering main loop")
