@@ -8,8 +8,6 @@
 #include <bpf/bpf_core_read.h>
 #include "common.h"
 
-#define MAX_ARGS_ENTRIES 20
-
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 1 << 24); /* 16 MB */
@@ -76,31 +74,14 @@ int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter *ctx
 	const char *filename = (const char *)ctx->args[0];
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), filename);
 
+	/* Verifier-safe argv capture: read only argv[0] into fixed buffer. */
 	const char *const *argv = (const char *const *)ctx->args[1];
-	__u32 offset = 0;
-
-	#pragma unroll
-	for (int i = 0; i < MAX_ARGS_ENTRIES; i++) {
-		const char *argp = NULL;
-		if (bpf_probe_read_user(&argp, sizeof(argp), &argv[i]) < 0 || !argp)
-			break;
-
-		if (offset >= MAX_ARGS_LEN - 1)
-			break;
-
-		int ret = bpf_probe_read_user_str(
-			&evt->args[offset],
-			MAX_ARGS_LEN - offset,
-			argp);
-		if (ret <= 0)
-			break;
-
-		offset += ret;
-		if (offset < MAX_ARGS_LEN)
-			evt->args[offset - 1] = ' ';
+	const char *arg0 = NULL;
+	if (argv && bpf_probe_read_user(&arg0, sizeof(arg0), &argv[0]) == 0 && arg0) {
+		int ret = bpf_probe_read_user_str(evt->args, sizeof(evt->args), arg0);
+		if (ret > 0)
+			evt->args_size = ret - 1;
 	}
-
-	evt->args_size = offset;
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
@@ -123,31 +104,14 @@ int tracepoint__syscalls__sys_enter_execveat(struct trace_event_raw_sys_enter *c
 	const char *filename = (const char *)ctx->args[1];
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), filename);
 
+	/* Verifier-safe argv capture: read only argv[0] into fixed buffer. */
 	const char *const *argv = (const char *const *)ctx->args[3];
-	__u32 offset = 0;
-
-	#pragma unroll
-	for (int i = 0; i < MAX_ARGS_ENTRIES; i++) {
-		const char *argp = NULL;
-		if (bpf_probe_read_user(&argp, sizeof(argp), &argv[i]) < 0 || !argp)
-			break;
-
-		if (offset >= MAX_ARGS_LEN - 1)
-			break;
-
-		int ret = bpf_probe_read_user_str(
-			&evt->args[offset],
-			MAX_ARGS_LEN - offset,
-			argp);
-		if (ret <= 0)
-			break;
-
-		offset += ret;
-		if (offset < MAX_ARGS_LEN)
-			evt->args[offset - 1] = ' ';
+	const char *arg0 = NULL;
+	if (argv && bpf_probe_read_user(&arg0, sizeof(arg0), &argv[0]) == 0 && arg0) {
+		int ret = bpf_probe_read_user_str(evt->args, sizeof(evt->args), arg0);
+		if (ret > 0)
+			evt->args_size = ret - 1;
 	}
-
-	evt->args_size = offset;
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
