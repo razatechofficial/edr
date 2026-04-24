@@ -2,6 +2,7 @@ agent:
   log_level: info
   data_dir: /var/lib/edr-agent
   temp_dir: /tmp/edr-agent
+rules_file: /etc/edr-agent/rules/baseline.yaml
 logging:
   level: info
   alert_file: /var/lib/edr-agent/alerts.jsonl
@@ -17,6 +18,7 @@ detection:
     sensitivity: medium
 response:
   auto_response: true
+  playbooks_path: /etc/edr-agent/rules/playbooks/playbooks.yml
   playbooks_dir: /etc/edr-agent/rules/playbooks
   forensics_dir: /var/lib/edr-agent/forensics
   quarantine_dir: /var/lib/edr-agent/quarantine

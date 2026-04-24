@@ -3,12 +3,25 @@ set -euo pipefail
 VERSION="${1:-dev}"
 ARCH="${2:-amd64}"
 BINARY="dist/linux-${ARCH}/edr-agent"
+RULES_SRC="rules"
+
+# Debian requires package version to start with a digit.
+DEB_VERSION="${VERSION}"
+if ! [[ "${DEB_VERSION}" =~ ^[0-9] ]]; then
+    DEB_VERSION="0.0.0-${DEB_VERSION}"
+fi
 
 mkdir -p pkg/deb/{DEBIAN,usr/bin,etc/edr-agent,lib/systemd/system,var/lib/edr-agent}
 cp "$BINARY" pkg/deb/usr/bin/edr-agent
 chmod 755 pkg/deb/usr/bin/edr-agent
 
 cp configs/linux/config.yml pkg/deb/etc/edr-agent/config.yml
+if [ ! -d "${RULES_SRC}" ]; then
+    echo "rules directory not found: ${RULES_SRC}" >&2
+    exit 1
+fi
+mkdir -p pkg/deb/etc/edr-agent/rules
+cp -R "${RULES_SRC}/." pkg/deb/etc/edr-agent/rules/
 
 cat > "pkg/deb/lib/systemd/system/edr-agent.service" << 'EOF'
 [Unit]
@@ -31,7 +44,7 @@ EOF
 
 cat > pkg/deb/DEBIAN/control << EOF
 Package: edr-agent
-Version: ${VERSION}
+Version: ${DEB_VERSION}
 Architecture: ${ARCH}
 Maintainer: Raza Tech <security@razatech.com>
 Description: EDR Agent
@@ -41,6 +54,11 @@ EOF
 
 cat > pkg/deb/DEBIAN/postinst << 'EOF'
 #!/bin/bash
+set -e
+mkdir -p /var/lib/edr-agent /var/lib/edr-agent/forensics /var/lib/edr-agent/quarantine /var/lib/edr-agent/alert-spool
+mkdir -p /etc/edr-agent/rules
+chmod 700 /var/lib/edr-agent /var/lib/edr-agent/forensics /var/lib/edr-agent/quarantine /var/lib/edr-agent/alert-spool
+chmod 755 /etc/edr-agent /etc/edr-agent/rules
 systemctl daemon-reload
 systemctl enable edr-agent
 systemctl start edr-agent
@@ -49,6 +67,7 @@ chmod 755 pkg/deb/DEBIAN/postinst
 
 cat > pkg/deb/DEBIAN/prerm << 'EOF'
 #!/bin/bash
+set -e
 systemctl stop edr-agent || true
 systemctl disable edr-agent || true
 EOF
@@ -56,7 +75,7 @@ chmod 755 pkg/deb/DEBIAN/prerm
 
 mkdir -p dist
 if command -v dpkg-deb &>/dev/null; then
-    dpkg-deb --build pkg/deb "dist/edr-agent_${VERSION}_${ARCH}.deb"
+    dpkg-deb --build pkg/deb "dist/edr-agent_${DEB_VERSION}_${ARCH}.deb"
 else
     echo "dpkg-deb not found; skipping DEB build"
 fi
