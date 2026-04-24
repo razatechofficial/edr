@@ -2,6 +2,7 @@ package detection
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/razatechofficial/edr/pkg/events"
@@ -29,6 +30,9 @@ func (d *InjectionDetector) Analyze(event interface{}, correlator *Correlator) [
 	if pid == 0 {
 		return nil
 	}
+	if runtime.GOOS == "linux" && isLikelyKernelThreadNoise(extractProcessName(event), pid) {
+		return nil
+	}
 
 	var alerts []*events.Alert
 	if a := d.checkInjectionTools(event, pid); a != nil {
@@ -54,9 +58,21 @@ func (d *InjectionDetector) Reset() {}
 // ---------------------------------------------------------------------------
 
 var injectionToolPatterns = []string{
-	"inject", "syringe", "shellcode", "meterpreter",
+	"syringe", "shellcode", "meterpreter",
 	"cobalt", "donut", "shellter", "pe_inject",
 	"process_inject", "reflective", "runpe", "hollowing",
+}
+
+func isLikelyKernelThreadNoise(process string, pid uint32) bool {
+	// Linux kernel threads often show bracketed names and low PIDs.
+	if pid > 256 {
+		return false
+	}
+	p := strings.ToLower(strings.TrimSpace(process))
+	if p == "" {
+		return true
+	}
+	return strings.HasPrefix(p, "[") || strings.HasSuffix(p, "]")
 }
 
 func (d *InjectionDetector) checkInjectionTools(event interface{}, pid uint32) *events.Alert {

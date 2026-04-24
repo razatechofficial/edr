@@ -607,6 +607,9 @@ func (e *Engine) yaraResultPump(ctx context.Context) {
 
 func (e *Engine) processYARAScanResult(res rules.YARAScanResult) {
 	for _, ym := range res.Matches {
+		if shouldSuppressYARANoise(ym, res.Path) {
+			continue
+		}
 		a := yaraMatchToAlert(ym, res.Event)
 		d := alertToDetection(a)
 		if e.scorer != nil {
@@ -634,6 +637,19 @@ func (e *Engine) processYARAScanResult(res rules.YARAScanResult) {
 			e.droppedEvents.Add(1)
 		}
 	}
+}
+
+func shouldSuppressYARANoise(m rules.YARAMatch, path string) bool {
+	ns := strings.ToLower(strings.TrimSpace(m.Namespace))
+	if ns != "documents" {
+		return false
+	}
+	p := strings.ToLower(strings.TrimSpace(path))
+	if p == "" {
+		return false
+	}
+	// Document macro signatures should not trigger on core system shared libraries.
+	return strings.HasPrefix(p, "/usr/lib/") || strings.HasPrefix(p, "/lib/")
 }
 
 // postProcessAlerts scores all alerts, applies AlertDeduper, and prepends

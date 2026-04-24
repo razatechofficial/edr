@@ -32,6 +32,9 @@ func (d *PrivescDetector) Analyze(event interface{}, correlator *Correlator) []*
 	if pid == 0 {
 		return nil
 	}
+	if runtime.GOOS == "linux" && isLikelyKernelThreadNoise(extractProcessName(event), pid) {
+		return nil
+	}
 
 	var alerts []*events.Alert
 	if a := d.checkSudoAnomaly(event, pid, correlator); a != nil {
@@ -248,7 +251,7 @@ func (d *PrivescDetector) checkUACBypass(event interface{}, pid uint32) *events.
 
 var kernelExploitPatterns = []string{
 	"dirtypipe", "dirtycow", "pwnkit", "pkexec",
-	"polkit", "overlayfs", "cve-", "exploit",
+	"polkit", "overlayfs", "cve-",
 	"roottool", "rootkit", "priv_esc",
 	"kernelexploit", "kernel_exploit",
 }
