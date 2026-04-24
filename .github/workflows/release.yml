@@ -15,11 +15,12 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev
+          sudo apt-get install -y clang llvm libbpf-dev libyara-dev pkg-config
           bash scripts/gen_vmlinux.sh
           make ebpf
+          make ebpf-link
       - name: Build linux
-        run: make build-linux
+        run: LINUX_CGO=1 make build-linux
       - name: Package deb/rpm
         run: bash build/linux/package.sh ${{ github.ref_name }} amd64
       - uses: actions/upload-artifact@v4
