@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,7 +21,6 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/razatechofficial/edr/pkg/events"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -378,7 +376,7 @@ func (d *EBPFDriver) attachTracepoints() error {
 func isOptionalTracepointAttachFailure(group, tp string, err error) bool {
 	// Some hardened kernels can deny this tracepoint perf link despite root + capabilities.
 	if group == "syscalls" && tp == "sys_enter_fchmodat" {
-		return errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES)
+		return true
 	}
 	return false
 }
