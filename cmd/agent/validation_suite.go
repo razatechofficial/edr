@@ -198,6 +198,17 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 func runOneTest(ctx context.Context, sink *ValidationSink, test ValidationTest) TestResult {
 	startAt := time.Now()
 	res := TestResult{TestName: test.Name, MITRE: test.MITRE}
+	verify := test.Verify
+	if verify == nil {
+		verify = func(_ context.Context, detections []detection.Detection) bool {
+			for _, d := range detections {
+				if strings.Contains(d.TechniqueID, test.MITRE) {
+					return true
+				}
+			}
+			return false
+		}
+	}
 	if err := test.Simulate(ctx); err != nil {
 		res.FailReason = fmt.Sprintf("simulate error: %v", err)
 		return res
@@ -211,11 +222,11 @@ func runOneTest(ctx context.Context, sink *ValidationSink, test ValidationTest) 
 		default:
 		}
 		detections := sink.DrainSince(startAt)
-		if test.Verify(ctx, detections) {
+		if verify(ctx, detections) {
 			res.Passed = true
 			res.DetectionLatencyMs = time.Since(startAt).Milliseconds()
 			for _, d := range detections {
-				if strings.Contains(d.TechniqueID, test.MITRE) || test.Verify(ctx, []detection.Detection{d}) {
+				if strings.Contains(d.TechniqueID, test.MITRE) || verify(ctx, []detection.Detection{d}) {
 					res.ResponseAction = detectionSourceName(d.Source)
 					break
 				}
