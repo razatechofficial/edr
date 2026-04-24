@@ -97,7 +97,7 @@ EOF
 chmod 755 pkg/deb/DEBIAN/prerm
 
 mkdir -p dist
-dpkg-deb --build pkg/deb "dist/edr-agent_${DEB_VERSION}_${ARCH}.deb"
+dpkg-deb --root-owner-group --build pkg/deb "dist/edr-agent_${DEB_VERSION}_${ARCH}.deb"
 
 mkdir -p build/linux
 cp pkg/deb/DEBIAN/postinst build/linux/postinst.sh
