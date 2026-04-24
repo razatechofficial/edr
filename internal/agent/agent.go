@@ -83,6 +83,19 @@ type Agent struct {
 
 	healthMu           sync.Mutex
 	lastHealthSnapshot time.Time
+	validationMu       sync.RWMutex
+	validationSink     func(detection.Detection)
+}
+
+// SetValidationSink registers a callback invoked for each advanced detection alert.
+// It is used by cmd/agent --test-mode to verify detections in real time.
+func (a *Agent) SetValidationSink(sink func(detection.Detection)) {
+	if a == nil {
+		return
+	}
+	a.validationMu.Lock()
+	a.validationSink = sink
+	a.validationMu.Unlock()
 }
 
 func NewDefault() (*Agent, error) {
@@ -553,6 +566,12 @@ func (a *Agent) drainAdvancedAlerts(ctx context.Context) {
 			}
 			if a.responseLayer != nil && advAlert != nil {
 				d := detection.FromAlert(advAlert)
+				a.validationMu.RLock()
+				vsink := a.validationSink
+				a.validationMu.RUnlock()
+				if vsink != nil {
+					vsink(d)
+				}
 				go func(det detection.Detection) {
 					if err := a.responseLayer.Handle(ctx, det); err != nil {
 						a.logger.Error("response layer handle failed", "error", err)
