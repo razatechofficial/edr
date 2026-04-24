@@ -266,6 +266,9 @@ func (d *PrivescDetector) checkKernelExploit(event interface{}, pid uint32) *eve
 		!containsAny(path, kernelExploitPatterns...) {
 		return nil
 	}
+	if isBenignPolkitActivity(cmd, proc, path) {
+		return nil
+	}
 
 	d.logger.Warn("kernel exploit pattern detected", zap.Uint32("pid", pid))
 	return newAlert(
@@ -277,4 +280,23 @@ func (d *PrivescDetector) checkKernelExploit(event interface{}, pid uint32) *eve
 		},
 		[]string{"privesc", "kernel_exploit", "action:kill_process", "action:host_isolate"}, event,
 	)
+}
+
+func isBenignPolkitActivity(cmd, proc, path string) bool {
+	// Keep specific exploit indicators high-signal while suppressing normal policykit daemons.
+	if !containsAny(cmd, "polkit", "pkexec") &&
+		!containsAny(proc, "polkit", "pkexec") &&
+		!containsAny(path, "polkit", "pkexec") {
+		return false
+	}
+	if containsAny(cmd, "dirtypipe", "dirtycow", "pwnkit", "cve-", "rootkit", "priv_esc", "kernelexploit", "kernel_exploit") {
+		return false
+	}
+	if containsAny(proc, "dirtypipe", "dirtycow", "pwnkit", "cve-", "rootkit", "priv_esc", "kernelexploit", "kernel_exploit") {
+		return false
+	}
+	if containsAny(path, "dirtypipe", "dirtycow", "pwnkit", "cve-", "rootkit", "priv_esc", "kernelexploit", "kernel_exploit") {
+		return false
+	}
+	return containsAny(path, "/usr/lib/polkit-1/polkitd", "/usr/libexec/polkit-", "/usr/lib/polkit-1/")
 }
