@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/razatechofficial/edr/pkg/events"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -359,6 +361,10 @@ func (d *EBPFDriver) attachTracepoints() error {
 		}
 		l, err := link.Tracepoint(group, tp, prog, nil)
 		if err != nil {
+			if isOptionalTracepointAttachFailure(group, tp, err) {
+				fmt.Fprintf(os.Stderr, "WARN ebpf: skipping optional tracepoint %s/%s: %v\n", group, tp, err)
+				continue
+			}
 			return fmt.Errorf("attaching %s (%s/%s): %w", name, group, tp, err)
 		}
 		d.links = append(d.links, l)
@@ -367,6 +373,14 @@ func (d *EBPFDriver) attachTracepoints() error {
 		return fmt.Errorf("no tracepoints attached; verify ebpf programs are present")
 	}
 	return nil
+}
+
+func isOptionalTracepointAttachFailure(group, tp string, err error) bool {
+	// Some hardened kernels can deny this tracepoint perf link despite root + capabilities.
+	if group == "syscalls" && tp == "sys_enter_fchmodat" {
+		return errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES)
+	}
+	return false
 }
 
 func (d *EBPFDriver) syncPolicyToMaps() error {
