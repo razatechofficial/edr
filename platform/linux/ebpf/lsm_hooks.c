@@ -60,10 +60,12 @@ SEC("lsm/bprm_check_security")
 int BPF_PROG(lsm_bprm_check, struct linux_binprm *bprm)
 {
 	char path[MAX_PATH_LEN] = {};
-	const char *fpath;
+	const unsigned char *fpath = 0;
 
-	fpath = BPF_CORE_READ(bprm, file, f_path.dentry, d_name.name);
-	bpf_probe_read_kernel_str(path, sizeof(path), fpath);
+	BPF_CORE_READ_INTO(&fpath, bprm, file, f_path.dentry, d_name.name);
+	if (!fpath)
+		return 0;
+	bpf_probe_read_kernel_str(path, sizeof(path), (const char *)fpath);
 
 	if (bpf_map_lookup_elem(&exec_deny_list, path)) {
 		struct security_event *evt;
@@ -84,10 +86,12 @@ SEC("lsm/file_open")
 int BPF_PROG(lsm_file_open, struct file *file)
 {
 	char path[MAX_PATH_LEN] = {};
-	const char *fpath;
+	const unsigned char *fpath = 0;
 
-	fpath = BPF_CORE_READ(file, f_path.dentry, d_name.name);
-	bpf_probe_read_kernel_str(path, sizeof(path), fpath);
+	BPF_CORE_READ_INTO(&fpath, file, f_path.dentry, d_name.name);
+	if (!fpath)
+		return 0;
+	bpf_probe_read_kernel_str(path, sizeof(path), (const char *)fpath);
 
 	if (bpf_map_lookup_elem(&file_deny_list, path)) {
 		struct security_event *evt;
