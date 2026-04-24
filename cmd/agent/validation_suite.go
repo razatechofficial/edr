@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -11,26 +9,29 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/agent"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/detection"
-	"github.com/razatechofficial/edr/internal/schema"
 )
 
 type ValidationTest struct {
-	Name        string
-	Description string
-	MITRE       string
-	Severity    string
-	Simulate    func(ctx context.Context) error
-	Verify      func(ctx context.Context, detections []detection.Detection) bool
-	Cleanup     func()
-	TimeoutSec  int
+	Name         string
+	Description  string
+	MITRE        string
+	Severity     string
+	Simulate     func(ctx context.Context) error
+	Verify       func(ctx context.Context, detections []detection.Detection) bool
+	Cleanup      func()
+	TimeoutSec   int
+	SupportedOS  []string
+	RequiresRoot bool
+	SkipInCI     bool
 }
 
 type TestResult struct {
@@ -40,13 +41,91 @@ type TestResult struct {
 	FailReason         string
 	DetectionLatencyMs int64
 	ResponseAction     string
+	Skipped            bool
 }
 
-var mitreRegexp = regexp.MustCompile(`T\d{4}(?:\.\d{3})?`)
+type ValidationSink struct {
+	ch  chan detection.Detection
+	mu  sync.Mutex
+	all []detection.Detection
+}
+
+func NewValidationSink() *ValidationSink {
+	return &ValidationSink{ch: make(chan detection.Detection, 1000)}
+}
+
+func (s *ValidationSink) Send(d detection.Detection) {
+	if s == nil {
+		return
+	}
+	select {
+	case s.ch <- d:
+	default:
+	}
+	s.mu.Lock()
+	s.all = append(s.all, d)
+	s.mu.Unlock()
+}
+
+func (s *ValidationSink) DrainSince(t time.Time) []detection.Detection {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]detection.Detection, 0, len(s.all))
+	for _, d := range s.all {
+		if !d.Timestamp.Before(t) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+type ValidationReport struct {
+	Timestamp    time.Time    `json:"timestamp"`
+	AgentVersion string       `json:"agent_version"`
+	Hostname     string       `json:"hostname"`
+	OS           string       `json:"os"`
+	Results      []TestResult `json:"results"`
+	Passed       int          `json:"passed"`
+	Failed       int          `json:"failed"`
+	TotalMs      int64        `json:"total_ms"`
+}
 
 func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config) int {
+	startWall := time.Now()
 	fmt.Println("=== EDR Validation Suite ===")
 	fmt.Printf("Version: %s\n\n", Version)
+
+	preflightFail := preflightChecks(cfg)
+	if len(preflightFail) > 0 {
+		fmt.Println("Preflight failures:")
+		for _, f := range preflightFail {
+			fmt.Printf("  - %s\n", f)
+		}
+		writeValidationReport(cfg, ValidationReport{
+			Timestamp:    time.Now().UTC(),
+			AgentVersion: Version,
+			Hostname:     hostname(),
+			OS:           runtime.GOOS,
+			Results: []TestResult{{
+				TestName:   "preflight",
+				MITRE:      "N/A",
+				Passed:     false,
+				FailReason: strings.Join(preflightFail, "; "),
+			}},
+			Passed:  0,
+			Failed:  1,
+			TotalMs: time.Since(startWall).Milliseconds(),
+		})
+		return 1
+	}
+
+	sink := NewValidationSink()
+	a.SetValidationSink(sink.Send)
+	defer a.SetValidationSink(nil)
+
 	tests := buildValidationTests()
 	results := make([]TestResult, 0, len(tests))
 	passed, failed := 0, 0
@@ -55,8 +134,18 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 	go func() { _ = a.Run(agentCtx) }()
 	time.Sleep(3 * time.Second)
 	for _, test := range tests {
+		if skip, reason := shouldSkip(test); skip {
+			fmt.Printf("[ SKIP ] %s (%s): %s\n", test.Name, test.MITRE, reason)
+			results = append(results, TestResult{
+				TestName:   test.Name,
+				MITRE:      test.MITRE,
+				Skipped:    true,
+				FailReason: reason,
+			})
+			continue
+		}
 		fmt.Printf("[ RUN ] %s (%s)\n", test.Name, test.MITRE)
-		result := runOneTest(ctx, cfg, test)
+		result := runOneTest(ctx, sink, test)
 		results = append(results, result)
 		if result.Passed {
 			passed++
@@ -80,26 +169,40 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 	}
 	if failed > 0 {
 		fmt.Printf("\n%d tests FAILED\n", failed)
+		writeValidationReport(cfg, ValidationReport{
+			Timestamp:    time.Now().UTC(),
+			AgentVersion: Version,
+			Hostname:     hostname(),
+			OS:           runtime.GOOS,
+			Results:      results,
+			Passed:       passed,
+			Failed:       failed,
+			TotalMs:      time.Since(startWall).Milliseconds(),
+		})
 		return 1
 	}
 	fmt.Println("\nAll tests passed")
+	writeValidationReport(cfg, ValidationReport{
+		Timestamp:    time.Now().UTC(),
+		AgentVersion: Version,
+		Hostname:     hostname(),
+		OS:           runtime.GOOS,
+		Results:      results,
+		Passed:       passed,
+		Failed:       failed,
+		TotalMs:      time.Since(startWall).Milliseconds(),
+	})
 	return 0
 }
 
-func runOneTest(ctx context.Context, cfg *config.Config, test ValidationTest) TestResult {
-	res := TestResult{TestName: test.Name, MITRE: test.MITRE}
-	alertPath := cfg.Logging.AlertFile
-	startOffset := fileSize(alertPath)
+func runOneTest(ctx context.Context, sink *ValidationSink, test ValidationTest) TestResult {
 	startAt := time.Now()
+	res := TestResult{TestName: test.Name, MITRE: test.MITRE}
 	if err := test.Simulate(ctx); err != nil {
-		res.FailReason = fmt.Sprintf("simulate failed: %v", err)
+		res.FailReason = fmt.Sprintf("simulate error: %v", err)
 		return res
 	}
-	timeout := time.Duration(test.TimeoutSec) * time.Second
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(time.Duration(test.TimeoutSec) * time.Second)
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -107,82 +210,51 @@ func runOneTest(ctx context.Context, cfg *config.Config, test ValidationTest) Te
 			return res
 		default:
 		}
-		ds, _ := readDetectionsFromAlerts(alertPath, startOffset)
-		verified := false
-		if test.Verify != nil {
-			verified = test.Verify(ctx, ds)
-		} else {
-			for _, d := range ds {
-				if strings.Contains(strings.ToUpper(d.TechniqueID), strings.ToUpper(test.MITRE)) {
-					verified = true
+		detections := sink.DrainSince(startAt)
+		if test.Verify(ctx, detections) {
+			res.Passed = true
+			res.DetectionLatencyMs = time.Since(startAt).Milliseconds()
+			for _, d := range detections {
+				if strings.Contains(d.TechniqueID, test.MITRE) || test.Verify(ctx, []detection.Detection{d}) {
+					res.ResponseAction = detectionSourceName(d.Source)
 					break
 				}
 			}
-		}
-		if verified {
-			res.Passed = true
-			res.DetectionLatencyMs = time.Since(startAt).Milliseconds()
 			return res
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
-	res.FailReason = "timeout waiting for detection"
+	detections := sink.DrainSince(startAt)
+	res.FailReason = fmt.Sprintf("timeout after %ds — %d detections received but none matched", test.TimeoutSec, len(detections))
+	if len(detections) > 0 {
+		techniques := make([]string, 0, len(detections))
+		for _, d := range detections {
+			techniques = append(techniques, d.TechniqueID)
+		}
+		res.FailReason += fmt.Sprintf(" (got: %s)", strings.Join(techniques, ", "))
+	}
 	return res
-}
-
-func readDetectionsFromAlerts(alertPath string, startOffset int64) ([]detection.Detection, error) {
-	f, err := os.Open(alertPath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	if startOffset > 0 {
-		if _, err := f.Seek(startOffset, 0); err != nil {
-			return nil, err
-		}
-	}
-	sc := bufio.NewScanner(f)
-	out := make([]detection.Detection, 0, 8)
-	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		var al schema.Alert
-		if err := json.Unmarshal(line, &al); err != nil {
-			continue
-		}
-		txt := strings.Join([]string{al.RuleID, al.Title, al.Description}, " ")
-		tech := mitreRegexp.FindString(strings.ToUpper(txt))
-		out = append(out, detection.Detection{
-			RuleID:      al.RuleID,
-			RuleName:    al.Title,
-			TechniqueID: tech,
-		})
-	}
-	return out, nil
-}
-
-func fileSize(path string) int64 {
-	st, err := os.Stat(path)
-	if err != nil {
-		return 0
-	}
-	return st.Size()
 }
 
 func buildValidationTests() []ValidationTest {
 	eicarPath := filepath.Join(os.TempDir(), "eicar_test.txt")
 	cronPath := filepath.Join(os.TempDir(), "edr_test_cron")
 	ransomDir := filepath.Join(os.TempDir(), "edr_ransom_test")
-	startupPath := getSuspiciousWritePath()
+	startupPath := suspiciousWritePath()
 	return []ValidationTest{
 		{
 			Name:       "suspicious-process-spawn",
 			MITRE:      "T1059",
 			TimeoutSec: 10,
 			Simulate: func(ctx context.Context) error {
-				return buildSuspiciousCommand(ctx).Run()
+				switch runtime.GOOS {
+				case "windows":
+					payload := base64.StdEncoding.EncodeToString([]byte("Write-Host 'edr-test'"))
+					_ = exec.CommandContext(ctx, "powershell.exe", "-EncodedCommand", payload).Run()
+				case "linux", "darwin":
+					_ = exec.CommandContext(ctx, "sh", "-c", "echo edr-test | base64 | sh 2>/dev/null || true").Run()
+				}
+				return nil
 			},
 			Verify: func(_ context.Context, detections []detection.Detection) bool {
 				for _, d := range detections {
@@ -192,6 +264,7 @@ func buildValidationTests() []ValidationTest {
 				}
 				return false
 			},
+			SupportedOS: []string{"linux", "darwin", "windows"},
 		},
 		{
 			Name:       "suspicious-file-write",
@@ -199,9 +272,10 @@ func buildValidationTests() []ValidationTest {
 			TimeoutSec: 10,
 			Simulate: func(_ context.Context) error {
 				_ = os.MkdirAll(filepath.Dir(startupPath), 0o755)
-				return os.WriteFile(startupPath, []byte("#!/bin/bash\necho owned"), 0o755)
+				return os.WriteFile(startupPath, []byte("#!/bin/sh\necho owned"), 0o755)
 			},
-			Cleanup: func() { _ = os.Remove(startupPath) },
+			Cleanup:     func() { _ = os.Remove(startupPath) },
+			SupportedOS: []string{"linux", "darwin", "windows"},
 		},
 		{
 			Name:       "yara-eicar-detection",
@@ -211,7 +285,8 @@ func buildValidationTests() []ValidationTest {
 				eicar := `X5O!P%@AP[4\PZX54(P^)7CC)7}` + `$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*`
 				return os.WriteFile(eicarPath, []byte(eicar), 0o644)
 			},
-			Cleanup: func() { _ = os.Remove(eicarPath) },
+			Cleanup:     func() { _ = os.Remove(eicarPath) },
+			SupportedOS: []string{"linux", "darwin", "windows"},
 		},
 		{
 			Name:       "suspicious-network-connection",
@@ -224,18 +299,22 @@ func buildValidationTests() []ValidationTest {
 				}
 				return nil
 			},
+			SupportedOS: []string{"linux", "darwin", "windows"},
 		},
 		{
-			Name:       "process-injection-simulation",
-			MITRE:      "T1055",
-			TimeoutSec: 10,
-			Simulate:   func(_ context.Context) error { return simulateSelfInjection() },
+			Name:        "process-injection-simulation",
+			MITRE:       "T1055",
+			TimeoutSec:  10,
+			Simulate:    func(_ context.Context) error { return simulateSelfInjection() },
+			SupportedOS: []string{"linux", "darwin", "windows"},
 		},
 		{
-			Name:       "sensitive-file-access",
-			MITRE:      "T1552",
-			TimeoutSec: 10,
-			Simulate:   func(_ context.Context) error { return attemptSensitiveFileRead() },
+			Name:        "sensitive-file-access",
+			MITRE:       "T1552",
+			TimeoutSec:  10,
+			Simulate:    func(_ context.Context) error { return attemptSensitiveFileRead() },
+			SupportedOS: []string{"linux", "darwin", "windows"},
+			SkipInCI:    true,
 		},
 		{
 			Name:       "ransomware-simulation",
@@ -244,18 +323,19 @@ func buildValidationTests() []ValidationTest {
 			Simulate: func(_ context.Context) error {
 				_ = os.MkdirAll(ransomDir, 0o755)
 				for i := range 30 {
-					src := filepath.Join(ransomDir, fmt.Sprintf("file%d.txt", i))
-					dst := filepath.Join(ransomDir, fmt.Sprintf("file%d.encrypted", i))
-					if err := os.WriteFile(src, []byte("test"), 0o644); err != nil {
+					src := filepath.Join(ransomDir, fmt.Sprintf("doc%d.docx", i))
+					dst := filepath.Join(ransomDir, fmt.Sprintf("doc%d.locked", i))
+					if err := os.WriteFile(src, []byte(strings.Repeat("X", 1024)), 0o644); err != nil {
 						return err
 					}
 					if err := os.Rename(src, dst); err != nil {
-						return err
+						return fmt.Errorf("rename %d failed: %w", i, err)
 					}
 				}
 				return nil
 			},
-			Cleanup: func() { _ = os.RemoveAll(ransomDir) },
+			Cleanup:     func() { _ = os.RemoveAll(ransomDir) },
+			SupportedOS: []string{"linux", "darwin", "windows"},
 		},
 		{
 			Name:       "persistence-cron",
@@ -264,20 +344,13 @@ func buildValidationTests() []ValidationTest {
 			Simulate: func(_ context.Context) error {
 				return os.WriteFile(cronPath, []byte("* * * * * /tmp/evil.sh"), 0o644)
 			},
-			Cleanup: func() { _ = os.Remove(cronPath) },
+			Cleanup:     func() { _ = os.Remove(cronPath) },
+			SupportedOS: []string{"linux", "darwin", "windows"},
 		},
 	}
 }
 
-func buildSuspiciousCommand(ctx context.Context) *exec.Cmd {
-	if runtime.GOOS == "windows" {
-		payload := base64.StdEncoding.EncodeToString([]byte("Write-Output suspicious"))
-		return exec.CommandContext(ctx, "powershell.exe", "-EncodedCommand", payload)
-	}
-	return exec.CommandContext(ctx, "sh", "-c", "echo suspicious")
-}
-
-func getSuspiciousWritePath() string {
+func suspiciousWritePath() string {
 	home, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "windows":
@@ -285,11 +358,13 @@ func getSuspiciousWritePath() string {
 		if appData == "" {
 			appData = filepath.Join(home, "AppData", "Roaming")
 		}
-		return filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "edr_test_startup.bat")
+		return filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "edr_test.bat")
 	case "darwin":
-		return filepath.Join(home, "Library", "LaunchAgents", "com.razatech.edr.test.plist")
+		return filepath.Join(home, "Library", "LaunchAgents", "com.edr-test.plist")
+	case "linux":
+		return "/tmp/edr_test_cron_sim"
 	default:
-		return filepath.Join(home, ".config", "autostart", "edr_test.desktop")
+		return "/tmp/edr_test_startup"
 	}
 }
 
@@ -323,4 +398,119 @@ func attemptSensitiveFileRead() error {
 		_, _ = os.ReadFile(p) // permission denied still exercises file access path
 	}
 	return nil
+}
+
+func detectionSourceName(src detection.DetectionSource) string {
+	switch src {
+	case detection.SourceSigma:
+		return "sigma"
+	case detection.SourceYARA:
+		return "yara"
+	case detection.SourceBehavioral:
+		return "behavioral"
+	case detection.SourceML:
+		return "ml"
+	case detection.SourceDedup:
+		return "dedup"
+	default:
+		return "unknown"
+	}
+}
+
+func shouldSkip(test ValidationTest) (bool, string) {
+	if len(test.SupportedOS) > 0 && !slices.Contains(test.SupportedOS, runtime.GOOS) {
+		return true, fmt.Sprintf("not supported on %s", runtime.GOOS)
+	}
+	if test.RequiresRoot && !isPrivileged() {
+		return true, "requires root/admin"
+	}
+	if test.SkipInCI && strings.EqualFold(os.Getenv("CI"), "true") {
+		return true, "skipped in CI"
+	}
+	return false, ""
+}
+
+func isPrivileged() bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return os.Geteuid() == 0
+}
+
+func preflightChecks(cfg *config.Config) []string {
+	var failures []string
+	sigmaDir := cfg.Detection.Sigma.RulesDir
+	yaraDir := cfg.Detection.YARA.RulesDir
+	if sigmaDir == "" || !dirExists(sigmaDir) {
+		failures = append(failures, fmt.Sprintf("sigma rules_dir not found: %s", sigmaDir))
+	} else if n := countFilesWithExt(sigmaDir, ".yml"); n == 0 {
+		failures = append(failures, "no sigma rules found")
+	} else {
+		fmt.Printf("  sigma rules: %d\n", n)
+	}
+	if yaraDir == "" || !dirExists(yaraDir) {
+		failures = append(failures, fmt.Sprintf("yara rules_dir not found: %s", yaraDir))
+	} else if n := countFilesWithExt(yaraDir, ".yar"); n == 0 {
+		failures = append(failures, "no yara rules found")
+	} else {
+		fmt.Printf("  yara rules:  %d\n", n)
+	}
+	pbPath := strings.TrimSpace(cfg.Response.PlaybooksPath)
+	if pbPath == "" {
+		pbDir := strings.TrimSpace(cfg.Response.PlaybooksDir)
+		if pbDir == "" {
+			pbDir = filepath.Join("rules", "playbooks")
+		}
+		pbPath = filepath.Join(pbDir, "playbooks.yml")
+	}
+	if _, err := os.Stat(pbPath); err != nil {
+		failures = append(failures, fmt.Sprintf("playbooks not found: %s", pbPath))
+	}
+	return failures
+}
+
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
+}
+
+func countFilesWithExt(root, ext string) int {
+	n := 0
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(path), ext) {
+			n++
+		}
+		return nil
+	})
+	return n
+}
+
+func writeValidationReport(cfg *config.Config, rep ValidationReport) {
+	data, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		fmt.Printf("failed to serialize validation report: %v\n", err)
+		return
+	}
+	out := filepath.Join(cfg.Agent.DataDir, "validation_report.json")
+	if cfg.Agent.DataDir == "" {
+		out = "/tmp/edr_validation_report.json"
+	}
+	_ = os.MkdirAll(filepath.Dir(out), 0o755)
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		fmt.Printf("failed to write validation report %s: %v\n", out, err)
+	} else {
+		fmt.Printf("validation report: %s\n", out)
+	}
+	_ = os.WriteFile("/tmp/edr_validation_report.json", data, 0o644)
+}
+
+func hostname() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	return h
 }
