@@ -4,11 +4,29 @@ VERSION="${1:-dev}"
 ARCH="${2:-amd64}"
 BINARY="dist/linux-${ARCH}/edr-agent"
 RULES_SRC="rules"
+EBPF_OBJ="platform/linux/ebpf/edr.bpf.o"
 
 # Debian requires package version to start with a digit.
 DEB_VERSION="${VERSION}"
 if ! [[ "${DEB_VERSION}" =~ ^[0-9] ]]; then
-    DEB_VERSION="0.0.0-${DEB_VERSION}"
+    if [[ "${DEB_VERSION}" =~ ^v[0-9] ]]; then
+        DEB_VERSION="${DEB_VERSION#v}"
+    else
+        DEB_VERSION="0.0.0-${DEB_VERSION}"
+    fi
+fi
+
+if ! command -v dpkg-deb &>/dev/null; then
+    echo "dpkg-deb not found; install dpkg-dev on Linux packaging host" >&2
+    exit 1
+fi
+if [ ! -f "${BINARY}" ]; then
+    echo "missing binary: ${BINARY} (run Linux build first)" >&2
+    exit 1
+fi
+if [ ! -f "${EBPF_OBJ}" ]; then
+    echo "missing eBPF object: ${EBPF_OBJ} (run: make ebpf && make ebpf-link)" >&2
+    exit 1
 fi
 
 mkdir -p pkg/deb/{DEBIAN,usr/bin,etc/edr-agent,lib/systemd/system,var/lib/edr-agent}
@@ -22,10 +40,8 @@ if [ ! -d "${RULES_SRC}" ]; then
 fi
 mkdir -p pkg/deb/etc/edr-agent/rules
 cp -R "${RULES_SRC}/." pkg/deb/etc/edr-agent/rules/
-if [ -f "platform/linux/ebpf/edr.bpf.o" ]; then
-    mkdir -p pkg/deb/var/lib/edr/bpf
-    cp "platform/linux/ebpf/edr.bpf.o" pkg/deb/var/lib/edr/bpf/edr.bpf.o
-fi
+mkdir -p pkg/deb/var/lib/edr/bpf
+cp "${EBPF_OBJ}" pkg/deb/var/lib/edr/bpf/edr.bpf.o
 
 cat > "pkg/deb/lib/systemd/system/edr-agent.service" << 'EOF'
 [Unit]
@@ -80,11 +96,7 @@ EOF
 chmod 755 pkg/deb/DEBIAN/prerm
 
 mkdir -p dist
-if command -v dpkg-deb &>/dev/null; then
-    dpkg-deb --build pkg/deb "dist/edr-agent_${DEB_VERSION}_${ARCH}.deb"
-else
-    echo "dpkg-deb not found; skipping DEB build"
-fi
+dpkg-deb --build pkg/deb "dist/edr-agent_${DEB_VERSION}_${ARCH}.deb"
 
 mkdir -p build/linux
 cp pkg/deb/DEBIAN/postinst build/linux/postinst.sh
