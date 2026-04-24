@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="EDR Agent"
+           Language="1033"
+           Version="$(var.Version)"
+           Manufacturer="RazaTech"
+           UpgradeCode="7D3A6EE5-52D7-4D6A-9D66-6AFC9FA04A90">
+
+    <Package InstallerVersion="200" Compressed="yes"
+             InstallScope="perMachine"/>
+
+    <MajorUpgrade DowngradeErrorMessage=
+      "A newer version is already installed."/>
+    <MediaTemplate EmbedCab="yes"/>
+
+    <Feature Id="ProductFeature" Title="EDR Agent" Level="1">
+      <ComponentGroupRef Id="ProductComponents"/>
+      <ComponentGroupRef Id="ServiceComponent"/>
+    </Feature>
+  </Product>
+
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="EDR Agent"/>
+      </Directory>
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="DATFOLDER" Name="EDR Agent"/>
+      </Directory>
+    </Directory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="ProductComponents"
+                    Directory="INSTALLFOLDER">
+      <Component Id="AgentExe" Guid="*">
+        <File Id="AgentExe"
+              Source="dist\windows-amd64\edr-agent.exe"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="ConfigFile" Guid="*">
+        <File Id="ConfigFile"
+              Source="build\windows\config.yml"
+              Name="config.yml"/>
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="ServiceComponent"
+                    Directory="INSTALLFOLDER">
+      <Component Id="WindowsService" Guid="*">
+        <ServiceInstall
+          Id="EDRAgentService"
+          Name="EDRAgent"
+          DisplayName="EDR Agent"
+          Description="Endpoint Detection and Response Agent"
+          Type="ownProcess"
+          Start="auto"
+          ErrorControl="normal"
+          Account="LocalSystem"
+          Arguments='--config "[CommonAppDataFolder]EDR Agent\config.yml"'/>
+        <ServiceControl
+          Id="StartService"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Name="EDRAgent"
+          Wait="yes"/>
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
