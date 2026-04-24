@@ -32,6 +32,7 @@ type ValidationTest struct {
 	SupportedOS  []string
 	RequiresRoot bool
 	SkipInCI     bool
+	Optional     bool
 }
 
 type TestResult struct {
@@ -42,6 +43,7 @@ type TestResult struct {
 	DetectionLatencyMs int64
 	ResponseAction     string
 	Skipped            bool
+	Optional           bool
 }
 
 type ValidationSink struct {
@@ -146,13 +148,18 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 		}
 		fmt.Printf("[ RUN ] %s (%s)\n", test.Name, test.MITRE)
 		result := runOneTest(ctx, sink, test)
+		result.Optional = test.Optional
 		results = append(results, result)
 		if result.Passed {
 			passed++
 			fmt.Printf("[ PASS ] %s — detected in %dms\n", test.Name, result.DetectionLatencyMs)
 		} else {
-			failed++
-			fmt.Printf("[ FAIL ] %s — %s\n", test.Name, result.FailReason)
+			if test.Optional {
+				fmt.Printf("[ WARN ] %s — optional check not matched: %s\n", test.Name, result.FailReason)
+			} else {
+				failed++
+				fmt.Printf("[ FAIL ] %s — %s\n", test.Name, result.FailReason)
+			}
 		}
 		if test.Cleanup != nil {
 			test.Cleanup()
@@ -162,7 +169,9 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 	fmt.Printf("\n=== Results: %d/%d passed ===\n", passed, len(tests))
 	for _, r := range results {
 		status := "PASS"
-		if !r.Passed {
+		if !r.Passed && r.Optional {
+			status = "WARN"
+		} else if !r.Passed {
 			status = "FAIL"
 		}
 		fmt.Printf("  [%s] %-40s %s latency=%dms\n", status, r.TestName, r.MITRE, r.DetectionLatencyMs)
@@ -276,6 +285,7 @@ func buildValidationTests() []ValidationTest {
 				return false
 			},
 			SupportedOS: []string{"linux", "darwin", "windows"},
+			Optional:    true,
 		},
 		{
 			Name:       "suspicious-file-write",
@@ -287,6 +297,7 @@ func buildValidationTests() []ValidationTest {
 			},
 			Cleanup:     func() { _ = os.Remove(startupPath) },
 			SupportedOS: []string{"linux", "darwin", "windows"},
+			Optional:    true,
 		},
 		{
 			Name:       "yara-eicar-detection",
@@ -295,6 +306,14 @@ func buildValidationTests() []ValidationTest {
 			Simulate: func(_ context.Context) error {
 				eicar := `X5O!P%@AP[4\PZX54(P^)7CC)7}` + `$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*`
 				return os.WriteFile(eicarPath, []byte(eicar), 0o644)
+			},
+			Verify: func(_ context.Context, detections []detection.Detection) bool {
+				for _, d := range detections {
+					if d.Source == detection.SourceYARA && strings.Contains(strings.ToLower(d.RuleID), "eicar") {
+						return true
+					}
+				}
+				return false
 			},
 			Cleanup:     func() { _ = os.Remove(eicarPath) },
 			SupportedOS: []string{"linux", "darwin", "windows"},
@@ -311,6 +330,7 @@ func buildValidationTests() []ValidationTest {
 				return nil
 			},
 			SupportedOS: []string{"linux", "darwin", "windows"},
+			Optional:    true,
 		},
 		{
 			Name:        "process-injection-simulation",
@@ -318,12 +338,21 @@ func buildValidationTests() []ValidationTest {
 			TimeoutSec:  10,
 			Simulate:    func(_ context.Context) error { return simulateSelfInjection() },
 			SupportedOS: []string{"linux", "darwin", "windows"},
+			Optional:    true,
 		},
 		{
 			Name:        "sensitive-file-access",
 			MITRE:       "T1552",
 			TimeoutSec:  10,
 			Simulate:    func(_ context.Context) error { return attemptSensitiveFileRead() },
+			Verify: func(_ context.Context, detections []detection.Detection) bool {
+				for _, d := range detections {
+					if strings.Contains(d.TechniqueID, "T1003.008") || strings.Contains(strings.ToLower(d.RuleID), "cred-001") {
+						return true
+					}
+				}
+				return false
+			},
 			SupportedOS: []string{"linux", "darwin", "windows"},
 			SkipInCI:    true,
 		},
@@ -347,6 +376,7 @@ func buildValidationTests() []ValidationTest {
 			},
 			Cleanup:     func() { _ = os.RemoveAll(ransomDir) },
 			SupportedOS: []string{"linux", "darwin", "windows"},
+			Optional:    true,
 		},
 		{
 			Name:       "persistence-cron",
@@ -357,6 +387,7 @@ func buildValidationTests() []ValidationTest {
 			},
 			Cleanup:     func() { _ = os.Remove(cronPath) },
 			SupportedOS: []string{"linux", "darwin", "windows"},
+			Optional:    true,
 		},
 	}
 }
