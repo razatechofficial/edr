@@ -13,8 +13,11 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 GOFLAGS := -trimpath
-LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(DATE)
+LDFLAGS := -s -w \
+	-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(DATE) \
+	-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.Commit=$(COMMIT)
 
 BIN_DIR     := bin
 PROTO_DIR   := proto
@@ -23,6 +26,17 @@ GOPATH_BIN  := $(shell go env GOPATH 2>/dev/null)/bin
 RULES_DIR   := rules
 MODELS_DIR  := models
 PACKAGE_DIR := dist
+HOST_OS := $(shell uname -s)
+ifeq ($(HOST_OS),Linux)
+LINUX_CGO ?= 1
+else
+LINUX_CGO ?= 0
+endif
+ifneq ($(shell command -v x86_64-w64-mingw32-gcc 2>/dev/null),)
+WINDOWS_CGO ?= 1
+else
+WINDOWS_CGO ?= 0
+endif
 
 CLANG      ?= clang
 define find_clang
@@ -47,9 +61,6 @@ $(shell \
   fi)
 endef
 CLANG_BPF := $(call find_clang)
-ifeq ($(CLANG_BPF),)
-$(error No clang with BPF backend found. On macOS: brew install llvm; On Ubuntu: apt-get install clang llvm; Or set CLANG=/path/to/bpf-capable-clang)
-endif
 BPF_ARCH   := $(shell uname -m 2>/dev/null | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' || echo "x86")
 BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror
 LIBBPF_SYSTEM := $(shell pkg-config --cflags libbpf 2>/dev/null)
@@ -57,7 +68,7 @@ LIBBPF_VENDOR := -Iplatform/linux/ebpf/libbpf
 LIBBPF_DEFAULT := -I/usr/include
 BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/linux/ebpf
 
-.PHONY: build-linux build-darwin build-windows build-all
+.PHONY: build-linux build-darwin build-windows build-darwin-nosec build-all
 .PHONY: bundle-enterprise build-installer-embedded
 .PHONY: ebpf ebpf-link ebpf-install proto
 .PHONY: test test-collector test-detection test-response test-race test-coverage
@@ -79,6 +90,9 @@ build-linux:
 	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-linux-amd64 ./cmd/agent
 	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-installer-linux-amd64 ./cmd/installer
 	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-linux-amd64 ./cmd/cli
+	@mkdir -p dist/linux-amd64 dist/linux-arm64
+	CGO_ENABLED=$(LINUX_CGO) GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/linux-amd64/edr-agent ./cmd/agent
+	CGO_ENABLED=$(LINUX_CGO) GOOS=linux GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/linux-arm64/edr-agent ./cmd/agent
 
 build-darwin:
 	@echo "==> Building macOS binaries"
@@ -88,11 +102,21 @@ build-darwin:
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-installer-darwin-arm64 ./cmd/installer
 	GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-amd64 ./cmd/cli
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-arm64 ./cmd/cli
+	@mkdir -p dist/darwin-amd64 dist/darwin-arm64
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-amd64/edr-agent ./cmd/agent
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-arm64/edr-agent ./cmd/agent
 
 build-windows:
 	@echo "==> Building Windows amd64 binaries"
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-windows-amd64.exe ./cmd/agent
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-windows-amd64.exe ./cmd/cli
+	@mkdir -p dist/windows-amd64
+	CGO_ENABLED=$(WINDOWS_CGO) GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
+
+build-darwin-nosec:
+	@echo "==> Building macOS arm64 nosec variant"
+	@mkdir -p dist/darwin-arm64-nosec
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags nosec $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-arm64-nosec/edr-agent ./cmd/agent
 
 build-all: build-linux build-darwin build-windows
 
@@ -136,6 +160,10 @@ $(VMLINUX_H):
 	fi
 
 ebpf: $(VMLINUX_H) $(EBPF_OBJ)
+	@if [ -z "$(CLANG_BPF)" ]; then \
+		echo "No clang with BPF backend found. Install llvm/clang or set CLANG=/path/to/bpf-capable-clang"; \
+		exit 1; \
+	fi
 	@echo "==> eBPF programs compiled"
 
 platform/linux/ebpf/%.o: platform/linux/ebpf/%.c platform/linux/ebpf/common.h $(VMLINUX_H)

@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev
+          bash scripts/gen_vmlinux.sh
+          make ebpf
+      - name: Build linux
+        run: make build-linux
+      - name: Package deb/rpm
+        run: bash build/linux/package.sh ${{ github.ref_name }} amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
+
+  build-darwin:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Build darwin
+        run: make build-darwin
+      - name: Package pkg
+        run: bash build/macos/package.sh ${{ github.ref_name }} arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-packages
+          path: dist/*.pkg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Build windows
+        run: make build-windows
+      - name: Build MSI
+        shell: cmd
+        run: build\windows\build_msi.bat ${{ github.ref_name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: dist\*.msi
+
+  release:
+    needs: [build-linux, build-darwin, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            linux-packages/*.deb
+            linux-packages/*.rpm
+            macos-packages/*.pkg
+            windows-packages/*.msi
