@@ -56,7 +56,8 @@ ExecStart=/usr/bin/edr-agent --config /etc/edr-agent/config.yml
 Restart=always
 RestartSec=5
 User=root
-AmbientCapabilities=CAP_SYS_PTRACE CAP_NET_ADMIN CAP_SYS_ADMIN
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SYS_PTRACE
 NoNewPrivileges=false
 
 [Install]
