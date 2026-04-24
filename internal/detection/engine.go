@@ -37,13 +37,14 @@ type EngineConfig struct {
 	LLMEnabled        bool
 	WorkerCount       int
 
-	SigmaRulesDir   string
-	YARARulesDir    string
-	CustomRulesPath string
-	IOCHashDBPath   string
-	IOCIPDBPath     string
-	IOCDomainDBPath string
-	MLModelsDir     string
+	SigmaRulesDir        string
+	YARARulesDir         string
+	BehavioralChainsPath string
+	CustomRulesPath      string
+	IOCHashDBPath        string
+	IOCIPDBPath          string
+	IOCDomainDBPath      string
+	MLModelsDir          string
 
 	// ML model filenames (basename only, resolved under MLModelsDir).
 	// Empty strings fall back to built-in defaults in ml.NewEngine.
@@ -83,19 +84,19 @@ type EngineConfig struct {
 // initialize or panic at runtime are isolated so the remaining layers
 // continue to operate.
 type Engine struct {
-	ioc        *ioc.Matcher
-	sigma      *rules.SigmaEngine
-	yara       *rules.YARAEngine
-	custom     *rules.CustomEngine
-	behavioral []Detector
-	correlator *Correlator
-	sequencer  *SequenceEngine
-	ml         *ml.Engine
-	llm        *llm.Engine
-	ragEngine  *rag.Engine
-	chain      *BehavioralEngine
-	scorer     *ScoringEngine
-	deduper    *AlertDeduper
+	ioc         *ioc.Matcher
+	sigma       *rules.SigmaEngine
+	yara        *rules.YARAEngine
+	custom      *rules.CustomEngine
+	behavioral  []Detector
+	correlator  *Correlator
+	sequencer   *SequenceEngine
+	ml          *ml.Engine
+	llm         *llm.Engine
+	ragEngine   *rag.Engine
+	chain       *BehavioralEngine
+	scorer      *ScoringEngine
+	deduper     *AlertDeduper
 	yaraAsyncCh chan rules.YARAScanResult
 
 	cfg         EngineConfig
@@ -187,7 +188,10 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 			NewRATDetector(logger),
 			NewRansomwareDetector(logger),
 		}
-		chainPath := filepath.Join("rules", "behavioral", "chains.yml")
+		chainPath := cfg.BehavioralChainsPath
+		if strings.TrimSpace(chainPath) == "" {
+			chainPath = filepath.Join("rules", "behavioral", "chains.yml")
+		}
 		if ch, err := NewBehavioralEngine(chainPath, logger); err == nil {
 			e.chain = ch
 		} else {

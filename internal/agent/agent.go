@@ -246,22 +246,29 @@ func (a *Agent) initAdvancedDetection() error {
 	if dataDir == "" {
 		dataDir = "/var/lib/edr"
 	}
+	behavioralChainsPath := filepath.Join("rules", "behavioral", "chains.yml")
+	if sdir := strings.TrimSpace(a.cfg.Detection.Sigma.RulesDir); sdir != "" {
+		behavioralChainsPath = filepath.Join(filepath.Dir(sdir), "behavioral", "chains.yml")
+	} else if rf := strings.TrimSpace(a.cfg.RulesFile); rf != "" {
+		behavioralChainsPath = filepath.Join(filepath.Dir(rf), "behavioral", "chains.yml")
+	}
 	ecfg := detection.EngineConfig{
-		BehavioralEnabled: true,
-		SigmaEnabled:      a.cfg.Detection.Sigma.Enabled,
-		DataDir:           dataDir,
-		YARAEnabled:       a.cfg.Detection.YARA.Enabled,
-		IOCEnabled:        a.cfg.Detection.IOC.Enabled,
-		MLEnabled:         a.cfg.ML.Enabled,
-		LLMEnabled:        a.cfg.LLM.Enabled,
-		SigmaRulesDir:     a.cfg.Detection.Sigma.RulesDir,
-		YARARulesDir:      a.cfg.Detection.YARA.RulesDir,
-		CustomRulesPath:   customRulesPath,
-		IOCHashDBPath:     a.cfg.Detection.IOC.HashDBPath,
-		IOCIPDBPath:       a.cfg.Detection.IOC.IPDBPath,
-		IOCDomainDBPath:   a.cfg.Detection.IOC.DomainDBPath,
-		MLModelsDir:       a.cfg.ML.ModelsDir,
-		WorkerCount:       4,
+		BehavioralEnabled:    true,
+		SigmaEnabled:         a.cfg.Detection.Sigma.Enabled,
+		DataDir:              dataDir,
+		YARAEnabled:          a.cfg.Detection.YARA.Enabled,
+		IOCEnabled:           a.cfg.Detection.IOC.Enabled,
+		MLEnabled:            a.cfg.ML.Enabled,
+		LLMEnabled:           a.cfg.LLM.Enabled,
+		SigmaRulesDir:        a.cfg.Detection.Sigma.RulesDir,
+		YARARulesDir:         a.cfg.Detection.YARA.RulesDir,
+		BehavioralChainsPath: behavioralChainsPath,
+		CustomRulesPath:      customRulesPath,
+		IOCHashDBPath:        a.cfg.Detection.IOC.HashDBPath,
+		IOCIPDBPath:          a.cfg.Detection.IOC.IPDBPath,
+		IOCDomainDBPath:      a.cfg.Detection.IOC.DomainDBPath,
+		MLModelsDir:          a.cfg.ML.ModelsDir,
+		WorkerCount:          4,
 
 		MLModelPEClassifier:   a.cfg.ML.Models.PEClassifier,
 		MLModelBehaviorLSTM:   a.cfg.ML.Models.BehaviorLSTM,

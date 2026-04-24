@@ -22,6 +22,10 @@ if [ ! -d "${RULES_SRC}" ]; then
 fi
 mkdir -p pkg/deb/etc/edr-agent/rules
 cp -R "${RULES_SRC}/." pkg/deb/etc/edr-agent/rules/
+if [ -f "platform/linux/ebpf/edr.bpf.o" ]; then
+    mkdir -p pkg/deb/var/lib/edr/bpf
+    cp "platform/linux/ebpf/edr.bpf.o" pkg/deb/var/lib/edr/bpf/edr.bpf.o
+fi
 
 cat > "pkg/deb/lib/systemd/system/edr-agent.service" << 'EOF'
 [Unit]
@@ -31,6 +35,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+WorkingDirectory=/etc/edr-agent
 ExecStart=/usr/bin/edr-agent --config /etc/edr-agent/config.yml
 Restart=always
 RestartSec=5
@@ -57,6 +62,7 @@ cat > pkg/deb/DEBIAN/postinst << 'EOF'
 set -e
 mkdir -p /var/lib/edr-agent /var/lib/edr-agent/forensics /var/lib/edr-agent/quarantine /var/lib/edr-agent/alert-spool
 mkdir -p /etc/edr-agent/rules
+mkdir -p /var/lib/edr/bpf
 chmod 700 /var/lib/edr-agent /var/lib/edr-agent/forensics /var/lib/edr-agent/quarantine /var/lib/edr-agent/alert-spool
 chmod 755 /etc/edr-agent /etc/edr-agent/rules
 systemctl daemon-reload
