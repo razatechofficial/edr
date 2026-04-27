@@ -77,6 +77,9 @@ func (e *YARAEngine) EnqueueFileScan(path string, event interface{}) bool {
 	if e.asyncSink == nil {
 		return false
 	}
+	if shouldSkipYARAScanPath(path) {
+		return false
+	}
 	select {
 	case e.scanChan <- scanRequest{path: path, event: event, async: true}:
 		return true
@@ -219,6 +222,9 @@ func mergeYARAMatches(a, b []YARAMatch) []YARAMatch {
 
 // ScanFile scans a file on disk against all compiled rules.
 func (e *YARAEngine) ScanFile(ctx context.Context, path string) ([]YARAMatch, error) {
+	if shouldSkipYARAScanPath(path) {
+		return nil, nil
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("yara: stat %s: %w", path, err)
@@ -249,6 +255,30 @@ func (e *YARAEngine) ScanFile(ctx context.Context, path string) ([]YARAMatch, er
 		all = mergeYARAMatches(all, convertMatches(m))
 	}
 	return all, nil
+}
+
+func shouldSkipYARAScanPath(path string) bool {
+	p := strings.ToLower(strings.TrimSpace(path))
+	if p == "" {
+		return true
+	}
+	clean := filepath.Clean(p)
+	// Avoid scanning high-churn system/runtime paths and shared object artifacts
+	// that can cause noisy matches and unstable scans under some libyara builds.
+	if strings.HasPrefix(clean, "/usr/lib/") ||
+		strings.HasPrefix(clean, "/lib/") ||
+		strings.HasPrefix(clean, "/proc/") ||
+		strings.HasPrefix(clean, "/sys/") ||
+		strings.HasPrefix(clean, "/dev/") ||
+		strings.HasPrefix(clean, "/run/") {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(clean))
+	switch ext {
+	case ".so", ".a", ".o":
+		return true
+	}
+	return false
 }
 
 // ScanBytes scans in-memory data against all compiled rules.
