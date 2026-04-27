@@ -303,9 +303,11 @@ func buildValidationTests() []ValidationTest {
 			Name:       "yara-eicar-detection",
 			MITRE:      "T1204",
 			TimeoutSec: 15,
-			Simulate: func(_ context.Context) error {
+			Simulate: func(ctx context.Context) error {
 				eicar := `X5O!P%@AP[4\PZX54(P^)7CC)7}` + `$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*`
-				return os.WriteFile(eicarPath, []byte(eicar), 0o644)
+				quoted := strings.ReplaceAll(eicar, `'`, `'\''`)
+				cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("printf '%%s' '%s' > %q", quoted, eicarPath))
+				return cmd.Run()
 			},
 			Verify: func(_ context.Context, detections []detection.Detection) bool {
 				for _, d := range detections {
