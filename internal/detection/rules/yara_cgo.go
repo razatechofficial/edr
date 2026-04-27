@@ -267,10 +267,17 @@ func shouldSkipYARAScanPath(path string) bool {
 	// that can cause noisy matches and unstable scans under some libyara builds.
 	if strings.HasPrefix(clean, "/usr/lib/") ||
 		strings.HasPrefix(clean, "/lib/") ||
+		strings.HasPrefix(clean, "/lib64/") ||
 		strings.HasPrefix(clean, "/proc/") ||
 		strings.HasPrefix(clean, "/sys/") ||
 		strings.HasPrefix(clean, "/dev/") ||
-		strings.HasPrefix(clean, "/run/") {
+		strings.HasPrefix(clean, "/run/") ||
+		strings.HasPrefix(clean, "/usr/share/") {
+		return true
+	}
+	// Avoid loader and policy configs that are frequently touched and noisy.
+	if clean == "/etc/ld.so.preload" || strings.HasPrefix(clean, "/etc/ld.so.") ||
+		strings.HasPrefix(clean, "/etc/polkit-1/") || strings.HasPrefix(clean, "/etc/alternatives/") {
 		return true
 	}
 	ext := strings.ToLower(filepath.Ext(clean))

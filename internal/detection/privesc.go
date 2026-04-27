@@ -251,7 +251,7 @@ func (d *PrivescDetector) checkUACBypass(event interface{}, pid uint32) *events.
 
 var kernelExploitPatterns = []string{
 	"dirtypipe", "dirtycow", "pwnkit", "pkexec",
-	"polkit", "overlayfs", "cve-",
+	"overlayfs", "cve-",
 	"roottool", "rootkit", "priv_esc",
 	"kernelexploit", "kernel_exploit",
 }
@@ -284,9 +284,9 @@ func (d *PrivescDetector) checkKernelExploit(event interface{}, pid uint32) *eve
 
 func isBenignPolkitActivity(cmd, proc, path string) bool {
 	// Keep specific exploit indicators high-signal while suppressing normal policykit daemons.
-	if !containsAny(cmd, "polkit", "pkexec") &&
-		!containsAny(proc, "polkit", "pkexec") &&
-		!containsAny(path, "polkit", "pkexec") {
+	if !containsAny(cmd, "polkit", "pkexec", "dbus-daemon --system") &&
+		!containsAny(proc, "polkit", "pkexec", "dbus-daemon") &&
+		!containsAny(path, "polkit", "pkexec", "/etc/polkit-1/") {
 		return false
 	}
 	if containsAny(cmd, "dirtypipe", "dirtycow", "pwnkit", "cve-", "rootkit", "priv_esc", "kernelexploit", "kernel_exploit") {
@@ -298,5 +298,11 @@ func isBenignPolkitActivity(cmd, proc, path string) bool {
 	if containsAny(path, "dirtypipe", "dirtycow", "pwnkit", "cve-", "rootkit", "priv_esc", "kernelexploit", "kernel_exploit") {
 		return false
 	}
-	return containsAny(path, "/usr/lib/polkit-1/polkitd", "/usr/libexec/polkit-", "/usr/lib/polkit-1/")
+	return containsAny(path,
+		"/usr/lib/polkit-1/polkitd",
+		"/usr/libexec/polkit-",
+		"/usr/lib/polkit-1/",
+		"/etc/polkit-1/",
+		"/usr/share/polkit-1/",
+	)
 }

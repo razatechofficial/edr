@@ -36,6 +36,7 @@ type EngineConfig struct {
 	MLEnabled         bool
 	LLMEnabled        bool
 	WorkerCount       int
+	YARAMaxFileSizeMB int
 
 	SigmaRulesDir        string
 	YARARulesDir         string
@@ -97,6 +98,7 @@ type Engine struct {
 	chain       *BehavioralEngine
 	scorer      *ScoringEngine
 	deduper     *AlertDeduper
+	rateLimiter *RuleRateLimiter
 	yaraAsyncCh chan rules.YARAScanResult
 
 	cfg         EngineConfig
@@ -133,6 +135,7 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 		stopCh:      make(chan struct{}),
 		scorer:      NewScoringEngine(),
 		deduper:     NewAlertDeduper(5*time.Minute, cfg.DataDir),
+		rateLimiter: NewRuleRateLimiter(30, 10, 4096),
 	}
 
 	if cfg.IOCEnabled {
@@ -145,7 +148,11 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 	}
 
 	if cfg.YARAEnabled && cfg.YARARulesDir != "" {
-		ye, err := rules.NewYARAEngine(cfg.YARARulesDir, 50, cfg.WorkerCount, logger)
+		yaraMaxFileMB := cfg.YARAMaxFileSizeMB
+		if yaraMaxFileMB <= 0 {
+			yaraMaxFileMB = 8
+		}
+		ye, err := rules.NewYARAEngine(cfg.YARARulesDir, yaraMaxFileMB, cfg.WorkerCount, logger)
 		if err != nil {
 			logger.Warn("engine: yara layer init failed, disabling", zap.Error(err))
 		} else {
@@ -628,6 +635,10 @@ func (e *Engine) processYARAScanResult(res rules.YARAScanResult) {
 		if !running {
 			return
 		}
+		if e.rateLimiter != nil && !e.rateLimiter.Allow(out.RuleID) {
+			e.droppedEvents.Add(1)
+			continue
+		}
 		select {
 		case e.alertCh <- out:
 			e.detectionsEmitted.Add(1)
@@ -648,8 +659,12 @@ func shouldSuppressYARANoise(m rules.YARAMatch, path string) bool {
 	if p == "" {
 		return false
 	}
-	// Document macro signatures should not trigger on core system shared libraries.
-	return strings.HasPrefix(p, "/usr/lib/") || strings.HasPrefix(p, "/lib/")
+	// Document macro signatures should not trigger on system libraries/config paths.
+	return strings.HasPrefix(p, "/usr/lib/") ||
+		strings.HasPrefix(p, "/lib/") ||
+		strings.HasPrefix(p, "/lib64/") ||
+		strings.HasPrefix(p, "/usr/share/") ||
+		strings.HasPrefix(p, "/etc/")
 }
 
 // postProcessAlerts scores all alerts, applies AlertDeduper, and prepends
@@ -692,6 +707,12 @@ func (e *Engine) postProcessAlerts(in []*events.Alert) []*events.Alert {
 		}
 		if len(a.Tags) > 0 {
 			a2.Tags = a.Tags
+		}
+		if e.rateLimiter != nil &&
+			!strings.HasPrefix(a2.RuleID, "dedup-") &&
+			!e.rateLimiter.Allow(a2.RuleID) {
+			e.droppedEvents.Add(1)
+			continue
 		}
 		out = append(out, a2)
 	}

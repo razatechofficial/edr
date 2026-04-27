@@ -3,6 +3,8 @@ package detection
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/razatechofficial/edr/pkg/events"
 	"go.uber.org/zap"
@@ -12,12 +14,17 @@ import (
 // sensitive credential stores (lsass, SAM, NTDS.dit, /etc/shadow, Keychain,
 // browser credential databases) and known credential dump tool execution.
 type CredentialDetector struct {
-	logger *zap.Logger
+	logger          *zap.Logger
+	cooldownMu      sync.Mutex
+	lastFileAlertAt map[string]time.Time
 }
 
 // NewCredentialDetector creates a CredentialDetector.
 func NewCredentialDetector(logger *zap.Logger) *CredentialDetector {
-	return &CredentialDetector{logger: logger}
+	return &CredentialDetector{
+		logger:          logger,
+		lastFileAlertAt: make(map[string]time.Time),
+	}
 }
 
 // Name returns the detector identifier.
@@ -67,6 +74,8 @@ func (d *CredentialDetector) Analyze(event interface{}, correlator *Correlator) 
 // Reset is a no-op; the detector is stateless.
 func (d *CredentialDetector) Reset() {}
 
+const credentialFileAlertCooldown = 45 * time.Second
+
 // ---------------------------------------------------------------------------
 // Sensitive credential file access
 // ---------------------------------------------------------------------------
@@ -105,6 +114,9 @@ func (d *CredentialDetector) checkCredentialFiles(event interface{}, pid uint32)
 		if !strings.Contains(path, pattern) {
 			continue
 		}
+		if d.isCredentialAlertCoolingDown(pid, path) {
+			return nil
+		}
 
 		mitre := credentialFileMITRE(pattern)
 		d.logger.Warn("credential file access",
@@ -118,6 +130,26 @@ func (d *CredentialDetector) checkCredentialFiles(event interface{}, pid uint32)
 		)
 	}
 	return nil
+}
+
+func (d *CredentialDetector) isCredentialAlertCoolingDown(pid uint32, path string) bool {
+	now := time.Now()
+	key := fmt.Sprintf("%d:%s", pid, path)
+	d.cooldownMu.Lock()
+	defer d.cooldownMu.Unlock()
+	if len(d.lastFileAlertAt) > 2048 {
+		// Bound map growth under sustained noisy workloads.
+		for k, ts := range d.lastFileAlertAt {
+			if now.Sub(ts) > 5*credentialFileAlertCooldown {
+				delete(d.lastFileAlertAt, k)
+			}
+		}
+	}
+	if last, ok := d.lastFileAlertAt[key]; ok && now.Sub(last) < credentialFileAlertCooldown {
+		return true
+	}
+	d.lastFileAlertAt[key] = now
+	return false
 }
 
 func credentialFileMITRE(pattern string) []events.MITREAttack {

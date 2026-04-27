@@ -262,6 +262,7 @@ func (a *Agent) initAdvancedDetection() error {
 		LLMEnabled:           a.cfg.LLM.Enabled,
 		SigmaRulesDir:        a.cfg.Detection.Sigma.RulesDir,
 		YARARulesDir:         a.cfg.Detection.YARA.RulesDir,
+		YARAMaxFileSizeMB:    a.cfg.Detection.YARA.MaxFileSizeMB,
 		BehavioralChainsPath: behavioralChainsPath,
 		CustomRulesPath:      customRulesPath,
 		IOCHashDBPath:        a.cfg.Detection.IOC.HashDBPath,
