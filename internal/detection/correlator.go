@@ -42,6 +42,8 @@ const (
 )
 
 const correlatorShardCount = 64
+const correlatorMaxEventsPerShard = 1024
+const correlatorRetentionWindow = 6 * time.Hour
 
 type timedEvent struct {
 	event       interface{}
@@ -93,12 +95,26 @@ func (c *Correlator) AddEvent(event interface{}) {
 	ps := c.pidShards[te.pid%correlatorShardCount]
 	ps.mu.Lock()
 	ps.events = append(ps.events, te)
+	if overflow := len(ps.events) - correlatorMaxEventsPerShard; overflow > 0 {
+		copy(ps.events, ps.events[overflow:])
+		for i := len(ps.events) - overflow; i < len(ps.events); i++ {
+			ps.events[i] = timedEvent{}
+		}
+		ps.events = ps.events[:len(ps.events)-overflow]
+	}
 	ps.mu.Unlock()
 
 	if te.user != "" {
 		us := c.userShards[fnvHash(te.user)%correlatorShardCount]
 		us.mu.Lock()
 		us.events = append(us.events, te)
+		if overflow := len(us.events) - correlatorMaxEventsPerShard; overflow > 0 {
+			copy(us.events, us.events[overflow:])
+			for i := len(us.events) - overflow; i < len(us.events); i++ {
+				us.events[i] = timedEvent{}
+			}
+			us.events = us.events[:len(us.events)-overflow]
+		}
 		us.mu.Unlock()
 	}
 }
@@ -304,7 +320,7 @@ func (c *Correlator) cleanupLoop() {
 		case <-c.stopCh:
 			return
 		case <-ticker.C:
-			cutoff := time.Now().Add(-time.Duration(Window24h))
+			cutoff := time.Now().Add(-correlatorRetentionWindow)
 			for i := 0; i < correlatorShardCount; i++ {
 				expireShard(c.pidShards[i], cutoff)
 				expireShard(c.userShards[i], cutoff)

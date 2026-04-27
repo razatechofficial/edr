@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +108,8 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	normalizePerformanceProfile(&cfg)
+	applyRuntimeLimits(cfg, slog.Default())
 	if cfg.ML.Enabled && cfg.ML.RequireRuntime {
 		if err := mlpkg.InitRuntime(cfg.ML.ONNX.NumThreads, cfg.ML.ONNX.UseGPU, cfg.ML.ONNX.GPUDeviceID); err != nil {
 			return nil, fmt.Errorf("ml.require_runtime: ONNX Runtime init failed: %w", err)
@@ -134,8 +137,8 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		cfg:          cfg,
 		collectors:   cols,
 		ruleSet:      rs,
-		eventSpool:   spool.NewQueue[schema.ProcessEvent](),
-		alertSpool:   spool.NewQueue[schema.Alert](),
+		eventSpool:   spool.NewQueueWithLimit[schema.ProcessEvent](cfg.Performance.EventBufferSize),
+		alertSpool:   spool.NewQueueWithLimit[schema.Alert](cfg.Performance.EventBufferSize),
 		detector:     detect.NewEngine(rs),
 		responder:    response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:       alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
@@ -269,7 +272,7 @@ func (a *Agent) initAdvancedDetection() error {
 		IOCIPDBPath:          a.cfg.Detection.IOC.IPDBPath,
 		IOCDomainDBPath:      a.cfg.Detection.IOC.DomainDBPath,
 		MLModelsDir:          a.cfg.ML.ModelsDir,
-		WorkerCount:          4,
+		WorkerCount:          a.cfg.Performance.WorkerCount,
 
 		MLModelPEClassifier:   a.cfg.ML.Models.PEClassifier,
 		MLModelBehaviorLSTM:   a.cfg.ML.Models.BehaviorLSTM,
@@ -374,6 +377,60 @@ func (a *Agent) initAdvancedDetection() error {
 	return nil
 }
 
+func applyRuntimeLimits(cfg config.Config, logger *slog.Logger) {
+	if cfg.Performance.WorkerCount > 0 {
+		maxProcs := cfg.Performance.WorkerCount
+		if maxProcs > runtime.NumCPU() {
+			maxProcs = runtime.NumCPU()
+		}
+		if maxProcs < 1 {
+			maxProcs = 1
+		}
+		runtime.GOMAXPROCS(maxProcs)
+	}
+
+	// Keep Go heap growth bounded on low-memory endpoints.
+	if cfg.Performance.MaxMemoryMB > 0 {
+		limit := int64(cfg.Performance.MaxMemoryMB) * 1024 * 1024
+		debug.SetMemoryLimit(limit)
+		if logger != nil {
+			logger.Info("go runtime memory limit applied", "max_memory_mb", cfg.Performance.MaxMemoryMB)
+		}
+	}
+
+	// Lower GC target for smaller, more frequent collections under pressure.
+	_ = debug.SetGCPercent(75)
+}
+
+func normalizePerformanceProfile(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	lowResource := cfg.Performance.MaxMemoryMB > 0 && cfg.Performance.MaxMemoryMB <= 1024
+
+	if cfg.Performance.WorkerCount <= 0 {
+		cfg.Performance.WorkerCount = 1
+	}
+	if lowResource && cfg.Performance.WorkerCount > 1 {
+		cfg.Performance.WorkerCount = 1
+	}
+	if cfg.Performance.EventBufferSize <= 0 {
+		cfg.Performance.EventBufferSize = 2048
+	}
+	if lowResource && cfg.Performance.EventBufferSize > 2048 {
+		cfg.Performance.EventBufferSize = 2048
+	}
+	if cfg.Performance.BatchSize <= 0 {
+		cfg.Performance.BatchSize = 20
+	}
+	if lowResource && cfg.Performance.BatchSize > 20 {
+		cfg.Performance.BatchSize = 20
+	}
+	if lowResource && cfg.Detection.YARA.MaxFileSizeMB > 4 {
+		cfg.Detection.YARA.MaxFileSizeMB = 4
+	}
+}
+
 func (a *Agent) initThreatIntel() error {
 	ti := a.cfg.ThreatIntel
 	if !ti.MISP.Enabled && !ti.OTX.Enabled && len(ti.CustomFeeds) == 0 {
@@ -419,13 +476,14 @@ func NewForTesting(cfg config.Config, rs rules.RuleSet) (*Agent, error) {
 }
 
 func NewForTestingWithCollectors(cfg config.Config, rs rules.RuleSet, collectors []collector.Collector) *Agent {
+	normalizePerformanceProfile(&cfg)
 	a := &Agent{
 		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		cfg:          cfg,
 		collectors:   collectors,
 		ruleSet:      rs,
-		eventSpool:   spool.NewQueue[schema.ProcessEvent](),
-		alertSpool:   spool.NewQueue[schema.Alert](),
+		eventSpool:   spool.NewQueueWithLimit[schema.ProcessEvent](cfg.Performance.EventBufferSize),
+		alertSpool:   spool.NewQueueWithLimit[schema.Alert](cfg.Performance.EventBufferSize),
 		detector:     detect.NewEngine(rs),
 		responder:    response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:       alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),

@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	fileHashWorkers     = 4
-	fileHashJobQueue    = 4096
-	fileHashCacheMax    = 10000
-	fileHashMaxFileSize = 50 << 20
+	fileHashWorkers     = 2
+	fileHashJobQueue    = 512
+	fileHashCacheMax    = 2048
+	fileHashMaxFileSize = 16 << 20
 )
 
 // fileHashPool hashes file telemetry asynchronously with an LRU (path+mtime+size) → SHA256 cache.

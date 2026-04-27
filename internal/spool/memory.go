@@ -3,17 +3,32 @@ package spool
 import "sync"
 
 type Queue[T any] struct {
-	mu    sync.Mutex
-	items []T
+	mu       sync.Mutex
+	items    []T
+	maxItems int
 }
 
 func NewQueue[T any]() *Queue[T] {
-	return &Queue[T]{items: make([]T, 0, 256)}
+	return NewQueueWithLimit[T](4096)
+}
+
+func NewQueueWithLimit[T any](maxItems int) *Queue[T] {
+	if maxItems <= 0 {
+		maxItems = 4096
+	}
+	return &Queue[T]{items: make([]T, 0, 256), maxItems: maxItems}
 }
 
 func (q *Queue[T]) Push(v T) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.maxItems > 0 && len(q.items) >= q.maxItems {
+		// Keep bounded memory usage by evicting oldest entries.
+		copy(q.items, q.items[1:])
+		var zero T
+		q.items[len(q.items)-1] = zero
+		q.items = q.items[:len(q.items)-1]
+	}
 	q.items = append(q.items, v)
 }
 

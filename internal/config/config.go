@@ -5,7 +5,6 @@
 package config
 
 import (
-	"runtime"
 	"time"
 )
 
@@ -401,9 +400,9 @@ func Defaults() Config {
 
 	cfg.Performance.MaxCPUPercent = 5
 	cfg.Performance.MaxMemoryMB = 200
-	cfg.Performance.EventBufferSize = 65536
-	cfg.Performance.WorkerCount = runtime.NumCPU()
-	cfg.Performance.BatchSize = 50
+	cfg.Performance.EventBufferSize = 2048
+	cfg.Performance.WorkerCount = 1
+	cfg.Performance.BatchSize = 20
 	cfg.Performance.BatchIntervalMs = 15000
 
 	cfg.Baseline.LearningDays = 7

@@ -107,14 +107,14 @@ func TestDefaults(t *testing.T) {
 	if cfg.Performance.MaxMemoryMB != 200 {
 		t.Errorf("Performance.MaxMemoryMB = %d, want %d", cfg.Performance.MaxMemoryMB, 200)
 	}
-	if cfg.Performance.EventBufferSize != 65536 {
-		t.Errorf("Performance.EventBufferSize = %d, want %d", cfg.Performance.EventBufferSize, 65536)
+	if cfg.Performance.EventBufferSize != 2048 {
+		t.Errorf("Performance.EventBufferSize = %d, want %d", cfg.Performance.EventBufferSize, 2048)
 	}
-	if cfg.Performance.WorkerCount != runtime.NumCPU() {
-		t.Errorf("Performance.WorkerCount = %d, want %d", cfg.Performance.WorkerCount, runtime.NumCPU())
+	if cfg.Performance.WorkerCount != 1 {
+		t.Errorf("Performance.WorkerCount = %d, want %d", cfg.Performance.WorkerCount, 1)
 	}
-	if cfg.Performance.BatchSize != 50 {
-		t.Errorf("Performance.BatchSize = %d, want %d", cfg.Performance.BatchSize, 50)
+	if cfg.Performance.BatchSize != 20 {
+		t.Errorf("Performance.BatchSize = %d, want %d", cfg.Performance.BatchSize, 20)
 	}
 	if cfg.Performance.BatchIntervalMs != 15000 {
 		t.Errorf("Performance.BatchIntervalMs = %d, want %d", cfg.Performance.BatchIntervalMs, 15000)
