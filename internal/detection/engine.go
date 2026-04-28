@@ -29,14 +29,18 @@ import (
 // EngineConfig controls which detection layers are active and where their
 // data files reside.
 type EngineConfig struct {
-	IOCEnabled        bool
-	SigmaEnabled      bool
-	YARAEnabled       bool
-	BehavioralEnabled bool
-	MLEnabled         bool
-	LLMEnabled        bool
-	WorkerCount       int
-	YARAMaxFileSizeMB int
+	IOCEnabled              bool
+	SigmaEnabled            bool
+	YARAEnabled             bool
+	BehavioralEnabled       bool
+	MLEnabled               bool
+	LLMEnabled              bool
+	WorkerCount             int
+	PerformanceProfile      string
+	YARAMaxFileSizeMB       int
+	YARARescanCooldownSec   int
+	YARAMaxScansPerMinute   int
+	YARAExcludePathPrefixes []string
 
 	SigmaRulesDir        string
 	YARARulesDir         string
@@ -126,16 +130,29 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 	if cfg.WorkerCount <= 0 {
 		cfg.WorkerCount = 4
 	}
+	setRuntimeProfile(cfg.PerformanceProfile)
+	alertBuffer := cfg.WorkerCount * 64
+	ratePerMin := 30
+	rateBurst := 10
+	if isLowResourceProfile() {
+		alertBuffer = cfg.WorkerCount * 32
+		ratePerMin = 12
+		rateBurst = 4
+	} else if isStrictProfile() {
+		alertBuffer = cfg.WorkerCount * 128
+		ratePerMin = 120
+		rateBurst = 40
+	}
 
 	e := &Engine{
 		cfg:         cfg,
 		workerCount: cfg.WorkerCount,
-		alertCh:     make(chan *events.Alert, cfg.WorkerCount*64),
+		alertCh:     make(chan *events.Alert, alertBuffer),
 		logger:      logger,
 		stopCh:      make(chan struct{}),
 		scorer:      NewScoringEngine(),
 		deduper:     NewAlertDeduper(5*time.Minute, cfg.DataDir),
-		rateLimiter: NewRuleRateLimiter(30, 10, 4096),
+		rateLimiter: NewRuleRateLimiter(ratePerMin, rateBurst, 4096),
 	}
 
 	if cfg.IOCEnabled {
@@ -152,12 +169,22 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 		if yaraMaxFileMB <= 0 {
 			yaraMaxFileMB = 8
 		}
-		ye, err := rules.NewYARAEngine(cfg.YARARulesDir, yaraMaxFileMB, cfg.WorkerCount, logger)
+		ye, err := rules.NewYARAEngine(cfg.YARARulesDir, yaraMaxFileMB, cfg.WorkerCount, logger, rules.YARAEngineOptions{
+			RescanCooldown:  time.Duration(cfg.YARARescanCooldownSec) * time.Second,
+			MaxScansPerMin:  cfg.YARAMaxScansPerMinute,
+			ExcludePrefixes: cfg.YARAExcludePathPrefixes,
+		})
 		if err != nil {
 			logger.Warn("engine: yara layer init failed, disabling", zap.Error(err))
 		} else {
 			e.yara = ye
-			e.yaraAsyncCh = make(chan rules.YARAScanResult, 256)
+			asyncBuf := 256
+			if isLowResourceProfile() {
+				asyncBuf = 64
+			} else if isStrictProfile() {
+				asyncBuf = 512
+			}
+			e.yaraAsyncCh = make(chan rules.YARAScanResult, asyncBuf)
 			ye.SetAsyncSink(e.yaraAsyncCh)
 		}
 	}
@@ -311,8 +338,25 @@ func (e *Engine) Stop() error {
 	if e.cancel != nil {
 		e.cancel()
 	}
-	e.wg.Wait()
-	e.llmWg.Wait()
+	waitWithTimeout := func(wg *sync.WaitGroup, timeout time.Duration) bool {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			wg.Wait()
+		}()
+		select {
+		case <-done:
+			return true
+		case <-time.After(timeout):
+			return false
+		}
+	}
+	if !waitWithTimeout(&e.wg, 8*time.Second) {
+		e.logger.Warn("engine: timeout waiting for workers during stop")
+	}
+	if !waitWithTimeout(&e.llmWg, 5*time.Second) {
+		e.logger.Warn("engine: timeout waiting for llm workers during stop")
+	}
 	if e.deduper != nil {
 		e.deduper.Stop()
 	}

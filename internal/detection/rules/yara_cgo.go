@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,15 +35,36 @@ type YARAEngine struct {
 	timeout     time.Duration
 	droppedJobs atomic.Uint64
 	asyncSink   chan<- YARAScanResult
+	opts        YARAEngineOptions
+	lastScanMu  sync.Mutex
+	lastScanAt  map[string]time.Time
+	scanBudget  *scanBudgetLimiter
+}
+
+type YARAEngineOptions struct {
+	RescanCooldown  time.Duration
+	MaxScansPerMin  int
+	ExcludePrefixes []string
 }
 
 // NewYARAEngine creates a YARA scanning engine backed by a worker pool.
-func NewYARAEngine(rulesDir string, maxFileSizeMB int, workers int, logger *zap.Logger) (*YARAEngine, error) {
+func NewYARAEngine(rulesDir string, maxFileSizeMB int, workers int, logger *zap.Logger, opts ...YARAEngineOptions) (*YARAEngine, error) {
 	if workers < 1 {
 		workers = 1
 	}
 	if maxFileSizeMB < 1 {
 		maxFileSizeMB = 50
+	}
+
+	var cfg YARAEngineOptions
+	if len(opts) > 0 {
+		cfg = opts[0]
+	}
+	if cfg.RescanCooldown <= 0 {
+		cfg.RescanCooldown = 2 * time.Minute
+	}
+	if cfg.MaxScansPerMin <= 0 {
+		cfg.MaxScansPerMin = workers * 60
 	}
 
 	e := &YARAEngine{
@@ -52,6 +74,9 @@ func NewYARAEngine(rulesDir string, maxFileSizeMB int, workers int, logger *zap.
 		scanChan:    make(chan scanRequest, workers*4),
 		logger:      logger,
 		timeout:     5 * time.Second,
+		opts:        cfg,
+		lastScanAt:  make(map[string]time.Time),
+		scanBudget:  newScanBudgetLimiter(cfg.MaxScansPerMin),
 	}
 
 	if err := e.LoadRules(); err != nil {
@@ -80,6 +105,9 @@ func (e *YARAEngine) EnqueueFileScan(path string, event interface{}) bool {
 	if shouldSkipYARAScanPath(path) {
 		return false
 	}
+	if e.shouldSkipByBudget(path) {
+		return false
+	}
 	select {
 	case e.scanChan <- scanRequest{path: path, event: event, async: true}:
 		return true
@@ -87,6 +115,41 @@ func (e *YARAEngine) EnqueueFileScan(path string, event interface{}) bool {
 		e.droppedJobs.Add(1)
 		return false
 	}
+}
+
+func (e *YARAEngine) shouldSkipByBudget(path string) bool {
+	if e == nil {
+		return false
+	}
+	p := strings.ToLower(strings.TrimSpace(path))
+	if p == "" {
+		return true
+	}
+	for _, pref := range e.opts.ExcludePrefixes {
+		q := strings.ToLower(strings.TrimSpace(pref))
+		if q != "" && strings.HasPrefix(p, q) {
+			return true
+		}
+	}
+	now := time.Now()
+	e.lastScanMu.Lock()
+	if last, ok := e.lastScanAt[p]; ok && now.Sub(last) < e.opts.RescanCooldown {
+		e.lastScanMu.Unlock()
+		return true
+	}
+	e.lastScanAt[p] = now
+	if len(e.lastScanAt) > 4096 {
+		for k, ts := range e.lastScanAt {
+			if now.Sub(ts) > 10*e.opts.RescanCooldown {
+				delete(e.lastScanAt, k)
+			}
+		}
+	}
+	e.lastScanMu.Unlock()
+	if e.scanBudget != nil && !e.scanBudget.Allow() {
+		return true
+	}
+	return false
 }
 
 // compileOneRuleFile parses a single YARA file into its own ruleset.
@@ -404,4 +467,51 @@ func (e *YARAEngine) worker(ctx context.Context) {
 			}
 		}
 	}
+}
+
+type scanBudgetLimiter struct {
+	mu         sync.Mutex
+	allowance  float64
+	ratePerSec float64
+	lastRefill time.Time
+	maxBurst   float64
+}
+
+func newScanBudgetLimiter(perMinute int) *scanBudgetLimiter {
+	if perMinute <= 0 {
+		perMinute = 60
+	}
+	rate := float64(perMinute) / 60.0
+	burst := float64(perMinute)
+	if burst < 1 {
+		burst = 1
+	}
+	return &scanBudgetLimiter{
+		allowance:  burst,
+		ratePerSec: rate,
+		lastRefill: time.Now(),
+		maxBurst:   burst,
+	}
+}
+
+func (s *scanBudgetLimiter) Allow() bool {
+	if s == nil {
+		return true
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	elapsed := now.Sub(s.lastRefill).Seconds()
+	if elapsed > 0 {
+		s.allowance += elapsed * s.ratePerSec
+		if s.allowance > s.maxBurst {
+			s.allowance = s.maxBurst
+		}
+		s.lastRefill = now
+	}
+	if s.allowance < 1 {
+		return false
+	}
+	s.allowance -= 1
+	return true
 }
