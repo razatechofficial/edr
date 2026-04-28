@@ -256,23 +256,27 @@ func (a *Agent) initAdvancedDetection() error {
 		behavioralChainsPath = filepath.Join(filepath.Dir(rf), "behavioral", "chains.yml")
 	}
 	ecfg := detection.EngineConfig{
-		BehavioralEnabled:    true,
-		SigmaEnabled:         a.cfg.Detection.Sigma.Enabled,
-		DataDir:              dataDir,
-		YARAEnabled:          a.cfg.Detection.YARA.Enabled,
-		IOCEnabled:           a.cfg.Detection.IOC.Enabled,
-		MLEnabled:            a.cfg.ML.Enabled,
-		LLMEnabled:           a.cfg.LLM.Enabled,
-		SigmaRulesDir:        a.cfg.Detection.Sigma.RulesDir,
-		YARARulesDir:         a.cfg.Detection.YARA.RulesDir,
-		YARAMaxFileSizeMB:    a.cfg.Detection.YARA.MaxFileSizeMB,
-		BehavioralChainsPath: behavioralChainsPath,
-		CustomRulesPath:      customRulesPath,
-		IOCHashDBPath:        a.cfg.Detection.IOC.HashDBPath,
-		IOCIPDBPath:          a.cfg.Detection.IOC.IPDBPath,
-		IOCDomainDBPath:      a.cfg.Detection.IOC.DomainDBPath,
-		MLModelsDir:          a.cfg.ML.ModelsDir,
-		WorkerCount:          a.cfg.Performance.WorkerCount,
+		BehavioralEnabled:       true,
+		SigmaEnabled:            a.cfg.Detection.Sigma.Enabled,
+		DataDir:                 dataDir,
+		YARAEnabled:             a.cfg.Detection.YARA.Enabled,
+		IOCEnabled:              a.cfg.Detection.IOC.Enabled,
+		MLEnabled:               a.cfg.ML.Enabled,
+		LLMEnabled:              a.cfg.LLM.Enabled,
+		SigmaRulesDir:           a.cfg.Detection.Sigma.RulesDir,
+		YARARulesDir:            a.cfg.Detection.YARA.RulesDir,
+		YARAMaxFileSizeMB:       a.cfg.Detection.YARA.MaxFileSizeMB,
+		YARARescanCooldownSec:   a.cfg.Detection.YARA.RescanCooldownSec,
+		YARAMaxScansPerMinute:   a.cfg.Detection.YARA.MaxScansPerMinute,
+		YARAExcludePathPrefixes: a.cfg.Detection.YARA.ExcludePathPrefixes,
+		BehavioralChainsPath:    behavioralChainsPath,
+		CustomRulesPath:         customRulesPath,
+		IOCHashDBPath:           a.cfg.Detection.IOC.HashDBPath,
+		IOCIPDBPath:             a.cfg.Detection.IOC.IPDBPath,
+		IOCDomainDBPath:         a.cfg.Detection.IOC.DomainDBPath,
+		MLModelsDir:             a.cfg.ML.ModelsDir,
+		WorkerCount:             a.cfg.Performance.WorkerCount,
+		PerformanceProfile:      a.cfg.Performance.Profile,
 
 		MLModelPEClassifier:   a.cfg.ML.Models.PEClassifier,
 		MLModelBehaviorLSTM:   a.cfg.ML.Models.BehaviorLSTM,
@@ -406,7 +410,12 @@ func normalizePerformanceProfile(cfg *config.Config) {
 	if cfg == nil {
 		return
 	}
-	lowResource := cfg.Performance.MaxMemoryMB > 0 && cfg.Performance.MaxMemoryMB <= 1024
+	profile := strings.ToLower(strings.TrimSpace(cfg.Performance.Profile))
+	if profile == "" {
+		profile = "balanced"
+	}
+	cfg.Performance.Profile = profile
+	lowResource := profile == "low_resource" || (cfg.Performance.MaxMemoryMB > 0 && cfg.Performance.MaxMemoryMB <= 1024)
 
 	if cfg.Performance.WorkerCount <= 0 {
 		cfg.Performance.WorkerCount = 1
@@ -428,6 +437,47 @@ func normalizePerformanceProfile(cfg *config.Config) {
 	}
 	if lowResource && cfg.Detection.YARA.MaxFileSizeMB > 4 {
 		cfg.Detection.YARA.MaxFileSizeMB = 4
+	}
+	if cfg.Detection.YARA.MaxFileSizeMB <= 0 {
+		cfg.Detection.YARA.MaxFileSizeMB = 8
+	}
+	if cfg.Detection.YARA.RescanCooldownSec <= 0 {
+		cfg.Detection.YARA.RescanCooldownSec = 120
+	}
+	if cfg.Detection.YARA.MaxScansPerMinute <= 0 {
+		cfg.Detection.YARA.MaxScansPerMinute = 120
+	}
+	switch profile {
+	case "strict":
+		if cfg.Performance.WorkerCount < 2 {
+			cfg.Performance.WorkerCount = 2
+		}
+		if cfg.Performance.EventBufferSize < 8192 {
+			cfg.Performance.EventBufferSize = 8192
+		}
+		if cfg.Performance.BatchSize < 50 {
+			cfg.Performance.BatchSize = 50
+		}
+		if cfg.Detection.YARA.RescanCooldownSec > 15 {
+			cfg.Detection.YARA.RescanCooldownSec = 15
+		}
+		if cfg.Detection.YARA.MaxScansPerMinute < 600 {
+			cfg.Detection.YARA.MaxScansPerMinute = 600
+		}
+	case "balanced":
+		if cfg.Detection.YARA.RescanCooldownSec > 60 {
+			cfg.Detection.YARA.RescanCooldownSec = 60
+		}
+		if cfg.Detection.YARA.MaxScansPerMinute < 240 {
+			cfg.Detection.YARA.MaxScansPerMinute = 240
+		}
+	default: // low_resource
+		if cfg.Detection.YARA.RescanCooldownSec < 120 {
+			cfg.Detection.YARA.RescanCooldownSec = 120
+		}
+		if cfg.Detection.YARA.MaxScansPerMinute > 120 {
+			cfg.Detection.YARA.MaxScansPerMinute = 120
+		}
 	}
 }
 
@@ -1041,6 +1091,18 @@ func (a *Agent) checkDriftAlerts() error {
 
 func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 	for _, al := range alerts {
+		correlationID := al.AlertID
+		if correlationID == "" {
+			correlationID = uuid.NewString()
+			al.AlertID = correlationID
+		}
+		a.logger.Info("detection event",
+			"event_type", "detection",
+			"rule", al.RuleID,
+			"target", firstNonEmpty(al.ProcessPath, al.FilePath, al.ProcessName),
+			"result", "detected",
+			"reason", al.Title,
+			"correlation_id", correlationID)
 		a.alertSpool.Push(al)
 		if a.durableSpool != nil {
 			if data, err := json.Marshal(al); err == nil {
@@ -1071,7 +1133,19 @@ func makeRuleAllowlist(ruleIDs []string) map[string]struct{} {
 }
 
 func (a *Agent) executeAutoResponse(al schema.Alert) {
+	correlationID := al.AlertID
+	if correlationID == "" {
+		correlationID = uuid.NewString()
+	}
 	if !a.shouldAutoKill(al) {
+		a.logger.Debug("response decision",
+			"event_type", "response_decision",
+			"rule", al.RuleID,
+			"target", firstNonEmpty(al.ProcessPath, al.FilePath, al.ProcessName),
+			"action", "none",
+			"result", "skipped",
+			"reason", "auto-kill policy did not match",
+			"correlation_id", correlationID)
 		return
 	}
 
@@ -1102,6 +1176,14 @@ func (a *Agent) executeAutoResponse(al schema.Alert) {
 				Message:       msg,
 				Timestamp:     time.Now().UTC(),
 			})
+			a.logger.Info("response action outcome",
+				"event_type", "response",
+				"rule", al.RuleID,
+				"target", firstNonEmpty(al.ProcessPath, al.FilePath, al.ProcessName),
+				"action", "kill_process",
+				"result", outcome,
+				"reason", msg,
+				"correlation_id", correlationID)
 		}
 
 		qPath := al.ProcessPath
@@ -1116,6 +1198,15 @@ func (a *Agent) executeAutoResponse(al schema.Alert) {
 			}
 			if _, qErr := a.respEngine.Execute(ctx, response.OpQuarantineFile, qParams); qErr != nil {
 				a.logger.Error("quarantine failed", "path", qPath, "error", qErr)
+			} else {
+				a.logger.Info("response action outcome",
+					"event_type", "response",
+					"rule", al.RuleID,
+					"target", qPath,
+					"action", "quarantine_file",
+					"result", "success",
+					"reason", al.Title,
+					"correlation_id", correlationID)
 			}
 		}
 		return
@@ -1139,6 +1230,23 @@ func (a *Agent) executeAutoResponse(al schema.Alert) {
 		Message:       res.Message,
 		Timestamp:     time.Now().UTC(),
 	})
+	a.logger.Info("response action outcome",
+		"event_type", "response",
+		"rule", al.RuleID,
+		"target", firstNonEmpty(al.ProcessPath, al.FilePath, al.ProcessName),
+		"action", "kill_process",
+		"result", map[bool]string{true: "success", false: "failure"}[res.Success],
+		"reason", res.Message,
+		"correlation_id", correlationID)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (a *Agent) shouldAutoKill(al schema.Alert) bool {

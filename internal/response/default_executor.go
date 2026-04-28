@@ -47,6 +47,18 @@ func (e *DefaultActionExecutor) Execute(ctx context.Context, op string, params m
 	if log == nil {
 		log = zap.NewNop()
 	}
+	correlationID := d.ID
+	if correlationID == "" {
+		correlationID = uuid.NewString()
+	}
+	log.Info("playbook action decision",
+		zap.String("event_type", "response_decision"),
+		zap.String("rule", d.RuleID),
+		zap.String("target", stringParamAny(params, "target")),
+		zap.String("action", op),
+		zap.String("result", "started"),
+		zap.String("reason", d.Description),
+		zap.String("correlation_id", correlationID))
 	switch op {
 	case "kill_process":
 		return e.runKill(ctx, params, d, log)
