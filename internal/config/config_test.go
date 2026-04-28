@@ -119,6 +119,12 @@ func TestDefaults(t *testing.T) {
 	if cfg.Performance.BatchIntervalMs != 15000 {
 		t.Errorf("Performance.BatchIntervalMs = %d, want %d", cfg.Performance.BatchIntervalMs, 15000)
 	}
+	if cfg.Performance.Profile != "balanced" {
+		t.Errorf("Performance.Profile = %q, want %q", cfg.Performance.Profile, "balanced")
+	}
+	if cfg.Logging.Mode != "structured" {
+		t.Errorf("Logging.Mode = %q, want %q", cfg.Logging.Mode, "structured")
+	}
 
 	if cfg.Service.TickInterval != time.Second {
 		t.Errorf("Service.TickInterval = %v, want %v", cfg.Service.TickInterval, time.Second)
@@ -128,6 +134,16 @@ func TestDefaults(t *testing.T) {
 	}
 	if !strings.Contains(cfg.RulesFile, "baseline.yaml") {
 		t.Errorf("RulesFile = %q, should reference baseline.yaml", cfg.RulesFile)
+	}
+}
+
+func TestValidateLoggingAndProfileModes(t *testing.T) {
+	cfg := Defaults()
+	cfg.Performance.Profile = "not-real"
+	cfg.Logging.Mode = "not-real"
+	err := Validate(&cfg)
+	if err == nil {
+		t.Fatal("expected validation error for invalid profile and logging mode")
 	}
 }
 
