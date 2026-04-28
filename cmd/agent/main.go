@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -80,16 +83,51 @@ func main() {
 	}
 }
 
-func newLogger() (*zap.Logger, error) {
-	if debug {
-		cfg := zap.NewDevelopmentConfig()
-		cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-		return cfg.Build()
+func newLogger(logMode string, cfg config.Config) (*zap.Logger, error) {
+	mode := strings.ToLower(strings.TrimSpace(logMode))
+	if mode == "" {
+		mode = "structured"
 	}
-	cfg := zap.NewProductionConfig()
-	cfg.EncoderConfig.TimeKey = "ts"
-	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	return cfg.Build()
+	encoderCfg := zap.NewProductionEncoderConfig()
+	encoderCfg.TimeKey = "ts"
+	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+	encoderCfg.EncodeDuration = zapcore.StringDurationEncoder
+	prettyCfg := zap.NewDevelopmentEncoderConfig()
+	prettyCfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	prettyCfg.EncodeTime = zapcore.TimeEncoderOfLayout("15:04:05")
+
+	level := zap.NewAtomicLevelAt(zap.InfoLevel)
+	if debug || strings.EqualFold(cfg.Agent.LogLevel, "debug") {
+		level.SetLevel(zap.DebugLevel)
+	}
+
+	cores := make([]zapcore.Core, 0, 3)
+	if mode == "structured" || mode == "dual" {
+		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(os.Stdout), level))
+	}
+	if mode == "pretty" || mode == "dual" || debug {
+		cores = append(cores, zapcore.NewCore(zapcore.NewConsoleEncoder(prettyCfg), zapcore.AddSync(os.Stdout), level))
+	}
+	if len(cores) == 0 {
+		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(os.Stdout), level))
+	}
+
+	// Persist agent runtime logs for production troubleshooting.
+	logPath := filepath.Join(cfg.Agent.DataDir, "logs", "agent.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err == nil {
+		if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+			cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(f), level))
+		}
+	}
+
+	return zap.New(zapcore.NewTee(cores...), zap.AddCaller()), nil
+}
+
+func installSlog(logger *zap.Logger) {
+	if logger == nil {
+		return
+	}
+	slog.SetDefault(slog.New(&zapSlogHandler{logger: logger}))
 }
 
 func runAgent() error {
@@ -113,11 +151,16 @@ func runAgent() error {
 		_ = os.Setenv("LOG_LEVEL", logLevel)
 	}
 
-	logger, err := newLogger()
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	logger, err := newLogger(cfg.Logging.Mode, cfg)
 	if err != nil {
 		return fmt.Errorf("initializing logger: %w", err)
 	}
 	defer func() { _ = logger.Sync() }()
+	installSlog(logger)
 
 	logger.Info("starting edr-agent",
 		zap.String("version", Version),
@@ -153,10 +196,6 @@ func runAgent() error {
 		return fmt.Errorf("agent init: %w", err)
 	}
 	if testMode {
-		cfg, cfgErr := config.Load(configPath)
-		if cfgErr != nil {
-			return fmt.Errorf("config load for test mode: %w", cfgErr)
-		}
 		exitCode := runValidationSuite(ctx, a, &cfg)
 		if exitCode != 0 {
 			return fmt.Errorf("validation suite failed with exit code %d", exitCode)
