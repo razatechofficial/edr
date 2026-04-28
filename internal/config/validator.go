@@ -111,6 +111,12 @@ func Validate(cfg *Config) error {
 		!cfg.ML.Enabled {
 		errs.add("at least one detection layer must be enabled: sigma|yara|ioc|ml")
 	}
+	if cfg.Detection.YARA.RescanCooldownSec < 0 {
+		errs.add("detection.yara.rescan_cooldown_sec must be >= 0, got %d", cfg.Detection.YARA.RescanCooldownSec)
+	}
+	if cfg.Detection.YARA.MaxScansPerMinute < 0 {
+		errs.add("detection.yara.max_scans_per_minute must be >= 0, got %d", cfg.Detection.YARA.MaxScansPerMinute)
+	}
 
 	validateRange(&errs, "performance.max_cpu_percent", cfg.Performance.MaxCPUPercent, 1, 100)
 	validateMin(&errs, "performance.max_memory_mb", cfg.Performance.MaxMemoryMB, 1)
@@ -118,6 +124,14 @@ func Validate(cfg *Config) error {
 	validateMin(&errs, "performance.worker_count", cfg.Performance.WorkerCount, 1)
 	validateMin(&errs, "performance.batch_size", cfg.Performance.BatchSize, 1)
 	validateMin(&errs, "performance.batch_interval_ms", cfg.Performance.BatchIntervalMs, 1)
+	if cfg.Performance.Profile != "" {
+		validateEnum(&errs, "performance.profile", cfg.Performance.Profile,
+			"low_resource", "balanced", "strict")
+	}
+	if cfg.Logging.Mode != "" {
+		validateEnum(&errs, "logging.mode", cfg.Logging.Mode,
+			"structured", "pretty", "dual")
+	}
 
 	for i, feed := range cfg.ThreatIntel.CustomFeeds {
 		if feed.Name == "" {

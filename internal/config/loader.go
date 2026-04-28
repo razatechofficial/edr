@@ -237,12 +237,50 @@ func migrateLegacy(cfg *Config, v *viper.Viper) {
 // applyPerformanceDefaults maps performance.worker_count <= 0 to runtime.NumCPU()
 // (minimum 1), matching shipped agent.yaml comments ("0 = NumCPU").
 func applyPerformanceDefaults(cfg *Config) {
+	profile := strings.ToLower(strings.TrimSpace(cfg.Performance.Profile))
+	if profile == "" {
+		profile = "balanced"
+	}
+	cfg.Performance.Profile = profile
+
 	if cfg.Performance.WorkerCount <= 0 {
 		n := runtime.NumCPU()
 		if n < 1 {
 			n = 1
 		}
 		cfg.Performance.WorkerCount = n
+	}
+	switch profile {
+	case "low_resource":
+		if cfg.Performance.WorkerCount > 1 {
+			cfg.Performance.WorkerCount = 1
+		}
+		if cfg.Performance.EventBufferSize <= 0 || cfg.Performance.EventBufferSize > 2048 {
+			cfg.Performance.EventBufferSize = 2048
+		}
+		if cfg.Performance.BatchSize <= 0 || cfg.Performance.BatchSize > 20 {
+			cfg.Performance.BatchSize = 20
+		}
+		if cfg.Performance.MaxMemoryMB <= 0 || cfg.Performance.MaxMemoryMB > 1024 {
+			cfg.Performance.MaxMemoryMB = 512
+		}
+	case "strict":
+		if cfg.Performance.EventBufferSize <= 0 {
+			cfg.Performance.EventBufferSize = 8192
+		}
+		if cfg.Performance.BatchSize <= 0 {
+			cfg.Performance.BatchSize = 50
+		}
+	default: // balanced
+		if cfg.Performance.EventBufferSize <= 0 {
+			cfg.Performance.EventBufferSize = 4096
+		}
+		if cfg.Performance.BatchSize <= 0 {
+			cfg.Performance.BatchSize = 25
+		}
+	}
+	if strings.TrimSpace(cfg.Logging.Mode) == "" {
+		cfg.Logging.Mode = "structured"
 	}
 }
 

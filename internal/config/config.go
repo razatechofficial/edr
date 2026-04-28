@@ -167,11 +167,14 @@ type Config struct {
 		} `yaml:"sigma"`
 
 		YARA struct {
-			Enabled       bool   `yaml:"enabled"`
-			RulesDir      string `yaml:"rules_dir"`
-			ScanOnWrite   bool   `yaml:"scan_on_write"`
-			ScanOnExec    bool   `yaml:"scan_on_exec"`
-			MaxFileSizeMB int    `yaml:"max_file_size_mb"`
+			Enabled             bool     `yaml:"enabled"`
+			RulesDir            string   `yaml:"rules_dir"`
+			ScanOnWrite         bool     `yaml:"scan_on_write"`
+			ScanOnExec          bool     `yaml:"scan_on_exec"`
+			MaxFileSizeMB       int      `yaml:"max_file_size_mb"`
+			RescanCooldownSec   int      `yaml:"rescan_cooldown_sec"`
+			MaxScansPerMinute   int      `yaml:"max_scans_per_minute"`
+			ExcludePathPrefixes []string `yaml:"exclude_path_prefixes"`
 		} `yaml:"yara"`
 
 		CustomRules struct {
@@ -275,12 +278,13 @@ type Config struct {
 	} `yaml:"self_protect"`
 
 	Performance struct {
-		MaxCPUPercent   int `yaml:"max_cpu_percent"`
-		MaxMemoryMB     int `yaml:"max_memory_mb"`
-		EventBufferSize int `yaml:"event_buffer_size"`
-		WorkerCount     int `yaml:"worker_count"`
-		BatchSize       int `yaml:"batch_size"`
-		BatchIntervalMs int `yaml:"batch_interval_ms"`
+		MaxCPUPercent   int    `yaml:"max_cpu_percent"`
+		MaxMemoryMB     int    `yaml:"max_memory_mb"`
+		EventBufferSize int    `yaml:"event_buffer_size"`
+		WorkerCount     int    `yaml:"worker_count"`
+		BatchSize       int    `yaml:"batch_size"`
+		BatchIntervalMs int    `yaml:"batch_interval_ms"`
+		Profile         string `yaml:"profile"` // low_resource|balanced|strict
 	} `yaml:"performance"`
 
 	Baseline struct {
@@ -324,6 +328,7 @@ type Config struct {
 
 	Logging struct {
 		Level     string `yaml:"level"`
+		Mode      string `yaml:"mode"` // structured|pretty|dual
 		AlertFile string `yaml:"alert_file"`
 		AuditFile string `yaml:"audit_file"`
 	} `yaml:"logging"`
@@ -390,6 +395,9 @@ func Defaults() Config {
 
 	cfg.Detection.Sigma.Enabled = true
 	cfg.Detection.YARA.Enabled = true
+	cfg.Detection.YARA.MaxFileSizeMB = 8
+	cfg.Detection.YARA.RescanCooldownSec = 120
+	cfg.Detection.YARA.MaxScansPerMinute = 120
 	cfg.Detection.IOC.Enabled = true
 	cfg.Detection.Behavioral.BaselineDays = 7
 	cfg.Detection.Behavioral.SensitivityLevel = "high"
@@ -404,6 +412,8 @@ func Defaults() Config {
 	cfg.Performance.WorkerCount = 1
 	cfg.Performance.BatchSize = 20
 	cfg.Performance.BatchIntervalMs = 15000
+	cfg.Performance.Profile = "balanced"
+	cfg.Logging.Mode = "structured"
 
 	cfg.Baseline.LearningDays = 7
 	cfg.Baseline.DeviationMult = 3.0
