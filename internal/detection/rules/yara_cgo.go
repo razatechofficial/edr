@@ -279,6 +279,7 @@ func shouldSkipYARAScanPath(path string) bool {
 	}
 	// Avoid loader and policy configs that are frequently touched and noisy.
 	if clean == "/etc/ld.so.preload" || strings.HasPrefix(clean, "/etc/ld.so.") ||
+		clean == "/etc/sudo.conf" || clean == "/etc/sudoers" ||
 		strings.HasPrefix(clean, "/etc/polkit-1/") || strings.HasPrefix(clean, "/etc/alternatives/") {
 		return true
 	}

@@ -2,6 +2,7 @@ package detection
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -74,7 +75,7 @@ func (d *CredentialDetector) Analyze(event interface{}, correlator *Correlator) 
 // Reset is a no-op; the detector is stateless.
 func (d *CredentialDetector) Reset() {}
 
-const credentialFileAlertCooldown = 45 * time.Second
+const credentialFileAlertCooldown = 5 * time.Minute
 
 // ---------------------------------------------------------------------------
 // Sensitive credential file access
@@ -109,10 +110,25 @@ func (d *CredentialDetector) checkCredentialFiles(event interface{}, pid uint32)
 	if path == "" {
 		return nil
 	}
+	op := strings.ToLower(extractFileOperation(event))
+	if op != "" && op != "read" && op != "open" && op != "copy" {
+		return nil
+	}
+	if pid == uint32(os.Getpid()) {
+		return nil
+	}
+	proc := strings.ToLower(strings.TrimSpace(extractProcessName(event)))
+	cmd := strings.ToLower(strings.TrimSpace(extractCommandLine(event)))
+	if proc == "edr-agent" {
+		return nil
+	}
 
 	for _, pattern := range credentialFilePatterns {
 		if !strings.Contains(path, pattern) {
 			continue
+		}
+		if isBenignShadowRead(path, proc, cmd) {
+			return nil
 		}
 		if d.isCredentialAlertCoolingDown(pid, path) {
 			return nil
@@ -126,10 +142,19 @@ func (d *CredentialDetector) checkCredentialFiles(event interface{}, pid uint32)
 			fmt.Sprintf("PID %d accessed sensitive credential file: %s", pid, extractFilePath(event)),
 			events.SeverityHigh,
 			mitre,
-			[]string{"credential_theft", "action:kill_process"}, event,
+			[]string{"credential_theft"}, event,
 		)
 	}
 	return nil
+}
+
+func isBenignShadowRead(path, proc, cmd string) bool {
+	if !containsAny(path, "/etc/shadow", "/etc/gshadow") {
+		return false
+	}
+	// Typical administrative/authentication tooling that reads shadow databases.
+	return containsAny(proc, "passwd", "chpasswd", "usermod", "useradd", "login", "sshd", "su", "sudo", "edr-agent") ||
+		containsAny(cmd, "pam_unix", "passwd", "chpasswd", "usermod", "useradd", "login", "sshd", " su ", " sudo ")
 }
 
 func (d *CredentialDetector) isCredentialAlertCoolingDown(pid uint32, path string) bool {
