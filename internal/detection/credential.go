@@ -77,6 +77,16 @@ func (d *CredentialDetector) Reset() {}
 
 const credentialFileAlertCooldown = 5 * time.Minute
 
+func credentialCooldownWindow() time.Duration {
+	if isLowResourceProfile() {
+		return 15 * time.Minute
+	}
+	if isStrictProfile() {
+		return 2 * time.Minute
+	}
+	return credentialFileAlertCooldown
+}
+
 // ---------------------------------------------------------------------------
 // Sensitive credential file access
 // ---------------------------------------------------------------------------
@@ -153,6 +163,9 @@ func isBenignShadowRead(path, proc, cmd string) bool {
 		return false
 	}
 	// Typical administrative/authentication tooling that reads shadow databases.
+	if isLowResourceProfile() && containsAny(proc, "cron", "systemd", "dbus-daemon", "bash", "sh") {
+		return true
+	}
 	return containsAny(proc, "passwd", "chpasswd", "usermod", "useradd", "login", "sshd", "su", "sudo", "edr-agent") ||
 		containsAny(cmd, "pam_unix", "passwd", "chpasswd", "usermod", "useradd", "login", "sshd", " su ", " sudo ")
 }
@@ -165,15 +178,16 @@ func (d *CredentialDetector) isCredentialAlertCoolingDown(pid uint32, path strin
 	key := fmt.Sprintf("path:%s", path)
 	d.cooldownMu.Lock()
 	defer d.cooldownMu.Unlock()
+	cooldown := credentialCooldownWindow()
 	if len(d.lastFileAlertAt) > 2048 {
 		// Bound map growth under sustained noisy workloads.
 		for k, ts := range d.lastFileAlertAt {
-			if now.Sub(ts) > 5*credentialFileAlertCooldown {
+			if now.Sub(ts) > 5*cooldown {
 				delete(d.lastFileAlertAt, k)
 			}
 		}
 	}
-	if last, ok := d.lastFileAlertAt[key]; ok && now.Sub(last) < credentialFileAlertCooldown {
+	if last, ok := d.lastFileAlertAt[key]; ok && now.Sub(last) < cooldown {
 		return true
 	}
 	d.lastFileAlertAt[key] = now

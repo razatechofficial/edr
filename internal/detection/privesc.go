@@ -11,6 +11,16 @@ import (
 
 const sudoAnomalyThreshold = 10
 
+func sudoThreshold() int {
+	if isLowResourceProfile() {
+		return 20
+	}
+	if isStrictProfile() {
+		return 6
+	}
+	return sudoAnomalyThreshold
+}
+
 // PrivescDetector identifies privilege escalation attempts including sudo
 // frequency anomalies, SUID binary execution from unexpected locations,
 // token manipulation, UAC bypass techniques, and kernel exploit patterns.
@@ -84,7 +94,7 @@ func (d *PrivescDetector) checkSudoAnomaly(event interface{}, pid uint32, correl
 			sudoCount++
 		}
 	}
-	if sudoCount < sudoAnomalyThreshold {
+	if sudoCount < sudoThreshold() {
 		return nil
 	}
 
@@ -267,6 +277,9 @@ func (d *PrivescDetector) checkKernelExploit(event interface{}, pid uint32) *eve
 		return nil
 	}
 	if isBenignPolkitActivity(cmd, proc, path) {
+		return nil
+	}
+	if isLowResourceProfile() && containsAny(path, "/usr/bin/pkexec", "/usr/lib/polkit-1/") {
 		return nil
 	}
 
