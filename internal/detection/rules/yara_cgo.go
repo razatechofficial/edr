@@ -272,7 +272,9 @@ func shouldSkipYARAScanPath(path string) bool {
 		strings.HasPrefix(clean, "/sys/") ||
 		strings.HasPrefix(clean, "/dev/") ||
 		strings.HasPrefix(clean, "/run/") ||
-		strings.HasPrefix(clean, "/usr/share/") {
+		strings.HasPrefix(clean, "/usr/share/") ||
+		strings.HasPrefix(clean, "/var/lib/dpkg/") ||
+		strings.HasPrefix(clean, "/var/cache/apt/") {
 		return true
 	}
 	// Avoid loader and policy configs that are frequently touched and noisy.

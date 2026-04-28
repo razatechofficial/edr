@@ -41,8 +41,13 @@ func (a *NetworkIsolateAction) PrepareCommands() []string {
 		`iptables -P INPUT DROP`,
 		`iptables -P OUTPUT DROP`,
 		`iptables -P FORWARD DROP`,
+		`iptables -I INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`,
+		`iptables -I OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`,
 		`iptables -I INPUT -i lo -j ACCEPT`,
 		`iptables -I OUTPUT -o lo -j ACCEPT`,
+		// Keep remote SSH management channel available during isolation.
+		`iptables -I INPUT -p tcp --dport 22 -j ACCEPT`,
+		`iptables -I OUTPUT -p tcp --sport 22 -j ACCEPT`,
 	)
 	for _, ip := range allow {
 		if ip == "" {
@@ -72,8 +77,12 @@ func (a *NetworkIsolateAction) Execute(ctx context.Context) (rollback func(conte
 		_ = exec.CommandContext(ctx, "iptables", "-P", "INPUT", "DROP").Run()
 		_ = exec.CommandContext(ctx, "iptables", "-P", "OUTPUT", "DROP").Run()
 		_ = exec.CommandContext(ctx, "iptables", "-P", "FORWARD", "DROP").Run()
+		_ = exec.CommandContext(ctx, "iptables", "-I", "INPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT").Run()
+		_ = exec.CommandContext(ctx, "iptables", "-I", "OUTPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT").Run()
 		_ = exec.CommandContext(ctx, "iptables", "-I", "INPUT", "-i", "lo", "-j", "ACCEPT").Run()
 		_ = exec.CommandContext(ctx, "iptables", "-I", "OUTPUT", "-o", "lo", "-j", "ACCEPT").Run()
+		_ = exec.CommandContext(ctx, "iptables", "-I", "INPUT", "-p", "tcp", "--dport", "22", "-j", "ACCEPT").Run()
+		_ = exec.CommandContext(ctx, "iptables", "-I", "OUTPUT", "-p", "tcp", "--sport", "22", "-j", "ACCEPT").Run()
 		for _, ip := range allow {
 			if ip == "" {
 				continue

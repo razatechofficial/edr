@@ -134,7 +134,10 @@ func (d *CredentialDetector) checkCredentialFiles(event interface{}, pid uint32)
 
 func (d *CredentialDetector) isCredentialAlertCoolingDown(pid uint32, path string) bool {
 	now := time.Now()
-	key := fmt.Sprintf("%d:%s", pid, path)
+	_ = pid
+	// Use path-level cooldown (not pid-level) to suppress high-volume forks repeatedly
+	// probing the same credential target (e.g. /etc/shadow during stress tests).
+	key := fmt.Sprintf("path:%s", path)
 	d.cooldownMu.Lock()
 	defer d.cooldownMu.Unlock()
 	if len(d.lastFileAlertAt) > 2048 {
