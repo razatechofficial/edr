@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
@@ -24,6 +25,9 @@ type DNSCollector struct {
 	events     []Telemetry
 	cancel     context.CancelFunc
 	seen       map[string]time.Time
+
+	emitted atomic.Uint64
+	dropped atomic.Uint64
 }
 
 func NewDNSCollector(endpointID string) *DNSCollector {
@@ -63,7 +67,25 @@ func (dc *DNSCollector) Collect(_ context.Context) ([]Telemetry, error) {
 	batch := dc.events
 	dc.events = nil
 	dc.mu.Unlock()
+	dc.emitted.Add(uint64(len(batch)))
 	return batch, nil
+}
+
+// ExportMonitoringHealth surfaces DNS log tailing stats.
+func (dc *DNSCollector) ExportMonitoringHealth() map[string]any {
+	src := MonitoringSource{
+		Name:    "dns",
+		OS:      runtime.GOOS,
+		Source:  "syslog_tail",
+		Status:  "healthy",
+		EPSOut:  dc.emitted.Load(),
+		Dropped: dc.dropped.Load(),
+	}
+	if dc.logPath == "" {
+		src.Status = "unavailable"
+		src.LastError = "no DNS log path detected"
+	}
+	return src.ToMap()
 }
 
 func (dc *DNSCollector) Start(ctx context.Context) error {
@@ -142,6 +164,7 @@ func (dc *DNSCollector) parseDNSLine(line string) (Telemetry, bool) {
 
 	now := time.Now().UTC()
 	if last, exists := dc.seen[domain]; exists && now.Sub(last) < 30*time.Second {
+		dc.dropped.Add(1)
 		return Telemetry{}, false
 	}
 	dc.seen[domain] = now
