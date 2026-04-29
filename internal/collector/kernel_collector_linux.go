@@ -33,6 +33,7 @@ const (
 	bpfEvtNetAccept = 12
 	bpfEvtNetBind   = 13
 	bpfEvtNetClose  = 14
+	bpfEvtModule    = 22
 	bpfEvtDNSQuery  = 35
 )
 
@@ -252,6 +253,18 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 			fe.SUID = fe.ChmodMode&04000 != 0
 		}
 		return &Telemetry{File: fe}
+
+	case bpfEvtModule:
+		base.EventType = schema.EventProcess
+		moduleName, _ := readLenStr(payload)
+		pe := &schema.ProcessEvent{
+			BaseEvent:   base,
+			PID:         int(pid),
+			ProcessName: "kernel_module_load",
+			ProcessPath: moduleName,
+			CommandLine: "init_module:" + moduleName,
+		}
+		return &Telemetry{Process: pe}
 
 	case bpfEvtNetConn, bpfEvtNetAccept, bpfEvtNetBind, bpfEvtNetClose, bpfEvtDNSQuery:
 		base.EventType = schema.EventNetwork
