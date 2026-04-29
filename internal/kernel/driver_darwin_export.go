@@ -68,6 +68,7 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 		"timestamp": time.Now().UTC(),
 		"agent_id":  d.agentID,
 		"esf_type":  int(eventType),
+		"esf_op":    esfOperationName(int(eventType)),
 		"seq":       d.esfSeq.Add(1),
 		"pid":       int(pid),
 		"ppid":      int(ppid),

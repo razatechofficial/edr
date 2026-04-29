@@ -597,15 +597,24 @@ func (d *ESFDriver) Stats() DriverStats {
 	}
 }
 
-// mapESFEventType maps raw ESF event type integers to internal EventType categories.
+// mapESFEventType maps raw ESF event type integers to internal EventType
+// categories. Each raw type is listed explicitly so future ESF additions
+// fall into the default branch and surface as needing manual handling.
+//
+// The split also gives image-load (NOTIFY_MMAP / NOTIFY_KEXTLOAD) its own
+// EventModule category, separate from generic memory mapping (MPROTECT) and
+// auth-time pre-execution mmap denials.
 func mapESFEventType(raw int) events.EventType {
 	switch raw {
+	// Process lifecycle.
 	case int(C.ES_EVENT_TYPE_AUTH_EXEC),
 		int(C.ES_EVENT_TYPE_NOTIFY_EXEC),
 		int(C.ES_EVENT_TYPE_NOTIFY_FORK),
 		int(C.ES_EVENT_TYPE_NOTIFY_EXIT),
 		int(C.ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE):
 		return events.EventProcess
+
+	// File operations.
 	case int(C.ES_EVENT_TYPE_AUTH_OPEN),
 		int(C.ES_EVENT_TYPE_AUTH_CREATE),
 		int(C.ES_EVENT_TYPE_AUTH_RENAME),
@@ -618,22 +627,81 @@ func mapESFEventType(raw int) events.EventType {
 		int(C.ES_EVENT_TYPE_NOTIFY_FCNTL),
 		int(C.ES_EVENT_TYPE_NOTIFY_RENAME):
 		return events.EventFile
+
+	// Image / module loads. NOTIFY_MMAP fires for every dylib mmap; we treat
+	// it as EventModule so detection rules can scope to image-load only and
+	// ignore page-protection changes.
 	case int(C.ES_EVENT_TYPE_NOTIFY_MMAP),
-		int(C.ES_EVENT_TYPE_NOTIFY_MPROTECT),
-		int(C.ES_EVENT_TYPE_AUTH_MMAP):
+		int(C.ES_EVENT_TYPE_AUTH_MMAP),
+		int(C.ES_EVENT_TYPE_AUTH_KEXTLOAD):
+		return events.EventModule
+
+	// Memory protection changes (no image load implication).
+	case int(C.ES_EVENT_TYPE_NOTIFY_MPROTECT):
 		return events.EventMemory
+
+	// Cross-process control.
 	case int(C.ES_EVENT_TYPE_AUTH_GET_TASK):
 		return events.EventPtrace
-	case int(C.ES_EVENT_TYPE_AUTH_KEXTLOAD):
-		return events.EventModule
-	case int(C.ES_EVENT_TYPE_AUTH_MOUNT):
-		return events.EventMount
 	case int(C.ES_EVENT_TYPE_AUTH_SIGNAL),
 		int(C.ES_EVENT_TYPE_NOTIFY_SIGNAL):
 		return events.EventSignal
+
+	// Mount.
+	case int(C.ES_EVENT_TYPE_AUTH_MOUNT):
+		return events.EventMount
+
 	default:
 		return events.EventProcess
 	}
+}
+
+// esfOperationName returns the lowercase operation name for a raw ESF event
+// type. It is used by the userland mapper to populate FileEvent.Operation
+// and ProcessEvent.ProcessName so detection rules see explicit op names
+// rather than a generic category alone.
+func esfOperationName(raw int) string {
+	switch raw {
+	case int(C.ES_EVENT_TYPE_AUTH_EXEC), int(C.ES_EVENT_TYPE_NOTIFY_EXEC):
+		return "exec"
+	case int(C.ES_EVENT_TYPE_NOTIFY_FORK):
+		return "fork"
+	case int(C.ES_EVENT_TYPE_NOTIFY_EXIT):
+		return "exit"
+	case int(C.ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE):
+		return "remote_thread_create"
+	case int(C.ES_EVENT_TYPE_AUTH_OPEN):
+		return "open"
+	case int(C.ES_EVENT_TYPE_AUTH_CREATE):
+		return "create"
+	case int(C.ES_EVENT_TYPE_AUTH_RENAME), int(C.ES_EVENT_TYPE_NOTIFY_RENAME):
+		return "rename"
+	case int(C.ES_EVENT_TYPE_AUTH_UNLINK), int(C.ES_EVENT_TYPE_NOTIFY_UNLINK):
+		return "unlink"
+	case int(C.ES_EVENT_TYPE_AUTH_COPYFILE):
+		return "copyfile"
+	case int(C.ES_EVENT_TYPE_NOTIFY_WRITE):
+		return "write"
+	case int(C.ES_EVENT_TYPE_NOTIFY_TRUNCATE):
+		return "truncate"
+	case int(C.ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA):
+		return "exchangedata"
+	case int(C.ES_EVENT_TYPE_NOTIFY_FCNTL):
+		return "fcntl"
+	case int(C.ES_EVENT_TYPE_NOTIFY_MMAP), int(C.ES_EVENT_TYPE_AUTH_MMAP):
+		return "image_load"
+	case int(C.ES_EVENT_TYPE_AUTH_KEXTLOAD):
+		return "kextload"
+	case int(C.ES_EVENT_TYPE_NOTIFY_MPROTECT):
+		return "mprotect"
+	case int(C.ES_EVENT_TYPE_AUTH_GET_TASK):
+		return "get_task"
+	case int(C.ES_EVENT_TYPE_AUTH_SIGNAL), int(C.ES_EVENT_TYPE_NOTIFY_SIGNAL):
+		return "signal"
+	case int(C.ES_EVENT_TYPE_AUTH_MOUNT):
+		return "mount"
+	}
+	return "unknown"
 }
 
 func (d *ESFDriver) clientCreateError(result int) error {
