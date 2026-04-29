@@ -32,6 +32,7 @@ const (
 	bpfEvtNetConn   = 11
 	bpfEvtNetAccept = 12
 	bpfEvtNetBind   = 13
+	bpfEvtNetClose  = 14
 )
 
 // KernelCollector wraps the eBPF kernel driver and presents its real-time
@@ -251,10 +252,25 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 		}
 		return &Telemetry{File: fe}
 
-	case bpfEvtNetConn, bpfEvtNetAccept, bpfEvtNetBind:
+	case bpfEvtNetConn, bpfEvtNetAccept, bpfEvtNetBind, bpfEvtNetClose:
 		base.EventType = schema.EventNetwork
-		ne := &schema.NetworkEvent{BaseEvent: base}
+		ne := &schema.NetworkEvent{BaseEvent: base, PID: int(pid)}
+		// Encode the operation in Protocol so downstream rules and the lineage
+		// correlator can distinguish connect/accept/bind/close without an extra
+		// schema field. Format: "<proto>:<op>".
+		opSuffix := ""
+		switch typ {
+		case bpfEvtNetConn:
+			opSuffix = "connect"
+		case bpfEvtNetAccept:
+			opSuffix = "accept"
+		case bpfEvtNetBind:
+			opSuffix = "bind"
+		case bpfEvtNetClose:
+			opSuffix = "close"
+		}
 		if len(payload) < 3 {
+			ne.Protocol = opSuffix
 			return &Telemetry{Network: ne}
 		}
 		family := payload[0]
@@ -268,6 +284,9 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 			ne.Protocol = "udp"
 		default:
 			ne.Protocol = fmt.Sprintf("proto_%d", proto)
+		}
+		if opSuffix != "" {
+			ne.Protocol = ne.Protocol + ":" + opSuffix
 		}
 
 		if family == 10 { // IPv6
