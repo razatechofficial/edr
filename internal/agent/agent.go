@@ -86,6 +86,8 @@ type Agent struct {
 	lastHealthSnapshot time.Time
 	validationMu       sync.RWMutex
 	validationSink     func(detection.Detection)
+	noisyAlertMu       sync.Mutex
+	noisyAlertLastSeen map[string]time.Time
 }
 
 // SetValidationSink registers a callback invoked for each advanced detection alert.
@@ -133,20 +135,21 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	zapLogger, _ := zap.NewProduction()
 
 	a := &Agent{
-		logger:       slog.Default(),
-		cfg:          cfg,
-		collectors:   cols,
-		ruleSet:      rs,
-		eventSpool:   spool.NewQueueWithLimit[schema.ProcessEvent](cfg.Performance.EventBufferSize),
-		alertSpool:   spool.NewQueueWithLimit[schema.Alert](cfg.Performance.EventBufferSize),
-		detector:     detect.NewEngine(rs),
-		responder:    response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
-		writer:       alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
-		killAllow:    makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
-		zapLogger:    zapLogger,
-		userLookup:   users,
-		fileDedup:    collector.NewFileDeduper(0),
-		fileHashPool: newFileHashPool(),
+		logger:             slog.Default(),
+		cfg:                cfg,
+		collectors:         cols,
+		ruleSet:            rs,
+		eventSpool:         spool.NewQueueWithLimit[schema.ProcessEvent](cfg.Performance.EventBufferSize),
+		alertSpool:         spool.NewQueueWithLimit[schema.Alert](cfg.Performance.EventBufferSize),
+		detector:           detect.NewEngine(rs),
+		responder:          response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
+		writer:             alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
+		killAllow:          makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		zapLogger:          zapLogger,
+		userLookup:         users,
+		fileDedup:          collector.NewFileDeduper(0),
+		fileHashPool:       newFileHashPool(),
+		noisyAlertLastSeen: make(map[string]time.Time),
 	}
 	collector.LogMonitoringBootstrap(a.logger, cfg)
 
@@ -528,18 +531,19 @@ func NewForTesting(cfg config.Config, rs rules.RuleSet) (*Agent, error) {
 func NewForTestingWithCollectors(cfg config.Config, rs rules.RuleSet, collectors []collector.Collector) *Agent {
 	normalizePerformanceProfile(&cfg)
 	a := &Agent{
-		logger:       slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		cfg:          cfg,
-		collectors:   collectors,
-		ruleSet:      rs,
-		eventSpool:   spool.NewQueueWithLimit[schema.ProcessEvent](cfg.Performance.EventBufferSize),
-		alertSpool:   spool.NewQueueWithLimit[schema.Alert](cfg.Performance.EventBufferSize),
-		detector:     detect.NewEngine(rs),
-		responder:    response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
-		writer:       alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),
-		killAllow:    makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
-		fileDedup:    collector.NewFileDeduper(0),
-		fileHashPool: newFileHashPool(),
+		logger:             slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		cfg:                cfg,
+		collectors:         collectors,
+		ruleSet:            rs,
+		eventSpool:         spool.NewQueueWithLimit[schema.ProcessEvent](cfg.Performance.EventBufferSize),
+		alertSpool:         spool.NewQueueWithLimit[schema.Alert](cfg.Performance.EventBufferSize),
+		detector:           detect.NewEngine(rs),
+		responder:          response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
+		writer:             alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),
+		killAllow:          makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		fileDedup:          collector.NewFileDeduper(0),
+		fileHashPool:       newFileHashPool(),
+		noisyAlertLastSeen: make(map[string]time.Time),
 	}
 	return a
 }
@@ -1091,6 +1095,9 @@ func (a *Agent) checkDriftAlerts() error {
 
 func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 	for _, al := range alerts {
+		if a.shouldSuppressNoisyAlert(al) {
+			continue
+		}
 		correlationID := al.AlertID
 		if correlationID == "" {
 			correlationID = uuid.NewString()
@@ -1122,6 +1129,45 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 		a.executeAutoResponse(al)
 	}
 	return nil
+}
+
+func (a *Agent) shouldSuppressNoisyAlert(al schema.Alert) bool {
+	// Keep strict mode fully verbose; tune only low_resource/balanced.
+	profile := strings.ToLower(strings.TrimSpace(a.cfg.Performance.Profile))
+	if profile == "strict" {
+		return false
+	}
+	if al.RuleID != "FILE-007" && al.RuleID != "CRED-001" {
+		return false
+	}
+	target := strings.ToLower(strings.TrimSpace(firstNonEmpty(al.FilePath, al.ProcessPath, al.ProcessName)))
+	if target == "" {
+		return false
+	}
+	// High-frequency system file reads are expected on Linux hosts.
+	if !strings.HasPrefix(target, "/etc/passwd") && !strings.HasPrefix(target, "/etc/shadow") {
+		return false
+	}
+	cooldown := 30 * time.Second
+	if profile == "low_resource" {
+		cooldown = 2 * time.Minute
+	}
+	key := al.RuleID + "|" + target
+	now := time.Now()
+	a.noisyAlertMu.Lock()
+	defer a.noisyAlertMu.Unlock()
+	if last, ok := a.noisyAlertLastSeen[key]; ok && now.Sub(last) < cooldown {
+		return true
+	}
+	a.noisyAlertLastSeen[key] = now
+	if len(a.noisyAlertLastSeen) > 2048 {
+		for k, ts := range a.noisyAlertLastSeen {
+			if now.Sub(ts) > 10*cooldown {
+				delete(a.noisyAlertLastSeen, k)
+			}
+		}
+	}
+	return false
 }
 
 func makeRuleAllowlist(ruleIDs []string) map[string]struct{} {
