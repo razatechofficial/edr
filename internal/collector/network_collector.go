@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -17,8 +16,6 @@ import (
 
 	"github.com/razatechofficial/edr/internal/schema"
 )
-
-var execCmd = exec.Command
 
 // NetworkCollector polls the kernel's TCP/UDP connection tables and emits
 // NetworkEvent telemetry for new connections observed since the last Collect.
@@ -57,7 +54,7 @@ func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
 		conns = append(conns, parseProcNet("/proc/net/udp", "udp")...)
 		conns = append(conns, parseProcNet("/proc/net/udp6", "udp")...)
 	} else {
-		conns = parseLsof()
+		conns = darwinLsofConnections()
 	}
 
 	nc.mu.Lock()
@@ -67,7 +64,7 @@ func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
 	var out []Telemetry
 
 	for _, c := range conns {
-		key := fmt.Sprintf("%s:%s:%d:%s:%d", c.proto, c.srcIP, c.srcPort, c.dstIP, c.dstPort)
+		key := fmt.Sprintf("%s:%s:%d:%s:%d:%d", c.proto, c.srcIP, c.srcPort, c.dstIP, c.dstPort, c.pid)
 		if _, exists := nc.seen[key]; exists {
 			nc.dropped.Add(1)
 			continue
@@ -89,6 +86,7 @@ func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
 					Hostname:      nc.hostname,
 					OS:            runtime.GOOS,
 				},
+				PID:      c.pid,
 				Protocol: c.proto,
 				SourceIP: c.srcIP,
 				SourcePt: c.srcPort,
@@ -113,7 +111,7 @@ func (nc *NetworkCollector) ExportMonitoringHealth() map[string]any {
 		Dropped: nc.dropped.Load(),
 	}
 	if runtime.GOOS == "darwin" {
-		src.Source = "lsof_polling"
+		src.Source = "lsof_pid"
 	}
 	return src.ToMap()
 }
@@ -124,6 +122,7 @@ type connEntry struct {
 	srcPort int
 	dstIP   string
 	dstPort int
+	pid     int // non-zero when source provides it (e.g. Darwin lsof)
 }
 
 // parseProcNet reads /proc/net/tcp or /proc/net/udp and extracts connections.
@@ -190,69 +189,4 @@ func parseHexAddr(s string) (string, int) {
 	}
 }
 
-// parseLsof extracts network connections on macOS using netstat -an.
-func parseLsof() []connEntry {
-	return parseNetstat()
-}
 
-func parseNetstat() []connEntry {
-	out, err := execCommand("netstat", "-an", "-p", "tcp")
-	if err != nil {
-		return nil
-	}
-	entries := parseNetstatOutput(string(out), "tcp")
-
-	outUDP, err := execCommand("netstat", "-an", "-p", "udp")
-	if err == nil {
-		entries = append(entries, parseNetstatOutput(string(outUDP), "udp")...)
-	}
-	return entries
-}
-
-func parseNetstatOutput(output, proto string) []connEntry {
-	var entries []connEntry
-	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-		if fields[0] != "tcp4" && fields[0] != "tcp6" && fields[0] != "udp4" && fields[0] != "udp6" {
-			continue
-		}
-
-		srcIP, srcPort := splitHostPort(fields[3])
-		dstIP, dstPort := splitHostPort(fields[4])
-
-		if srcIP == "" || dstIP == "" {
-			continue
-		}
-
-		entries = append(entries, connEntry{
-			proto:   proto,
-			srcIP:   srcIP,
-			srcPort: srcPort,
-			dstIP:   dstIP,
-			dstPort: dstPort,
-		})
-	}
-	return entries
-}
-
-func splitHostPort(addr string) (string, int) {
-	lastDot := strings.LastIndex(addr, ".")
-	if lastDot < 0 {
-		return addr, 0
-	}
-	host := addr[:lastDot]
-	portStr := addr[lastDot+1:]
-	if portStr == "*" {
-		return host, 0
-	}
-	port, _ := strconv.Atoi(portStr)
-	return host, port
-}
-
-func execCommand(name string, args ...string) ([]byte, error) {
-	cmd := execCmd(name, args...)
-	return cmd.Output()
-}
