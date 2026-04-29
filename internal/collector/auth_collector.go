@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
@@ -25,6 +26,9 @@ type AuthCollector struct {
 
 	mu     sync.Mutex
 	events []schema.AuthEvent
+
+	scans   atomic.Uint64
+	emitted atomic.Uint64
 }
 
 func NewAuthCollector(endpointID, dataDir string) *AuthCollector {
@@ -41,8 +45,13 @@ func NewAuthCollector(endpointID, dataDir string) *AuthCollector {
 func (ac *AuthCollector) Name() string { return "auth" }
 
 func (ac *AuthCollector) Collect(_ context.Context) ([]Telemetry, error) {
+	ac.scans.Add(1)
 	if runtime.GOOS == "windows" {
-		return authWindowsSecurityTelemetry(ac)
+		out, err := authWindowsSecurityTelemetry(ac)
+		if err == nil {
+			ac.emitted.Add(uint64(len(out)))
+		}
+		return out, err
 	}
 	if ac.logPath == "" {
 		return nil, nil
@@ -59,7 +68,28 @@ func (ac *AuthCollector) Collect(_ context.Context) ([]Telemetry, error) {
 	for i := range all {
 		out = append(out, Telemetry{Auth: &all[i]})
 	}
+	ac.emitted.Add(uint64(len(out)))
 	return out, nil
+}
+
+// ExportMonitoringHealth surfaces auth-log tailing stats.
+func (ac *AuthCollector) ExportMonitoringHealth() map[string]any {
+	src := MonitoringSource{
+		Name:   "auth",
+		OS:     runtime.GOOS,
+		Source: "syslog_tail",
+		Status: "healthy",
+		EPSIn:  ac.scans.Load(),
+		EPSOut: ac.emitted.Load(),
+	}
+	switch {
+	case runtime.GOOS == "windows":
+		src.Source = "evtsubscribe"
+	case ac.logPath == "":
+		src.Status = "unavailable"
+		src.LastError = "no auth log path detected"
+	}
+	return src.ToMap()
 }
 
 func (ac *AuthCollector) readNewLines() []schema.AuthEvent {
