@@ -204,4 +204,86 @@ int tp_dns_sendto(struct trace_event_raw_sys_enter *ctx)
 	return 0;
 }
 
+/*
+ * Kernel-side enrichment: tcp_v4_connect runs inside the kernel after the
+ * sockaddr has been validated and the local source port assigned, so this
+ * gives us a fully resolved 4-tuple that the syscall tracepoint cannot.
+ * Failures inside CO-RE reads are tolerated; we just emit what we have.
+ */
+SEC("kprobe/tcp_v4_connect")
+int kp_tcp_v4_connect(struct pt_regs *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk)
+		return 0;
+
+	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_NET_CONNECT);
+	evt->direction = 0;
+	evt->protocol  = AF_INET;
+	evt->is_ipv6   = 0;
+
+	__u32 saddr = 0, daddr = 0;
+	__u16 sport = 0, dport = 0;
+	BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
+	BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+	BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+	BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+
+	evt->src_addr = saddr;
+	evt->dst_addr = daddr;
+	evt->src_port = sport;
+	evt->dst_port = __builtin_bswap16(dport);
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+/*
+ * tcp_close fires once per closed TCP connection (both client and server),
+ * giving an accurate connection-end signal that userland correlators use to
+ * compute connection duration and tear down lineage state.
+ */
+SEC("kprobe/tcp_close")
+int kp_tcp_close(struct pt_regs *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk)
+		return 0;
+
+	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_NET_CLOSE);
+	evt->direction = 0;
+	evt->protocol  = AF_INET;
+
+	__u32 saddr = 0, daddr = 0;
+	__u16 sport = 0, dport = 0;
+	BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
+	BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+	BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+	BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+
+	evt->src_addr = saddr;
+	evt->dst_addr = daddr;
+	evt->src_port = sport;
+	evt->dst_port = __builtin_bswap16(dport);
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
 char _license[] SEC("license") = "GPL";

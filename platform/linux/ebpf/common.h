@@ -34,6 +34,7 @@ enum event_type {
 	EVENT_NET_CONNECT   = 11,
 	EVENT_NET_ACCEPT    = 12,
 	EVENT_NET_BIND      = 13,
+	EVENT_NET_CLOSE     = 14,
 	EVENT_MODULE_LOAD   = 22,
 	EVENT_MOUNT         = 23,
 	EVENT_PTRACE        = 24,
