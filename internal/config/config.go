@@ -315,6 +315,12 @@ type Config struct {
 		ETWTaskScheduler    bool `yaml:"etw_task_scheduler"`
 		// HealthSnapshotSec writes monitoring_health.json under data_dir when > 0.
 		HealthSnapshotSec int `yaml:"health_snapshot_sec"`
+
+		// SysmonAutoInstall, when true on Windows, lets the agent install the
+		// bundled Sysmon binary + minimal config from `pkg/sysmon/` if Sysmon
+		// is not already present. When false (default) the agent only consumes
+		// the existing Sysmon Operational channel if installed by the admin.
+		SysmonAutoInstall bool `yaml:"sysmon_auto_install" env:"EDR_MONITORING_SYSMON_AUTOINSTALL"`
 	} `yaml:"monitoring"`
 
 	// Legacy fields for backward compatibility with existing agent.example.yaml.
