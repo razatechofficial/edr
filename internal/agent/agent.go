@@ -396,7 +396,6 @@ func applyRuntimeLimits(cfg config.Config, logger *slog.Logger) {
 		runtime.GOMAXPROCS(maxProcs)
 	}
 
-	// Keep Go heap growth bounded on low-memory endpoints.
 	if cfg.Performance.MaxMemoryMB > 0 {
 		limit := int64(cfg.Performance.MaxMemoryMB) * 1024 * 1024
 		debug.SetMemoryLimit(limit)
@@ -405,8 +404,22 @@ func applyRuntimeLimits(cfg config.Config, logger *slog.Logger) {
 		}
 	}
 
-	// Lower GC target for smaller, more frequent collections under pressure.
-	_ = debug.SetGCPercent(75)
+	// Profile-aware GC: low_resource favours frequent small collections so RSS
+	// stays close to live-set; strict favours throughput; balanced is between.
+	gcPercent := 75
+	switch strings.ToLower(strings.TrimSpace(cfg.Performance.Profile)) {
+	case "low_resource":
+		gcPercent = 50
+	case "strict":
+		gcPercent = 100
+	}
+	prev := debug.SetGCPercent(gcPercent)
+	if logger != nil {
+		logger.Info("go runtime gc percent applied",
+			"profile", cfg.Performance.Profile,
+			"gc_percent", gcPercent,
+			"previous", prev)
+	}
 }
 
 func normalizePerformanceProfile(cfg *config.Config) {
