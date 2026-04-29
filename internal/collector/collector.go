@@ -4,19 +4,31 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"os/exec"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
 )
 
+// ProcessCollector emits ProcessEvent telemetry. On Linux it uses the /proc
+// diff source so only newly visible pids are emitted, eliminating the
+// per-cycle `ps -axo` fork that previously dominated CPU usage. On other
+// Unix-like systems the legacy `ps` fallback is retained until a native
+// per-OS source replaces it (macOS proc_listpids, Windows ETW).
 type ProcessCollector struct {
 	EndpointID string
 	Hostname   string
+
+	mu      sync.Mutex // guards: tracker, linuxImpl
+	tracker *LineageTracker
+	// linuxImpl is *ProcSource on Linux; left nil elsewhere. Storing it as any
+	// avoids a type-name dependency on a build-tagged symbol.
+	linuxImpl any
 }
 
 func NewProcessCollector(endpointID string) (*ProcessCollector, error) {
@@ -24,7 +36,30 @@ func NewProcessCollector(endpointID string) (*ProcessCollector, error) {
 	if err != nil {
 		host = "unknown"
 	}
-	return &ProcessCollector{EndpointID: endpointID, Hostname: host}, nil
+	return &ProcessCollector{
+		EndpointID: endpointID,
+		Hostname:   host,
+		tracker:    NewLineageTracker(0, 0),
+	}, nil
+}
+
+// SetLineageTracker swaps in a shared tracker (typically owned by the agent).
+func (c *ProcessCollector) SetLineageTracker(t *LineageTracker) {
+	if t == nil {
+		return
+	}
+	c.mu.Lock()
+	c.tracker = t
+	c.linuxImpl = nil // force re-init so ProcSource picks up the shared tracker
+	c.mu.Unlock()
+}
+
+// LineageTracker exposes the underlying tracker for collectors that want to
+// stamp events through the same identity store.
+func (c *ProcessCollector) LineageTracker() *LineageTracker {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tracker
 }
 
 func (c *ProcessCollector) Name() string { return "process" }
@@ -32,7 +67,10 @@ func (c *ProcessCollector) Name() string { return "process" }
 func (c *ProcessCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 	now := time.Now().UTC()
 	user := os.Getenv("USER")
-	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+	switch runtime.GOOS {
+	case "linux":
+		return c.collectLinux(ctx)
+	case "darwin":
 		return c.collectFromPS(ctx, now, user)
 	}
 
