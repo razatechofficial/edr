@@ -97,6 +97,9 @@ func printLinux(w io.Writer, cfg config.Config) {
 			fmt.Fprintln(w)
 		}
 	}
+	requireSources(w, cfg, []string{
+		"process", "file", "network", "auth",
+	})
 }
 
 func printDarwin(w io.Writer, cfg config.Config) {
@@ -120,6 +123,9 @@ func printDarwin(w io.Writer, cfg config.Config) {
 	if n := len(cfg.Monitoring.ESFMutePathPrefixes); n > 0 {
 		fmt.Fprintf(w, "config esf_mute_path_prefixes: %d extra prefix(es)\n", n)
 	}
+	requireSources(w, cfg, []string{
+		"process", "file", "network", "auth",
+	})
 }
 
 func printWindows(w io.Writer, cfg config.Config) {
@@ -128,6 +134,53 @@ func printWindows(w io.Writer, cfg config.Config) {
 	m := cfg.Monitoring
 	fmt.Fprintf(w, "optional ETW flags: wmi=%v ps=%v pipes=%v bits=%v tasks=%v\n",
 		m.ETWWMIActivity, m.ETWPowerShellScript, m.ETWNamedPipeHandles, m.ETWBitsClient, m.ETWTaskScheduler)
+	requireSources(w, cfg, []string{
+		"process", "file", "network", "auth", "kernel", "registry",
+	})
+}
+
+// requireSources reads the latest monitoring_health.json snapshot and warns
+// when expected per-OS sources are missing or unhealthy. Snapshot freshness
+// is reported alongside each missing source so the operator can tell whether
+// the agent is running.
+func requireSources(w io.Writer, cfg config.Config, expected []string) {
+	if cfg.Agent.DataDir == "" {
+		return
+	}
+	p := filepath.Join(cfg.Agent.DataDir, "monitoring_health.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		fmt.Fprintf(w, "expected sources: cannot evaluate (no %s)\n", p)
+		return
+	}
+	var snap map[string]interface{}
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return
+	}
+	sources, _ := snap["sources"].([]interface{})
+	present := map[string]string{}
+	for _, raw := range sources {
+		src, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name := stringField(src, "name", "")
+		if name == "" {
+			continue
+		}
+		present[name] = stringField(src, "status", "")
+	}
+	for _, want := range expected {
+		st, ok := present[want]
+		switch {
+		case !ok:
+			fmt.Fprintf(w, "  source %s: MISSING\n", want)
+		case st == "unavailable" || st == "absent":
+			fmt.Fprintf(w, "  source %s: %s\n", want, st)
+		case st == "degraded":
+			fmt.Fprintf(w, "  source %s: %s\n", want, st)
+		}
+	}
 }
 
 func printMonitoringHealthFile(w io.Writer, cfg config.Config) {
@@ -147,8 +200,67 @@ func printMonitoringHealthFile(w io.Writer, cfg config.Config) {
 		fmt.Fprintf(w, "  (invalid json: %v)\n", err)
 		return
 	}
+	if rt, ok := snap["runtime"].(map[string]interface{}); ok {
+		fmt.Fprintf(w, "  runtime: goroutines=%v heap_alloc_mib=%v num_gc=%v\n",
+			rt["num_goroutine"], rt["heap_alloc_mib"], rt["num_gc"])
+	}
+	if sources, ok := snap["sources"].([]interface{}); ok {
+		fmt.Fprintf(w, "  sources (%d):\n", len(sources))
+		for _, raw := range sources {
+			src, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			printSourceRow(w, src)
+		}
+	}
 	if k, ok := snap["kernel"].(map[string]interface{}); ok {
 		fmt.Fprintf(w, "  kernel keys: %v\n", keysOf(k))
+	}
+}
+
+// printSourceRow renders a single MonitoringSource row in tabular form so the
+// doctor command can be eyeballed without jq. Fields default to "-" when
+// missing; numbers are rendered as-is via %v.
+func printSourceRow(w io.Writer, src map[string]interface{}) {
+	name := stringField(src, "name", "?")
+	osName := stringField(src, "os", "?")
+	source := stringField(src, "source", "-")
+	status := stringField(src, "status", "-")
+	notes := stringField(src, "notes", "")
+	lastErr := stringField(src, "last_error", "")
+	icon := statusIcon(status)
+	fmt.Fprintf(w, "    %s %-22s %-8s %-22s %-10s in=%v out=%v drop=%v",
+		icon, name, osName, source, status,
+		src["eps_in"], src["eps_out"], src["dropped"])
+	if notes != "" {
+		fmt.Fprintf(w, " notes=%q", notes)
+	}
+	if lastErr != "" {
+		fmt.Fprintf(w, " err=%q", lastErr)
+	}
+	fmt.Fprintln(w)
+}
+
+func stringField(m map[string]interface{}, key, fallback string) string {
+	if v, ok := m[key].(string); ok && v != "" {
+		return v
+	}
+	return fallback
+}
+
+func statusIcon(status string) string {
+	switch strings.ToLower(status) {
+	case "healthy":
+		return "[OK]"
+	case "degraded":
+		return "[WARN]"
+	case "standby":
+		return "[STBY]"
+	case "unavailable", "absent":
+		return "[OFF]"
+	default:
+		return "[?]"
 	}
 }
 
