@@ -158,6 +158,13 @@ func (s *PowerShellDefenderSource) Snapshot(ctx context.Context) ([]Telemetry, e
 	return out, nil
 }
 
+func (s *PowerShellDefenderSource) Name() string { return "powershell_defender" }
+
+// Collect implements Collector by draining PowerShell/Defender/AppLocker queues.
+func (s *PowerShellDefenderSource) Collect(ctx context.Context) ([]Telemetry, error) {
+	return s.Snapshot(ctx)
+}
+
 // Close releases all subscription/bookmark handles.
 func (s *PowerShellDefenderSource) Close() {
 	s.mu.Lock()
