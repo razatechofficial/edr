@@ -113,6 +113,7 @@ func (s *ProcSource) Snapshot(ctx context.Context) ([]Telemetry, error) {
 			Comm:        comm,
 			CommandLine: cmdline,
 		})
+		s.tracker.EnrichFromProcLinux(pid)
 
 		ev := schema.ProcessEvent{
 			BaseEvent: schema.BaseEvent{
