@@ -33,6 +33,7 @@ const (
 	bpfEvtNetAccept = 12
 	bpfEvtNetBind   = 13
 	bpfEvtNetClose  = 14
+	bpfEvtDNSQuery  = 35
 )
 
 // KernelCollector wraps the eBPF kernel driver and presents its real-time
@@ -252,7 +253,7 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 		}
 		return &Telemetry{File: fe}
 
-	case bpfEvtNetConn, bpfEvtNetAccept, bpfEvtNetBind, bpfEvtNetClose:
+	case bpfEvtNetConn, bpfEvtNetAccept, bpfEvtNetBind, bpfEvtNetClose, bpfEvtDNSQuery:
 		base.EventType = schema.EventNetwork
 		ne := &schema.NetworkEvent{BaseEvent: base, PID: int(pid)}
 		// Encode the operation in Protocol so downstream rules and the lineage
@@ -268,6 +269,8 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 			opSuffix = "bind"
 		case bpfEvtNetClose:
 			opSuffix = "close"
+		case bpfEvtDNSQuery:
+			opSuffix = "dns_query"
 		}
 		if len(payload) < 3 {
 			ne.Protocol = opSuffix

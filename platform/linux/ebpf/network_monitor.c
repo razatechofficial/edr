@@ -247,6 +247,48 @@ int kp_tcp_v4_connect(struct pt_regs *ctx)
 }
 
 /*
+ * udp_sendmsg is the single kernel entry-point for both sendto(2) and
+ * sendmsg(2) on UDP sockets. Hooking it gives DNS query visibility even
+ * when an application uses sendmsg with iov (which the syscall tracepoint
+ * for sendto misses). We do not parse the DNS qname here - the syscall
+ * tracepoint above does that - this kprobe only emits a lightweight
+ * EVENT_DNS_QUERY breadcrumb so userland can correlate.
+ */
+SEC("kprobe/udp_sendmsg")
+int kp_udp_sendmsg(struct pt_regs *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk)
+		return 0;
+
+	__u16 dport_be = 0;
+	BPF_CORE_READ_INTO(&dport_be, sk, __sk_common.skc_dport);
+	__u16 dport = __builtin_bswap16(dport_be);
+	if (dport != 53)
+		return 0;
+
+	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_DNS_QUERY);
+	evt->direction = 0;
+	evt->protocol  = AF_INET;
+	evt->dst_port  = dport;
+
+	__u32 daddr = 0;
+	BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+	evt->dst_addr = daddr;
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+/*
  * tcp_close fires once per closed TCP connection (both client and server),
  * giving an accurate connection-end signal that userland correlators use to
  * compute connection duration and tear down lineage state.
