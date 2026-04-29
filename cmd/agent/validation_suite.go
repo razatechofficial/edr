@@ -176,6 +176,11 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 		}
 		fmt.Printf("  [%s] %-40s %s latency=%dms\n", status, r.TestName, r.MITRE, r.DetectionLatencyMs)
 	}
+	monRep := runMonitoringValidation(ctx, cfg)
+	writeMonitoringReport(cfg, monRep)
+	if monRep.Failed > 0 {
+		failed += monRep.Failed
+	}
 	if failed > 0 {
 		fmt.Printf("\n%d tests FAILED\n", failed)
 		writeValidationReport(cfg, ValidationReport{
