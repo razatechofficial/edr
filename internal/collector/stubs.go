@@ -103,6 +103,8 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 		cols = append(cols, dc)
 	}
 
+	cols = extendWindowsEvtCollectors(cols, cfg, endpointID)
+
 	if rc := NewRegistryCollector(endpointID); rc != nil {
 		cols = append(cols, rc)
 	}
