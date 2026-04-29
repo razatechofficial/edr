@@ -1,16 +1,15 @@
-//go:build !linux
+//go:build !linux && !darwin
 
 package collector
 
 import (
 	"context"
-	"os"
 	"time"
 )
 
-// collectLinux is a no-op on non-Linux platforms; Collect routes to ps/ETW
-// instead. This stub exists so the shared method can be referenced
-// unconditionally from collector.go.
-func (c *ProcessCollector) collectLinux(ctx context.Context) ([]Telemetry, error) {
-	return c.collectFromPS(ctx, time.Now().UTC(), os.Getenv("USER"))
+// collectNative is the non-Linux/non-Darwin fallback. We still honour the
+// signature so collector.go stays platform-agnostic, but on Windows the
+// ETW-driven collector handles process telemetry; this method is unused.
+func (c *ProcessCollector) collectNative(ctx context.Context, now time.Time, user string) ([]Telemetry, error) {
+	return c.collectFromPS(ctx, now, user)
 }
