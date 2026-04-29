@@ -651,6 +651,30 @@ func (d *ETWDriver) decodeProcessUserData(record *etwEventRecord, env map[string
 		if len(ud) >= 4 {
 			env["exit_pid"] = binary.LittleEndian.Uint32(ud[0:4])
 		}
+	case 5: // ImageLoad
+		// Microsoft-Windows-Kernel-Process ImageLoad payload (x64):
+		//   ProcessId (u32), ImageBase (u64), ImageSize (u64), ImageName (utf16le)
+		if len(ud) >= 4 {
+			env["image_load_pid"] = binary.LittleEndian.Uint32(ud[0:4])
+		}
+		if len(ud) >= 20 {
+			env["image_base"] = binary.LittleEndian.Uint64(ud[4:12])
+			env["image_size"] = binary.LittleEndian.Uint64(ud[12:20])
+		}
+		if len(ud) > 20 {
+			env["image_name"] = extractUTF16String(ud[20:])
+		}
+		env["type"] = events.EventModule
+		env["op"] = "image_load"
+	case 6: // ImageUnload
+		if len(ud) >= 4 {
+			env["image_unload_pid"] = binary.LittleEndian.Uint32(ud[0:4])
+		}
+		if len(ud) > 20 {
+			env["image_name"] = extractUTF16String(ud[20:])
+		}
+		env["type"] = events.EventModule
+		env["op"] = "image_unload"
 	}
 }
 

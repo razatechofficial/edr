@@ -276,14 +276,17 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 	case "module", "mount", "signal", "ptrace":
 		base.EventType = schema.EventProcess
 		pe := &schema.ProcessEvent{BaseEvent: base}
-		pe.PID = jsonInt(raw, "pid")
+		pe.PID = jsonInt(raw, "pid", "image_load_pid", "image_unload_pid")
 		// Refine ProcessName for image-load events so detection rules can
-		// scope to dylib mmap or kernel extension load specifically. The
-		// macOS ESF callback stamps esf_op via esfOperationName().
-		op := jsonString(raw, "esf_op")
+		// scope to dylib mmap or kernel extension load specifically.
+		// macOS ESF stamps esf_op; Windows ETW stamps op (image_load,
+		// image_unload). Fall back to evType if neither is provided.
+		op := firstNonEmpty(jsonString(raw, "esf_op"), jsonString(raw, "op"))
 		switch {
 		case evType == "module" && op == "image_load":
 			pe.ProcessName = "image_load"
+		case evType == "module" && op == "image_unload":
+			pe.ProcessName = "image_unload"
 		case evType == "module" && op == "kextload":
 			pe.ProcessName = "kextload"
 		case op != "" && op != "unknown":
@@ -291,7 +294,11 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		default:
 			pe.ProcessName = evType
 		}
-		pe.ProcessPath = firstNonEmpty(jsonString(raw, "path"), jsonString(raw, "module_path"))
+		pe.ProcessPath = firstNonEmpty(
+			jsonString(raw, "path"),
+			jsonString(raw, "module_path"),
+			jsonString(raw, "image_name"),
+		)
 		pe.CommandLine = jsonString(raw, "message")
 		applyProcessUserFromJSON(pe, raw, users)
 		return &Telemetry{Process: pe}
