@@ -97,6 +97,11 @@ func printLinux(w io.Writer, cfg config.Config) {
 			fmt.Fprintln(w)
 		}
 	}
+	if _, err := exec.LookPath("journalctl"); err == nil {
+		fmt.Fprintln(w, "journalctl: present")
+	} else {
+		fmt.Fprintln(w, "journalctl: not found in PATH")
+	}
 	requireSources(w, cfg, []string{
 		"process", "file", "network", "auth",
 	})
