@@ -71,7 +71,7 @@ BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/l
 .PHONY: build-linux build-darwin build-windows build-darwin-nosec build-all
 .PHONY: bundle-enterprise build-installer-embedded
 .PHONY: ebpf ebpf-link ebpf-install proto
-.PHONY: test test-collector test-detection test-response test-race test-coverage
+.PHONY: test test-collector test-detection test-response test-race monitoring-soak test-coverage
 .PHONY: run-agent run-agent-ml test-edr-macos-lab
 .PHONY: test-bench
 .PHONY: vulncheck
@@ -227,6 +227,11 @@ test-response:
 test-race:
 	@echo "==> Running tests with race detector"
 	go test ./... -race -count=1 -timeout 300s
+
+# Longer race pass on the monitoring stack (avoids `go test ./...` which may include non-repo trees).
+monitoring-soak:
+	@echo "==> Monitoring layer soak (collector + agent CLI, race, nosec)"
+	go test -race -count=1 -timeout 300s -tags nosec ./internal/collector/... ./cmd/agent/...
 
 test-coverage:
 	@echo "==> Running tests with coverage"
