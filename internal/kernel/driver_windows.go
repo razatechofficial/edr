@@ -700,36 +700,58 @@ func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string
 		return
 	}
 	env["data_length"] = len(ud)
-	// Kernel network provider layouts vary by OS build; try common IPv4 tuple placements.
+
+	// Microsoft-Windows-Kernel-Network IPv4 layout (TcpIp_V4_Header):
+	//   uint32 PID        @0
+	//   uint32 size       @4
+	//   uint32 daddr      @8
+	//   uint32 saddr      @12
+	//   uint16 dport (BE) @16
+	//   uint16 sport (BE) @18
 	if len(ud) >= 20 {
-		sport := binary.LittleEndian.Uint16(ud[8:10])
-		dport := binary.LittleEndian.Uint16(ud[10:12])
-		saddr := binary.LittleEndian.Uint32(ud[12:16])
-		daddr := binary.LittleEndian.Uint32(ud[16:20])
-		if saddr != 0 || daddr != 0 {
-			env["src"] = ip4FromDWordLE(saddr)
-			env["dst"] = ip4FromDWordLE(daddr)
-			env["src_port"] = int(sport)
-			env["dest_port"] = int(dport)
-			env["protocol"] = "tcp"
-			return
-		}
-	}
-	if len(ud) >= 16 {
-		saddr := binary.LittleEndian.Uint32(ud[4:8])
+		env["pid"] = binary.LittleEndian.Uint32(ud[0:4])
+		env["size"] = binary.LittleEndian.Uint32(ud[4:8])
 		daddr := binary.LittleEndian.Uint32(ud[8:12])
-		if saddr != 0 && daddr != 0 {
-			env["src"] = ip4FromDWordLE(saddr)
-			env["dst"] = ip4FromDWordLE(daddr)
-			if len(ud) >= 14 {
-				env["src_port"] = int(binary.LittleEndian.Uint16(ud[12:14]))
-			}
-			if len(ud) >= 16 {
-				env["dest_port"] = int(binary.LittleEndian.Uint16(ud[14:16]))
-			}
-			env["protocol"] = "tcp"
-		}
+		saddr := binary.LittleEndian.Uint32(ud[12:16])
+		dport := binary.BigEndian.Uint16(ud[16:18])
+		sport := binary.BigEndian.Uint16(ud[18:20])
+		env["src"] = ip4FromDWordLE(saddr)
+		env["dst"] = ip4FromDWordLE(daddr)
+		env["src_port"] = int(sport)
+		env["dest_port"] = int(dport)
+		// Map opcode → connect|accept|send|recv|disconnect for downstream rules.
+		env["protocol"] = networkOpcodeName(record.EventHeader.EventDescriptor.Opcode)
+		return
 	}
+	// Fallback for IPv6 / shorter records: still try to surface a PID so the
+	// downstream lineage tracker can attribute the event to a process.
+	if len(ud) >= 4 {
+		env["pid"] = binary.LittleEndian.Uint32(ud[0:4])
+	}
+}
+
+// networkOpcodeName maps Kernel-Network ETW opcodes to a textual operation
+// name. The opcode table is documented in MSDN under TcpIp_V4_Header:
+//   10/11 send, 12/13 recv, 14/15 disconnect/retransmit,
+//   16 accept, 17 connect, 26 fail.
+func networkOpcodeName(op uint8) string {
+	switch op {
+	case 10, 11:
+		return "tcp:send"
+	case 12, 13:
+		return "tcp:recv"
+	case 14, 15:
+		return "tcp:disconnect"
+	case 16:
+		return "tcp:accept"
+	case 17:
+		return "tcp:connect"
+	case 18, 19:
+		return "tcp:reconnect"
+	case 26:
+		return "tcp:fail"
+	}
+	return "tcp"
 }
 
 func (d *ETWDriver) decodeOpaqueETW(record *etwEventRecord, env map[string]interface{}) {
