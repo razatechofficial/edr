@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -29,6 +30,9 @@ type FileCollector struct {
 	events []schema.FileEvent
 	extras []Telemetry
 	done   chan struct{}
+
+	emitted atomic.Uint64
+	dropped atomic.Uint64
 }
 
 // DefaultFIMPaths returns platform-appropriate paths to watch for file integrity.
@@ -122,7 +126,25 @@ func (fc *FileCollector) Collect(_ context.Context) ([]Telemetry, error) {
 		out = append(out, Telemetry{File: &batch[i]})
 	}
 	out = append(out, extras...)
+	fc.emitted.Add(uint64(len(out)))
 	return out, nil
+}
+
+// ExportMonitoringHealth surfaces fsnotify watcher stats.
+func (fc *FileCollector) ExportMonitoringHealth() map[string]any {
+	src := MonitoringSource{
+		Name:    "file",
+		OS:      runtime.GOOS,
+		Source:  "fsnotify",
+		Status:  "healthy",
+		EPSOut:  fc.emitted.Load(),
+		Dropped: fc.dropped.Load(),
+	}
+	if fc.watcher == nil {
+		src.Status = "unavailable"
+		src.LastError = "fsnotify watcher not initialized"
+	}
+	return src.ToMap()
 }
 
 func (fc *FileCollector) Close() error {

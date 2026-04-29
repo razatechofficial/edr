@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
@@ -26,6 +27,10 @@ type NetworkCollector struct {
 	hostname   string
 	mu         sync.Mutex
 	seen       map[string]struct{}
+
+	scans   atomic.Uint64
+	emitted atomic.Uint64
+	dropped atomic.Uint64
 }
 
 func NewNetworkCollector(endpointID string) *NetworkCollector {
@@ -43,6 +48,7 @@ func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		return nil, nil
 	}
+	nc.scans.Add(1)
 
 	var conns []connEntry
 	if runtime.GOOS == "linux" {
@@ -63,11 +69,13 @@ func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
 	for _, c := range conns {
 		key := fmt.Sprintf("%s:%s:%d:%s:%d", c.proto, c.srcIP, c.srcPort, c.dstIP, c.dstPort)
 		if _, exists := nc.seen[key]; exists {
+			nc.dropped.Add(1)
 			continue
 		}
 		nc.seen[key] = struct{}{}
 
 		if c.dstIP == "0.0.0.0" || c.dstIP == "::" || c.dstIP == "" {
+			nc.dropped.Add(1)
 			continue
 		}
 
@@ -88,8 +96,26 @@ func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
 				DestPt:   c.dstPort,
 			},
 		})
+		nc.emitted.Add(1)
 	}
 	return out, nil
+}
+
+// ExportMonitoringHealth surfaces /proc-net or lsof polling stats.
+func (nc *NetworkCollector) ExportMonitoringHealth() map[string]any {
+	src := MonitoringSource{
+		Name:    "network",
+		OS:      runtime.GOOS,
+		Source:  "proc_net_polling",
+		Status:  "healthy",
+		EPSIn:   nc.scans.Load(),
+		EPSOut:  nc.emitted.Load(),
+		Dropped: nc.dropped.Load(),
+	}
+	if runtime.GOOS == "darwin" {
+		src.Source = "lsof_polling"
+	}
+	return src.ToMap()
 }
 
 type connEntry struct {
