@@ -6,7 +6,9 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
@@ -24,9 +26,14 @@ type KernelCollector struct {
 	cfg        config.Config
 	users      *UsernameCache
 
+	fimPrefixes []string // lowercased FIM path prefixes for file enrichment gate
+	selfPID     uint32
+
 	mu     sync.Mutex
 	events []Telemetry
 	cancel context.CancelFunc
+
+	fileDropped uint64 // events filtered out because path is not under FIM set
 }
 
 func isWindowsElevated() bool {
@@ -49,13 +56,23 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		return nil
 	}
 	host, _ := os.Hostname()
+	prefixes := make([]string, 0, len(cfg.Monitoring.FIMPaths))
+	for _, p := range cfg.Monitoring.FIMPaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		prefixes = append(prefixes, strings.ToLower(p))
+	}
 	return &KernelCollector{
-		driver:     d,
-		buf:        kernel.NewRingBuffer(65536),
-		endpointID: endpointID,
-		hostname:   host,
-		cfg:        cfg,
-		users:      users,
+		driver:      d,
+		buf:         kernel.NewRingBuffer(65536),
+		endpointID:  endpointID,
+		hostname:    host,
+		cfg:         cfg,
+		users:       users,
+		fimPrefixes: prefixes,
+		selfPID:     uint32(os.Getpid()),
 	}
 }
 
@@ -65,8 +82,10 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"driver":  kc.driver.Stats(),
-		"ringbuf": kc.buf.Stats(),
+		"driver":         kc.driver.Stats(),
+		"ringbuf":        kc.buf.Stats(),
+		"file_dropped":   atomic.LoadUint64(&kc.fileDropped),
+		"fim_prefix_set": len(kc.fimPrefixes),
 	}
 }
 
@@ -117,13 +136,44 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 			continue
 		}
 		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
-		if tel != nil {
-			kc.maybeEnrichProcessImageHash(tel)
-			kc.mu.Lock()
-			kc.events = append(kc.events, *tel)
-			kc.mu.Unlock()
+		if tel == nil {
+			continue
+		}
+		if !kc.acceptFileTelemetry(tel) {
+			atomic.AddUint64(&kc.fileDropped, 1)
+			continue
+		}
+		kc.maybeEnrichProcessImageHash(tel)
+		kc.mu.Lock()
+		kc.events = append(kc.events, *tel)
+		kc.mu.Unlock()
+	}
+}
+
+// acceptFileTelemetry drops Kernel-File events whose path is not under any
+// configured FIM prefix and whose actor is the agent itself. Non-file events
+// always pass through. When no FIM prefixes are configured the gate accepts
+// everything (agent-policy decision: do not silently lose events).
+func (kc *KernelCollector) acceptFileTelemetry(tel *Telemetry) bool {
+	if tel.File == nil {
+		return true
+	}
+	if uint32(tel.File.ActorPID) == kc.selfPID && kc.selfPID != 0 {
+		return false
+	}
+	if len(kc.fimPrefixes) == 0 {
+		return true
+	}
+	path := strings.ToLower(strings.TrimSpace(tel.File.Path))
+	if path == "" {
+		return false
+	}
+	for _, p := range kc.fimPrefixes {
+		if strings.HasPrefix(path, p) {
+			return true
 		}
 	}
+	return false
 }
 
 const maxWinExecImageHashBytes = 32 << 20
