@@ -47,6 +47,13 @@ var (
 		Data1: 0x1C95126E, Data2: 0x7EEA, Data3: 0x49A9,
 		Data4: [8]byte{0xA3, 0xFE, 0xA3, 0x78, 0xB0, 0x3D, 0xDB, 0x4D},
 	}
+	// Microsoft-Windows-Kernel-Registry: emits realtime registry create/open/
+	// delete/setvalue events with PID + key path. Replaces the userland
+	// registry polling on hosts that allow ETW autologger access.
+	kernelRegistryGUID = windows.GUID{
+		Data1: 0x70EB4F03, Data2: 0xC1DE, Data3: 0x4F73,
+		Data4: [8]byte{0xA0, 0x51, 0x33, 0xD1, 0x3D, 0x54, 0x13, 0xBD},
+	}
 	wmiActivityGUID = windows.GUID{
 		Data1: 0x141194EF, Data2: 0x0210, Data3: 0x4338,
 		Data4: [8]byte{0xBC, 0xA5, 0x2B, 0xFF, 0x18, 0x28, 0x29, 0x30},
@@ -240,6 +247,7 @@ var etwCoreProviders = []providerConfig{
 	{"File", kernelFileGUID, events.EventFile},
 	{"Network", kernelNetworkGUID, events.EventNetwork},
 	{"DNS", dnsClientGUID, events.EventDNS},
+	{"Registry", kernelRegistryGUID, events.EventRegistry},
 }
 
 func (d *ETWDriver) providersToStart() []providerConfig {
@@ -596,6 +604,9 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 	case dnsClientGUID:
 		envelope["type"] = events.EventDNS
 		d.decodeDNSClient(record, envelope)
+	case kernelRegistryGUID:
+		envelope["type"] = events.EventRegistry
+		d.decodeKernelRegistry(record, envelope)
 	case wmiActivityGUID:
 		envelope["type"] = events.EventWMI
 		d.decodeOpaqueETW(record, envelope)
