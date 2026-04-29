@@ -68,10 +68,8 @@ func (c *ProcessCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 	now := time.Now().UTC()
 	user := os.Getenv("USER")
 	switch runtime.GOOS {
-	case "linux":
-		return c.collectLinux(ctx)
-	case "darwin":
-		return c.collectFromPS(ctx, now, user)
+	case "linux", "darwin":
+		return c.collectNative(ctx, now, user)
 	}
 
 	// Fallback for non-ps platforms.
