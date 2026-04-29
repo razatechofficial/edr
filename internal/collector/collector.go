@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
@@ -29,6 +30,10 @@ type ProcessCollector struct {
 	// linuxImpl is *ProcSource on Linux; left nil elsewhere. Storing it as any
 	// avoids a type-name dependency on a build-tagged symbol.
 	linuxImpl any
+
+	scans   atomic.Uint64
+	emitted atomic.Uint64
+	errs    atomic.Pointer[string]
 }
 
 func NewProcessCollector(endpointID string) (*ProcessCollector, error) {
@@ -64,12 +69,47 @@ func (c *ProcessCollector) LineageTracker() *LineageTracker {
 
 func (c *ProcessCollector) Name() string { return "process" }
 
+// ExportMonitoringHealth surfaces ProcessCollector throughput.
+func (c *ProcessCollector) ExportMonitoringHealth() map[string]any {
+	src := MonitoringSource{
+		Name:   "process",
+		OS:     runtime.GOOS,
+		Source: "native_proc",
+		Status: "healthy",
+		EPSIn:  c.scans.Load(),
+		EPSOut: c.emitted.Load(),
+	}
+	switch runtime.GOOS {
+	case "linux":
+		src.Source = "proc_diff"
+	case "darwin":
+		src.Source = "kern.proc.all"
+	case "windows":
+		src.Source = "toolhelp32"
+	default:
+		src.Source = "ps_fallback"
+	}
+	if errPtr := c.errs.Load(); errPtr != nil && *errPtr != "" {
+		src.LastError = *errPtr
+		src.Status = "degraded"
+	}
+	return src.ToMap()
+}
+
 func (c *ProcessCollector) Collect(ctx context.Context) ([]Telemetry, error) {
+	c.scans.Add(1)
 	now := time.Now().UTC()
 	user := os.Getenv("USER")
 	switch runtime.GOOS {
 	case "linux", "darwin", "windows":
-		return c.collectNative(ctx, now, user)
+		out, err := c.collectNative(ctx, now, user)
+		if err != nil {
+			msg := err.Error()
+			c.errs.Store(&msg)
+		} else {
+			c.emitted.Add(uint64(len(out)))
+		}
+		return out, err
 	}
 
 	// Fallback for non-ps platforms.
