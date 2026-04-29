@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
@@ -18,13 +19,23 @@ import (
 
 // RegistryCollector snapshots watched keys and emits RegistryEvent rows when
 // values are added, changed, or removed compared to the previous Collect pass.
+//
+// On hosts where the Microsoft-Windows-Kernel-Registry ETW provider is
+// delivering events through the kernel driver, this collector becomes a cold
+// fallback (SetETWActive(true)) and skips its poll cycle to avoid duplicate
+// emissions. The health snapshot still records its observed state.
 type RegistryCollector struct {
-	mu         sync.Mutex
-	endpointID string
-	hostname   string
-	watchKeys  []string
-	prev       map[string]map[string]string
+	mu          sync.Mutex
+	endpointID  string
+	hostname    string
+	watchKeys   []string
+	prev        map[string]map[string]string
 	initialized map[string]bool
+
+	etwActive atomic.Bool
+	scans     atomic.Uint64
+	emitted   atomic.Uint64
+	skipped   atomic.Uint64
 }
 
 func NewRegistryCollector(endpointID string) *RegistryCollector {
@@ -88,8 +99,38 @@ func readKeySnapshot(k registry.Key) (map[string]string, error) {
 	return out, nil
 }
 
+// SetETWActive lets the agent declare that the Kernel-Registry ETW provider
+// is delivering events; the polling collector then becomes a no-op until the
+// flag is cleared. Safe to call from any goroutine.
+func (rc *RegistryCollector) SetETWActive(active bool) {
+	rc.etwActive.Store(active)
+}
+
+// ExportMonitoringHealth surfaces fallback status to the doctor command.
+func (rc *RegistryCollector) ExportMonitoringHealth() map[string]any {
+	src := MonitoringSource{
+		Name:    "registry",
+		OS:      "windows",
+		Source:  "registry_polling",
+		Status:  "healthy",
+		EPSIn:   rc.scans.Load(),
+		EPSOut:  rc.emitted.Load(),
+		Dropped: rc.skipped.Load(),
+	}
+	if rc.etwActive.Load() {
+		src.Status = "standby"
+		src.Notes = "ETW Kernel-Registry is primary; polling disabled"
+	}
+	return src.ToMap()
+}
+
 func (rc *RegistryCollector) Collect(_ context.Context) ([]Telemetry, error) {
 	now := time.Now().UTC()
+	if rc.etwActive.Load() {
+		rc.skipped.Add(1)
+		return nil, nil
+	}
+	rc.scans.Add(1)
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 
@@ -126,6 +167,7 @@ func (rc *RegistryCollector) Collect(_ context.Context) ([]Telemetry, error) {
 				out = append(out, Telemetry{
 					Registry: rc.newEvent(keyPath, vn, "set", old, val, now),
 				})
+				rc.emitted.Add(1)
 			}
 		}
 		for vn := range prev {
@@ -133,6 +175,7 @@ func (rc *RegistryCollector) Collect(_ context.Context) ([]Telemetry, error) {
 				out = append(out, Telemetry{
 					Registry: rc.newEvent(keyPath, vn, "delete", prev[vn], "", now),
 				})
+				rc.emitted.Add(1)
 			}
 		}
 		rc.prev[keyPath] = cur
