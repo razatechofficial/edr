@@ -57,3 +57,5 @@ platform/linux/ebpf/vmlinux.h
 # Editor/IDE
 # .idea/
 # .vscode/
+
+temp/
