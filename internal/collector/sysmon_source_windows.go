@@ -143,6 +143,13 @@ func (s *SysmonSource) Snapshot(ctx context.Context) ([]Telemetry, error) {
 	return out, nil
 }
 
+func (s *SysmonSource) Name() string { return "sysmon_evt" }
+
+// Collect implements Collector by draining queued Sysmon events.
+func (s *SysmonSource) Collect(ctx context.Context) ([]Telemetry, error) {
+	return s.Snapshot(ctx)
+}
+
 // Close releases the bookmark + subscription handles.
 func (s *SysmonSource) Close() {
 	s.mu.Lock()
