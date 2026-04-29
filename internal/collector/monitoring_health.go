@@ -34,6 +34,7 @@ type MonitoringSource struct {
 	QueueDepth    int    `json:"queue_depth"`    // current outbound queue length
 	LastError     string `json:"last_error"`     // empty string when none
 	LastEventUnix int64  `json:"last_event_unix"` // unix seconds; 0 if never
+	Notes         string `json:"notes,omitempty"` // optional free-form context
 }
 
 // ToMap renders the record into the loose map[string]any shape used by
@@ -53,6 +54,9 @@ func (m MonitoringSource) ToMap() map[string]any {
 	}
 	if m.LastError != "" {
 		out["last_error"] = m.LastError
+	}
+	if m.Notes != "" {
+		out["notes"] = m.Notes
 	}
 	return out
 }
