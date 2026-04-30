@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-04-30T12:00:00Z",
+  "os": "linux",
+  "runtime": {
+    "num_goroutine": 9,
+    "heap_alloc_mib": 30,
+    "num_gc": 1
+  },
+  "sources": [
+    {"name": "process", "status": "healthy", "dropped": 0},
+    {"name": "file", "status": "healthy", "dropped": 0},
+    {"name": "network", "status": "healthy", "dropped": 0},
+    {"name": "auth", "status": "healthy", "dropped": 0},
+    {"name": "streaming_journal", "status": "healthy", "dropped": 0, "rate_limited_drops": 42}
+  ]
+}
