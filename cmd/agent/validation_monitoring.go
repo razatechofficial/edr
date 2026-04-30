@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 )
 
@@ -18,24 +19,24 @@ import (
 // MonitoringReport rather than panicking the suite, so operators can address
 // them one at a time.
 type monitoringAssertion struct {
-	Name    string
-	Detail  string
-	Failed  bool
+	Name   string
+	Detail string
+	Failed bool
 }
 
 // MonitoringReport is written next to validation_report.json so CI can fail
 // the build on missing collectors, missing health snapshots, or budget
 // breaches without parsing free-form logs.
 type MonitoringReport struct {
-	Timestamp     time.Time             `json:"timestamp"`
-	OS            string                `json:"os"`
-	HealthFile    string                `json:"health_file"`
-	HealthAgeSec  float64               `json:"health_age_seconds"`
-	Sources       []map[string]any      `json:"sources"`
-	Assertions    []monitoringAssertion `json:"assertions"`
-	NumGoroutine  int                   `json:"num_goroutine"`
-	HeapAllocMiB  uint64                `json:"heap_alloc_mib"`
-	Failed        int                   `json:"failed"`
+	Timestamp    time.Time             `json:"timestamp"`
+	OS           string                `json:"os"`
+	HealthFile   string                `json:"health_file"`
+	HealthAgeSec float64               `json:"health_age_seconds"`
+	Sources      []map[string]any      `json:"sources"`
+	Assertions   []monitoringAssertion `json:"assertions"`
+	NumGoroutine int                   `json:"num_goroutine"`
+	HeapAllocMiB uint64                `json:"heap_alloc_mib"`
+	Failed       int                   `json:"failed"`
 }
 
 // runMonitoringValidation reads monitoring_health.json and asserts that
@@ -106,9 +107,11 @@ func runMonitoringValidation(ctx context.Context, cfg *config.Config) Monitoring
 		}
 	}
 
+	rep.Assertions = append(rep.Assertions, assertHealthSchemaVersion(snap)...)
+
 	expected := perOSExpectedSources(cfg)
 	rep.Assertions = append(rep.Assertions,
-		assertSourcesPresent(rep.Sources, expected)...,
+		assertSourcesPresent(rep.Sources, expected, cfg)...,
 	)
 	rep.Assertions = append(rep.Assertions,
 		assertNoDrops(rep.Sources)...,
@@ -136,6 +139,38 @@ func wantMonitoringKernelTier(cfg *config.Config) bool {
 	return m.KernelEnabled
 }
 
+func assertHealthSchemaVersion(snap map[string]any) []monitoringAssertion {
+	v := snap["schema_version"]
+	var n float64
+	switch x := v.(type) {
+	case float64:
+		n = x
+	case int:
+		n = float64(x)
+	case int64:
+		n = float64(x)
+	default:
+		return []monitoringAssertion{{
+			Name:   "health_schema_version",
+			Detail: "missing or non-numeric schema_version in monitoring_health.json",
+			Failed: true,
+		}}
+	}
+	got := int(n)
+	want := collector.MonitoringHealthSchemaVersion
+	if got != want {
+		return []monitoringAssertion{{
+			Name:   "health_schema_version",
+			Detail: fmt.Sprintf("got %d want %d", got, want),
+			Failed: true,
+		}}
+	}
+	return []monitoringAssertion{{
+		Name:   "health_schema_version",
+		Detail: fmt.Sprintf("%d ok", got),
+	}}
+}
+
 // perOSExpectedSources lists source names required in monitoring_health.json.
 // Kernel is asserted only when config requests kernel-tier monitoring (mirrors
 // DefaultCollectors + monitoring doctor conditional checks).
@@ -148,19 +183,31 @@ func perOSExpectedSources(cfg *config.Config) []string {
 		if wantK {
 			out = append(out, "kernel")
 		}
+		if cfg != nil && collector.InventoryWanted(*cfg) {
+			out = append(out, "inventory")
+		}
 		return out
 	case "windows":
 		out := []string{"process", "file", "network", "auth", "registry"}
 		if wantK {
 			out = append(out, "kernel")
 		}
+		if cfg != nil && collector.InventoryWanted(*cfg) {
+			out = append(out, "inventory")
+		}
 		return out
 	default:
-		return nil
+		// Tier-minimal: canonical Linux/macOS/Windows builds carry full pillar sets.
+		// Rare GOOS use inventory + bounded userland pillars; auth may be absent.
+		out := []string{"process", "file", "network"}
+		if cfg != nil && collector.InventoryWanted(*cfg) {
+			out = append(out, "inventory")
+		}
+		return out
 	}
 }
 
-func assertSourcesPresent(sources []map[string]any, expected []string) []monitoringAssertion {
+func assertSourcesPresent(sources []map[string]any, expected []string, cfg *config.Config) []monitoringAssertion {
 	have := map[string]string{}
 	for _, src := range sources {
 		name, _ := src["name"].(string)
@@ -169,6 +216,7 @@ func assertSourcesPresent(sources []map[string]any, expected []string) []monitor
 			have[name] = status
 		}
 	}
+	requireK := cfg != nil && cfg.Monitoring.RequireKernel
 	out := make([]monitoringAssertion, 0, len(expected))
 	for _, want := range expected {
 		st, present := have[want]
@@ -179,7 +227,14 @@ func assertSourcesPresent(sources []map[string]any, expected []string) []monitor
 				Detail: "missing from monitoring_health.json",
 				Failed: true,
 			})
-		case st == "unavailable" || st == "absent" || st == "":
+		case st == "absent":
+			fail := !(want == "kernel" && !requireK)
+			out = append(out, monitoringAssertion{
+				Name:   "source." + want,
+				Detail: "status=" + st,
+				Failed: fail,
+			})
+		case st == "unavailable" || st == "":
 			out = append(out, monitoringAssertion{
 				Name:   "source." + want,
 				Detail: "status=" + st,
@@ -207,8 +262,24 @@ func assertNoDrops(sources []map[string]any) []monitoringAssertion {
 				Failed: false, // soft-fail: surface but do not block the suite
 			})
 		}
+		if rl := rateLimitedPositive(src["rate_limited_drops"]); rl > 0 {
+			out = append(out, monitoringAssertion{
+				Name:   "rate_limit_drops." + name,
+				Detail: fmt.Sprintf("rate_limited_drops=%.0f (stream_max_eps)", rl),
+				Failed: false,
+			})
+		}
 	}
 	return out
+}
+
+// rateLimitedPositive returns a positive count from health JSON unmarshaled numbers (float64).
+func rateLimitedPositive(v any) float64 {
+	f, ok := v.(float64)
+	if ok && f > 0 {
+		return f
+	}
+	return 0
 }
 
 func assertHeapBudget(heapMiB uint64) []monitoringAssertion {
