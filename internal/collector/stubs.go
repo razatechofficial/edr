@@ -68,11 +68,9 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 	if err != nil {
 		return nil, err
 	}
+	tracker := pc.LineageTracker()
 
-	var netCol Collector = NewNetworkStubCollector(endpointID)
-	if nc := NewNetworkCollector(endpointID); nc != nil {
-		netCol = nc
-	}
+	netCol := chooseNetworkCollector(cfg, endpointID, tracker)
 
 	var authCol Collector = NewAuthStubCollector(endpointID)
 	if ac := NewAuthCollector(endpointID, cfg.Agent.DataDir); ac != nil && (runtime.GOOS == "windows" || ac.logPath != "") {
@@ -108,6 +106,9 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 	if rc := NewRegistryCollector(endpointID); rc != nil {
 		cols = append(cols, rc)
 	}
+
+	cols = extendLinuxMonitoringCollectors(cols, cfg, endpointID, tracker)
+	cols = extendDarwinMonitoringCollectors(cols, cfg, endpointID, tracker)
 
 	return cols, nil
 }
