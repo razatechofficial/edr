@@ -79,10 +79,7 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if kc == nil || kc.driver == nil || kc.buf == nil {
 		return nil
 	}
-	return map[string]any{
-		"driver":  kc.driver.Stats(),
-		"ringbuf": kc.buf.Stats(),
-	}
+	return KernelHealthMap("ebpf", kc.driver.Stats(), kc.buf.Stats(), nil)
 }
 
 func (kc *KernelCollector) Name() string { return "kernel" }
