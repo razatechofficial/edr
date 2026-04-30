@@ -106,7 +106,7 @@ func runMonitoringValidation(ctx context.Context, cfg *config.Config) Monitoring
 		}
 	}
 
-	expected := perOSExpectedSources(runtime.GOOS)
+	expected := perOSExpectedSources(cfg)
 	rep.Assertions = append(rep.Assertions,
 		assertSourcesPresent(rep.Sources, expected)...,
 	)
@@ -125,20 +125,39 @@ func runMonitoringValidation(ctx context.Context, cfg *config.Config) Monitoring
 	return rep
 }
 
-// perOSExpectedSources lists the source names that must appear in
-// monitoring_health.json for the suite to consider the agent healthy on a
-// given OS. The list intentionally trails the plan's roadmap so per-feature
-// rollouts can land without breaking the validation suite.
-func perOSExpectedSources(os string) []string {
-	switch os {
-	case "linux":
-		return []string{"process", "file", "network", "auth"}
-	case "darwin":
-		return []string{"process", "file", "network", "auth"}
-	case "windows":
-		return []string{"process", "file", "network", "auth"}
+func wantMonitoringKernelTier(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
 	}
-	return nil
+	m := cfg.Monitoring
+	if m.Mode == "userland" {
+		return false
+	}
+	return m.KernelEnabled
+}
+
+// perOSExpectedSources lists source names required in monitoring_health.json.
+// Kernel is asserted only when config requests kernel-tier monitoring (mirrors
+// DefaultCollectors + monitoring doctor conditional checks).
+func perOSExpectedSources(cfg *config.Config) []string {
+	wantK := wantMonitoringKernelTier(cfg)
+	osName := runtime.GOOS
+	switch osName {
+	case "linux", "darwin":
+		out := []string{"process", "file", "network", "auth"}
+		if wantK {
+			out = append(out, "kernel")
+		}
+		return out
+	case "windows":
+		out := []string{"process", "file", "network", "auth", "registry"}
+		if wantK {
+			out = append(out, "kernel")
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func assertSourcesPresent(sources []map[string]any, expected []string) []monitoringAssertion {
