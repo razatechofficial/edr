@@ -41,12 +41,6 @@ type YARAEngine struct {
 	scanBudget  *scanBudgetLimiter
 }
 
-type YARAEngineOptions struct {
-	RescanCooldown  time.Duration
-	MaxScansPerMin  int
-	ExcludePrefixes []string
-}
-
 // NewYARAEngine creates a YARA scanning engine backed by a worker pool.
 func NewYARAEngine(rulesDir string, maxFileSizeMB int, workers int, logger *zap.Logger, opts ...YARAEngineOptions) (*YARAEngine, error) {
 	if workers < 1 {
