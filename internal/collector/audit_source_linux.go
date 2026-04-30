@@ -38,6 +38,17 @@ type AuditSource struct {
 
 	emitted atomic.Uint64
 	errs    atomic.Pointer[string]
+
+	pendingMu sync.Mutex
+	pending   map[string]*auditSyscallScratch // SYSCALL rows until PATH correlates (FIM who-data).
+}
+
+type auditSyscallScratch struct {
+	pid     int
+	uid     string
+	syscall string
+	exe     string
+	comm    string
 }
 
 // auditPacket is a Linux netlink audit message header.
@@ -63,6 +74,7 @@ func NewAuditSource(endpointID, hostname string, tracker *LineageTracker) *Audit
 		hostname:   hostname,
 		tracker:    tracker,
 		fd:         -1,
+		pending:    make(map[string]*auditSyscallScratch),
 	}
 }
 
@@ -104,7 +116,7 @@ func (a *AuditSource) Stop() {
 
 // Run drains the audit socket, parses messages, and pushes AuthEvent
 // telemetry into out. Honors ctx.Done().
-func (a *AuditSource) Run(ctx context.Context, out chan<- Telemetry) error {
+func (a *AuditSource) Run(ctx context.Context, sink *StreamingSink) error {
 	if err := a.Start(); err != nil {
 		return err
 	}
@@ -131,13 +143,13 @@ func (a *AuditSource) Run(ctx context.Context, out chan<- Telemetry) error {
 			a.recordError(err)
 			return err
 		}
-		a.parseAndDispatch(ctx, buf[:n], out)
+		a.parseAndDispatch(ctx, buf[:n], sink)
 	}
 }
 
 // parseAndDispatch interprets one or more concatenated netlink messages.
 // Audit messages are key=value text after the netlink header.
-func (a *AuditSource) parseAndDispatch(ctx context.Context, data []byte, out chan<- Telemetry) {
+func (a *AuditSource) parseAndDispatch(ctx context.Context, data []byte, sink *StreamingSink) {
 	for len(data) >= 16 {
 		var p auditPacket
 		p.Length = binary.LittleEndian.Uint32(data[0:4])
@@ -148,12 +160,8 @@ func (a *AuditSource) parseAndDispatch(ctx context.Context, data []byte, out cha
 		body := string(data[16:p.Length])
 		ev := a.parseAuditBody(p.Type, body)
 		if ev != nil {
-			select {
-			case out <- *ev:
+			if sink.Send(ctx, *ev) {
 				a.emitted.Add(1)
-			case <-ctx.Done():
-				return
-			default:
 			}
 		}
 		// netlink alignment: round up to 4 bytes.
@@ -165,19 +173,37 @@ func (a *AuditSource) parseAndDispatch(ctx context.Context, data []byte, out cha
 	}
 }
 
-// parseAuditBody picks out the small subset of audit message types we
-// translate into AuthEvent telemetry.
+// parseAuditBody maps Linux audit multicasts to telemetry. User-auth lines
+// become AuthEvents; SYSCALL/PATH correlation yields FileEvents (who-data parity).
 func (a *AuditSource) parseAuditBody(t uint16, body string) *Telemetry {
 	const (
-		AUDIT_USER_AUTH  = 1100
-		AUDIT_USER_ACCT  = 1101
-		AUDIT_USER_LOGIN = 1112
-		AUDIT_USER_CMD   = 1123
+		AUDIT_USER_AUTH    = 1100
+		AUDIT_USER_ACCT    = 1101
+		AUDIT_USER_LOGIN   = 1112
+		AUDIT_USER_CMD     = 1123
+		auditSyscallNLType = 1300 // AUDIT_SYSCALL
+		auditPathNLType    = 1302 // AUDIT_PATH
 	)
-	if t != AUDIT_USER_AUTH && t != AUDIT_USER_ACCT && t != AUDIT_USER_LOGIN && t != AUDIT_USER_CMD {
+	fields := parseAuditKV(body)
+	typ := fields["type"]
+
+	switch {
+	case typ == "SYSCALL" || t == auditSyscallNLType:
+		serial := parseAuditMsgSerial(body)
+		sc := syscallScratchFrom(fields)
+		if serial != "" && sc != nil {
+			a.rememberSyscall(serial, sc)
+		}
+		return nil
+	case typ == "PATH" || t == auditPathNLType:
+		return a.telemetryFromAuditPATH(fields, parseAuditMsgSerial(body))
+	}
+
+	switch t {
+	case AUDIT_USER_AUTH, AUDIT_USER_ACCT, AUDIT_USER_LOGIN, AUDIT_USER_CMD:
+	default:
 		return nil
 	}
-	fields := parseAuditKV(body)
 	now := time.Now().UTC()
 	ae := &schema.AuthEvent{
 		BaseEvent: schema.BaseEvent{
@@ -199,6 +225,106 @@ func (a *AuditSource) parseAuditBody(t uint16, body string) *Telemetry {
 		}
 	}
 	return &Telemetry{Auth: ae}
+}
+
+func parseAuditMsgSerial(body string) string {
+	const pref = "msg=audit("
+	i := strings.Index(body, pref)
+	if i < 0 {
+		return ""
+	}
+	start := i + len(pref)
+	idx := strings.IndexByte(body[start:], ')')
+	if idx < 0 {
+		return ""
+	}
+	inside := body[start : start+idx]
+	j := strings.LastIndexByte(inside, ':')
+	if j < 0 {
+		return ""
+	}
+	return strings.TrimSpace(inside[j+1:])
+}
+
+func syscallScratchFrom(fields map[string]string) *auditSyscallScratch {
+	var s auditSyscallScratch
+	if v := fields["pid"]; v != "" {
+		if x, err := strconv.Atoi(v); err == nil {
+			s.pid = x
+		}
+	}
+	s.uid = firstNonEmpty(fields["uid"], fields["euid"])
+	if s.uid == "" {
+		s.uid = fields["auid"]
+	}
+	s.syscall = fields["syscall"]
+	s.exe = fields["exe"]
+	s.comm = fields["comm"]
+	if s.pid == 0 && s.syscall == "" && s.exe == "" && s.comm == "" {
+		return nil
+	}
+	return &s
+}
+
+func (a *AuditSource) rememberSyscall(serial string, sc *auditSyscallScratch) {
+	a.pendingMu.Lock()
+	defer a.pendingMu.Unlock()
+	if len(a.pending) > 2048 {
+		a.pending = make(map[string]*auditSyscallScratch, 512)
+	}
+	a.pending[serial] = sc
+}
+
+func (a *AuditSource) takeSyscall(serial string) *auditSyscallScratch {
+	if serial == "" {
+		return nil
+	}
+	a.pendingMu.Lock()
+	defer a.pendingMu.Unlock()
+	sc := a.pending[serial]
+	delete(a.pending, serial)
+	return sc
+}
+
+func (a *AuditSource) telemetryFromAuditPATH(fields map[string]string, serial string) *Telemetry {
+	path := fields["name"]
+	if path == "" {
+		return nil
+	}
+	nametype := strings.ToLower(strings.TrimSpace(fields["nametype"]))
+	op := "audit_path"
+	if nametype != "" {
+		op = "audit_path_" + nametype
+	}
+	sc := a.takeSyscall(serial)
+	p := 0
+	subjUID := ""
+	if sc != nil {
+		p = sc.pid
+		subjUID = sc.uid
+		if sc.pid != 0 && a.tracker != nil {
+			a.tracker.Upsert(LineageEntry{PID: uint32(sc.pid)})
+		}
+		if nametype == "" && sc.syscall != "" {
+			op = "audit_path_syscall_" + sc.syscall
+		}
+	}
+	now := time.Now().UTC()
+	fe := &schema.FileEvent{
+		BaseEvent: schema.BaseEvent{
+			SchemaVersion: schema.SchemaVersionV1,
+			EventType:     schema.EventFile,
+			EndpointID:    a.endpointID,
+			Timestamp:     now,
+			Hostname:      a.hostname,
+			OS:            runtime.GOOS,
+		},
+		Path:       path,
+		Operation:  op,
+		ActorPID:   p,
+		SubjectUID: subjUID,
+	}
+	return &Telemetry{File: fe}
 }
 
 func auditTypeName(t uint16) string {
