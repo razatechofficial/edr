@@ -39,12 +39,13 @@ type Alert struct {
 	DestIP   string `json:"dest_ip,omitempty"`
 	DestPort int    `json:"dest_port,omitempty"`
 	Domain   string `json:"domain,omitempty"`
+	SourceIP string `json:"source_ip,omitempty"`
+	URL      string `json:"url,omitempty"`
 
 	// Auth context
 	User     string `json:"user,omitempty"`
 	AuthType string `json:"auth_type,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`
-	SourceIP string `json:"source_ip,omitempty"`
 }
 
 type AuditRecord struct {
