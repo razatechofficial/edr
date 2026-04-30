@@ -1,0 +1,14 @@
+# Reference: edr-fim-whodata-v1
+#
+# Goal: emit SYSCALL + PATH pairs the agent can correlate for FIM who-data
+# (actor pid/uid + touched path). Tune paths to match monitoring.fim_paths.
+#
+# Typical install: copy to /etc/audit/rules.d/89-edr-fim.rules and run
+# augenrules --load (or auditctl -R this file after substituting paths).
+#
+# Example watches (repeat per sensitive tree):
+# -w /etc/shadow -p wa -k fim_edr_whodata
+# -w /path/to/fim_root -p wa -k fim_edr_whodata
+#
+# Optional syscall class filter (uncomment and set PATH_PLACEHOLDER):
+# -a always,exit -F arch=b64 -S open,openat,creat,unlink,rename -F path=PATH_PLACEHOLDER -F perm=w -F success=1 -k fim_edr_syscall
