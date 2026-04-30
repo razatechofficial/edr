@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 )
 
@@ -52,6 +53,53 @@ func TestRunMonitoringValidation_InvalidJSON(t *testing.T) {
 		t.Fatal("expected failure on invalid JSON")
 	}
 	findFailedName(t, rep.Assertions, "health_file_json")
+}
+
+func TestRunMonitoringValidation_SchemaVersionMismatch(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testMonitoringConfig(dir)
+	want := perOSExpectedSources(cfg)
+	if len(want) == 0 {
+		t.Skip("no expected sources on this GOOS")
+	}
+	sources := make([]map[string]any, 0, len(want))
+	for _, name := range want {
+		sources = append(sources, map[string]any{"name": name, "status": "healthy"})
+	}
+	writeMonitoringHealthFixtureWithSchema(t, dir, 10, sources, 999)
+	rep := runMonitoringValidation(context.Background(), cfg)
+	if rep.Failed == 0 {
+		t.Fatal("expected schema failure")
+	}
+	findFailedName(t, rep.Assertions, "health_schema_version")
+}
+
+func TestRunMonitoringValidation_RegulatedExpectsInventoryRow(t *testing.T) {
+	dir := t.TempDir()
+	defs := config.Defaults()
+	cfg := &defs
+	cfg.Agent.DataDir = dir
+	cfg.Monitoring.SecurityProfile = "regulated"
+	cfg.Monitoring.Mode = "userland"
+	cfg.Monitoring.KernelEnabled = false
+
+	want := perOSExpectedSources(cfg)
+	if !containsWant(want, "inventory") {
+		t.Fatalf("regulated should require inventory in expected list: %v", want)
+	}
+	sources := make([]map[string]any, 0, len(want))
+	for _, name := range want {
+		if name == "inventory" {
+			continue
+		}
+		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
+	}
+	writeMonitoringHealthFixture(t, dir, 42, sources)
+	rep := runMonitoringValidation(context.Background(), cfg)
+	if rep.Failed == 0 {
+		t.Fatal("expected missing inventory row to fail")
+	}
+	findFailedName(t, rep.Assertions, "source.inventory")
 }
 
 func testMonitoringConfig(dir string) *config.Config {
@@ -107,6 +155,9 @@ func TestRunMonitoringValidation_MissingSource(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testMonitoringConfig(dir)
 	want := perOSExpectedSources(cfg)
+	if !containsWant(want, "auth") {
+		t.Skip("auth not in expected tier for this GOOS")
+	}
 	var rows []map[string]any
 	for _, name := range want {
 		if name == "auth" {
@@ -152,12 +203,13 @@ func writeMonitoringHealthFixture(t *testing.T, dir string, heapMiB float64, sou
 		list[i] = sources[i]
 	}
 	snap := map[string]any{
-		"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
-		"os":         runtime.GOOS,
+		"schema_version": float64(collector.MonitoringHealthSchemaVersion),
+		"updated_at":     time.Now().UTC().Format(time.RFC3339Nano),
+		"os":             runtime.GOOS,
 		"runtime": map[string]any{
 			"num_goroutine":  float64(8),
 			"heap_alloc_mib": heapMiB,
-			"num_gc":       float64(1),
+			"num_gc":         float64(1),
 		},
 		"sources": list,
 	}
@@ -168,6 +220,116 @@ func writeMonitoringHealthFixture(t *testing.T, dir string, heapMiB float64, sou
 	if err := os.WriteFile(filepath.Join(dir, "monitoring_health.json"), b, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeMonitoringHealthFixtureWithSchema(t *testing.T, dir string, heapMiB float64, sources []map[string]any, schemaVersion int) {
+	t.Helper()
+	list := make([]any, len(sources))
+	for i := range sources {
+		list[i] = sources[i]
+	}
+	snap := map[string]any{
+		"schema_version": float64(schemaVersion),
+		"updated_at":     time.Now().UTC().Format(time.RFC3339Nano),
+		"os":             runtime.GOOS,
+		"runtime": map[string]any{
+			"num_goroutine":  float64(8),
+			"heap_alloc_mib": heapMiB,
+			"num_gc":         float64(1),
+		},
+		"sources": list,
+	}
+	b, err := json.MarshalIndent(snap, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "monitoring_health.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunMonitoringValidation_KernelAbsentPassesWhenRequireKernelFalse(t *testing.T) {
+	dir := t.TempDir()
+	defs := config.Defaults()
+	cfg := &defs
+	cfg.Agent.DataDir = dir
+	cfg.Monitoring.RequireKernel = false
+	want := perOSExpectedSources(cfg)
+	if !containsWant(want, "kernel") {
+		t.Skip("kernel not expected on this config/os")
+	}
+	sources := make([]map[string]any, 0, len(want))
+	for _, name := range want {
+		if name == "kernel" {
+			sources = append(sources, map[string]any{"name": "kernel", "status": "absent", "dropped": float64(0)})
+			continue
+		}
+		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
+	}
+	writeMonitoringHealthFixture(t, dir, 42, sources)
+	rep := runMonitoringValidation(context.Background(), cfg)
+	if rep.Failed != 0 {
+		t.Fatalf("kernel absent must not fail validation when require_kernel=false: %#v", rep.Assertions)
+	}
+}
+
+func TestRunMonitoringValidation_KernelAbsentFailsWhenRequireKernelTrue(t *testing.T) {
+	dir := t.TempDir()
+	defs := config.Defaults()
+	cfg := &defs
+	cfg.Agent.DataDir = dir
+	cfg.Monitoring.RequireKernel = true
+	want := perOSExpectedSources(cfg)
+	if !containsWant(want, "kernel") {
+		t.Skip("kernel not expected on this config/os")
+	}
+	sources := make([]map[string]any, 0, len(want))
+	for _, name := range want {
+		if name == "kernel" {
+			sources = append(sources, map[string]any{"name": "kernel", "status": "absent"})
+			continue
+		}
+		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
+	}
+	writeMonitoringHealthFixture(t, dir, 42, sources)
+	rep := runMonitoringValidation(context.Background(), cfg)
+	if rep.Failed == 0 {
+		t.Fatal("expected failure when kernel absent and require_kernel=true")
+	}
+	findFailedName(t, rep.Assertions, "source.kernel")
+}
+
+func TestMonitoringValidation_SoakSmoke(t *testing.T) {
+	if os.Getenv("EDR_SOAK_MONITORING") == "" {
+		t.Skip("set EDR_SOAK_MONITORING=1 to run monitoring soak smoke")
+	}
+	dir := t.TempDir()
+	defs := config.Defaults()
+	defs.Agent.DataDir = dir
+	cfg := &defs
+	want := perOSExpectedSources(cfg)
+	sources := make([]map[string]any, 0, len(want))
+	for _, name := range want {
+		if name == "kernel" {
+			sources = append(sources, map[string]any{"name": name, "status": "absent", "dropped": float64(0)})
+			continue
+		}
+		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
+	}
+	writeMonitoringHealthFixture(t, dir, 42, sources)
+	rep := runMonitoringValidation(context.Background(), cfg)
+	if rep.Failed != 0 {
+		t.Fatalf("soak smoke validation failed: %#v", rep.Assertions)
+	}
+}
+
+func containsWant(want []string, name string) bool {
+	for _, w := range want {
+		if w == name {
+			return true
+		}
+	}
+	return false
 }
 
 func findFailedName(t *testing.T, assertions []monitoringAssertion, substr string) {
