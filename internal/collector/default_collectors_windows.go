@@ -22,10 +22,15 @@ func extendWindowsEvtCollectors(cols []Collector, cfg config.Config, endpointID 
 
 	det := NewSysmonDetector(cfg.Monitoring.SysmonAutoInstall, filepath.Join("pkg", "sysmon"))
 	st := det.Probe(context.Background())
-	sm := NewSysmonSource(endpointID, host, dd)
+	sm := NewSysmonSource(endpointID, host, dd, cfg.Monitoring.WindowsSysmonNetworkEvents)
 	sm.SetChannelPresent(st.ChannelPresent)
 
 	ps := NewPowerShellDefenderSource(endpointID, host, dd)
 
-	return append(cols, sm, ps)
+	cols = append(cols, sm, ps)
+	if cfg.Monitoring.DnsClientETWWindows {
+		dns := NewDnsClientEVTSource(endpointID, dd)
+		cols = append(cols, newStreamingRunCollector("dns_client_etw", 256, cfg.Monitoring.StreamMaxEPS, dns.Run, dns.ExportMonitoringHealth))
+	}
+	return cols
 }

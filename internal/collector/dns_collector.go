@@ -5,22 +5,24 @@ import (
 	"context"
 	"math"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/schema"
 )
 
 // DNSCollector monitors DNS query logs to capture domain resolution events.
-// On Linux it tails /var/log/syslog or journalctl for dnsmasq/systemd-resolved
-// entries. On macOS it reads from /var/log/system.log.
+// On Linux it may tail syslog files or follow journald systemd-resolved.
 type DNSCollector struct {
 	endpointID string
 	hostname   string
 	logPath    string
+	sourceKind string // "syslog_tail" | "journal_systemd"
 	mu         sync.Mutex
 	events     []Telemetry
 	cancel     context.CancelFunc
@@ -30,9 +32,18 @@ type DNSCollector struct {
 	dropped atomic.Uint64
 }
 
-func NewDNSCollector(endpointID string) *DNSCollector {
+func NewDNSCollector(endpointID string, cfg config.Config) *DNSCollector {
 	hostname, _ := os.Hostname()
-	logPath := dnsLogPath()
+	if cfg.Monitoring.DnsJournalSystemd && runtime.GOOS == "linux" && systemdJournalEligible() && journalctlBinPresent() {
+		return &DNSCollector{
+			endpointID: endpointID,
+			hostname:   hostname,
+			logPath:    "journal://systemd-resolved",
+			sourceKind: "journal_systemd",
+			seen:       make(map[string]time.Time),
+		}
+	}
+	logPath := dnsLogPath(cfg)
 	if logPath == "" {
 		return nil
 	}
@@ -40,11 +51,24 @@ func NewDNSCollector(endpointID string) *DNSCollector {
 		endpointID: endpointID,
 		hostname:   hostname,
 		logPath:    logPath,
+		sourceKind: "syslog_tail",
 		seen:       make(map[string]time.Time),
 	}
 }
 
-func dnsLogPath() string {
+func systemdJournalEligible() bool {
+	if _, err := os.Stat("/run/systemd/journal/socket"); err != nil {
+		return false
+	}
+	return true
+}
+
+func journalctlBinPresent() bool {
+	_, err := exec.LookPath("journalctl")
+	return err == nil
+}
+
+func dnsLogPath(cfg config.Config) string {
 	switch runtime.GOOS {
 	case "linux":
 		for _, p := range []string{"/var/log/syslog", "/var/log/messages"} {
@@ -53,8 +77,16 @@ func dnsLogPath() string {
 			}
 		}
 	case "darwin":
-		if _, err := os.Stat("/var/log/system.log"); err == nil {
-			return "/var/log/system.log"
+		paths := append([]string{}, cfg.Monitoring.DarwinDNSExtraLogPaths...)
+		paths = append(paths, "/var/log/system.log", "/private/var/log/system.log")
+		for _, p := range paths {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
 		}
 	}
 	return ""
@@ -76,10 +108,15 @@ func (dc *DNSCollector) ExportMonitoringHealth() map[string]any {
 	src := MonitoringSource{
 		Name:    "dns",
 		OS:      runtime.GOOS,
-		Source:  "syslog_tail",
 		Status:  "healthy",
 		EPSOut:  dc.emitted.Load(),
 		Dropped: dc.dropped.Load(),
+	}
+	switch dc.sourceKind {
+	case "journal_systemd":
+		src.Source = "journal_systemd_dns"
+	default:
+		src.Source = "syslog_tail"
 	}
 	if dc.logPath == "" {
 		src.Status = "unavailable"
@@ -90,8 +127,39 @@ func (dc *DNSCollector) ExportMonitoringHealth() map[string]any {
 
 func (dc *DNSCollector) Start(ctx context.Context) error {
 	ctx, dc.cancel = context.WithCancel(ctx)
-	go dc.tailLoop(ctx)
+	switch dc.sourceKind {
+	case "journal_systemd":
+		go dc.journalTailLoop(ctx)
+	default:
+		go dc.tailLoop(ctx)
+	}
 	return nil
+}
+
+func (dc *DNSCollector) journalTailLoop(ctx context.Context) {
+	args := []string{"--follow", "--output=cat", "--no-pager", "--unit=systemd-resolved.service"}
+	cmd := exec.CommandContext(ctx, "journalctl", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 4096), 512*1024)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			break
+		}
+		if ev, ok := dc.parseDNSLine(scanner.Text()); ok {
+			dc.mu.Lock()
+			dc.events = append(dc.events, ev)
+			dc.mu.Unlock()
+		}
+	}
+	_ = stdout.Close()
+	_ = cmd.Wait()
 }
 
 func (dc *DNSCollector) Stop() {
