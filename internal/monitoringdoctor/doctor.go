@@ -102,9 +102,7 @@ func printLinux(w io.Writer, cfg config.Config) {
 	} else {
 		fmt.Fprintln(w, "journalctl: not found in PATH")
 	}
-	requireSources(w, cfg, []string{
-		"process", "file", "network", "auth",
-	})
+	requireSources(w, cfg, expectedHealthSourceNames(cfg))
 }
 
 func printDarwin(w io.Writer, cfg config.Config) {
@@ -128,9 +126,7 @@ func printDarwin(w io.Writer, cfg config.Config) {
 	if n := len(cfg.Monitoring.ESFMutePathPrefixes); n > 0 {
 		fmt.Fprintf(w, "config esf_mute_path_prefixes: %d extra prefix(es)\n", n)
 	}
-	requireSources(w, cfg, []string{
-		"process", "file", "network", "auth",
-	})
+	requireSources(w, cfg, expectedHealthSourceNames(cfg))
 }
 
 func printWindows(w io.Writer, cfg config.Config) {
@@ -139,9 +135,29 @@ func printWindows(w io.Writer, cfg config.Config) {
 	m := cfg.Monitoring
 	fmt.Fprintf(w, "optional ETW flags: wmi=%v ps=%v pipes=%v bits=%v tasks=%v\n",
 		m.ETWWMIActivity, m.ETWPowerShellScript, m.ETWNamedPipeHandles, m.ETWBitsClient, m.ETWTaskScheduler)
-	requireSources(w, cfg, []string{
-		"process", "file", "network", "auth", "kernel", "registry",
-	})
+	requireSources(w, cfg, expectedHealthSourceNames(cfg))
+}
+
+// expectedHealthSourceNames aligns doctor checks with cmd/agent validation:
+// pillar sources always; registry on Windows; kernel only when config enables
+// kernel-tier monitoring (not merely "windows can use ETW").
+func expectedHealthSourceNames(cfg config.Config) []string {
+	out := []string{"process", "file", "network", "auth"}
+	if runtime.GOOS == "windows" {
+		out = append(out, "registry")
+	}
+	if wantKernelTierDoctor(cfg) {
+		out = append(out, "kernel")
+	}
+	return out
+}
+
+func wantKernelTierDoctor(cfg config.Config) bool {
+	m := cfg.Monitoring
+	if m.Mode == "userland" || !m.KernelEnabled {
+		return false
+	}
+	return true
 }
 
 // requireSources reads the latest monitoring_health.json snapshot and warns
