@@ -46,6 +46,10 @@ jobs:
         if: runner.os == 'Linux'
         run: make ebpf
 
+      - name: Link eBPF + BPF version check
+        if: runner.os == 'Linux'
+        run: make ebpf-link bpf-version-check
+
       - name: Verify eBPF objects generated
         if: runner.os == 'Linux'
         run: |
@@ -133,16 +137,35 @@ jobs:
         run: |
           GOOS=darwin GOARCH=arm64 go build -tags nosec ./...
 
-      - name: Build darwin arm64 (full, requires ESF SDK)
-        if: runner.os == 'macOS'
-        run: |
-          GOOS=darwin GOARCH=arm64 go build ./...
+      # Full ESF/cgo linkage is exercised on a macOS runner (see darwin-esf-matrix).
+      # Cross-compiling linux→darwin cannot validate CGO=ON kernel builds reliably.
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
           name: edr-binaries
           path: bin/
+
+  darwin-esf-matrix:
+    name: macOS build matrix (CGO / ESF)
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cgo_enabled: ["0", "1"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - run: go mod download
+
+      - name: Build (CGO_ENABLED=${{ matrix.cgo_enabled }})
+        env:
+          CGO_ENABLED: ${{ matrix.cgo_enabled }}
+        run: go build ./...
 
   lint:
     name: Lint
