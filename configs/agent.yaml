@@ -401,7 +401,20 @@ monitoring:
   etw_named_pipe_handles: false
   etw_bits_client: false
   etw_task_scheduler: false
+  etw_threat_intel: false
+  windows_sysmon_network_events: true
+  require_kernel: false
+  stream_max_eps: 0
+  bpf_object_path: ""
   health_snapshot_sec: 0
+  # standard | regulated — regulated forbids pillar stubs and requires inventory (+ platform defaults). Env: EDR_MONITORING_SECURITY_PROFILE
+  security_profile: "standard"
+  inventory_enabled: false
+  inventory_interval_sec: 120
+  # Windows: FileObject LRU path cache for kernel file events. Env: EDR_MONITORING_ETW_KERNEL_FILE_CACHE
+  etw_kernel_file_object_cache: true
+  # Windows + regulated: enable grouped verbose ETW facets (WMI, PS script, pipes, BITS, tasks).
+  etw_regulated_verbose: false
 
 # -----------------------------------------------------------------------------
 # Baseline anomaly detection
