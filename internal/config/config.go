@@ -316,6 +316,25 @@ type Config struct {
 		// HealthSnapshotSec writes monitoring_health.json under data_dir when > 0.
 		HealthSnapshotSec int `yaml:"health_snapshot_sec"`
 
+		// --- Optional telemetry (default off for low footprint) ---
+		// Linux: journalctl follow for auth-like units (distinct health name journald_auth).
+		JournaldAuth bool `yaml:"journald_auth"`
+		// Linux: prefer SocketSource for network (PID-attributed vs /proc/net only).
+		LinuxPIDNetwork bool `yaml:"linux_pid_network"`
+		// Linux: non-empty opts into fanotify mount marks (needs CAP_SYS_ADMIN).
+		LinuxFanotifyMounts []string `yaml:"linux_fanotify_mounts"`
+		// Linux: audit NETLINK listener (distinct health name linux_audit).
+		LinuxAuditNetlink bool `yaml:"linux_audit_netlink"`
+		// Linux: sysfs USB attach/detach watcher.
+		LinuxUSBBridge bool `yaml:"linux_usb_hotplug"`
+
+		// Darwin: log stream DNS (health name dns_unified_log).
+		DarwinUnifiedLogDNS bool `yaml:"darwin_unified_log_dns"`
+		// Darwin: alternate unified-log DNS collector (dns_log_stream_alt health).
+		DarwinLogStreamDNSAlt bool `yaml:"darwin_log_stream_dns_alt"`
+		// Darwin: use DarwinNetworkSource (tracker-aware lsof snapshot) vs plain NetworkCollector.
+		DarwinAttribNetwork bool `yaml:"darwin_attrib_network"`
+
 		// SysmonAutoInstall, when true on Windows, lets the agent install the
 		// bundled Sysmon binary + minimal config from `pkg/sysmon/` if Sysmon
 		// is not already present. When false (default) the agent only consumes
