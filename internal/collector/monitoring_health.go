@@ -11,6 +11,9 @@ import (
 	"github.com/razatechofficial/edr/internal/config"
 )
 
+// MonitoringHealthSchemaVersion increments when monitoring_health.json semantics change materially.
+const MonitoringHealthSchemaVersion = 1
+
 // ExportMonitoringHealth is implemented by collectors that publish driver- or
 // source-level statistics (eBPF/ETW/ESF ring depth, EPS, drops, last error).
 // Returning a nil map means "no data available right now" and the collector
@@ -27,10 +30,10 @@ type MonitoringSource struct {
 	Name          string `json:"name"`           // e.g. "process", "file", "network"
 	OS            string `json:"os"`             // runtime.GOOS
 	Source        string `json:"source"`         // "ebpf", "etw", "esf", "fsnotify", ...
-	Status        string `json:"status"`         // "healthy" | "degraded" | "unavailable"
+	Status        string `json:"status"`         // "healthy" | "degraded" | "unavailable" | "absent"
 	EPSIn         uint64 `json:"eps_in"`         // events received last second
 	EPSOut        uint64 `json:"eps_out"`        // events emitted last second
-	Dropped       uint64 `json:"dropped"`        // lifetime drops (bounded ring + EPS limiter)
+	Dropped       uint64 `json:"dropped"`         // channel/backpressure drops; optional map key rate_limited_drops = stream_max_eps path (streaming_run_collector).
 	QueueDepth    int    `json:"queue_depth"`    // current outbound queue length
 	LastError     string `json:"last_error"`     // empty string when none
 	LastEventUnix int64  `json:"last_event_unix"` // unix seconds; 0 if never
@@ -38,8 +41,8 @@ type MonitoringSource struct {
 }
 
 // ToMap renders the record into the loose map[string]any shape used by
-// ExportMonitoringHealth implementations. Keeping this in one place prevents
-// drift between collectors.
+// ExportMonitoringHealth implementations. Extra keys such as rate_limited_drops
+// may be merged by callers (streaming collectors EPS cap path; see streaming_run_collector.go).
 func (m MonitoringSource) ToMap() map[string]any {
 	out := map[string]any{
 		"name":             m.Name,
@@ -77,6 +80,27 @@ func KernelHealthMap(backend string, driverStats, ringBufStats any, extras map[s
 		src[k] = v
 	}
 	return src
+}
+
+// AppendSyntheticKernelAbsentIfNeeded appends name=kernel, status=absent when WantKernelTier
+// is true but no prior source row advertised kernel telemetry (elevated/driver/build gaps).
+func AppendSyntheticKernelAbsentIfNeeded(cfg config.Config, sources []map[string]any) []map[string]any {
+	if !WantKernelTier(cfg) {
+		return sources
+	}
+	for _, s := range sources {
+		if name, _ := s["name"].(string); name == "kernel" {
+			return sources
+		}
+	}
+	row := MonitoringSource{
+		Name:   "kernel",
+		OS:     runtime.GOOS,
+		Source: "none",
+		Status: "absent",
+		Notes:  "kernel tier enabled but no kernel collector attached or emitted health; check elevation/root, driver init, entitlement (macOS), or nosec/CGO-less builds",
+	}.ToMap()
+	return append(sources, row)
 }
 
 // runtimeSnapshot captures process-wide go-runtime metrics once per write
@@ -117,11 +141,13 @@ func WriteMonitoringHealth(cfg config.Config, collectors []Collector, log *slog.
 		}
 		sources = append(sources, snap)
 	}
+	sources = AppendSyntheticKernelAbsentIfNeeded(cfg, sources)
 	out := map[string]any{
-		"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
-		"os":         runtime.GOOS,
-		"runtime":    captureRuntimeSnapshot(),
-		"sources":    sources,
+		"schema_version": MonitoringHealthSchemaVersion,
+		"updated_at":     time.Now().UTC().Format(time.RFC3339Nano),
+		"os":             runtime.GOOS,
+		"runtime":        captureRuntimeSnapshot(),
+		"sources":        sources,
 	}
 	// Legacy "kernel" key: prefer the explicit kernel source row.
 	for _, s := range sources {
