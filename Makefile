@@ -70,7 +70,7 @@ BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/l
 
 .PHONY: build-linux build-darwin build-windows build-darwin-nosec build-all
 .PHONY: bundle-enterprise build-installer-embedded
-.PHONY: ebpf ebpf-link ebpf-install proto
+.PHONY: ebpf ebpf-link ebpf-install bpf-version-check proto
 .PHONY: test test-collector test-detection test-response test-race monitoring-soak test-coverage
 .PHONY: run-agent run-agent-ml test-edr-macos-lab
 .PHONY: test-bench
@@ -142,6 +142,7 @@ EBPF_SRC     := $(wildcard platform/linux/ebpf/*.c)
 EBPF_OBJ     := $(EBPF_SRC:.c=.o)
 EBPF_MERGED  := platform/linux/ebpf/edr.bpf.o
 EBPF_INSTALL := /var/lib/edr/bpf/edr.bpf.o
+EBPF_VER_INSTALL := /var/lib/edr/bpf/edr.bpf.version
 VMLINUX_H    := platform/linux/ebpf/vmlinux.h
 VMLINUX_FALLBACK := platform/linux/ebpf/vmlinux_fallback.h
 LLVM_LINK    ?= llvm-link
@@ -180,12 +181,20 @@ ebpf-link: $(EBPF_OBJ)
 		exit 1; \
 	fi
 	@echo "==> Linked: $(EBPF_MERGED)"
+	@cp internal/kernel/ebpf_expected_version.txt platform/linux/ebpf/edr.bpf.version
+	@echo "==> Synced platform/linux/ebpf/edr.bpf.version from internal/kernel/ebpf_expected_version.txt"
 
 ebpf-install: ebpf-link
 	@echo "==> Installing eBPF bytecode to $(EBPF_INSTALL)"
 	@sudo mkdir -p $(dir $(EBPF_INSTALL))
 	@sudo install -m 644 $(EBPF_MERGED) $(EBPF_INSTALL)
-	@echo "==> Installed: $(EBPF_INSTALL)"
+	@sudo install -m 644 internal/kernel/ebpf_expected_version.txt $(EBPF_VER_INSTALL)
+	@echo "==> Installed: $(EBPF_INSTALL) and $(EBPF_VER_INSTALL)"
+
+# Verify in-tree BPF version sidecar matches internal/kernel/ebpf_expected_version.txt
+# when platform/linux/ebpf/edr.bpf.o exists (run make ebpf-link first).
+bpf-version-check:
+	@bash scripts/ci/verify-bpf-version.sh
 
 # ============================================================================
 # Protobuf generation
@@ -231,7 +240,7 @@ test-race:
 # Longer race pass on the monitoring stack (avoids `go test ./...` which may include non-repo trees).
 monitoring-soak:
 	@echo "==> Monitoring layer soak (collector + agent CLI, race, nosec)"
-	go test -race -count=1 -timeout 300s -tags nosec ./internal/collector/... ./cmd/agent/...
+	EDR_SOAK_MONITORING=1 go test -race -count=1 -timeout 300s -tags nosec ./internal/collector/... ./cmd/agent/...
 
 test-coverage:
 	@echo "==> Running tests with coverage"
