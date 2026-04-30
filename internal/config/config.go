@@ -300,6 +300,25 @@ type Config struct {
 		KernelEnabled    bool     `yaml:"kernel_enabled" env:"EDR_MONITORING_KERNEL"`
 		FIMPaths         []string `yaml:"fim_paths"`
 		UserlandFallback bool     `yaml:"userland_fallback"`
+		// SecurityProfile standard (default) or regulated — regulated forbids pillar stubs and requires inventory.
+		SecurityProfile string `yaml:"security_profile" env:"EDR_MONITORING_SECURITY_PROFILE"`
+		// InventoryEnabled collects L1 snapshots; implied true when SecurityProfile is regulated.
+		InventoryEnabled bool `yaml:"inventory_enabled" env:"EDR_MONITORING_INVENTORY"`
+		// InventoryIntervalSec minimum seconds between heavyweight inventory rescans (0 = every Collect).
+		InventoryIntervalSec int `yaml:"inventory_interval_sec"`
+		// InventoryPersistSnapshots writes canonical JSON + SHA256 under agent data_dir for manager/delta workflows (G-L1-SYNC-lite).
+		InventoryPersistSnapshots bool `yaml:"inventory_persist_snapshots" env:"EDR_MONITORING_INVENTORY_PERSIST"`
+		// InventoryStrictListenerAttribution, when true with regulated profile, marks inventory health degraded if Linux listener attribution is count_only or unavailable.
+		InventoryStrictListenerAttribution bool `yaml:"inventory_strict_listener_attribution"`
+		// AdditionalLogTailPaths (optional) tails text files for supplementary logcollector-style coverage (G-L4-BREADTH).
+		AdditionalLogTailPaths []string `yaml:"additional_log_tail_paths"`
+		// PostureEnabled opts into lightweight read-only posture probes (G-POSTURE); off by default.
+		PostureEnabled bool `yaml:"posture_enabled" env:"EDR_MONITORING_POSTURE"`
+		// ETWKernelFileObjectCache (Windows) LRU cache FileObject→path for kernel file telemetry.
+		ETWKernelFileObjectCache bool `yaml:"etw_kernel_file_object_cache"`
+		// ETWRegulatedVerbose (Windows) enables WMI, PS script, pipes, BITS, Task Scheduler ETW together.
+		ETWRegulatedVerbose bool `yaml:"etw_regulated_verbose"`
+
 		// ChecklistTier is optional reporting hint: userland|kernel_hooks|full_edr (empty = derive at runtime).
 		ChecklistTier string `yaml:"checklist_tier" env:"EDR_MONITORING_CHECKLIST_TIER"`
 
@@ -313,8 +332,12 @@ type Config struct {
 		ETWNamedPipeHandles bool `yaml:"etw_named_pipe_handles"`
 		ETWBitsClient       bool `yaml:"etw_bits_client"`
 		ETWTaskScheduler    bool `yaml:"etw_task_scheduler"`
+		// ETWThreatIntel enables Microsoft-Windows-Threat-Intelligence probing (requires PPL/signing pipeline for production; default off).
+		ETWThreatIntel bool `yaml:"etw_threat_intel" env:"EDR_MONITORING_ETW_TI"`
 		// HealthSnapshotSec writes monitoring_health.json under data_dir when > 0.
 		HealthSnapshotSec int `yaml:"health_snapshot_sec"`
+		// RequireKernel, when true, makes monitoring validation fail if the kernel source is absent/unavailable when kernel tier is configured.
+		RequireKernel bool `yaml:"require_kernel" env:"EDR_MONITORING_REQUIRE_KERNEL"`
 
 		// --- Optional telemetry (default off for low footprint) ---
 		// Linux: journalctl follow for auth-like units (distinct health name journald_auth).
@@ -334,12 +357,32 @@ type Config struct {
 		DarwinLogStreamDNSAlt bool `yaml:"darwin_log_stream_dns_alt"`
 		// Darwin: use DarwinNetworkSource (tracker-aware lsof snapshot) vs plain NetworkCollector.
 		DarwinAttribNetwork bool `yaml:"darwin_attrib_network"`
+		// Darwin: auth via unified log stream when /var/log/system.log is unreadable.
+		DarwinAuthUnifiedLog bool `yaml:"darwin_auth_unified_log"`
+		// Linux: follow journald for ssh/sudo when no /var/log/auth.log|secure.
+		LinuxAuthAutoJournal bool `yaml:"linux_auth_auto_journal"`
+		// Linux: override path to edr.bpf.o (empty = /var/lib/edr/bpf/edr.bpf.o).
+		BPFObjectPath string `yaml:"bpf_object_path"`
+		// StreamMaxEPS caps outbound events per second per streaming collector (0 = unlimited).
+		StreamMaxEPS int `yaml:"stream_max_eps"`
 
 		// SysmonAutoInstall, when true on Windows, lets the agent install the
 		// bundled Sysmon binary + minimal config from `pkg/sysmon/` if Sysmon
 		// is not already present. When false (default) the agent only consumes
 		// the existing Sysmon Operational channel if installed by the admin.
 		SysmonAutoInstall bool `yaml:"sysmon_auto_install" env:"EDR_MONITORING_SYSMON_AUTOINSTALL"`
+		// WindowsSysmonNetworkEvents, when false, narrows the Sysmon subscription to exclude
+		// network-related EIDs (3 and 12) so elevated kernel ETW network is not double-counted.
+		WindowsSysmonNetworkEvents bool `yaml:"windows_sysmon_network_events"`
+		// WindowsUserlandNetTable: auto | on | off | force — IP Helper MIB TCP snapshots for userland network pillar.
+		// "auto" (default empty): poll when process is not elevated or kernel tier disabled; skip when elevated+kernel to prefer ETW.
+		WindowsUserlandNetTable string `yaml:"windows_userland_net_table"`
+		// DnsJournalSystemd (Linux): follow systemd-resolved / DNS via journalctl when true.
+		DnsJournalSystemd bool `yaml:"dns_journal_systemd"`
+		// DnsClientETWWindows: subscribe DNS Client operational channel bookmarked telemetry (Windows).
+		DnsClientETWWindows bool `yaml:"dns_client_etw_windows"`
+		// DarwinDNSExtraLogPaths append file paths attempted before default /var/log/system.log.
+		DarwinDNSExtraLogPaths []string `yaml:"darwin_dns_extra_log_paths"`
 	} `yaml:"monitoring"`
 
 	// Legacy fields for backward compatibility with existing agent.example.yaml.
@@ -446,6 +489,13 @@ func Defaults() Config {
 	cfg.Monitoring.Mode = "auto"
 	cfg.Monitoring.KernelEnabled = true
 	cfg.Monitoring.UserlandFallback = true
+	cfg.Monitoring.DarwinAuthUnifiedLog = true
+	cfg.Monitoring.LinuxAuthAutoJournal = true
+	cfg.Monitoring.WindowsSysmonNetworkEvents = true
+	cfg.Monitoring.SecurityProfile = "standard"
+	cfg.Monitoring.InventoryIntervalSec = 120
+	cfg.Monitoring.InventoryPersistSnapshots = true
+	cfg.Monitoring.ETWKernelFileObjectCache = true
 
 	cfg.Service.TickInterval = time.Second
 	cfg.LegacyResponse.MinKillScore = 90
