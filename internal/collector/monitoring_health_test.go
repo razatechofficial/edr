@@ -76,3 +76,41 @@ func TestWriteMonitoringHealth_AggregatesSources(t *testing.T) {
 		t.Fatal("legacy kernel key missing")
 	}
 }
+
+func TestWriteMonitoringHealth_SyntheticKernelWhenTierNoCollector(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Defaults()
+	cfg.Agent.DataDir = dir
+	cfg.Monitoring.Mode = "auto"
+	cfg.Monitoring.KernelEnabled = true
+	cols := []Collector{
+		&fakeHealthyCollector{name: "process", snap: MonitoringSource{Name: "process", Source: "stub", Status: "healthy"}.ToMap()},
+	}
+	WriteMonitoringHealth(cfg, cols, nil)
+	b, err := os.ReadFile(filepath.Join(dir, "monitoring_health.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap map[string]any
+	if err := json.Unmarshal(b, &snap); err != nil {
+		t.Fatal(err)
+	}
+	srcs, _ := snap["sources"].([]any)
+	var kernelRow map[string]any
+	for _, raw := range srcs {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["name"] == "kernel" {
+			kernelRow = m
+			break
+		}
+	}
+	if kernelRow == nil {
+		t.Fatal("expected synthetic kernel row")
+	}
+	if kernelRow["status"] != "absent" {
+		t.Fatalf("kernel status=%v want absent", kernelRow["status"])
+	}
+}
