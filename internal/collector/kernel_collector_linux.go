@@ -59,7 +59,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 	if os.Getuid() != 0 {
 		return nil
 	}
-	driver, err := kernel.NewEBPFDriver(endpointID)
+	driver, err := kernel.NewEBPFDriver(endpointID, cfg.Monitoring.BPFObjectPath)
 	if err != nil {
 		return nil
 	}
