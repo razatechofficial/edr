@@ -2,10 +2,8 @@ package actions
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"runtime"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -28,15 +26,16 @@ func TestKillProcessAction_Basic(t *testing.T) {
 	if err := k.Execute(ctx); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	p, err := os.FindProcess(int(pid))
-	if err != nil {
-		return
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+	select {
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for killed process to exit")
+	case err := <-waitErr:
+		if err == nil {
+			t.Fatal("expected kill to produce wait error, got nil")
+		}
 	}
-	if err := p.Signal(syscall.Signal(0)); err == nil {
-		t.Fatal("expected process to be gone")
-	}
-	_ = p.Release()
 }
 
 func TestKillProcessAction_IncludeChildren(t *testing.T) {
