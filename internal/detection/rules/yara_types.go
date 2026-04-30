@@ -1,6 +1,22 @@
 package rules
 
-// YARAMatch represents a YARA rule match.
+import "time"
+
+// YARAEngineOptions tunes scan pacing and exclusions (present in stub and CGO builds).
+type YARAEngineOptions struct {
+	RescanCooldown  time.Duration
+	MaxScansPerMin  int
+	ExcludePrefixes []string
+}
+
+// YARAString is one matched string instance from a rule.
+type YARAString struct {
+	Name   string
+	Offset uint64
+	Data   []byte
+}
+
+// YARAMatch is a single rule match result (CGO path fills from go-yara).
 type YARAMatch struct {
 	Rule      string
 	Namespace string
@@ -9,24 +25,18 @@ type YARAMatch struct {
 	Meta      map[string]interface{}
 }
 
-// YARAString represents a matched string within a YARA rule.
-type YARAString struct {
-	Name   string
-	Offset uint64
-	Data   []byte
-}
-
-// YARAScanResult is delivered asynchronously from the YARA worker pool to the detection engine.
+// YARAScanResult is emitted on the async sink after a background scan.
 type YARAScanResult struct {
 	Matches []YARAMatch
-	Event   interface{}
 	Path    string
+	Event   interface{}
 }
 
+// scanRequest is an internal work item for the YARA worker pool.
 type scanRequest struct {
 	path     string
 	data     []byte
-	resultCh chan<- []YARAMatch
 	event    interface{}
 	async    bool
+	resultCh chan []YARAMatch
 }

@@ -13,7 +13,7 @@ import (
 type YARAEngine struct{}
 
 // NewYARAEngine is unavailable without CGO; the detection engine disables the YARA layer.
-func NewYARAEngine(_ string, _ int, _ int, _ *zap.Logger) (*YARAEngine, error) {
+func NewYARAEngine(_ string, _ int, _ int, _ *zap.Logger, _ ...YARAEngineOptions) (*YARAEngine, error) {
 	return nil, fmt.Errorf("yara: not available (built with CGO disabled; use CGO_ENABLED=1 and libyara, or build for the native GOARCH only)")
 }
 
