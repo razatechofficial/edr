@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-04-30T12:00:00Z",
+  "os": "windows",
+  "runtime": {
+    "num_goroutine": 20,
+    "heap_alloc_mib": 52,
+    "num_gc": 1
+  },
+  "sources": [
+    {"name": "process", "status": "healthy", "dropped": 0},
+    {"name": "file", "status": "healthy", "dropped": 0},
+    {"name": "network", "status": "degraded", "dropped": 0},
+    {"name": "auth", "status": "healthy", "dropped": 0},
+    {"name": "registry", "status": "healthy", "dropped": 0},
+    {"name": "kernel", "status": "absent", "dropped": 0, "notes": "fixture synthetic"}
+  ]
+}
