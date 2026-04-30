@@ -63,22 +63,39 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 	if users == nil {
 		users = NewUsernameCache()
 	}
-	endpointID := cfg.Service.EndpointID
+	cfgEff := ApplyRegulatedDefaults(cfg)
+	endpointID := cfgEff.Service.EndpointID
 	pc, err := NewProcessCollector(endpointID)
 	if err != nil {
 		return nil, err
 	}
 	tracker := pc.LineageTracker()
 
-	netCol := chooseNetworkCollector(cfg, endpointID, tracker)
+	netCol := chooseNetworkCollector(cfgEff, endpointID, tracker)
 
-	var authCol Collector = NewAuthStubCollector(endpointID)
-	if ac := NewAuthCollector(endpointID, cfg.Agent.DataDir); ac != nil && (runtime.GOOS == "windows" || ac.logPath != "") {
-		authCol = ac
+	var authCol Collector
+	var linuxJournalStandalone bool
+	switch runtime.GOOS {
+	case "windows":
+		if ac := NewAuthCollector(endpointID, cfgEff.Agent.DataDir); ac != nil {
+			authCol = ac
+		} else {
+			authCol = NewAuthStubCollector(endpointID)
+		}
+	case "linux":
+		authCol, linuxJournalStandalone = pickLinuxAuth(cfgEff, endpointID, tracker)
+	case "darwin":
+		authCol = pickDarwinAuth(cfgEff, endpointID, tracker)
+	default:
+		if ac := NewAuthCollector(endpointID, cfgEff.Agent.DataDir); ac != nil && ac.logPath != "" {
+			authCol = ac
+		} else {
+			authCol = NewAuthStubCollector(endpointID)
+		}
 	}
 
 	var fileCol Collector
-	fimPaths := cfg.Monitoring.FIMPaths
+	fimPaths := cfgEff.Monitoring.FIMPaths
 	if len(fimPaths) == 0 {
 		fimPaths = nil
 	}
@@ -91,29 +108,48 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 
 	cols := []Collector{pc, netCol, authCol, fileCol}
 
-	if wantKernelTier(cfg) {
-		if kc := NewKernelCollector(endpointID, cfg, users); kc != nil {
+	if WantKernelTier(cfgEff) {
+		if kc := NewKernelCollector(endpointID, cfgEff, users); kc != nil {
 			cols = append(cols, kc)
 		}
 	}
 
-	if dc := NewDNSCollector(endpointID); dc != nil {
+	if dc := NewDNSCollector(endpointID, cfgEff); dc != nil {
 		cols = append(cols, dc)
 	}
 
-	cols = extendWindowsEvtCollectors(cols, cfg, endpointID)
+	cols = extendWindowsEvtCollectors(cols, cfgEff, endpointID)
 
 	if rc := NewRegistryCollector(endpointID); rc != nil {
 		cols = append(cols, rc)
 	}
 
-	cols = extendLinuxMonitoringCollectors(cols, cfg, endpointID, tracker)
-	cols = extendDarwinMonitoringCollectors(cols, cfg, endpointID, tracker)
+	if runtime.GOOS == "windows" {
+		WireWindowsKernelRegistryETW(cols)
+	}
 
+	cols = extendLinuxMonitoringCollectors(cols, cfgEff, endpointID, tracker, linuxJournalStandalone)
+	cols = extendDarwinMonitoringCollectors(cols, cfgEff, endpointID, tracker)
+
+	if InventoryWanted(cfgEff) {
+		cols = append(cols, NewInventoryCollector(cfgEff))
+	}
+
+	if ltc := NewLogTailCollector(cfgEff); ltc != nil {
+		cols = append(cols, ltc)
+	}
+	if pc := NewPostureCollector(cfgEff); pc != nil {
+		cols = append(cols, pc)
+	}
+
+	if err := ValidateRegulatedMonitoring(cfgEff, cols); err != nil {
+		return nil, err
+	}
 	return cols, nil
 }
 
-func wantKernelTier(cfg config.Config) bool {
+// WantKernelTier reports whether kernel-tier collectors should attach per config.
+func WantKernelTier(cfg config.Config) bool {
 	m := cfg.Monitoring
 	if m.Mode == "userland" {
 		return false
