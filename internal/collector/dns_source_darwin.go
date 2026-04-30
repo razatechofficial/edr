@@ -60,7 +60,7 @@ func NewDarwinDNSSource(endpointID, hostname string, tracker *LineageTracker) *D
 }
 
 // Run streams DNS messages until ctx is cancelled.
-func (s *DarwinDNSSource) Run(ctx context.Context, out chan<- Telemetry) error {
+func (s *DarwinDNSSource) Run(ctx context.Context, sink *StreamingSink) error {
 	cmd := exec.CommandContext(ctx, "log", "stream",
 		"--predicate", `subsystem == "com.apple.mDNSResponder" AND (eventMessage CONTAINS "Query " OR eventMessage CONTAINS "Resolve")`,
 		"--style", "ndjson",
@@ -95,7 +95,7 @@ func (s *DarwinDNSSource) Run(ctx context.Context, out chan<- Telemetry) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		s.dispatchLine(ctx, scanner.Bytes(), out)
+		s.dispatchLine(ctx, scanner.Bytes(), sink)
 	}
 	if err := scanner.Err(); err != nil {
 		s.recordError(err)
@@ -104,7 +104,7 @@ func (s *DarwinDNSSource) Run(ctx context.Context, out chan<- Telemetry) error {
 	return nil
 }
 
-func (s *DarwinDNSSource) dispatchLine(ctx context.Context, line []byte, out chan<- Telemetry) {
+func (s *DarwinDNSSource) dispatchLine(ctx context.Context, line []byte, sink *StreamingSink) {
 	var entry map[string]any
 	if err := json.Unmarshal(line, &entry); err != nil {
 		return
@@ -141,11 +141,8 @@ func (s *DarwinDNSSource) dispatchLine(ctx context.Context, line []byte, out cha
 		Protocol: "dns",
 		Domain:   domain,
 	}
-	select {
-	case out <- Telemetry{Network: ne}:
+	if sink.Send(ctx, Telemetry{Network: ne}) {
 		s.emitted.Add(1)
-	case <-ctx.Done():
-	default:
 	}
 }
 

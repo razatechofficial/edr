@@ -64,7 +64,7 @@ func NewJournaldSource(endpointID, hostname string, tracker *LineageTracker, ext
 // Run spawns journalctl and streams its output until ctx is cancelled. The
 // subprocess is killed on ctx.Done(); io readers are closed on exit so no
 // goroutine or fd leak survives.
-func (j *JournaldSource) Run(ctx context.Context, out chan<- Telemetry) error {
+func (j *JournaldSource) Run(ctx context.Context, sink *StreamingSink) error {
 	args := append([]string{"--follow", "--output=json", "--no-pager"}, j.flags...)
 	cmd := exec.CommandContext(ctx, "journalctl", args...)
 	stdout, err := cmd.StdoutPipe()
@@ -96,7 +96,7 @@ func (j *JournaldSource) Run(ctx context.Context, out chan<- Telemetry) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		j.dispatchLine(ctx, scanner.Bytes(), out)
+		j.dispatchLine(ctx, scanner.Bytes(), sink)
 	}
 	if err := scanner.Err(); err != nil {
 		j.recordError(err)
@@ -105,7 +105,7 @@ func (j *JournaldSource) Run(ctx context.Context, out chan<- Telemetry) error {
 	return nil
 }
 
-func (j *JournaldSource) dispatchLine(ctx context.Context, line []byte, out chan<- Telemetry) {
+func (j *JournaldSource) dispatchLine(ctx context.Context, line []byte, sink *StreamingSink) {
 	var entry map[string]any
 	if err := json.Unmarshal(line, &entry); err != nil {
 		return
@@ -146,11 +146,8 @@ func (j *JournaldSource) dispatchLine(ctx context.Context, line []byte, out chan
 		Outcome:  outcomeFromMessage(msg),
 		AuthType: unit,
 	}
-	select {
-	case out <- Telemetry{Auth: ae}:
+	if sink.Send(ctx, Telemetry{Auth: ae}) {
 		j.emitted.Add(1)
-	case <-ctx.Done():
-	default:
 	}
 }
 
