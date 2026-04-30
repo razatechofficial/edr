@@ -29,6 +29,10 @@ type KernelCollector struct {
 	fimPrefixes []string // lowercased FIM path prefixes for file enrichment gate
 	selfPID     uint32
 
+	// registryPeer optionally suppresses RegistryCollector polling while
+	// Kernel-Registry ETW is active (see WireWindowsKernelRegistryETW).
+	registryPeer *RegistryCollector
+
 	mu     sync.Mutex
 	events []Telemetry
 	cancel context.CancelFunc
@@ -84,6 +88,17 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	extras := map[string]any{
 		"file_dropped":   atomic.LoadUint64(&kc.fileDropped),
 		"fim_prefix_set": len(kc.fimPrefixes),
+		"etw_providers":  kc.driver.ProviderHealthSnapshot(),
+	}
+	extras["etw_threat_intel_requested"] = kc.cfg.Monitoring.ETWThreatIntel
+	tih := kc.driver.ThreatIntelHealthSnapshot()
+	extras["etw_threat_intel_probed"] = tih.Probed
+	extras["etw_threat_intel_ok"] = tih.OK
+	if tih.Status != "" {
+		extras["etw_threat_intel_status"] = tih.Status
+	}
+	if tih.Reason != "" {
+		extras["etw_threat_intel_reason"] = tih.Reason
 	}
 	return KernelHealthMap("etw_kernel", kc.driver.Stats(), kc.buf.Stats(), extras)
 }
@@ -99,9 +114,14 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	pol.ETWNamedPipeHandles = m.ETWNamedPipeHandles
 	pol.ETWBitsClient = m.ETWBitsClient
 	pol.ETWTaskScheduler = m.ETWTaskScheduler
+	pol.ETWThreatIntel = m.ETWThreatIntel
+	pol.KernelFileObjectCache = m.ETWKernelFileObjectCache
 	_ = kc.driver.SetPolicy(pol)
 	if err := kc.driver.Start(ctx, kc.buf); err != nil {
 		return err
+	}
+	if kc.registryPeer != nil {
+		kc.registryPeer.SetETWActive(true)
 	}
 	go kc.readLoop(ctx)
 	return nil
@@ -118,6 +138,9 @@ func (kc *KernelCollector) Collect(_ context.Context) ([]Telemetry, error) {
 func (kc *KernelCollector) Stop() {
 	if kc.cancel != nil {
 		kc.cancel()
+	}
+	if kc.registryPeer != nil {
+		kc.registryPeer.SetETWActive(false)
 	}
 	_ = kc.driver.Stop()
 }

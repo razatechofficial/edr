@@ -238,6 +238,8 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 			fe.Operation = "event"
 		}
 		fe.ActorPID = jsonInt(raw, "pid")
+		fe.SubjectUID = firstNonEmpty(jsonString(raw, "subject_uid"), jsonString(raw, "audit_uid"))
+		fe.Hash = jsonString(raw, "hash")
 		fe.WriteFD = jsonInt(raw, "write_fd")
 		fe.BytesWritten = jsonUint64(raw, "bytes_written")
 		fe.OpenFlags = jsonUint32(raw, "open_flags")
@@ -249,6 +251,8 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		base.EventType = schema.EventNetwork
 		ne := &schema.NetworkEvent{BaseEvent: base, PID: jsonInt(raw, "pid")}
 		ne.Protocol = jsonString(raw, "protocol")
+		ne.Transport = firstNonEmpty(jsonString(raw, "transport"), "")
+		ne.CommunityID = firstNonEmpty(jsonString(raw, "community_id"), "")
 		ne.SourceIP = firstNonEmpty(jsonString(raw, "source_ip"), jsonString(raw, "src"))
 		ne.DestIP = firstNonEmpty(jsonString(raw, "dest_ip"), jsonString(raw, "dst"), jsonString(raw, "dst_addr"))
 		ne.SourcePt = jsonInt(raw, "source_port", "src_port")
