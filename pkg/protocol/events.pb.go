@@ -375,16 +375,23 @@ func (x *FileEvent) GetHash() string {
 }
 
 // NetworkEvent represents a network connection or communication event.
+//
+// G-ZEEK-SCHEMA — wire join hints: five-tuple + endpoint identity live in BaseEvent
+// and address fields below; optional community_id aligns with Zeek conn-style correlation.
 type NetworkEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Base          *BaseEvent             `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	Pid           int32                  `protobuf:"varint,2,opt,name=pid,proto3" json:"pid,omitempty"`
-	Protocol      string                 `protobuf:"bytes,3,opt,name=protocol,proto3" json:"protocol,omitempty"`
-	SourceIp      string                 `protobuf:"bytes,4,opt,name=source_ip,json=sourceIp,proto3" json:"source_ip,omitempty"`
-	SourcePort    int32                  `protobuf:"varint,5,opt,name=source_port,json=sourcePort,proto3" json:"source_port,omitempty"`
-	DestIp        string                 `protobuf:"bytes,6,opt,name=dest_ip,json=destIp,proto3" json:"dest_ip,omitempty"`
-	DestPort      int32                  `protobuf:"varint,7,opt,name=dest_port,json=destPort,proto3" json:"dest_port,omitempty"`
-	Domain        string                 `protobuf:"bytes,8,opt,name=domain,proto3" json:"domain,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Base       *BaseEvent             `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	Pid        int32                  `protobuf:"varint,2,opt,name=pid,proto3" json:"pid,omitempty"`
+	Protocol   string                 `protobuf:"bytes,3,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	SourceIp   string                 `protobuf:"bytes,4,opt,name=source_ip,json=sourceIp,proto3" json:"source_ip,omitempty"`
+	SourcePort int32                  `protobuf:"varint,5,opt,name=source_port,json=sourcePort,proto3" json:"source_port,omitempty"`
+	DestIp     string                 `protobuf:"bytes,6,opt,name=dest_ip,json=destIp,proto3" json:"dest_ip,omitempty"`
+	DestPort   int32                  `protobuf:"varint,7,opt,name=dest_port,json=destPort,proto3" json:"dest_port,omitempty"`
+	Domain     string                 `protobuf:"bytes,8,opt,name=domain,proto3" json:"domain,omitempty"`
+	// Optional Zeek/community-id fusion (populate when computed server- or agent-side).
+	CommunityId string `protobuf:"bytes,9,opt,name=community_id,json=communityId,proto3" json:"community_id,omitempty"`
+	// Coarse transport label (tcp | udp | icmp) distinct from opcode-level protocol strings.
+	Transport     string `protobuf:"bytes,10,opt,name=transport,proto3" json:"transport,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -471,6 +478,20 @@ func (x *NetworkEvent) GetDestPort() int32 {
 func (x *NetworkEvent) GetDomain() string {
 	if x != nil {
 		return x.Domain
+	}
+	return ""
+}
+
+func (x *NetworkEvent) GetCommunityId() string {
+	if x != nil {
+		return x.CommunityId
+	}
+	return ""
+}
+
+func (x *NetworkEvent) GetTransport() string {
+	if x != nil {
+		return x.Transport
 	}
 	return ""
 }
@@ -869,7 +890,7 @@ const file_events_proto_rawDesc = "" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x1c\n" +
 	"\toperation\x18\x03 \x01(\tR\toperation\x12\x1b\n" +
 	"\tactor_pid\x18\x04 \x01(\x05R\bactorPid\x12\x12\n" +
-	"\x04hash\x18\x05 \x01(\tR\x04hash\"\xec\x01\n" +
+	"\x04hash\x18\x05 \x01(\tR\x04hash\"\xad\x02\n" +
 	"\fNetworkEvent\x12\"\n" +
 	"\x04base\x18\x01 \x01(\v2\x0e.edr.BaseEventR\x04base\x12\x10\n" +
 	"\x03pid\x18\x02 \x01(\x05R\x03pid\x12\x1a\n" +
@@ -879,7 +900,10 @@ const file_events_proto_rawDesc = "" +
 	"sourcePort\x12\x17\n" +
 	"\adest_ip\x18\x06 \x01(\tR\x06destIp\x12\x1b\n" +
 	"\tdest_port\x18\a \x01(\x05R\bdestPort\x12\x16\n" +
-	"\x06domain\x18\b \x01(\tR\x06domain\"\xb6\x01\n" +
+	"\x06domain\x18\b \x01(\tR\x06domain\x12!\n" +
+	"\fcommunity_id\x18\t \x01(\tR\vcommunityId\x12\x1c\n" +
+	"\ttransport\x18\n" +
+	" \x01(\tR\ttransport\"\xb6\x01\n" +
 	"\tAuthEvent\x12\"\n" +
 	"\x04base\x18\x01 \x01(\v2\x0e.edr.BaseEventR\x04base\x12\x12\n" +
 	"\x04user\x18\x02 \x01(\tR\x04user\x12\x18\n" +

@@ -57,9 +57,11 @@ type ProcessEvent struct {
 
 type FileEvent struct {
 	BaseEvent
-	Path          string `json:"path"`
-	Operation     string `json:"operation"`
-	ActorPID      int    `json:"actor_pid"`
+	Path      string `json:"path"`
+	Operation string `json:"operation"`
+	ActorPID  int    `json:"actor_pid"`
+	// SubjectUID is the auditing subject UID when known (auditd / enriched JSON sources).
+	SubjectUID    string `json:"subject_uid,omitempty"`
 	Hash          string `json:"hash,omitempty"`
 	WriteFD       int    `json:"write_fd,omitempty"`
 	BytesWritten  uint64 `json:"bytes_written,omitempty"`
@@ -110,6 +112,10 @@ type NetworkEvent struct {
 	DestPt   int    `json:"dest_port"`
 	Domain   string `json:"domain,omitempty"`
 	JA3      string `json:"ja3,omitempty"`
+	// Transport is a coarse label (tcp, udp, icmp) for SIEM join with Zeek conn logs.
+	Transport string `json:"transport,omitempty"`
+	// CommunityID is an optional RFC-style flow hash shared with Zeek when both endpoints compute it.
+	CommunityID string `json:"community_id,omitempty"`
 }
 
 type AuthEvent struct {
