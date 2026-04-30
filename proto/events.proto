@@ -59,6 +59,9 @@ message FileEvent {
 }
 
 // NetworkEvent represents a network connection or communication event.
+//
+// G-ZEEK-SCHEMA — wire join hints: five-tuple + endpoint identity live in BaseEvent
+// and address fields below; optional community_id aligns with Zeek conn-style correlation.
 message NetworkEvent {
   BaseEvent base        = 1;
   int32     pid         = 2;
@@ -68,6 +71,10 @@ message NetworkEvent {
   string    dest_ip     = 6;
   int32     dest_port   = 7;
   string    domain      = 8;
+  // Optional Zeek/community-id fusion (populate when computed server- or agent-side).
+  string community_id = 9;
+  // Coarse transport label (tcp | udp | icmp) distinct from opcode-level protocol strings.
+  string transport   = 10;
 }
 
 // AuthEvent represents an authentication event.
