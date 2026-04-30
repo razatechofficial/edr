@@ -107,7 +107,7 @@ func (f *FanotifySource) Stop() {
 // Run blocks until ctx is cancelled, draining the fanotify fd and pushing
 // telemetry into out. The function honors ctx and never sends on a closed
 // channel.
-func (f *FanotifySource) Run(ctx context.Context, out chan<- Telemetry) error {
+func (f *FanotifySource) Run(ctx context.Context, sink *StreamingSink) error {
 	if err := f.Start(); err != nil {
 		return err
 	}
@@ -139,13 +139,13 @@ func (f *FanotifySource) Run(ctx context.Context, out chan<- Telemetry) error {
 		if n < evSize {
 			continue
 		}
-		f.parseAndDispatch(ctx, buf[:n], out)
+		f.parseAndDispatch(ctx, buf[:n], sink)
 	}
 }
 
 // parseAndDispatch walks a packed fanotify event buffer and emits FileEvent
 // telemetry, resolving each fd to its absolute path via /proc/self/fd.
-func (f *FanotifySource) parseAndDispatch(ctx context.Context, data []byte, out chan<- Telemetry) {
+func (f *FanotifySource) parseAndDispatch(ctx context.Context, data []byte, sink *StreamingSink) {
 	for len(data) >= 24 {
 		// fanotify_event_metadata layout: u32 event_len, u8 vers, u8 reserved,
 		// u16 metadata_len, u64 mask, s32 fd, s32 pid.
@@ -177,13 +177,8 @@ func (f *FanotifySource) parseAndDispatch(ctx context.Context, data []byte, out 
 			Path:      path,
 			Operation: op,
 		}
-		select {
-		case out <- Telemetry{File: fe}:
+		if sink.Send(ctx, Telemetry{File: fe}) {
 			f.emitted.Add(1)
-		case <-ctx.Done():
-			return
-		default:
-			// Channel full; drop. The owning collector accounts for it via budget.
 		}
 		data = data[eventLen:]
 	}
