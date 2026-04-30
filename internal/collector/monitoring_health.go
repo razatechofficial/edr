@@ -61,6 +61,24 @@ func (m MonitoringSource) ToMap() map[string]any {
 	return out
 }
 
+// KernelHealthMap builds a monitoring_health.json row with canonical
+// MonitoringSource fields (name=kernel) plus driver and ring-buffer stats.
+// extras are merged last (e.g. file_dropped on Windows ETW builds).
+func KernelHealthMap(backend string, driverStats, ringBufStats any, extras map[string]any) map[string]any {
+	src := MonitoringSource{
+		Name:   "kernel",
+		OS:     runtime.GOOS,
+		Source: backend,
+		Status: "healthy",
+	}.ToMap()
+	src["driver"] = driverStats
+	src["ringbuf"] = ringBufStats
+	for k, v := range extras {
+		src[k] = v
+	}
+	return src
+}
+
 // runtimeSnapshot captures process-wide go-runtime metrics once per write
 // cycle. It is cheap (a few atomic loads) and helps the doctor command spot
 // goroutine or memory growth.
@@ -105,10 +123,12 @@ func WriteMonitoringHealth(cfg config.Config, collectors []Collector, log *slog.
 		"runtime":    captureRuntimeSnapshot(),
 		"sources":    sources,
 	}
-	// Preserve legacy "kernel" key for clients that rely on it: first source
-	// implementing ExportMonitoringHealth wins, matching prior behavior.
-	if len(sources) > 0 {
-		out["kernel"] = sources[0]
+	// Legacy "kernel" key: prefer the explicit kernel source row.
+	for _, s := range sources {
+		if name, _ := s["name"].(string); name == "kernel" {
+			out["kernel"] = s
+			break
+		}
 	}
 	path := filepath.Join(cfg.Agent.DataDir, "monitoring_health.json")
 	if err := os.MkdirAll(cfg.Agent.DataDir, 0o755); err != nil {
