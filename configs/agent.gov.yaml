@@ -185,6 +185,24 @@ performance:
   batch_size: 100
   batch_interval_ms: 5000
 
+# Regulated monitoring baseline: L1 inventory, no stub pillars, kernel required where policy demands.
+monitoring:
+  security_profile: "regulated"
+  inventory_enabled: true
+  inventory_interval_sec: 120
+  mode: "auto"
+  kernel_enabled: true
+  require_kernel: true
+  userland_fallback: true
+  checklist_tier: ""
+  stream_max_eps: 0
+  health_snapshot_sec: 30
+  bpf_object_path: ""
+  windows_sysmon_network_events: false
+  etw_kernel_file_object_cache: true
+  etw_regulated_verbose: true
+  etw_threat_intel: false
+
 service:
   endpoint_id: ""
   tick_interval: "500ms"
