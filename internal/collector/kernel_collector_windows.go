@@ -81,12 +81,11 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if kc == nil || kc.driver == nil || kc.buf == nil {
 		return nil
 	}
-	return map[string]any{
-		"driver":         kc.driver.Stats(),
-		"ringbuf":        kc.buf.Stats(),
+	extras := map[string]any{
 		"file_dropped":   atomic.LoadUint64(&kc.fileDropped),
 		"fim_prefix_set": len(kc.fimPrefixes),
 	}
+	return KernelHealthMap("etw_kernel", kc.driver.Stats(), kc.buf.Stats(), extras)
 }
 
 func (kc *KernelCollector) Name() string { return "kernel" }
