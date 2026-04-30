@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-04-30T12:00:00Z",
+  "os": "windows",
+  "runtime": {
+    "num_goroutine": 14,
+    "heap_alloc_mib": 55,
+    "num_gc": 2
+  },
+  "sources": [
+    {"name": "process", "status": "healthy", "dropped": 0},
+    {"name": "file", "status": "healthy", "dropped": 0},
+    {"name": "network", "status": "healthy", "dropped": 0},
+    {"name": "auth", "status": "healthy", "dropped": 0},
+    {"name": "registry", "status": "healthy", "dropped": 0}
+  ]
+}
