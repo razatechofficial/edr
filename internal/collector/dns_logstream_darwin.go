@@ -51,7 +51,7 @@ func NewLogStreamDNSSource(endpointID, hostname string) *LogStreamDNSSource {
 // Run spawns `log stream --style compact --predicate 'subsystem == "com.apple.network.dns"'`
 // (when available) or falls back to a broader predicate, and emits NetworkEvent
 // rows with Protocol "dns" until ctx is cancelled.
-func (l *LogStreamDNSSource) Run(ctx context.Context, out chan<- Telemetry) error {
+func (l *LogStreamDNSSource) Run(ctx context.Context, sink *StreamingSink) error {
 	args := []string{
 		"stream",
 		"--style", "compact",
@@ -111,13 +111,12 @@ func (l *LogStreamDNSSource) Run(ctx context.Context, out chan<- Telemetry) erro
 			SourceIP:  "127.0.0.1",
 			SourcePt:  0,
 		}
-		select {
-		case out <- Telemetry{Network: ev}:
+		if sink.Send(ctx, Telemetry{Network: ev}) {
 			l.emitted.Add(1)
-		case <-ctx.Done():
+			continue
+		}
+		if ctx.Err() != nil {
 			return ctx.Err()
-		default:
-			// bounded channel - drop
 		}
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(err, context.Canceled) {
