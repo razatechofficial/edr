@@ -235,7 +235,7 @@ func parseAuditKV(body string) map[string]string {
 // ExportMonitoringHealth implements the per-source health interface.
 func (a *AuditSource) ExportMonitoringHealth() map[string]any {
 	src := MonitoringSource{
-		Name:   "auth",
+		Name:   "linux_audit",
 		OS:     "linux",
 		Source: "audit-netlink",
 		Status: "healthy",

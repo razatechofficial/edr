@@ -218,7 +218,7 @@ func stringField(entry map[string]any, key string) string {
 // ExportMonitoringHealth implements the per-source health interface.
 func (j *JournaldSource) ExportMonitoringHealth() map[string]any {
 	src := MonitoringSource{
-		Name:   "auth",
+		Name:   "journald_auth",
 		OS:     "linux",
 		Source: "journald",
 		Status: "healthy",

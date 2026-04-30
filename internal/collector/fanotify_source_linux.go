@@ -205,7 +205,7 @@ func fanotifyOpName(mask uint64) string {
 // ExportMonitoringHealth implements the per-source health interface.
 func (f *FanotifySource) ExportMonitoringHealth() map[string]any {
 	src := MonitoringSource{
-		Name:   "file",
+		Name:   "fanotify_file",
 		OS:     "linux",
 		Source: "fanotify",
 		Status: "healthy",
