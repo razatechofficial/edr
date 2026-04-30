@@ -174,7 +174,7 @@ func extractDNSQuery(msg string) string {
 // ExportMonitoringHealth implements the per-source health interface.
 func (s *DarwinDNSSource) ExportMonitoringHealth() map[string]any {
 	src := MonitoringSource{
-		Name:   "dns",
+		Name:   "dns_unified_log",
 		OS:     "darwin",
 		Source: "log-stream",
 		Status: "healthy",

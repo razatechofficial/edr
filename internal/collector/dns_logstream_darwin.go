@@ -130,9 +130,9 @@ func (l *LogStreamDNSSource) Run(ctx context.Context, out chan<- Telemetry) erro
 // ExportMonitoringHealth implements the per-source health interface.
 func (l *LogStreamDNSSource) ExportMonitoringHealth() map[string]any {
 	src := MonitoringSource{
-		Name:   "dns",
+		Name:   "dns_log_stream_alt",
 		OS:     "darwin",
-		Source: "log_stream",
+		Source: "log_stream_dns",
 		Status: "healthy",
 		EPSOut: l.emitted.Load(),
 	}
