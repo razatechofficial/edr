@@ -36,6 +36,10 @@ type EventPolicy struct {
 	ETWNamedPipeHandles bool
 	ETWBitsClient       bool
 	ETWTaskScheduler    bool
+	// ETWThreatIntel enables probing Microsoft-Windows-Threat-Intelligence ETW (gated by product config).
+	ETWThreatIntel bool
+	// KernelFileObjectCache correlates Kernel-File events to paths via FileObject handle (WHIDS-class).
+	KernelFileObjectCache bool
 }
 
 // DefaultPolicy returns an EventPolicy with all event types enabled.
@@ -94,4 +98,19 @@ type DriverStats struct {
 	LastEventTime   time.Time
 	UptimeSeconds   float64
 	ErrorCount      uint64
+}
+
+// ETWProviderHealth records per-provider subscribe status (Windows ETW).
+type ETWProviderHealth struct {
+	Name   string `json:"name"`
+	Active bool   `json:"active"`
+	Error  string `json:"last_error,omitempty"`
+}
+
+// ThreatIntelHealth summarizes ETW Threat-Intel probe outcome (Windows).
+type ThreatIntelHealth struct {
+	Probed bool   `json:"probed"`
+	OK     bool   `json:"ok"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 }
