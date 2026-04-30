@@ -62,6 +62,12 @@ func (c *tiCapability) enabled() bool {
 	return c.probed.Load() && c.ok.Load()
 }
 
+func (c *tiCapability) skipThreatIntelProbe(reason string) {
+	c.probed.Store(true)
+	c.ok.Store(false)
+	c.setStatus("disabled", reason)
+}
+
 func (c *tiCapability) setStatus(status, reason string) {
 	c.status.Store(status)
 	c.reason.Store(reason)
@@ -117,6 +123,8 @@ func (d *ETWDriver) probeThreatIntelProviders() bool {
 //
 // Production path: integrate ELAM driver via etw_ti_service_windows.go
 // once MVI membership and WHQL signing are obtained.
+//
+// G9 epic: runtime probing is gated by monitoring.etw_threat_intel (default false).
 func enableSeDebugPrivilege() error {
 	var tok windows.Token
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_ADJUST_PRIVILEGES|windows.TOKEN_QUERY, &tok); err != nil {
@@ -136,6 +144,20 @@ func enableSeDebugPrivilege() error {
 		return err
 	}
 	return nil
+}
+
+// ThreatIntelHealthSnapshot exposes L5 TI probing state for monitoring_health (L5 governance).
+func (d *ETWDriver) ThreatIntelHealthSnapshot() ThreatIntelHealth {
+	if d == nil {
+		return ThreatIntelHealth{}
+	}
+	st, rsn := d.tiCap.getStatus()
+	return ThreatIntelHealth{
+		Probed: d.tiCap.probed.Load(),
+		OK:     d.tiCap.ok.Load(),
+		Status: st,
+		Reason: rsn,
+	}
 }
 
 func (d *ETWDriver) emitTIStatusEvent() {
