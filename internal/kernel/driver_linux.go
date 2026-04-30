@@ -27,7 +27,7 @@ const (
 	bpfCommLen         = 16
 	bpfFilenameLen     = 256
 	bpfArgsLen         = 512
-	bpfObjectPath      = "/var/lib/edr/bpf/edr.bpf.o"
+	bpfObjectPathDefault = "/var/lib/edr/bpf/edr.bpf.o"
 	rawHeaderSize      = 26
 	bpfEvtProcExec     = 1
 	bpfEvtProcExit     = 2
@@ -169,6 +169,8 @@ type EBPFDriver struct {
 	processed atomic.Uint64
 	errors    atomic.Uint64
 	features  linuxFeatureSet
+
+	bpfObjectPath string // optional override; empty uses bpfObjectPathDefault
 }
 
 type linuxFeatureSet struct {
@@ -180,13 +182,15 @@ type linuxFeatureSet struct {
 }
 
 // NewEBPFDriver creates a new eBPF-based kernel driver. Requires root privileges.
-func NewEBPFDriver(agentID string) (*EBPFDriver, error) {
+// objectPathOverride, when non-empty, replaces the default /var/lib/edr/bpf/edr.bpf.o path.
+func NewEBPFDriver(agentID string, objectPathOverride string) (*EBPFDriver, error) {
 	if os.Getuid() != 0 {
 		return nil, fmt.Errorf("ebpf driver requires root privileges")
 	}
 	return &EBPFDriver{
-		agentID: agentID,
-		policy:  DefaultPolicy(),
+		agentID:       agentID,
+		policy:        DefaultPolicy(),
+		bpfObjectPath: objectPathOverride,
 	}, nil
 }
 
@@ -319,17 +323,45 @@ func (d *EBPFDriver) cleanup() {
 	}
 }
 
+func (d *EBPFDriver) resolvedBPFObjectPath() string {
+	if d.bpfObjectPath != "" {
+		return d.bpfObjectPath
+	}
+	return bpfObjectPathDefault
+}
+
 func (d *EBPFDriver) loadCollection() (*ebpf.CollectionSpec, error) {
 	if len(bpfBytecode) > 0 {
 		return ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpfBytecode))
 	}
-	if _, err := os.Stat(bpfObjectPath); err != nil {
+	path := d.resolvedBPFObjectPath()
+	if err := d.verifyBPFObjectVersionFile(path); err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf(
 			"ebpf object not found at %s (compile with 'make ebpf-link' or build with -tags embed_ebpf): %w",
-			bpfObjectPath, err,
+			path, err,
 		)
 	}
-	return ebpf.LoadCollectionSpec(bpfObjectPath)
+	return ebpf.LoadCollectionSpec(path)
+}
+
+func (d *EBPFDriver) verifyBPFObjectVersionFile(objectPath string) error {
+	want := ebpfExpectedObjectVersion()
+	if want == "" {
+		return nil
+	}
+	verPath := objectPath + ".version"
+	data, err := os.ReadFile(verPath)
+	if err != nil {
+		return nil
+	}
+	got := strings.TrimSpace(string(data))
+	if got != want {
+		return fmt.Errorf("bpf object version %q in %s does not match agent %q; run `make ebpf-install` or reinstall the bpf package", got, verPath, want)
+	}
+	return nil
 }
 
 func (d *EBPFDriver) attachTracepoints() error {

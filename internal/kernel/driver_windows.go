@@ -279,6 +279,15 @@ func (d *ETWDriver) providersToStart() []providerConfig {
 	return out
 }
 
+func isOptionalETWProvider(name string) bool {
+	switch name {
+	case "WMI", "PowerShell", "KernelObject", "BitsClient", "TaskScheduler":
+		return true
+	default:
+		return false
+	}
+}
+
 type etwSession struct {
 	name          string
 	nameUTF16     *uint16
@@ -307,6 +316,14 @@ type ETWDriver struct {
 	errors    atomic.Uint64
 
 	tiCap tiCapability
+
+	provMu     sync.RWMutex
+	provHealth []ETWProviderHealth
+
+	fileObjMu   sync.RWMutex
+	fileObjPath map[uint64]string
+	fileObjFIFO []uint64
+	fileObjCap  int
 }
 
 // globalETW holds the active ETWDriver for the event record callback.
@@ -317,8 +334,10 @@ var etwCallbackPtr = windows.NewCallback(etwEventRecordCallback)
 // NewETWDriver creates a new ETW-based kernel driver for Windows.
 func NewETWDriver(agentID string) (*ETWDriver, error) {
 	return &ETWDriver{
-		agentID: agentID,
-		policy:  DefaultPolicy(),
+		agentID:     agentID,
+		policy:      DefaultPolicy(),
+		fileObjPath: make(map[uint64]string),
+		fileObjCap:  65536,
 	}, nil
 }
 
@@ -354,19 +373,34 @@ func (d *ETWDriver) Start(ctx context.Context, buf *RingBuffer) error {
 		return fmt.Errorf("another etw driver instance is already active")
 	}
 
+	d.provMu.Lock()
+	d.provHealth = nil
+	d.provMu.Unlock()
+
 	for _, p := range d.providersToStart() {
+		optional := isOptionalETWProvider(p.name)
 		sess, err := d.createSession(p.name, p.guid)
 		if err != nil {
+			if optional {
+				d.recordProviderHealth(p.name, false, err.Error())
+				continue
+			}
 			d.stopAllSessions()
 			globalETW.Store(nil)
 			return fmt.Errorf("creating %s session: %w", p.name, err)
 		}
 		if err := d.openAndProcess(sess); err != nil {
+			d.stopLoggerOnly(sess)
+			if optional {
+				d.recordProviderHealth(p.name, false, err.Error())
+				continue
+			}
 			d.stopAllSessions()
 			globalETW.Store(nil)
 			return fmt.Errorf("opening %s trace: %w", p.name, err)
 		}
 		d.sessions = append(d.sessions, sess)
+		d.recordProviderHealth(p.name, true, "")
 	}
 
 	if len(d.sessions) == 0 {
@@ -376,7 +410,15 @@ func (d *ETWDriver) Start(ctx context.Context, buf *RingBuffer) error {
 
 	d.startTime = time.Now()
 	d.running.Store(true)
-	_ = d.probeThreatIntelProviders()
+	d.mu.RLock()
+	wantTI := d.policy.ETWThreatIntel
+	d.mu.RUnlock()
+	if !wantTI {
+		d.tiCap.skipThreatIntelProbe("monitoring.etw_threat_intel=false")
+		d.emitTIStatusEvent()
+	} else {
+		_ = d.probeThreatIntelProviders()
+	}
 	return nil
 }
 
@@ -413,6 +455,40 @@ func (d *ETWDriver) Stats() DriverStats {
 		UptimeSeconds:   uptime,
 		ErrorCount:      d.errors.Load(),
 	}
+}
+
+func (d *ETWDriver) recordProviderHealth(name string, active bool, errStr string) {
+	d.provMu.Lock()
+	defer d.provMu.Unlock()
+	d.provHealth = append(d.provHealth, ETWProviderHealth{Name: name, Active: active, Error: errStr})
+}
+
+// ProviderHealthSnapshot returns the last ETW session outcomes (per provider).
+func (d *ETWDriver) ProviderHealthSnapshot() []ETWProviderHealth {
+	d.provMu.RLock()
+	defer d.provMu.RUnlock()
+	out := make([]ETWProviderHealth, len(d.provHealth))
+	copy(out, d.provHealth)
+	return out
+}
+
+// stopLoggerOnly stops a real-time logger without a consumer trace (OpenTrace failed).
+func (d *ETWDriver) stopLoggerOnly(s *etwSession) {
+	if s == nil || s.sessionHandle == 0 {
+		return
+	}
+	propSize := unsafe.Sizeof(etwTraceProperties{})
+	bufSize := propSize + 256*2
+	buf := make([]byte, bufSize)
+	props := (*etwTraceProperties)(unsafe.Pointer(&buf[0]))
+	props.Wnode.BufferSize = uint32(bufSize)
+	props.LoggerNameOffset = uint32(propSize)
+	procControlTrace.Call(
+		uintptr(s.sessionHandle),
+		0,
+		uintptr(unsafe.Pointer(props)),
+		eventTraceControlStop,
+	)
 }
 
 func (d *ETWDriver) policyAllows(et events.EventType) bool {
@@ -689,14 +765,62 @@ func (d *ETWDriver) decodeProcessUserData(record *etwEventRecord, env map[string
 	}
 }
 
+func (d *ETWDriver) kernelFileRemember(fo uint64, path string) {
+	if fo == 0 || path == "" {
+		return
+	}
+	d.fileObjMu.Lock()
+	defer d.fileObjMu.Unlock()
+	if d.fileObjPath == nil {
+		d.fileObjPath = make(map[uint64]string)
+	}
+	capN := d.fileObjCap
+	if capN <= 0 {
+		capN = 65536
+	}
+	if _, exists := d.fileObjPath[fo]; !exists {
+		d.fileObjFIFO = append(d.fileObjFIFO, fo)
+		for len(d.fileObjFIFO) > capN {
+			old := d.fileObjFIFO[0]
+			d.fileObjFIFO = d.fileObjFIFO[1:]
+			delete(d.fileObjPath, old)
+		}
+	}
+	d.fileObjPath[fo] = path
+}
+
+func (d *ETWDriver) kernelFileLookup(fo uint64) string {
+	d.fileObjMu.RLock()
+	defer d.fileObjMu.RUnlock()
+	if d.fileObjPath == nil {
+		return ""
+	}
+	return d.fileObjPath[fo]
+}
+
 func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]interface{}) {
 	ud := userDataSlice(record)
 	if ud == nil || len(ud) < 8 {
 		return
 	}
 	env["file_object"] = binary.LittleEndian.Uint64(ud[0:8])
+	fn := ""
 	if len(ud) > 8 {
-		env["file_name"] = extractUTF16String(ud[8:])
+		fn = extractUTF16String(ud[8:])
+		env["file_name"] = fn
+	}
+	d.mu.RLock()
+	cache := d.policy.KernelFileObjectCache
+	d.mu.RUnlock()
+	if cache {
+		fo := binary.LittleEndian.Uint64(ud[0:8])
+		if fn != "" {
+			d.kernelFileRemember(fo, fn)
+		} else if fo != 0 {
+			if lp := d.kernelFileLookup(fo); lp != "" {
+				env["file_name"] = lp
+			}
+		}
 	}
 }
 
@@ -743,8 +867,9 @@ func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string
 
 // networkOpcodeName maps Kernel-Network ETW opcodes to a textual operation
 // name. The opcode table is documented in MSDN under TcpIp_V4_Header:
-//   10/11 send, 12/13 recv, 14/15 disconnect/retransmit,
-//   16 accept, 17 connect, 26 fail.
+//
+//	10/11 send, 12/13 recv, 14/15 disconnect/retransmit,
+//	16 accept, 17 connect, 26 fail.
 func networkOpcodeName(op uint8) string {
 	switch op {
 	case 10, 11:
