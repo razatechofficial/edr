@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 )
 
@@ -27,19 +28,39 @@ func Print(w io.Writer, configPath string) error {
 	fmt.Fprintf(w, "os/arch:     %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(w, "monitoring.mode:           %s\n", effectiveMode(cfg))
 	fmt.Fprintf(w, "monitoring.kernel_enabled: %v\n", cfg.Monitoring.KernelEnabled)
+	fmt.Fprintf(w, "monitoring.require_kernel: %v\n", cfg.Monitoring.RequireKernel)
+	fmt.Fprintf(w, "monitoring.security_profile: %s\n", strings.TrimSpace(cfg.Monitoring.SecurityProfile))
+	if collector.IsRegulatedMonitoring(cfg) {
+		fmt.Fprintf(w, "regulated: inventory implied; linux_pid_network defaults on Linux; darwin_attrib_network defaults on macOS\n")
+	}
+	fmt.Fprintf(w, "monitoring.inventory_enabled: %v\n", cfg.Monitoring.InventoryEnabled)
+	fmt.Fprintf(w, "monitoring.inventory_interval_sec: %d\n", cfg.Monitoring.InventoryIntervalSec)
+	fmt.Fprintf(w, "monitoring.etw_kernel_file_object_cache: %v (Windows kernel file path correlation)\n", cfg.Monitoring.ETWKernelFileObjectCache)
+	fmt.Fprintf(w, "monitoring.etw_regulated_verbose: %v (Windows: bundle WMI/PS/pipes/BITS/tasks when regulated)\n", cfg.Monitoring.ETWRegulatedVerbose)
+	fmt.Fprintf(w, "monitoring.stream_max_eps: %d\n", cfg.Monitoring.StreamMaxEPS)
+	switch runtime.GOOS {
+	case "linux":
+		bpf := cfg.Monitoring.BPFObjectPath
+		if bpf == "" {
+			bpf = linuxBPFObject + " (default)"
+		}
+		fmt.Fprintf(w, "monitoring.bpf_object_path: %s\n", bpf)
+	}
 	fmt.Fprintf(w, "checklist_tier (config):   %q\n", cfg.Monitoring.ChecklistTier)
 	fmt.Fprintf(w, "derived_tier:              %s\n", deriveTier(cfg))
 	fmt.Fprintf(w, "health_snapshot_sec:       %d\n", cfg.Monitoring.HealthSnapshotSec)
-	printMonitoringHealthFile(w, cfg)
+
+	parsed := parseMonitoringHealth(cfg)
+	printMonitoringHealthFile(w, parsed)
 	fmt.Fprintln(w)
 
 	switch runtime.GOOS {
 	case "linux":
-		printLinux(w, cfg)
+		printLinux(w, cfg, parsed)
 	case "darwin":
-		printDarwin(w, cfg)
+		printDarwin(w, cfg, parsed)
 	case "windows":
-		printWindows(w, cfg)
+		printWindows(w, cfg, parsed)
 	default:
 		fmt.Fprintf(w, "No OS-specific checks for %s.\n", runtime.GOOS)
 	}
@@ -75,7 +96,7 @@ func deriveTier(cfg config.Config) string {
 	return "userland"
 }
 
-func printLinux(w io.Writer, cfg config.Config) {
+func printLinux(w io.Writer, cfg config.Config, parsed monitoringHealthParsed) {
 	fmt.Fprintf(w, "uid: %d euid: %d\n", os.Getuid(), os.Geteuid())
 	if os.Getuid() != 0 {
 		fmt.Fprintln(w, "PROCESS/FILE/NET kernel: degraded (eBPF needs root)")
@@ -91,6 +112,11 @@ func printLinux(w io.Writer, cfg config.Config) {
 	} else {
 		fmt.Fprintf(w, "eBPF object %s: ok (%d bytes)\n", linuxBPFObject, fi.Size())
 	}
+	if vdata, err := os.ReadFile(linuxBPFObject + ".version"); err != nil {
+		fmt.Fprintf(w, "eBPF version file %s.version: missing (optional; `make ebpf-install` writes it)\n", linuxBPFObject)
+	} else {
+		fmt.Fprintf(w, "eBPF version sidecar: %s\n", strings.TrimSpace(string(vdata)))
+	}
 	if data, err := os.ReadFile("/proc/sys/kernel/unprivileged_bpf_disabled"); err == nil {
 		fmt.Fprintf(w, "kernel.unprivileged_bpf_disabled: %s", strings.TrimSpace(string(data)))
 		if !strings.HasSuffix(string(data), "\n") {
@@ -102,16 +128,17 @@ func printLinux(w io.Writer, cfg config.Config) {
 	} else {
 		fmt.Fprintln(w, "journalctl: not found in PATH")
 	}
-	requireSources(w, cfg, expectedHealthSourceNames(cfg))
+	requireSources(w, cfg, expectedHealthSourceNames(cfg), parsed)
 }
 
-func printDarwin(w io.Writer, cfg config.Config) {
+func printDarwin(w io.Writer, cfg config.Config, parsed monitoringHealthParsed) {
 	fmt.Fprintf(w, "uid: %d\n", os.Getuid())
 	if os.Getuid() != 0 {
 		fmt.Fprintln(w, "ESF: degraded (LaunchDaemon root recommended)")
 	} else {
 		fmt.Fprintln(w, "ESF: root ok (still needs codesign + endpoint-security entitlement)")
 	}
+	fmt.Fprintf(w, "darwin_auth_unified_log: %v (SSH/sudo via log stream when /var/log/system.log unreadable)\n", cfg.Monitoring.DarwinAuthUnifiedLog)
 	exe, err := os.Executable()
 	if err == nil {
 		out, _ := exec.Command("codesign", "-dv", exe).CombinedOutput()
@@ -126,16 +153,19 @@ func printDarwin(w io.Writer, cfg config.Config) {
 	if n := len(cfg.Monitoring.ESFMutePathPrefixes); n > 0 {
 		fmt.Fprintf(w, "config esf_mute_path_prefixes: %d extra prefix(es)\n", n)
 	}
-	requireSources(w, cfg, expectedHealthSourceNames(cfg))
+	requireSources(w, cfg, expectedHealthSourceNames(cfg), parsed)
+	printDarwinKernelTierChecklist(w, cfg, parsed)
 }
 
-func printWindows(w io.Writer, cfg config.Config) {
+func printWindows(w io.Writer, cfg config.Config, parsed monitoringHealthParsed) {
 	fmt.Fprintln(w, "Run as elevated Windows Service (Local System) for ETW kernel providers.")
-	fmt.Fprintln(w, "Minifilter/WFP: not loaded (tier-2 driver roadmap).")
+	fmt.Fprintln(w, "Minifilter/WFP: not loaded - tier-3 driver is a separate epic; see docs/monitoring_g10_tier3_roadmap.md (no in-tree driver without product sign-off).")
 	m := cfg.Monitoring
-	fmt.Fprintf(w, "optional ETW flags: wmi=%v ps=%v pipes=%v bits=%v tasks=%v\n",
-		m.ETWWMIActivity, m.ETWPowerShellScript, m.ETWNamedPipeHandles, m.ETWBitsClient, m.ETWTaskScheduler)
-	requireSources(w, cfg, expectedHealthSourceNames(cfg))
+	fmt.Fprintf(w, "optional ETW flags: wmi=%v ps=%v pipes=%v bits=%v tasks=%v ti_etw=%v\n",
+		m.ETWWMIActivity, m.ETWPowerShellScript, m.ETWNamedPipeHandles, m.ETWBitsClient, m.ETWTaskScheduler, m.ETWThreatIntel)
+	fmt.Fprintf(w, "windows_sysmon_network_events: %v (false narrows Sysmon to exclude network EIDs 3 and 12; use when elevated kernel ETW already covers network)\n", m.WindowsSysmonNetworkEvents)
+	printWindowsETWProviders(w, parsed.Kernel)
+	requireSources(w, cfg, expectedHealthSourceNames(cfg), parsed)
 }
 
 // expectedHealthSourceNames aligns doctor checks with cmd/agent validation:
@@ -149,6 +179,9 @@ func expectedHealthSourceNames(cfg config.Config) []string {
 	if wantKernelTierDoctor(cfg) {
 		out = append(out, "kernel")
 	}
+	if collector.InventoryWanted(cfg) {
+		out = append(out, "inventory")
+	}
 	return out
 }
 
@@ -160,26 +193,36 @@ func wantKernelTierDoctor(cfg config.Config) bool {
 	return true
 }
 
-// requireSources reads the latest monitoring_health.json snapshot and warns
-// when expected per-OS sources are missing or unhealthy. Snapshot freshness
-// is reported alongside each missing source so the operator can tell whether
-// the agent is running.
-func requireSources(w io.Writer, cfg config.Config, expected []string) {
+// monitoringHealthParsed is the result of a single read of monitoring_health.json
+// so doctor subcommands do not re-read the file for each section.
+type monitoringHealthParsed struct {
+	Path    string
+	Snap    map[string]interface{}
+	Present map[string]string
+	Kernel  map[string]interface{}
+	ReadErr error
+	JSONErr error
+}
+
+func parseMonitoringHealth(cfg config.Config) monitoringHealthParsed {
+	out := monitoringHealthParsed{Present: map[string]string{}}
 	if cfg.Agent.DataDir == "" {
-		return
+		out.ReadErr = os.ErrNotExist
+		return out
 	}
-	p := filepath.Join(cfg.Agent.DataDir, "monitoring_health.json")
-	data, err := os.ReadFile(p)
+	out.Path = filepath.Join(cfg.Agent.DataDir, "monitoring_health.json")
+	data, err := os.ReadFile(out.Path)
 	if err != nil {
-		fmt.Fprintf(w, "expected sources: cannot evaluate (no %s)\n", p)
-		return
+		out.ReadErr = err
+		return out
 	}
 	var snap map[string]interface{}
 	if err := json.Unmarshal(data, &snap); err != nil {
-		return
+		out.JSONErr = err
+		return out
 	}
+	out.Snap = snap
 	sources, _ := snap["sources"].([]interface{})
-	present := map[string]string{}
 	for _, raw := range sources {
 		src, ok := raw.(map[string]interface{})
 		if !ok {
@@ -189,10 +232,41 @@ func requireSources(w io.Writer, cfg config.Config, expected []string) {
 		if name == "" {
 			continue
 		}
-		present[name] = stringField(src, "status", "")
+		out.Present[name] = stringField(src, "status", "")
+		if name == "kernel" {
+			out.Kernel = cloneStringAnyMap(src)
+		}
+	}
+	if len(out.Kernel) == 0 {
+		if k, ok := snap["kernel"].(map[string]interface{}); ok {
+			out.Kernel = k
+		}
+	}
+	return out
+}
+
+func cloneStringAnyMap(m map[string]interface{}) map[string]interface{} {
+	cp := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
+}
+
+// requireSources warns when expected per-OS sources are missing or unhealthy.
+func requireSources(w io.Writer, cfg config.Config, expected []string, parsed monitoringHealthParsed) {
+	switch {
+	case cfg.Agent.DataDir == "":
+		return
+	case parsed.ReadErr != nil:
+		fmt.Fprintf(w, "expected sources: cannot evaluate (no %s)\n", parsed.Path)
+		return
+	case parsed.JSONErr != nil:
+		fmt.Fprintf(w, "expected sources: invalid monitoring_health JSON: %v\n", parsed.JSONErr)
+		return
 	}
 	for _, want := range expected {
-		st, ok := present[want]
+		st, ok := parsed.Present[want]
 		switch {
 		case !ok:
 			fmt.Fprintf(w, "  source %s: MISSING\n", want)
@@ -204,22 +278,23 @@ func requireSources(w io.Writer, cfg config.Config, expected []string) {
 	}
 }
 
-func printMonitoringHealthFile(w io.Writer, cfg config.Config) {
-	if cfg.Agent.DataDir == "" {
+func printMonitoringHealthFile(w io.Writer, parsed monitoringHealthParsed) {
+	if parsed.Path == "" {
 		fmt.Fprintln(w, "monitoring health: (no agent data_dir)")
 		return
 	}
-	p := filepath.Join(cfg.Agent.DataDir, "monitoring_health.json")
-	data, err := os.ReadFile(p)
-	if err != nil {
-		fmt.Fprintf(w, "monitoring health: %s not readable (%v); enable health_snapshot_sec on a running agent\n", p, err)
+	if parsed.ReadErr != nil {
+		fmt.Fprintf(w, "monitoring health: %s not readable (%v); enable health_snapshot_sec on a running agent\n", parsed.Path, parsed.ReadErr)
 		return
 	}
-	fmt.Fprintf(w, "monitoring health: %s\n", p)
-	var snap map[string]interface{}
-	if err := json.Unmarshal(data, &snap); err != nil {
-		fmt.Fprintf(w, "  (invalid json: %v)\n", err)
+	fmt.Fprintf(w, "monitoring health: %s\n", parsed.Path)
+	if parsed.JSONErr != nil {
+		fmt.Fprintf(w, "  (invalid json: %v)\n", parsed.JSONErr)
 		return
+	}
+	snap := parsed.Snap
+	if sv, ok := snap["schema_version"]; ok {
+		fmt.Fprintf(w, "  schema_version: %v\n", sv)
 	}
 	if rt, ok := snap["runtime"].(map[string]interface{}); ok {
 		fmt.Fprintf(w, "  runtime: goroutines=%v heap_alloc_mib=%v num_gc=%v\n",
@@ -237,6 +312,52 @@ func printMonitoringHealthFile(w io.Writer, cfg config.Config) {
 	}
 	if k, ok := snap["kernel"].(map[string]interface{}); ok {
 		fmt.Fprintf(w, "  kernel keys: %v\n", keysOf(k))
+	}
+}
+
+func printDarwinKernelTierChecklist(w io.Writer, cfg config.Config, parsed monitoringHealthParsed) {
+	if !wantKernelTierDoctor(cfg) {
+		return
+	}
+	if parsed.ReadErr != nil || parsed.JSONErr != nil {
+		return
+	}
+	st, have := parsed.Present["kernel"]
+	if have && st != "absent" && st != "unavailable" {
+		return
+	}
+	fmt.Fprintln(w, "Darwin kernel-tier (Endpoint Security Framework) gap — remediation checklist:")
+	fmt.Fprintf(w, "  - Run the agent as root via LaunchDaemon (not only `sudo` in a shell) so ESF can attach reliably.\n")
+	fmt.Fprintf(w, "  - Binary must be codesigned with entitlement com.apple.developer.endpoint-security.client (not typical for nosec/CGO-less dev builds).\n")
+	fmt.Fprintf(w, "  - A synthetic monitoring_health kernel row status=absent means no kernel collector attached; see agent logs and set monitoring.require_kernel to align validation with expectation.\n")
+}
+
+func printWindowsETWProviders(w io.Writer, kernelRow map[string]interface{}) {
+	if len(kernelRow) == 0 {
+		return
+	}
+	raw, ok := kernelRow["etw_providers"]
+	if !ok {
+		return
+	}
+	arr, ok := raw.([]interface{})
+	if !ok || len(arr) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "kernel ETW providers (from health snapshot):")
+	for _, row := range arr {
+		ent, ok := row.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name := stringField(ent, "name", "?")
+		active := ent["active"]
+		errStr := stringField(ent, "last_error", "")
+		if errStr == "" {
+			fmt.Fprintf(w, "  %s active=%v\n", name, active)
+		} else {
+			fmt.Fprintf(w, "  %s active=%v err=%q\n", name, active, errStr)
+		}
 	}
 }
 

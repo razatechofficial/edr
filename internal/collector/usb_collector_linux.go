@@ -52,7 +52,7 @@ func NewUSBCollector(endpointID, hostname string) *USBCollector {
 // Run begins watching usbSysPath and emits Telemetry until ctx is cancelled.
 // On non-Linux it is a no-op (build tag protects compilation, but at runtime
 // the sysfs path may simply be absent).
-func (u *USBCollector) Run(ctx context.Context, out chan<- Telemetry) error {
+func (u *USBCollector) Run(ctx context.Context, sink *StreamingSink) error {
 	if _, err := os.Stat(usbSysPath); err != nil {
 		u.recordError(err)
 		return err
@@ -92,13 +92,8 @@ func (u *USBCollector) Run(ctx context.Context, out chan<- Telemetry) error {
 			if tel == nil {
 				continue
 			}
-			select {
-			case out <- *tel:
+			if sink.Send(ctx, *tel) {
 				u.emitted.Add(1)
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-				// channel full; drop and continue
 			}
 		case err, ok := <-w.Errors:
 			if !ok {

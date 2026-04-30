@@ -20,10 +20,27 @@ import (
 
 const (
 	sysmonChannel = "Microsoft-Windows-Sysmon/Operational"
-	// Subscribe to the high-value Sysmon events. Operators can extend this
-	// query via configuration in a follow-up commit.
-	sysmonQuery = "*[System[(EventID=1 or EventID=3 or EventID=5 or EventID=7 or EventID=8 or EventID=10 or EventID=11 or EventID=12 or EventID=13 or EventID=14 or EventID=22 or EventID=25)]]"
 )
+
+func buildSysmonXPathQuery(includeNetwork bool) string {
+	idsNoNet := [...]int{1, 5, 7, 8, 10, 11, 13, 14, 22, 25}
+	idsNet := [...]int{1, 3, 5, 7, 8, 10, 11, 12, 13, 14, 22, 25}
+	ids := idsNoNet[:]
+	if includeNetwork {
+		ids = idsNet[:]
+	}
+	var b strings.Builder
+	b.WriteString("*[System[(")
+	for i, id := range ids {
+		if i > 0 {
+			b.WriteString(" or ")
+		}
+		b.WriteString("EventID=")
+		b.WriteString(strconv.Itoa(id))
+	}
+	b.WriteString(")]]")
+	return b.String()
+}
 
 // SysmonSource consumes the Microsoft-Windows-Sysmon/Operational channel via
 // EvtSubscribe and maps the most useful Sysmon events into schema telemetry.
@@ -36,13 +53,15 @@ type SysmonSource struct {
 	hostname   string
 	dataDir    string
 
-	mu            sync.Mutex // guards: result, bookmark, primed
-	result        windows.Handle
-	bookmark      windows.Handle
-	bookmarkPath  string
-	useSubscribe  bool
-	primed        bool
-	channelExists bool
+	mu             sync.Mutex // guards: result, bookmark, primed
+	result         windows.Handle
+	bookmark       windows.Handle
+	bookmarkPath   string
+	useSubscribe   bool
+	primed         bool
+	channelExists  bool
+	xpathQuery     string
+	includeNetwork bool
 
 	emitted atomic.Uint64
 	dropped atomic.Uint64
@@ -51,7 +70,7 @@ type SysmonSource struct {
 
 // NewSysmonSource constructs a Sysmon channel consumer. dataDir is used to
 // persist the EvtSubscribe bookmark so restarts do not replay or skip events.
-func NewSysmonSource(endpointID, hostname, dataDir string) *SysmonSource {
+func NewSysmonSource(endpointID, hostname, dataDir string, includeNetwork bool) *SysmonSource {
 	if hostname == "" {
 		if h, err := os.Hostname(); err == nil {
 			hostname = h
@@ -63,10 +82,12 @@ func NewSysmonSource(endpointID, hostname, dataDir string) *SysmonSource {
 		dataDir = "."
 	}
 	return &SysmonSource{
-		endpointID:   endpointID,
-		hostname:     hostname,
-		dataDir:      dataDir,
-		bookmarkPath: filepath.Join(dataDir, "sysmon_bookmark.xml"),
+		endpointID:     endpointID,
+		hostname:       hostname,
+		dataDir:        dataDir,
+		bookmarkPath:   filepath.Join(dataDir, "sysmon_bookmark.xml"),
+		xpathQuery:     buildSysmonXPathQuery(includeNetwork),
+		includeNetwork: includeNetwork,
 	}
 }
 
@@ -183,6 +204,9 @@ func (s *SysmonSource) ExportMonitoringHealth() map[string]any {
 		src.LastError = *errPtr
 		src.Status = "degraded"
 	}
+	if s.includeNetwork {
+		src.Notes = "Network EIDs 3 and 12 are subscribed; when kernel ETW already covers sockets, set monitoring.windows_sysmon_network_events false to avoid duplicate host-net telemetry."
+	}
 	return src.ToMap()
 }
 
@@ -206,7 +230,11 @@ func (s *SysmonSource) init() error {
 		s.primed = false
 	}
 	ch, _ := windows.UTF16PtrFromString(sysmonChannel)
-	q, _ := windows.UTF16PtrFromString(sysmonQuery)
+	qstr := s.xpathQuery
+	if qstr == "" {
+		qstr = buildSysmonXPathQuery(true)
+	}
+	q, _ := windows.UTF16PtrFromString(qstr)
 	if sub, err := kernel.EvtSubscribe(0, 0, ch, q, s.bookmark, 0, 0,
 		kernel.EvtSubscribeToFutureEvents); err == nil {
 		s.result = sub
