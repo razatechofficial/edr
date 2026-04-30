@@ -101,6 +101,18 @@ func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
 
 // ExportMonitoringHealth surfaces /proc-net or lsof polling stats.
 func (nc *NetworkCollector) ExportMonitoringHealth() map[string]any {
+	if runtime.GOOS == "windows" {
+		return MonitoringSource{
+			Name:    "network",
+			OS:      "windows",
+			Source:  "sysmon_etw_delegate",
+			Status:  "healthy",
+			EPSIn:   nc.scans.Load(),
+			EPSOut:  nc.emitted.Load(),
+			Dropped: nc.dropped.Load(),
+			Notes:   "Userland poll idle; socket telemetry from Sysmon EID3 / kernel ETW when enabled.",
+		}.ToMap()
+	}
 	src := MonitoringSource{
 		Name:    "network",
 		OS:      runtime.GOOS,
