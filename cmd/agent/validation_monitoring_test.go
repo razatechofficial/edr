@@ -54,9 +54,18 @@ func TestRunMonitoringValidation_InvalidJSON(t *testing.T) {
 	findFailedName(t, rep.Assertions, "health_file_json")
 }
 
+func testMonitoringConfig(dir string) *config.Config {
+	c := &config.Config{}
+	c.Agent.DataDir = dir
+	c.Monitoring.Mode = "userland"
+	c.Monitoring.KernelEnabled = false
+	return c
+}
+
 func TestRunMonitoringValidation_AllExpectedSourcesHealthy(t *testing.T) {
 	dir := t.TempDir()
-	want := perOSExpectedSources(runtime.GOOS)
+	cfg := testMonitoringConfig(dir)
+	want := perOSExpectedSources(cfg)
 	if len(want) == 0 {
 		t.Skip("no expected sources on this GOOS")
 	}
@@ -65,8 +74,6 @@ func TestRunMonitoringValidation_AllExpectedSourcesHealthy(t *testing.T) {
 		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
 	}
 	writeMonitoringHealthFixture(t, dir, 42, sources)
-	cfg := &config.Config{}
-	cfg.Agent.DataDir = dir
 	rep := runMonitoringValidation(context.Background(), cfg)
 	if rep.Failed != 0 {
 		t.Fatalf("unexpected failures Failed=%d details=%v", rep.Failed, rep.Assertions)
@@ -75,7 +82,8 @@ func TestRunMonitoringValidation_AllExpectedSourcesHealthy(t *testing.T) {
 
 func TestRunMonitoringValidation_HeapExceedsBudget(t *testing.T) {
 	dir := t.TempDir()
-	want := perOSExpectedSources(runtime.GOOS)
+	cfg := testMonitoringConfig(dir)
+	want := perOSExpectedSources(cfg)
 	if len(want) == 0 {
 		t.Skip("no expected sources")
 	}
@@ -88,8 +96,6 @@ func TestRunMonitoringValidation_HeapExceedsBudget(t *testing.T) {
 		sources = append(sources, map[string]any{"name": name, "status": "healthy"})
 	}
 	writeMonitoringHealthFixture(t, dir, float64(budget+80), sources)
-	cfg := &config.Config{}
-	cfg.Agent.DataDir = dir
 	rep := runMonitoringValidation(context.Background(), cfg)
 	if rep.Failed == 0 {
 		t.Fatal("expected heap budget failure")
@@ -99,14 +105,16 @@ func TestRunMonitoringValidation_HeapExceedsBudget(t *testing.T) {
 
 func TestRunMonitoringValidation_MissingSource(t *testing.T) {
 	dir := t.TempDir()
-	// Omit "auth"
-	writeMonitoringHealthFixture(t, dir, 10, []map[string]any{
-		{"name": "process", "status": "healthy"},
-		{"name": "file", "status": "healthy"},
-		{"name": "network", "status": "healthy"},
-	})
-	cfg := &config.Config{}
-	cfg.Agent.DataDir = dir
+	cfg := testMonitoringConfig(dir)
+	want := perOSExpectedSources(cfg)
+	var rows []map[string]any
+	for _, name := range want {
+		if name == "auth" {
+			continue
+		}
+		rows = append(rows, map[string]any{"name": name, "status": "healthy"})
+	}
+	writeMonitoringHealthFixture(t, dir, 10, rows)
 	rep := runMonitoringValidation(context.Background(), cfg)
 	if rep.Failed == 0 {
 		t.Fatal("expected missing source failure")

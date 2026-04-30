@@ -53,6 +53,7 @@ func TestWriteMonitoringHealth_AggregatesSources(t *testing.T) {
 	cols := []Collector{
 		&fakeHealthyCollector{name: "process", snap: MonitoringSource{Name: "process", Source: "ebpf", Status: "healthy"}.ToMap()},
 		&fakeHealthyCollector{name: "file", snap: MonitoringSource{Name: "file", Source: "fsnotify", Status: "degraded", LastError: "boom"}.ToMap()},
+		&fakeHealthyCollector{name: "kernel", snap: KernelHealthMap("fake", map[string]any{"n": 1}, map[string]any{"d": 2}, nil)},
 	}
 	WriteMonitoringHealth(cfg, cols, nil)
 
@@ -65,7 +66,7 @@ func TestWriteMonitoringHealth_AggregatesSources(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	srcs, ok := got["sources"].([]any)
-	if !ok || len(srcs) != 2 {
+	if !ok || len(srcs) != 3 {
 		t.Fatalf("sources not aggregated: %v", got["sources"])
 	}
 	if _, ok := got["runtime"]; !ok {
