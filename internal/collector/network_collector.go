@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/schema"
 )
 
@@ -22,6 +23,7 @@ import (
 type NetworkCollector struct {
 	endpointID string
 	hostname   string
+	cfg        config.Config
 	mu         sync.Mutex
 	seen       map[string]struct{}
 
@@ -30,20 +32,27 @@ type NetworkCollector struct {
 	dropped atomic.Uint64
 }
 
-func NewNetworkCollector(endpointID string) *NetworkCollector {
+func NewNetworkCollector(endpointID string, cfg config.Config) *NetworkCollector {
 	hostname, _ := os.Hostname()
 	return &NetworkCollector{
 		endpointID: endpointID,
 		hostname:   hostname,
+		cfg:        cfg,
 		seen:       make(map[string]struct{}),
 	}
 }
 
 func (nc *NetworkCollector) Name() string { return "network" }
 
-func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
+func (nc *NetworkCollector) Collect(ctx context.Context) ([]Telemetry, error) {
+	if runtime.GOOS == "windows" {
+		return nc.collectWindowsMIB(ctx)
+	}
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		return nil, nil
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 	nc.scans.Add(1)
 
@@ -57,6 +66,10 @@ func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
 		conns = darwinLsofConnections()
 	}
 
+	return nc.collectFromConnSlice(conns), nil
+}
+
+func (nc *NetworkCollector) collectFromConnSlice(conns []connEntry) []Telemetry {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
@@ -96,22 +109,13 @@ func (nc *NetworkCollector) Collect(_ context.Context) ([]Telemetry, error) {
 		})
 		nc.emitted.Add(1)
 	}
-	return out, nil
+	return out
 }
 
 // ExportMonitoringHealth surfaces /proc-net or lsof polling stats.
 func (nc *NetworkCollector) ExportMonitoringHealth() map[string]any {
 	if runtime.GOOS == "windows" {
-		return MonitoringSource{
-			Name:    "network",
-			OS:      "windows",
-			Source:  "sysmon_etw_delegate",
-			Status:  "healthy",
-			EPSIn:   nc.scans.Load(),
-			EPSOut:  nc.emitted.Load(),
-			Dropped: nc.dropped.Load(),
-			Notes:   "Userland poll idle; socket telemetry from Sysmon EID3 / kernel ETW when enabled.",
-		}.ToMap()
+		return nc.exportNetworkHealthWindows()
 	}
 	src := MonitoringSource{
 		Name:    "network",

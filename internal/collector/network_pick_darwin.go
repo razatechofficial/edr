@@ -30,7 +30,7 @@ func chooseNetworkCollector(cfg config.Config, endpointID string, tracker *Linea
 	if cfg.Monitoring.DarwinAttribNetwork {
 		return newDarwinAttributedNetworkCollector(endpointID, tracker)
 	}
-	if nc := NewNetworkCollector(endpointID); nc != nil {
+	if nc := NewNetworkCollector(endpointID, cfg); nc != nil {
 		return nc
 	}
 	return NewNetworkStubCollector(endpointID)
