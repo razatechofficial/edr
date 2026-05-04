@@ -203,9 +203,12 @@ func perOSExpectedSources(cfg *config.Config) []string {
 		}
 		return out
 	default:
-		// Tier-minimal: canonical Linux/macOS/Windows builds carry full pillar sets.
-		// Rare GOOS use bounded userland pillars + optional posture/log_tail/inventory; auth may be absent.
-		out := []string{"process", "file", "network"}
+		// Tier-minimal: rare GOOS carry bounded pillars + explicit dns/kernel capability rows when enabled.
+		out := []string{"process", "file", "network", "auth"}
+		if wantK {
+			out = append(out, "kernel")
+		}
+		out = append(out, "dns")
 		if cfg != nil && cfg.Monitoring.PostureEnabled {
 			out = append(out, "posture")
 		}
@@ -244,6 +247,22 @@ func assertSourcesPresent(sources []map[string]any, expected []string, cfg *conf
 			// Rare GOOS: network pillar may report absent when neither procfs nor netstat yields rows.
 			if want == "network" && st == "absent" {
 				switch osName := runtime.GOOS; osName {
+				case "linux", "darwin", "windows":
+				default:
+					fail = false
+				}
+			}
+			// Rare GOOS: DNS pillar is observability-only (tier_minimal_noop).
+			if want == "dns" && st == "absent" {
+				switch runtime.GOOS {
+				case "linux", "darwin", "windows":
+				default:
+					fail = false
+				}
+			}
+			// Rare GOOS: auth may remain stub/absent when no log source is available.
+			if want == "auth" && st == "absent" {
+				switch runtime.GOOS {
 				case "linux", "darwin", "windows":
 				default:
 					fail = false
