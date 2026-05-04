@@ -34,13 +34,16 @@ func (a *AuthStubCollector) Collect(context.Context) ([]Telemetry, error) {
 }
 
 func (a *AuthStubCollector) ExportMonitoringHealth() map[string]any {
-	return MonitoringSource{
-		Name:   "auth",
-		OS:     runtime.GOOS,
-		Source: "stub",
-		Status: "absent",
-		Notes:  "no auth collector available on this GOOS/config",
+	m := MonitoringSource{
+		Name:      "auth",
+		OS:        runtime.GOOS,
+		Source:    "stub",
+		Status:    "absent",
+		LastError: "no_auth_source_after_probe",
+		Notes:     "no auth collector available on this GOOS/config; " + authStubProbeSummary(),
 	}.ToMap()
+	m["reason"] = "no_auth_source_after_probe"
+	return m
 }
 
 // FileStubCollector is a placeholder for future file / FIM telemetry.
@@ -97,11 +100,7 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 	case "darwin":
 		authCol = pickDarwinAuth(cfgEff, endpointID, tracker)
 	default:
-		if ac := NewAuthCollector(endpointID, cfgEff.Agent.DataDir); ac != nil && ac.logPath != "" {
-			authCol = ac
-		} else {
-			authCol = NewAuthStubCollector(endpointID)
-		}
+		authCol = pickRareOrPrimaryAuth(cfgEff, endpointID, tracker)
 	}
 
 	var fileCol Collector
@@ -121,6 +120,8 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 	if WantKernelTier(cfgEff) {
 		if kc := NewKernelCollector(endpointID, cfgEff, users); kc != nil {
 			cols = append(cols, kc)
+		} else if kcap := newKernelCapabilityProbeCollectorWhenNil(endpointID, cfgEff, users); kcap != nil {
+			cols = append(cols, kcap)
 		}
 	}
 
