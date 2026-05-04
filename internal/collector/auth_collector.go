@@ -42,6 +42,18 @@ func NewAuthCollector(endpointID, dataDir string) *AuthCollector {
 	}
 }
 
+// NewAuthCollectorWithLogPath constructs an auth collector that tails the given
+// log path (used on rare GOOS when standard detection returns "").
+func NewAuthCollectorWithLogPath(endpointID, dataDir, logPath string) *AuthCollector {
+	hostname, _ := os.Hostname()
+	return &AuthCollector{
+		endpointID: endpointID,
+		hostname:   hostname,
+		dataDir:    dataDir,
+		logPath:    logPath,
+	}
+}
+
 func (ac *AuthCollector) Name() string { return "auth" }
 
 func (ac *AuthCollector) Collect(_ context.Context) ([]Telemetry, error) {
@@ -87,7 +99,7 @@ func (ac *AuthCollector) ExportMonitoringHealth() map[string]any {
 		src.Source = "evtsubscribe"
 	case ac.logPath == "":
 		src.Status = "unavailable"
-		src.LastError = "no auth log path detected"
+		src.LastError = authLogPathEmptyHealthMessage()
 	}
 	return src.ToMap()
 }
