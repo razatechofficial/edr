@@ -7,9 +7,8 @@ import (
 	"time"
 )
 
-// collectNative is the non-Linux/non-Darwin fallback. We still honour the
-// signature so collector.go stays platform-agnostic, but on Windows the
-// ETW-driven collector handles process telemetry; this method is unused.
+// collectNative is the non–tier-1 Unix fallback: bounded `ps` snapshot.
+// Windows and macOS use their own build-tagged collectNative implementations.
 func (c *ProcessCollector) collectNative(ctx context.Context, now time.Time, user string) ([]Telemetry, error) {
 	return c.collectFromPS(ctx, now, user)
 }
