@@ -52,6 +52,7 @@ func Print(w io.Writer, configPath string) error {
 
 	parsed := parseMonitoringHealth(cfg)
 	printMonitoringHealthFile(w, parsed)
+	printCrossPlatformMonitoringHints(w)
 	fmt.Fprintln(w)
 
 	switch runtime.GOOS {
@@ -175,12 +176,21 @@ func expectedHealthSourceNames(cfg config.Config) []string {
 	out := []string{"process", "file", "network", "auth"}
 	if runtime.GOOS == "windows" {
 		out = append(out, "registry")
+		if cfg.Monitoring.DnsClientETWWindows {
+			out = append(out, "dns")
+		}
 	}
 	if wantKernelTierDoctor(cfg) {
 		out = append(out, "kernel")
 	}
 	if collector.InventoryWanted(cfg) {
 		out = append(out, "inventory")
+	}
+	if cfg.Monitoring.PostureEnabled {
+		out = append(out, "posture")
+	}
+	if collector.LogTailPathsConfigured(cfg) {
+		out = append(out, "log_tail")
 	}
 	return out
 }
@@ -359,6 +369,18 @@ func printWindowsETWProviders(w io.Writer, kernelRow map[string]interface{}) {
 			fmt.Fprintf(w, "  %s active=%v err=%q\n", name, active, errStr)
 		}
 	}
+}
+
+func printCrossPlatformMonitoringHints(w io.Writer) {
+	fmt.Fprintf(w, "--- DNS / Windows userland networking (hints) ---\n")
+	fmt.Fprintf(w, "  pillar name=dns       : canonical DNS pillar across OSes. Linux/macOS use syslog/journal; Windows DNS Client EVT maps to name=dns when enabled.\n")
+	fmt.Fprintf(w, "  enable Windows DNS    : monitoring.dns_client_etw_windows=true (source remains DNS Client operational stream; pillar identity stays dns).\n")
+	fmt.Fprintf(w, "  unified-log DNS rows  : macOS darwin_unified_log_dns / darwin_log_stream_dns_alt collectors when those flags are on.\n")
+	fmt.Fprintf(w, "  Windows userland MIB network : TCP GetExtendedTcp* snapshots only—UDP intentionally deferred to ETW/Sysmon/kernel coverage.\n")
+	fmt.Fprintf(w, "  linux_proc_net_pid_enrich: reverse-map from /proc/*/fd to socket inodes when set (prefer linux_pid_network for full attribution).\n")
+	fmt.Fprintf(w, "  log_tail file_events       : per-line FileEvent emission (stream_max_eps cap, 8KiB line cap, offsets in agent.data_dir/log_tail_offsets.json).\n")
+	fmt.Fprintf(w, "  rare GOOS network          : /proc/net/tcp* when linprocfs present; else bounded netstat -an parse.\n")
+	fmt.Fprintf(w, "  backlog (config gates): monitoring.log_tail_telemetry_mode, monitoring.linux_proc_net_pid_enrich (see regulated model).\n")
 }
 
 // printSourceRow renders a single MonitoringSource row in tabular form so the

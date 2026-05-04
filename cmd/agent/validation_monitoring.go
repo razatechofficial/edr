@@ -117,6 +117,9 @@ func runMonitoringValidation(ctx context.Context, cfg *config.Config) Monitoring
 		assertNoDrops(rep.Sources)...,
 	)
 	rep.Assertions = append(rep.Assertions,
+		assertWindowsNetworkContract(rep.Sources)...,
+	)
+	rep.Assertions = append(rep.Assertions,
 		assertHeapBudget(rep.HeapAllocMiB)...,
 	)
 
@@ -189,6 +192,9 @@ func perOSExpectedSources(cfg *config.Config) []string {
 		return out
 	case "windows":
 		out := []string{"process", "file", "network", "auth", "registry"}
+		if cfg != nil && cfg.Monitoring.DnsClientETWWindows {
+			out = append(out, "dns")
+		}
 		if wantK {
 			out = append(out, "kernel")
 		}
@@ -198,8 +204,14 @@ func perOSExpectedSources(cfg *config.Config) []string {
 		return out
 	default:
 		// Tier-minimal: canonical Linux/macOS/Windows builds carry full pillar sets.
-		// Rare GOOS use inventory + bounded userland pillars; auth may be absent.
+		// Rare GOOS use bounded userland pillars + optional posture/log_tail/inventory; auth may be absent.
 		out := []string{"process", "file", "network"}
+		if cfg != nil && cfg.Monitoring.PostureEnabled {
+			out = append(out, "posture")
+		}
+		if cfg != nil && collector.LogTailPathsConfigured(*cfg) {
+			out = append(out, "log_tail")
+		}
 		if cfg != nil && collector.InventoryWanted(*cfg) {
 			out = append(out, "inventory")
 		}
@@ -229,6 +241,14 @@ func assertSourcesPresent(sources []map[string]any, expected []string, cfg *conf
 			})
 		case st == "absent":
 			fail := !(want == "kernel" && !requireK)
+			// Rare GOOS: network pillar may report absent when neither procfs nor netstat yields rows.
+			if want == "network" && st == "absent" {
+				switch osName := runtime.GOOS; osName {
+				case "linux", "darwin", "windows":
+				default:
+					fail = false
+				}
+			}
 			out = append(out, monitoringAssertion{
 				Name:   "source." + want,
 				Detail: "status=" + st,
@@ -271,6 +291,44 @@ func assertNoDrops(sources []map[string]any) []monitoringAssertion {
 		}
 	}
 	return out
+}
+
+func assertWindowsNetworkContract(sources []map[string]any) []monitoringAssertion {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	for _, src := range sources {
+		name, _ := src["name"].(string)
+		if name != "network" {
+			continue
+		}
+		source, _ := src["source"].(string)
+		notes, _ := src["notes"].(string)
+		lowerNotes := strings.ToLower(notes)
+		switch source {
+		case "iphlpapi_extended_tcp":
+			ok := strings.Contains(lowerNotes, "tcp-only")
+			return []monitoringAssertion{{
+				Name:   "source.network.contract",
+				Detail: fmt.Sprintf("source=%s tcp_only_note=%v", source, ok),
+				Failed: !ok,
+			}}
+		case "etw_sysmon_delegate":
+			ok := strings.Contains(lowerNotes, "defers") || strings.Contains(lowerNotes, "delegate")
+			return []monitoringAssertion{{
+				Name:   "source.network.contract",
+				Detail: fmt.Sprintf("source=%s delegated_note=%v", source, ok),
+				Failed: !ok,
+			}}
+		default:
+			return []monitoringAssertion{{
+				Name:   "source.network.contract",
+				Detail: "unexpected network source=" + source,
+				Failed: true,
+			}}
+		}
+	}
+	return nil
 }
 
 // rateLimitedPositive returns a positive count from health JSON unmarshaled numbers (float64).
