@@ -30,6 +30,13 @@ type NetworkCollector struct {
 	scans   atomic.Uint64
 	emitted atomic.Uint64
 	dropped atomic.Uint64
+
+	// linuxEnrichMissStreak counts consecutive Collect ticks where
+	// linux_proc_net_pid_enrich saw socket inodes but resolved zero PIDs (GOOS=linux only).
+	linuxEnrichMissStreak atomic.Uint32
+
+	// otherNetSource records last rare-GOOS gather path (proc_net_polling | netstat_poll | absent).
+	otherNetSource atomic.Value // string
 }
 
 func NewNetworkCollector(endpointID string, cfg config.Config) *NetworkCollector {
@@ -49,7 +56,7 @@ func (nc *NetworkCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 		return nc.collectWindowsMIB(ctx)
 	}
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		return nil, nil
+		return gatherOtherPlatformConnections(ctx, nc)
 	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -62,6 +69,7 @@ func (nc *NetworkCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 		conns = append(conns, parseProcNet("/proc/net/tcp6", "tcp")...)
 		conns = append(conns, parseProcNet("/proc/net/udp", "udp")...)
 		conns = append(conns, parseProcNet("/proc/net/udp6", "udp")...)
+		applyLinuxProcNetPIDEnrichIfConfigured(ctx, nc, conns)
 	} else {
 		conns = darwinLsofConnections()
 	}
@@ -77,7 +85,12 @@ func (nc *NetworkCollector) collectFromConnSlice(conns []connEntry) []Telemetry 
 	var out []Telemetry
 
 	for _, c := range conns {
-		key := fmt.Sprintf("%s:%s:%d:%s:%d:%d", c.proto, c.srcIP, c.srcPort, c.dstIP, c.dstPort, c.pid)
+		key := fmt.Sprintf("%s:%s:%d:%s:%d", c.proto, c.srcIP, c.srcPort, c.dstIP, c.dstPort)
+		if c.inode != 0 {
+			key += fmt.Sprintf(":ino:%d", c.inode)
+		} else if c.pid != 0 {
+			key += fmt.Sprintf(":pid:%d", c.pid)
+		}
 		if _, exists := nc.seen[key]; exists {
 			nc.dropped.Add(1)
 			continue
@@ -117,6 +130,9 @@ func (nc *NetworkCollector) ExportMonitoringHealth() map[string]any {
 	if runtime.GOOS == "windows" {
 		return nc.exportNetworkHealthWindows()
 	}
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return exportOtherPlatformNetworkHealth(nc)
+	}
 	src := MonitoringSource{
 		Name:    "network",
 		OS:      runtime.GOOS,
@@ -129,6 +145,16 @@ func (nc *NetworkCollector) ExportMonitoringHealth() map[string]any {
 	if runtime.GOOS == "darwin" {
 		src.Source = "lsof_pid"
 	}
+	if runtime.GOOS == "linux" && nc.cfg.Monitoring.LinuxProcNetPIDEnrich {
+		if src.Notes != "" {
+			src.Notes += "; "
+		}
+		src.Notes += "linux_proc_net_pid_enrich=true: best-effort PID via /proc/*/fd socket inode reverse-map"
+		if nc.linuxEnrichMissStreak.Load() >= 10 {
+			src.Status = "degraded"
+			src.Notes += "; no inode→PID matches across recent scans (permissions or mapping miss)"
+		}
+	}
 	return src.ToMap()
 }
 
@@ -138,7 +164,8 @@ type connEntry struct {
 	srcPort int
 	dstIP   string
 	dstPort int
-	pid     int // non-zero when source provides it (e.g. Darwin lsof)
+	pid     int    // non-zero when source provides it (e.g. Darwin lsof, Linux inode map)
+	inode   uint64 // Linux /proc/net inode when parsed (optional)
 }
 
 // parseProcNet reads /proc/net/tcp or /proc/net/udp and extracts connections.
@@ -158,8 +185,16 @@ func parseProcNet(path, proto string) []connEntry {
 		if len(fields) < 4 {
 			continue
 		}
+		// Data rows start with "sl_index:" (e.g. "12:"); skip header / garbage lines.
+		if len(fields[0]) < 1 || fields[0][0] < '0' || fields[0][0] > '9' {
+			continue
+		}
 		srcIP, srcPort := parseHexAddr(fields[1])
 		dstIP, dstPort := parseHexAddr(fields[2])
+		var inode uint64
+		if len(fields) >= 10 {
+			inode, _ = strconv.ParseUint(fields[9], 10, 64)
+		}
 
 		entries = append(entries, connEntry{
 			proto:   proto,
@@ -167,6 +202,7 @@ func parseProcNet(path, proto string) []connEntry {
 			srcPort: srcPort,
 			dstIP:   dstIP,
 			dstPort: dstPort,
+			inode:   inode,
 		})
 	}
 	return entries
@@ -204,5 +240,3 @@ func parseHexAddr(s string) (string, int) {
 		return hexIP, int(port)
 	}
 }
-
-
