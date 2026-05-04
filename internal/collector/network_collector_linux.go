@@ -17,12 +17,14 @@ func applyLinuxProcNetPIDEnrichIfConfigured(ctx context.Context, nc *NetworkColl
 			conns[i].pid = int(pid)
 		}
 	}
-	updateLinuxProcNetEnrichMiss(nc, conns)
+	updateLinuxProcNetEnrichStats(nc, conns)
 }
 
-func updateLinuxProcNetEnrichMiss(nc *NetworkCollector, conns []connEntry) {
-	withInode := 0
-	withPID := 0
+func updateLinuxProcNetEnrichStats(nc *NetworkCollector, conns []connEntry) {
+	if nc == nil || !nc.cfg.Monitoring.LinuxProcNetPIDEnrich {
+		return
+	}
+	var withInode, withPID uint64
 	for _, c := range conns {
 		if c.inode == 0 {
 			continue
@@ -32,15 +34,20 @@ func updateLinuxProcNetEnrichMiss(nc *NetworkCollector, conns []connEntry) {
 			withPID++
 		}
 	}
-	if withInode == 0 {
+	nc.linuxEnrichInodeLast.Store(withInode)
+	nc.linuxEnrichPIDLast.Store(withPID)
+
+	if withInode < 5 {
+		nc.linuxEnrichLowRateStreak.Store(0)
 		return
 	}
-	if withPID == 0 {
-		v := nc.linuxEnrichMissStreak.Add(1)
+	rate := float64(withPID) / float64(withInode)
+	if rate < 0.05 {
+		v := nc.linuxEnrichLowRateStreak.Add(1)
 		if v > 10000 {
-			nc.linuxEnrichMissStreak.Store(10000)
+			nc.linuxEnrichLowRateStreak.Store(10000)
 		}
 	} else {
-		nc.linuxEnrichMissStreak.Store(0)
+		nc.linuxEnrichLowRateStreak.Store(0)
 	}
 }

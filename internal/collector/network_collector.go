@@ -31,12 +31,16 @@ type NetworkCollector struct {
 	emitted atomic.Uint64
 	dropped atomic.Uint64
 
-	// linuxEnrichMissStreak counts consecutive Collect ticks where
-	// linux_proc_net_pid_enrich saw socket inodes but resolved zero PIDs (GOOS=linux only).
-	linuxEnrichMissStreak atomic.Uint32
+	// linux_proc_net_pid_enrich: last-tick inode vs PID counts (GOOS=linux only).
+	linuxEnrichInodeLast atomic.Uint64
+	linuxEnrichPIDLast   atomic.Uint64
+	// linuxEnrichLowRateStreak counts consecutive ticks where attribution rate < 5% with enough inodes.
+	linuxEnrichLowRateStreak atomic.Uint32
 
-	// otherNetSource records last rare-GOOS gather path (proc_net_polling | netstat_poll | absent).
+	// otherNetSource records last rare-GOOS winning gather path.
 	otherNetSource atomic.Value // string
+	otherProbesMu  sync.Mutex
+	otherProbesLast []string // last gather probe order (diagnostics)
 }
 
 func NewNetworkCollector(endpointID string, cfg config.Config) *NetworkCollector {
@@ -150,10 +154,18 @@ func (nc *NetworkCollector) ExportMonitoringHealth() map[string]any {
 			src.Notes += "; "
 		}
 		src.Notes += "linux_proc_net_pid_enrich=true: best-effort PID via /proc/*/fd socket inode reverse-map"
-		if nc.linuxEnrichMissStreak.Load() >= 10 {
-			src.Status = "degraded"
-			src.Notes += "; no inode→PID matches across recent scans (permissions or mapping miss)"
+		inode := nc.linuxEnrichInodeLast.Load()
+		pid := nc.linuxEnrichPIDLast.Load()
+		var rate float64
+		if inode > 0 {
+			rate = float64(pid) / float64(inode)
 		}
+		m := src.ToMap()
+		m["pid_attribution_rate"] = rate
+		if inode >= 5 && rate < 0.05 && nc.linuxEnrichLowRateStreak.Load() >= 6 {
+			m["auto_promotion_hint"] = "enable_linux_pid_network"
+		}
+		return m
 	}
 	return src.ToMap()
 }
