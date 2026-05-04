@@ -308,10 +308,12 @@ type Config struct {
 		InventoryIntervalSec int `yaml:"inventory_interval_sec"`
 		// InventoryPersistSnapshots writes canonical JSON + SHA256 under agent data_dir for manager/delta workflows (G-L1-SYNC-lite).
 		InventoryPersistSnapshots bool `yaml:"inventory_persist_snapshots" env:"EDR_MONITORING_INVENTORY_PERSIST"`
-		// InventoryStrictListenerAttribution, when true with regulated profile, marks inventory health degraded if Linux listener attribution is count_only or unavailable.
+		// InventoryStrictListenerAttribution, when true with regulated profile, marks inventory health degraded if listener attribution is count_only or unavailable (tier-1 scans).
 		InventoryStrictListenerAttribution bool `yaml:"inventory_strict_listener_attribution"`
 		// AdditionalLogTailPaths (optional) tails text files for supplementary logcollector-style coverage (G-L4-BREADTH).
 		AdditionalLogTailPaths []string `yaml:"additional_log_tail_paths"`
+		// LogTailTelemetryMode: empty or none — health/read-only drain (default); file_events reserved for future capped FileEvent emission (see log_tail collector).
+		LogTailTelemetryMode string `yaml:"log_tail_telemetry_mode"`
 		// PostureEnabled opts into lightweight read-only posture probes (G-POSTURE); off by default.
 		PostureEnabled bool `yaml:"posture_enabled" env:"EDR_MONITORING_POSTURE"`
 		// ETWKernelFileObjectCache (Windows) LRU cache FileObject→path for kernel file telemetry.
@@ -344,6 +346,8 @@ type Config struct {
 		JournaldAuth bool `yaml:"journald_auth"`
 		// Linux: prefer SocketSource for network (PID-attributed vs /proc/net only).
 		LinuxPIDNetwork bool `yaml:"linux_pid_network"`
+		// LinuxProcNetPIDEnrich: when linux_pid_network is false, map /proc/net socket inodes to PIDs via /proc/*/fd (best-effort; prefer linux_pid_network for full attribution).
+		LinuxProcNetPIDEnrich bool `yaml:"linux_proc_net_pid_enrich"`
 		// Linux: non-empty opts into fanotify mount marks (needs CAP_SYS_ADMIN).
 		LinuxFanotifyMounts []string `yaml:"linux_fanotify_mounts"`
 		// Linux: audit NETLINK listener (distinct health name linux_audit).
