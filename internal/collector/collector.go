@@ -18,9 +18,9 @@ import (
 
 // ProcessCollector emits ProcessEvent telemetry. On Linux it uses the /proc
 // diff source so only newly visible pids are emitted, eliminating the
-// per-cycle `ps -axo` fork that previously dominated CPU usage. On other
-// Unix-like systems the legacy `ps` fallback is retained until a native
-// per-OS source replaces it (macOS proc_listpids, Windows ETW).
+// per-cycle `ps -axo` fork that previously dominated CPU usage. macOS and
+// Windows use native platform sources. Other Unix-like systems use a bounded
+// `ps` fallback (see process_collector_other.go).
 type ProcessCollector struct {
 	EndpointID string
 	Hostname   string
@@ -100,37 +100,14 @@ func (c *ProcessCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 	c.scans.Add(1)
 	now := time.Now().UTC()
 	user := os.Getenv("USER")
-	switch runtime.GOOS {
-	case "linux", "darwin", "windows":
-		out, err := c.collectNative(ctx, now, user)
-		if err != nil {
-			msg := err.Error()
-			c.errs.Store(&msg)
-		} else {
-			c.emitted.Add(uint64(len(out)))
-		}
-		return out, err
+	out, err := c.collectNative(ctx, now, user)
+	if err != nil {
+		msg := err.Error()
+		c.errs.Store(&msg)
+	} else {
+		c.emitted.Add(uint64(len(out)))
 	}
-
-	// Fallback for non-ps platforms.
-	evt := schema.ProcessEvent{
-		BaseEvent: schema.BaseEvent{
-			SchemaVersion: schema.SchemaVersionV1,
-			EventType:     schema.EventProcess,
-			EndpointID:    c.EndpointID,
-			Timestamp:     now,
-			Hostname:      c.Hostname,
-			OS:            runtime.GOOS,
-		},
-		PID:         os.Getpid(),
-		PPID:        os.Getppid(),
-		ParentName:  "",
-		ProcessName: "edr-agent",
-		ProcessPath: os.Args[0],
-		CommandLine: "",
-		User:        user,
-	}
-	return []Telemetry{{Process: &evt}}, nil
+	return out, err
 }
 
 func (c *ProcessCollector) collectFromPS(ctx context.Context, now time.Time, user string) ([]Telemetry, error) {

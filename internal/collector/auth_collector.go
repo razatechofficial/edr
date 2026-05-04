@@ -15,8 +15,8 @@ import (
 
 // AuthCollector monitors authentication events by tailing platform-specific
 // auth logs. On Linux it reads /var/log/auth.log (or /var/log/secure), on
-// macOS it reads /var/log/system.log, and on Windows it is a placeholder
-// for ETW Security event log integration.
+// macOS it reads /var/log/system.log when present, and on Windows it queries
+// the Security event log via the Windows Event API (evtsubscribe path in Collect).
 type AuthCollector struct {
 	endpointID string
 	hostname   string

@@ -26,7 +26,7 @@ func (nc *NetworkCollector) exportNetworkHealthWindows() map[string]any {
 	var b strings.Builder
 	if poll {
 		src.Source = "iphlpapi_extended_tcp"
-		b.WriteString("Userland MIB snapshots (GetExtendedTcp*, non-LISTEN, PID-qualified) active; ")
+		b.WriteString("Userland MIB snapshots (GetExtendedTcp*, non-LISTEN, PID-qualified) active; TCP-only pillar (GetExtendedUdpTable not used—product policy); rely on ETW/Sysmon for UDP-class visibility; ")
 		b.WriteString("policy=")
 		b.WriteString(policyDesc)
 		b.WriteString("; ")
