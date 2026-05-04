@@ -33,6 +33,16 @@ func (a *AuthStubCollector) Collect(context.Context) ([]Telemetry, error) {
 	return nil, nil
 }
 
+func (a *AuthStubCollector) ExportMonitoringHealth() map[string]any {
+	return MonitoringSource{
+		Name:   "auth",
+		OS:     runtime.GOOS,
+		Source: "stub",
+		Status: "absent",
+		Notes:  "no auth collector available on this GOOS/config",
+	}.ToMap()
+}
+
 // FileStubCollector is a placeholder for future file / FIM telemetry.
 type FileStubCollector struct{ endpointID string }
 

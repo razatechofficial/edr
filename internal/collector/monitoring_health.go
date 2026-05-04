@@ -27,15 +27,15 @@ type ExportMonitoringHealth interface {
 // remains supported for back-compat; this struct exists so collectors emit a
 // stable schema and the doctor command can render uniform tables.
 type MonitoringSource struct {
-	Name          string `json:"name"`           // e.g. "process", "file", "network"
-	OS            string `json:"os"`             // runtime.GOOS
-	Source        string `json:"source"`         // "ebpf", "etw", "esf", "fsnotify", ...
-	Status        string `json:"status"`         // "healthy" | "degraded" | "unavailable" | "absent"
-	EPSIn         uint64 `json:"eps_in"`         // events received last second
-	EPSOut        uint64 `json:"eps_out"`        // events emitted last second
+	Name          string `json:"name"`            // e.g. "process", "file", "network"
+	OS            string `json:"os"`              // runtime.GOOS
+	Source        string `json:"source"`          // "ebpf", "etw", "esf", "fsnotify", ...
+	Status        string `json:"status"`          // "healthy" | "degraded" | "unavailable" | "absent"
+	EPSIn         uint64 `json:"eps_in"`          // events received last second
+	EPSOut        uint64 `json:"eps_out"`         // events emitted last second
 	Dropped       uint64 `json:"dropped"`         // channel/backpressure drops; optional map key rate_limited_drops = stream_max_eps path (streaming_run_collector).
-	QueueDepth    int    `json:"queue_depth"`    // current outbound queue length
-	LastError     string `json:"last_error"`     // empty string when none
+	QueueDepth    int    `json:"queue_depth"`     // current outbound queue length
+	LastError     string `json:"last_error"`      // empty string when none
 	LastEventUnix int64  `json:"last_event_unix"` // unix seconds; 0 if never
 	Notes         string `json:"notes,omitempty"` // optional free-form context
 }
@@ -45,15 +45,15 @@ type MonitoringSource struct {
 // may be merged by callers (streaming collectors EPS cap path; see streaming_run_collector.go).
 func (m MonitoringSource) ToMap() map[string]any {
 	out := map[string]any{
-		"name":             m.Name,
-		"os":               m.OS,
-		"source":           m.Source,
-		"status":           m.Status,
-		"eps_in":           m.EPSIn,
-		"eps_out":          m.EPSOut,
-		"dropped":          m.Dropped,
-		"queue_depth":      m.QueueDepth,
-		"last_event_unix":  m.LastEventUnix,
+		"name":            m.Name,
+		"os":              m.OS,
+		"source":          m.Source,
+		"status":          m.Status,
+		"eps_in":          m.EPSIn,
+		"eps_out":         m.EPSOut,
+		"dropped":         m.Dropped,
+		"queue_depth":     m.QueueDepth,
+		"last_event_unix": m.LastEventUnix,
 	}
 	if m.LastError != "" {
 		out["last_error"] = m.LastError
@@ -141,6 +141,7 @@ func WriteMonitoringHealth(cfg config.Config, collectors []Collector, log *slog.
 		}
 		sources = append(sources, snap)
 	}
+	sources = collapseMonitoringSourcesByName(sources)
 	sources = AppendSyntheticKernelAbsentIfNeeded(cfg, sources)
 	out := map[string]any{
 		"schema_version": MonitoringHealthSchemaVersion,
@@ -170,4 +171,50 @@ func WriteMonitoringHealth(cfg config.Config, collectors []Collector, log *slog.
 	if err := os.WriteFile(path, b, 0o644); err != nil && log != nil {
 		log.Debug("monitoring health write", "error", err)
 	}
+}
+
+func collapseMonitoringSourcesByName(in []map[string]any) []map[string]any {
+	if len(in) <= 1 {
+		return in
+	}
+	out := make([]map[string]any, 0, len(in))
+	byName := make(map[string]int, len(in))
+	for _, src := range in {
+		name, _ := src["name"].(string)
+		if name == "" {
+			out = append(out, src)
+			continue
+		}
+		if idx, exists := byName[name]; !exists {
+			byName[name] = len(out)
+			out = append(out, src)
+			continue
+		} else {
+			out[idx] = preferMonitoringSource(out[idx], src)
+		}
+	}
+	return out
+}
+
+func preferMonitoringSource(current, next map[string]any) map[string]any {
+	currStatus, _ := current["status"].(string)
+	nextStatus, _ := next["status"].(string)
+	rank := func(s string) int {
+		switch s {
+		case "healthy":
+			return 4
+		case "degraded":
+			return 3
+		case "unavailable":
+			return 2
+		case "absent":
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(nextStatus) > rank(currStatus) {
+		return next
+	}
+	return current
 }

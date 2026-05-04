@@ -16,7 +16,7 @@ type fakeHealthyCollector struct {
 	snap map[string]any
 }
 
-func (f *fakeHealthyCollector) Name() string                                { return f.name }
+func (f *fakeHealthyCollector) Name() string                                     { return f.name }
 func (f *fakeHealthyCollector) Collect(ctx context.Context) ([]Telemetry, error) { return nil, nil }
 func (f *fakeHealthyCollector) ExportMonitoringHealth() map[string]any {
 	return f.snap
@@ -112,5 +112,28 @@ func TestWriteMonitoringHealth_SyntheticKernelWhenTierNoCollector(t *testing.T) 
 	}
 	if kernelRow["status"] != "absent" {
 		t.Fatalf("kernel status=%v want absent", kernelRow["status"])
+	}
+}
+
+func TestCollapseMonitoringSourcesByName_PrefersHealthierStatus(t *testing.T) {
+	in := []map[string]any{
+		MonitoringSource{Name: "dns", Source: "none", Status: "unavailable"}.ToMap(),
+		MonitoringSource{Name: "dns", Source: "journal_systemd_dns", Status: "healthy"}.ToMap(),
+	}
+	got := collapseMonitoringSourcesByName(in)
+	if len(got) != 1 {
+		t.Fatalf("len=%d want 1", len(got))
+	}
+	name, _ := got[0]["name"].(string)
+	if name != "dns" {
+		t.Fatalf("name=%q", name)
+	}
+	status, _ := got[0]["status"].(string)
+	if status != "healthy" {
+		t.Fatalf("status=%q want healthy", status)
+	}
+	source, _ := got[0]["source"].(string)
+	if source != "journal_systemd_dns" {
+		t.Fatalf("source=%q want journal_systemd_dns", source)
 	}
 }
