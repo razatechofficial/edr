@@ -30,7 +30,9 @@ func extendWindowsEvtCollectors(cols []Collector, cfg config.Config, endpointID 
 	cols = append(cols, sm, ps)
 	if cfg.Monitoring.DnsClientETWWindows {
 		dns := NewDnsClientEVTSource(endpointID, dd)
-		cols = append(cols, newStreamingRunCollector("dns_client_etw", 256, cfg.Monitoring.StreamMaxEPS, dns.Run, dns.ExportMonitoringHealth))
+		// Canonical pillar name is "dns"; source-specific identity is retained
+		// in source/notes within ExportMonitoringHealth.
+		cols = append(cols, newStreamingRunCollector("dns", 256, cfg.Monitoring.StreamMaxEPS, dns.Run, dns.ExportMonitoringHealth))
 	}
 	return cols
 }

@@ -22,7 +22,7 @@ type DNSCollector struct {
 	endpointID string
 	hostname   string
 	logPath    string
-	sourceKind string // "syslog_tail" | "journal_systemd"
+	sourceKind string // "syslog_tail" | "journal_systemd" | "unconfigured" | "unsupported_goos"
 	mu         sync.Mutex
 	events     []Telemetry
 	cancel     context.CancelFunc
@@ -34,26 +34,32 @@ type DNSCollector struct {
 
 func NewDNSCollector(endpointID string, cfg config.Config) *DNSCollector {
 	hostname, _ := os.Hostname()
-	if cfg.Monitoring.DnsJournalSystemd && runtime.GOOS == "linux" && systemdJournalEligible() && journalctlBinPresent() {
-		return &DNSCollector{
-			endpointID: endpointID,
-			hostname:   hostname,
-			logPath:    "journal://systemd-resolved",
-			sourceKind: "journal_systemd",
-			seen:       make(map[string]time.Time),
-		}
-	}
-	logPath := dnsLogPath(cfg)
-	if logPath == "" {
-		return nil
-	}
-	return &DNSCollector{
+	base := &DNSCollector{
 		endpointID: endpointID,
 		hostname:   hostname,
-		logPath:    logPath,
-		sourceKind: "syslog_tail",
 		seen:       make(map[string]time.Time),
 	}
+	if cfg.Monitoring.DnsJournalSystemd && runtime.GOOS == "linux" && systemdJournalEligible() && journalctlBinPresent() {
+		base.logPath = "journal://systemd-resolved"
+		base.sourceKind = "journal_systemd"
+		return base
+	}
+	if logPath := dnsLogPath(cfg); logPath != "" {
+		base.logPath = logPath
+		base.sourceKind = "syslog_tail"
+		return base
+	}
+	// Linux/macOS: always attach a DNS collector so health explains absence (no silent nil).
+	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+		base.sourceKind = "unconfigured"
+		return base
+	}
+	// Rare GOOS: surface explicit DNS absence for observability symmetry.
+	if runtime.GOOS != "windows" {
+		base.sourceKind = "unsupported_goos"
+		return base
+	}
+	return nil
 }
 
 func systemdJournalEligible() bool {
@@ -105,32 +111,72 @@ func (dc *DNSCollector) Collect(_ context.Context) ([]Telemetry, error) {
 
 // ExportMonitoringHealth surfaces DNS log tailing stats.
 func (dc *DNSCollector) ExportMonitoringHealth() map[string]any {
-	src := MonitoringSource{
-		Name:    "dns",
-		OS:      runtime.GOOS,
-		Status:  "healthy",
-		EPSOut:  dc.emitted.Load(),
-		Dropped: dc.dropped.Load(),
-	}
+	out := dc.emitted.Load()
+	dropped := dc.dropped.Load()
 	switch dc.sourceKind {
+	case "unsupported_goos":
+		return MonitoringSource{
+			Name:      "dns",
+			OS:        runtime.GOOS,
+			Source:    "tier_minimal_noop",
+			Status:    "absent",
+			LastError: "dns collector not implemented for this GOOS tier",
+			EPSOut:    out,
+			Dropped:   dropped,
+		}.ToMap()
+	case "unconfigured":
+		last := "no DNS syslog path found; enable monitoring.dns_journal_systemd (Linux) or provide resolvable syslog paths"
+		if runtime.GOOS == "darwin" {
+			last = "no DNS syslog paths; use monitoring.darwin_unified_log_dns / darwin_log_stream_dns_alt or darwin_dns_extra_log_paths"
+		}
+		return MonitoringSource{
+			Name:      "dns",
+			OS:        runtime.GOOS,
+			Source:    "none",
+			Status:    "unavailable",
+			LastError: last,
+			EPSOut:    out,
+			Dropped:   dropped,
+		}.ToMap()
 	case "journal_systemd":
-		src.Source = "journal_systemd_dns"
+		return MonitoringSource{
+			Name:    "dns",
+			OS:      runtime.GOOS,
+			Source:  "journal_systemd_dns",
+			Status:  "healthy",
+			EPSOut:  out,
+			Dropped: dropped,
+		}.ToMap()
 	default:
-		src.Source = "syslog_tail"
+		src := MonitoringSource{
+			Name:    "dns",
+			OS:      runtime.GOOS,
+			Source:  "syslog_tail",
+			Status:  "healthy",
+			EPSOut:  out,
+			Dropped: dropped,
+			Notes:   dc.logPath,
+		}
+		if dc.logPath == "" {
+			src.Status = "unavailable"
+			src.LastError = "no DNS log path"
+		}
+		return src.ToMap()
 	}
-	if dc.logPath == "" {
-		src.Status = "unavailable"
-		src.LastError = "no DNS log path detected"
-	}
-	return src.ToMap()
 }
 
 func (dc *DNSCollector) Start(ctx context.Context) error {
+	if dc.sourceKind == "unconfigured" || dc.sourceKind == "unsupported_goos" {
+		return nil
+	}
 	ctx, dc.cancel = context.WithCancel(ctx)
 	switch dc.sourceKind {
 	case "journal_systemd":
 		go dc.journalTailLoop(ctx)
 	default:
+		if dc.logPath == "" {
+			return nil
+		}
 		go dc.tailLoop(ctx)
 	}
 	return nil
