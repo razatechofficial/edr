@@ -150,6 +150,19 @@ func (r *streamingRunCollector) ExportMonitoringHealth() map[string]any {
 		}.ToMap()
 		return merged
 	}
+	// Collector contract: the collector name is canonical for pillar identity.
+	// This lets wrapper names (e.g. Windows DNS stream mapped to "dns") stay
+	// consistent even when the underlying source health uses a legacy label.
+	merged["name"] = r.name
+	if _, ok := merged["os"]; !ok {
+		merged["os"] = runtime.GOOS
+	}
+	if _, ok := merged["status"]; !ok {
+		merged["status"] = "healthy"
+	}
+	if _, ok := merged["source"]; !ok {
+		merged["source"] = "streaming"
+	}
 	merged["queue_depth"] = depth
 	merged["dropped"] = dropped
 	if rl := r.rateDropCount.Load(); rl > 0 {
