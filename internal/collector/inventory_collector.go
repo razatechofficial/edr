@@ -63,13 +63,7 @@ func (i *InventoryCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 				sum["inventory_snapshot_path"] = snapPath
 			}
 		}
-		if IsRegulatedMonitoring(i.cfg) && i.cfg.Monitoring.InventoryStrictListenerAttribution && runtime.GOOS == "linux" {
-			a, _ := sum["inventory_listener_attribution"].(string)
-			if a == "count_only" || a == "unavailable" || a == "" {
-				i.strictNote = "regulated inventory_strict_listener_attribution: insufficient listener process attribution (got " + a + ")"
-			}
-		}
-		if IsRegulatedMonitoring(i.cfg) && i.cfg.Monitoring.InventoryStrictListenerAttribution && runtime.GOOS == "windows" {
+		if IsRegulatedMonitoring(i.cfg) && i.cfg.Monitoring.InventoryStrictListenerAttribution {
 			a, _ := sum["inventory_listener_attribution"].(string)
 			if a == "count_only" || a == "unavailable" || a == "" {
 				i.strictNote = "regulated inventory_strict_listener_attribution: insufficient listener process attribution (got " + a + ")"
