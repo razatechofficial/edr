@@ -13,7 +13,15 @@ import (
 )
 
 // MonitoringHealthSchemaVersion increments when monitoring_health.json semantics change materially.
-const MonitoringHealthSchemaVersion = 1
+const MonitoringHealthSchemaVersion = 2
+
+// Kernel-tier monitoring_health extras (schema v2+) may include tamper-adjacent counters:
+//   - ebpf_program_missing_events (Linux)
+//   - etw_session_recover_attempts (Windows)
+//   - tamper_esf_auth_denials (macOS ESF, when policy denies)
+//
+// All phases should prefer a normalized `tamper` object in kernel source rows:
+//   tamper.component, tamper.posture, tamper.signals
 
 // ExportMonitoringHealth is implemented by collectors that publish driver- or
 // source-level statistics (eBPF/ETW/ESF ring depth, EPS, drops, last error).
@@ -39,6 +47,15 @@ type MonitoringSource struct {
 	LastError     string `json:"last_error"`      // empty string when none
 	LastEventUnix int64  `json:"last_event_unix"` // unix seconds; 0 if never
 	Notes         string `json:"notes,omitempty"` // optional free-form context
+
+	// Kernel tier / ring buffer (schema v2+).
+	RingBytesUsed     uint64  `json:"ring_bytes_used,omitempty"`
+	RingCapacityBytes uint64  `json:"ring_capacity_bytes,omitempty"`
+	RingBacklogPct    float64 `json:"ring_backlog_pct,omitempty"`
+	// ETW/ESF ingest queues (callback → worker).
+	IngestQueueDepth int    `json:"ingest_queue_depth,omitempty"`
+	IngestQueueCap   int    `json:"ingest_queue_cap,omitempty"`
+	IngestDropped    uint64 `json:"ingest_dropped,omitempty"`
 }
 
 // ToMap renders the record into the loose map[string]any shape used by
@@ -62,6 +79,24 @@ func (m MonitoringSource) ToMap() map[string]any {
 	if m.Notes != "" {
 		out["notes"] = m.Notes
 	}
+	if m.RingBytesUsed > 0 {
+		out["ring_bytes_used"] = m.RingBytesUsed
+	}
+	if m.RingCapacityBytes > 0 {
+		out["ring_capacity_bytes"] = m.RingCapacityBytes
+	}
+	if m.RingBacklogPct > 0 {
+		out["ring_backlog_pct"] = m.RingBacklogPct
+	}
+	if m.IngestQueueDepth > 0 {
+		out["ingest_queue_depth"] = m.IngestQueueDepth
+	}
+	if m.IngestQueueCap > 0 {
+		out["ingest_queue_cap"] = m.IngestQueueCap
+	}
+	if m.IngestDropped > 0 {
+		out["ingest_dropped"] = m.IngestDropped
+	}
 	return out
 }
 
@@ -81,6 +116,24 @@ func KernelHealthMap(backend string, driverStats, ringBufStats any, extras map[s
 		src[k] = v
 	}
 	return src
+}
+
+// MergeTamperHealth normalizes anti-tamper posture/signals under one key.
+func MergeTamperHealth(extras map[string]any, component string, posture map[string]any, signals map[string]any) map[string]any {
+	if extras == nil {
+		extras = map[string]any{}
+	}
+	t := map[string]any{
+		"component": component,
+	}
+	if len(posture) > 0 {
+		t["posture"] = posture
+	}
+	if len(signals) > 0 {
+		t["signals"] = signals
+	}
+	extras["tamper"] = t
+	return extras
 }
 
 // AppendSyntheticKernelAbsentIfNeeded appends name=kernel, status=absent when WantKernelTier
