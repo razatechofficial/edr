@@ -17,13 +17,13 @@ func pickRareOrPrimaryAuth(cfg config.Config, endpointID string, tracker *Lineag
 func pickRareOrPrimaryAuthFromPaths(cfg config.Config, endpointID string, _ *LineageTracker, candidates []string) Collector {
 	for _, p := range candidates {
 		if authPathReadable(p) {
-			return NewAuthCollectorWithLogPath(endpointID, cfg.Agent.DataDir, p)
+			return NewRareAuthCollector(endpointID, p)
 		}
 	}
 	if ac := NewAuthCollector(endpointID, cfg.Agent.DataDir); ac != nil && ac.logPath != "" {
 		return ac
 	}
-	return NewAuthStubCollector(endpointID)
+	return NewRareAuthCollector(endpointID, "/var/log/messages")
 }
 
 func authPathReadable(p string) bool {
