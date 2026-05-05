@@ -26,6 +26,7 @@ var (
 	modiphlpapiWin              = windows.NewLazySystemDLL("iphlpapi.dll")
 	procGetExtendedTcpTableWin  = modiphlpapiWin.NewProc("GetExtendedTcpTable")
 	procGetExtendedTcp6TableWin = modiphlpapiWin.NewProc("GetExtendedTcp6Table")
+	procGetExtendedUdpTableWin  = modiphlpapiWin.NewProc("GetExtendedUdpTable")
 )
 
 func mibPortFromDWORD(dw uint32) int {
@@ -92,6 +93,62 @@ func getExtendedTcp6Buf() ([]byte, error) {
 	return buf, nil
 }
 
+func getExtendedUDPTableAF(af uintptr) ([]byte, error) {
+	var size uint32
+	r0, _, _ := procGetExtendedUdpTableWin.Call(0, uintptr(unsafe.Pointer(&size)), 1, af, 1, 0)
+	if errno := uintptrToMIBErr(r0); errno != nil && !errors.Is(errno, windows.ERROR_INSUFFICIENT_BUFFER) {
+		return nil, errno
+	}
+	if size == 0 {
+		size = 65536
+	}
+	buf := make([]byte, size)
+	r0, _, _ = procGetExtendedUdpTableWin.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 1, af, 1, 0)
+	if errno := uintptrToMIBErr(r0); errno != nil {
+		if errors.Is(errno, windows.ERROR_INSUFFICIENT_BUFFER) && int(size) > len(buf) {
+			buf = make([]byte, size)
+			r0, _, _ = procGetExtendedUdpTableWin.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 1, af, 1, 0)
+			if errno2 := uintptrToMIBErr(r0); errno2 != nil {
+				return nil, errno2
+			}
+		} else {
+			return nil, errno
+		}
+	}
+	if int(size) < len(buf) {
+		buf = buf[:size]
+	}
+	return buf, nil
+}
+
+func getExtendedUdp6Buf() ([]byte, error) {
+	var size uint32
+	r0, _, _ := procGetExtendedUdpTableWin.Call(0, uintptr(unsafe.Pointer(&size)), 1, uintptr(syscall.AF_INET6), 1, 0)
+	if errno := uintptrToMIBErr(r0); errno != nil && !errors.Is(errno, windows.ERROR_INSUFFICIENT_BUFFER) {
+		return nil, errno
+	}
+	if size == 0 {
+		size = 131072
+	}
+	buf := make([]byte, size)
+	r0, _, _ = procGetExtendedUdpTableWin.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 1, uintptr(syscall.AF_INET6), 1, 0)
+	if errno := uintptrToMIBErr(r0); errno != nil {
+		if errors.Is(errno, windows.ERROR_INSUFFICIENT_BUFFER) && int(size) > len(buf) {
+			buf = make([]byte, size)
+			r0, _, _ = procGetExtendedUdpTableWin.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 1, uintptr(syscall.AF_INET6), 1, 0)
+			if errno2 := uintptrToMIBErr(r0); errno2 != nil {
+				return nil, errno2
+			}
+		} else {
+			return nil, errno
+		}
+	}
+	if int(size) < len(buf) {
+		buf = buf[:size]
+	}
+	return buf, nil
+}
+
 func uintptrToMIBErr(r uintptr) error {
 	switch r {
 	case 0:
@@ -136,6 +193,20 @@ func windowsMIBTCPConnections(limit int) ([]connEntry, error) {
 		return out, nil
 	}
 	v4e(rows6)
+
+	// UDP coverage (owner-PID rows)
+	if len(out) < limit {
+		if ub4, err := getExtendedUDPTableAF(uintptr(syscall.AF_INET)); err == nil {
+			rowsu4, _ := mibUDPConnRowsIPv4(ub4, limit-len(out))
+			v4e(rowsu4)
+		}
+	}
+	if len(out) < limit {
+		if ub6, err := getExtendedUdp6Buf(); err == nil {
+			rowsu6, _ := mibUDPConnRowsIPv6(ub6, limit-len(out))
+			v4e(rowsu6)
+		}
+	}
 	return out, nil
 }
 
@@ -203,6 +274,61 @@ func mibTCPConnRowsIPv6(buf []byte, lim int) ([]connEntry, error) {
 			dstIP:   rip.String(),
 			dstPort: rp,
 			pid: int(binary.LittleEndian.Uint32(row[52:56])),
+		})
+	}
+	return out, nil
+}
+
+func mibUDPConnRowsIPv4(buf []byte, lim int) ([]connEntry, error) {
+	const rowSize = 12
+	out := make([]connEntry, 0, lim)
+	if len(buf) < 4 {
+		return out, nil
+	}
+	num := binary.LittleEndian.Uint32(buf[:4])
+	off := 4
+	for i := uint32(0); i < num && len(out) < lim; i++ {
+		if off+rowSize > len(buf) {
+			break
+		}
+		row := buf[off : off+rowSize]
+		off += rowSize
+		lp := mibPortFromDWORD(binary.LittleEndian.Uint32(row[4:8]))
+		out = append(out, connEntry{
+			proto:   "udp",
+			srcIP:   mibDwordToIPv4(binary.LittleEndian.Uint32(row[0:4])).String(),
+			srcPort: lp,
+			dstIP:   "0.0.0.0",
+			dstPort: 0,
+			pid:     int(binary.LittleEndian.Uint32(row[8:12])),
+		})
+	}
+	return out, nil
+}
+
+func mibUDPConnRowsIPv6(buf []byte, lim int) ([]connEntry, error) {
+	const rowSize = 28
+	out := make([]connEntry, 0, lim)
+	if len(buf) < 4 {
+		return out, nil
+	}
+	num := binary.LittleEndian.Uint32(buf[:4])
+	off := 4
+	for i := uint32(0); i < num && len(out) < lim; i++ {
+		if off+rowSize > len(buf) {
+			break
+		}
+		row := buf[off : off+rowSize]
+		off += rowSize
+		lp := mibPortFromDWORD(binary.LittleEndian.Uint32(row[20:24]))
+		lip := append(net.IP(nil), row[0:16]...)
+		out = append(out, connEntry{
+			proto:   "udp",
+			srcIP:   lip.String(),
+			srcPort: lp,
+			dstIP:   "::",
+			dstPort: 0,
+			pid:     int(binary.LittleEndian.Uint32(row[24:28])),
 		})
 	}
 	return out, nil
@@ -301,9 +427,8 @@ func (nc *NetworkCollector) windowsShouldPollUserlandNet() (poll bool, policy st
 	case "force":
 		return true, "force"
 	default:
-		if elev && wantK {
-			return false, "auto_skip_elevated_kernel"
-		}
+		_ = elev
+		_ = wantK
 		return true, "auto"
 	}
 }
