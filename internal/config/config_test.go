@@ -147,6 +147,18 @@ func TestValidateLoggingAndProfileModes(t *testing.T) {
 	}
 }
 
+func TestValidateMonitoringSecurityProfileModes(t *testing.T) {
+	cfg := Defaults()
+	cfg.Monitoring.SecurityProfile = "strict_complete"
+	if err := Validate(&cfg); err != nil {
+		t.Fatalf("strict_complete should validate: %v", err)
+	}
+	cfg.Monitoring.SecurityProfile = "invalid_mode"
+	if err := Validate(&cfg); err == nil {
+		t.Fatal("expected validation error for invalid monitoring.security_profile")
+	}
+}
+
 func TestValidateMLRequireRuntimeRequiresMLEnabled(t *testing.T) {
 	t.Parallel()
 	cfg := Defaults()
