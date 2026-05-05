@@ -28,7 +28,7 @@ func extendWindowsEvtCollectors(cols []Collector, cfg config.Config, endpointID 
 	ps := NewPowerShellDefenderSource(endpointID, host, dd)
 
 	cols = append(cols, sm, ps)
-	if cfg.Monitoring.DnsClientETWWindows {
+	if cfg.Monitoring.DnsClientETWWindows || IsRegulatedMonitoring(cfg) {
 		dns := NewDnsClientEVTSource(endpointID, dd)
 		// Canonical pillar name is "dns"; source-specific identity is retained
 		// in source/notes within ExportMonitoringHealth.
