@@ -22,6 +22,12 @@ func (f *fakeHealthyCollector) ExportMonitoringHealth() map[string]any {
 	return f.snap
 }
 
+func TestMonitoringHealthSchemaVersion_Current(t *testing.T) {
+	if MonitoringHealthSchemaVersion != 2 {
+		t.Fatalf("update golden fixtures under cmd/agent/testdata/monitoring_health when bumping schema (got %d)", MonitoringHealthSchemaVersion)
+	}
+}
+
 func TestMonitoringSource_ToMapStableShape(t *testing.T) {
 	src := MonitoringSource{
 		Name:          "process",
