@@ -39,11 +39,13 @@ type FanotifySource struct {
 
 	emitted atomic.Uint64
 	errs    atomic.Pointer[string]
+
+	fileDedupe *LinuxFileDeduper
 }
 
 // NewFanotifySource constructs a source that will watch the given mount
 // points (or "/" when empty).
-func NewFanotifySource(endpointID, hostname string, tracker *LineageTracker, mounts []string) *FanotifySource {
+func NewFanotifySource(endpointID, hostname string, tracker *LineageTracker, mounts []string, dedupe *LinuxFileDeduper) *FanotifySource {
 	if hostname == "" {
 		if h, err := os.Hostname(); err == nil {
 			hostname = h
@@ -60,6 +62,7 @@ func NewFanotifySource(endpointID, hostname string, tracker *LineageTracker, mou
 		tracker:    tracker,
 		mounts:     mounts,
 		fd:         -1,
+		fileDedupe: dedupe,
 	}
 }
 
@@ -177,6 +180,10 @@ func (f *FanotifySource) parseAndDispatch(ctx context.Context, data []byte, sink
 			Path:      path,
 			Operation: op,
 		}
+		if fe.Path != "" && f.fileDedupe != nil && !f.fileDedupe.Allow(fe.Path) {
+			data = data[eventLen:]
+			continue
+		}
 		if sink.Send(ctx, Telemetry{File: fe}) {
 			f.emitted.Add(1)
 		}
@@ -212,6 +219,9 @@ func (f *FanotifySource) ExportMonitoringHealth() map[string]any {
 	if errPtr := f.errs.Load(); errPtr != nil && *errPtr != "" {
 		src.LastError = *errPtr
 		src.Status = "degraded"
+	}
+	if f.fileDedupe != nil {
+		src.Notes = fmt.Sprintf("file_dedupe_skipped=%d", f.fileDedupe.Skipped())
 	}
 	return src.ToMap()
 }
