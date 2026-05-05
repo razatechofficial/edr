@@ -264,3 +264,21 @@ func TestRingBufferTryReadEmpty(t *testing.T) {
 		t.Errorf("expected nil data on empty buffer, got %q", data)
 	}
 }
+
+func TestRingBufferStats_BacklogPct(t *testing.T) {
+	t.Parallel()
+	rb := NewRingBuffer(1024)
+	if err := rb.Write([]byte("payload")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	st := rb.Stats()
+	if st.BytesUsed == 0 {
+		t.Fatal("expected non-zero BytesUsed")
+	}
+	if st.BacklogPct <= 0 || st.BacklogPct > 100 {
+		t.Fatalf("BacklogPct=%v want (0,100]", st.BacklogPct)
+	}
+	if st.Capacity == 0 {
+		t.Fatal("capacity not set")
+	}
+}
