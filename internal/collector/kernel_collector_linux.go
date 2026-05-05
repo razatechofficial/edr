@@ -10,12 +10,14 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/kernel"
 	"github.com/razatechofficial/edr/internal/schema"
+	"github.com/razatechofficial/edr/internal/selfprotect"
 	"github.com/razatechofficial/edr/internal/telemetryenrich"
 )
 
@@ -79,7 +81,23 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if kc == nil || kc.driver == nil || kc.buf == nil {
 		return nil
 	}
-	return KernelHealthMap("ebpf", kc.driver.Stats(), kc.buf.Stats(), nil)
+	extras := map[string]any{
+		"bpf_pin_path_requested": strings.TrimSpace(kc.cfg.Monitoring.LinuxBPFPinPath),
+	}
+	if ld := kc.driver.LastLoadDiagnostics(); ld != "" {
+		extras["bpf_load_diag"] = ld
+	}
+	rs := kc.buf.Stats()
+	extras["ring_bytes_used"] = rs.BytesUsed
+	extras["ring_capacity_bytes"] = rs.Capacity
+	extras["ring_backlog_pct"] = rs.BacklogPct
+	tamperSignals := map[string]any{}
+	for k, v := range kc.driver.TamperMetrics() {
+		extras[k] = v
+		tamperSignals[k] = v
+	}
+	extras = MergeTamperHealth(extras, "linux_kernel_monitoring", selfprotect.AntiDebugPosture(), tamperSignals)
+	return KernelHealthMap("ebpf", kc.driver.Stats(), kc.buf.Stats(), extras)
 }
 
 func (kc *KernelCollector) Name() string { return "kernel" }
@@ -88,6 +106,7 @@ func (kc *KernelCollector) Name() string { return "kernel" }
 // buffer into the internal queue.
 func (kc *KernelCollector) Start(ctx context.Context) error {
 	ctx, kc.cancel = context.WithCancel(ctx)
+	kc.driver.SetBPFPinPath(kc.cfg.Monitoring.LinuxBPFPinPath)
 	if err := kc.driver.Start(ctx, kc.buf); err != nil {
 		return err
 	}
