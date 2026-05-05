@@ -299,6 +299,53 @@ func TestRunMonitoringValidation_KernelAbsentFailsWhenRequireKernelTrue(t *testi
 	findFailedName(t, rep.Assertions, "source.kernel")
 }
 
+func TestRunMonitoringValidation_StrictCompleteDropsFail(t *testing.T) {
+	dir := t.TempDir()
+	defs := config.Defaults()
+	cfg := &defs
+	cfg.Agent.DataDir = dir
+	cfg.Monitoring.SecurityProfile = "strict_complete"
+	want := perOSExpectedSources(cfg)
+	if len(want) == 0 {
+		t.Skip("no expected sources")
+	}
+	sources := make([]map[string]any, 0, len(want))
+	for _, name := range want {
+		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
+	}
+	sources[0]["dropped"] = float64(1)
+	writeMonitoringHealthFixture(t, dir, 42, sources)
+	rep := runMonitoringValidation(context.Background(), cfg)
+	if rep.Failed == 0 {
+		t.Fatal("expected strict_complete to fail on dropped events")
+	}
+}
+
+func TestRunMonitoringValidation_StrictCompleteRejectsPlaceholderSources(t *testing.T) {
+	dir := t.TempDir()
+	defs := config.Defaults()
+	cfg := &defs
+	cfg.Agent.DataDir = dir
+	cfg.Monitoring.SecurityProfile = "strict_complete"
+	want := perOSExpectedSources(cfg)
+	if len(want) == 0 {
+		t.Skip("no expected sources")
+	}
+	sources := make([]map[string]any, 0, len(want))
+	for _, name := range want {
+		sources = append(sources, map[string]any{
+			"name":   name,
+			"status": "healthy",
+			"source": "contract_backend",
+		})
+	}
+	writeMonitoringHealthFixture(t, dir, 42, sources)
+	rep := runMonitoringValidation(context.Background(), cfg)
+	if rep.Failed == 0 {
+		t.Fatal("expected strict_complete to fail on placeholder source backends")
+	}
+}
+
 func TestMonitoringValidation_SoakSmoke(t *testing.T) {
 	if os.Getenv("EDR_SOAK_MONITORING") == "" {
 		t.Skip("set EDR_SOAK_MONITORING=1 to run monitoring soak smoke")
@@ -320,6 +367,21 @@ func TestMonitoringValidation_SoakSmoke(t *testing.T) {
 	rep := runMonitoringValidation(context.Background(), cfg)
 	if rep.Failed != 0 {
 		t.Fatalf("soak smoke validation failed: %#v", rep.Assertions)
+	}
+}
+
+func TestAssertStrictNoPlaceholderSources_AllowsApprovedEquivalentSources(t *testing.T) {
+	defs := config.Defaults()
+	cfg := &defs
+	cfg.Monitoring.SecurityProfile = "strict_complete"
+
+	out := assertStrictNoPlaceholderSources([]map[string]any{
+		{"name": "kernel", "source": "darwin_userland_log_stream"},
+		{"name": "kernel", "source": "rare_userland_kernel_stream"},
+		{"name": "registry", "source": "rare_registry_probe"},
+	}, cfg)
+	if len(out) != 0 {
+		t.Fatalf("expected no strict placeholder failures for approved equivalent sources, got=%v", out)
 	}
 }
 
