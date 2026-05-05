@@ -114,13 +114,16 @@ func runMonitoringValidation(ctx context.Context, cfg *config.Config) Monitoring
 		assertSourcesPresent(rep.Sources, expected, cfg)...,
 	)
 	rep.Assertions = append(rep.Assertions,
-		assertNoDrops(rep.Sources)...,
+		assertNoDrops(rep.Sources, cfg)...,
 	)
 	rep.Assertions = append(rep.Assertions,
 		assertWindowsNetworkContract(rep.Sources)...,
 	)
 	rep.Assertions = append(rep.Assertions,
 		assertHeapBudget(rep.HeapAllocMiB)...,
+	)
+	rep.Assertions = append(rep.Assertions,
+		assertStrictNoPlaceholderSources(rep.Sources, cfg)...,
 	)
 
 	for _, a := range rep.Assertions {
@@ -178,6 +181,9 @@ func assertHealthSchemaVersion(snap map[string]any) []monitoringAssertion {
 // Kernel is asserted only when config requests kernel-tier monitoring (mirrors
 // DefaultCollectors + monitoring doctor conditional checks).
 func perOSExpectedSources(cfg *config.Config) []string {
+	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.Monitoring.SecurityProfile), "strict_complete") {
+		return collector.StrictMandatorySources(*cfg)
+	}
 	wantK := wantMonitoringKernelTier(cfg)
 	osName := runtime.GOOS
 	switch osName {
@@ -232,6 +238,7 @@ func assertSourcesPresent(sources []map[string]any, expected []string, cfg *conf
 		}
 	}
 	requireK := cfg != nil && cfg.Monitoring.RequireKernel
+	strictComplete := cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.Monitoring.SecurityProfile), "strict_complete")
 	out := make([]monitoringAssertion, 0, len(expected))
 	for _, want := range expected {
 		st, present := have[want]
@@ -244,28 +251,30 @@ func assertSourcesPresent(sources []map[string]any, expected []string, cfg *conf
 			})
 		case st == "absent":
 			fail := !(want == "kernel" && !requireK)
-			// Rare GOOS: network pillar may report absent when neither procfs nor netstat yields rows.
-			if want == "network" && st == "absent" {
-				switch osName := runtime.GOOS; osName {
-				case "linux", "darwin", "windows":
-				default:
-					fail = false
+			if !strictComplete {
+				// Rare GOOS: network pillar may report absent when neither procfs nor netstat yields rows.
+				if want == "network" && st == "absent" {
+					switch osName := runtime.GOOS; osName {
+					case "linux", "darwin", "windows":
+					default:
+						fail = false
+					}
 				}
-			}
-			// Rare GOOS: DNS pillar is observability-only (tier_minimal_noop).
-			if want == "dns" && st == "absent" {
-				switch runtime.GOOS {
-				case "linux", "darwin", "windows":
-				default:
-					fail = false
+				// Rare GOOS: DNS pillar may report absent in relaxed profile.
+				if want == "dns" && st == "absent" {
+					switch runtime.GOOS {
+					case "linux", "darwin", "windows":
+					default:
+						fail = false
+					}
 				}
-			}
-			// Rare GOOS: auth may remain stub/absent when no log source is available.
-			if want == "auth" && st == "absent" {
-				switch runtime.GOOS {
-				case "linux", "darwin", "windows":
-				default:
-					fail = false
+				// Rare GOOS: auth may remain stub/absent when no log source is available.
+				if want == "auth" && st == "absent" {
+					switch runtime.GOOS {
+					case "linux", "darwin", "windows":
+					default:
+						fail = false
+					}
 				}
 			}
 			out = append(out, monitoringAssertion{
@@ -289,7 +298,8 @@ func assertSourcesPresent(sources []map[string]any, expected []string, cfg *conf
 	return out
 }
 
-func assertNoDrops(sources []map[string]any) []monitoringAssertion {
+func assertNoDrops(sources []map[string]any, cfg *config.Config) []monitoringAssertion {
+	strict := cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.Monitoring.SecurityProfile), "strict_complete")
 	var out []monitoringAssertion
 	for _, src := range sources {
 		name, _ := src["name"].(string)
@@ -298,14 +308,14 @@ func assertNoDrops(sources []map[string]any) []monitoringAssertion {
 			out = append(out, monitoringAssertion{
 				Name:   "drops." + name,
 				Detail: fmt.Sprintf("dropped=%.0f (idle should be 0)", dropped),
-				Failed: false, // soft-fail: surface but do not block the suite
+				Failed: strict,
 			})
 		}
 		if rl := rateLimitedPositive(src["rate_limited_drops"]); rl > 0 {
 			out = append(out, monitoringAssertion{
 				Name:   "rate_limit_drops." + name,
 				Detail: fmt.Sprintf("rate_limited_drops=%.0f (stream_max_eps)", rl),
-				Failed: false,
+				Failed: strict,
 			})
 		}
 	}
@@ -325,11 +335,11 @@ func assertWindowsNetworkContract(sources []map[string]any) []monitoringAssertio
 		notes, _ := src["notes"].(string)
 		lowerNotes := strings.ToLower(notes)
 		switch source {
-		case "iphlpapi_extended_tcp":
-			ok := strings.Contains(lowerNotes, "tcp-only")
+		case "iphlpapi_extended_net", "iphlpapi_extended_tcp":
+			ok := strings.Contains(lowerNotes, "tcp+udp coverage") || strings.Contains(lowerNotes, "tcp-only")
 			return []monitoringAssertion{{
 				Name:   "source.network.contract",
-				Detail: fmt.Sprintf("source=%s tcp_only_note=%v", source, ok),
+				Detail: fmt.Sprintf("source=%s network_coverage_note=%v", source, ok),
 				Failed: !ok,
 			}}
 		case "etw_sysmon_delegate":
@@ -375,6 +385,45 @@ func assertHeapBudget(heapMiB uint64) []monitoringAssertion {
 		Name:   "heap_alloc_mib",
 		Detail: fmt.Sprintf("%d MiB (budget %d)", heapMiB, budget),
 	}}
+}
+
+func assertStrictNoPlaceholderSources(sources []map[string]any, cfg *config.Config) []monitoringAssertion {
+	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.Monitoring.SecurityProfile), "strict_complete") {
+		return nil
+	}
+	var out []monitoringAssertion
+	for _, s := range sources {
+		name, _ := s["name"].(string)
+		src, _ := s["source"].(string)
+		l := strings.ToLower(src)
+		if isApprovedStrictEquivalentSource(name, l) {
+			continue
+		}
+		if strings.Contains(l, "contract") || strings.Contains(l, "snapshot") || strings.Contains(l, "placeholder") {
+			out = append(out, monitoringAssertion{
+				Name:   "source_impl." + name,
+				Detail: "placeholder source=" + src,
+				Failed: true,
+			})
+		}
+	}
+	return out
+}
+
+func isApprovedStrictEquivalentSource(name, src string) bool {
+	// Darwin no-cgo/nosec intentionally uses a userland-equivalent kernel tier.
+	if name == "kernel" && src == "darwin_userland_log_stream" {
+		return true
+	}
+	// Rare GOOS kernel tier may be implemented as bounded userland-equivalent stream.
+	if name == "kernel" && src == "rare_userland_kernel_stream" {
+		return true
+	}
+	// Rare GOOS registry pillar uses deterministic host state probes.
+	if name == "registry" && src == "rare_registry_probe" {
+		return true
+	}
+	return false
 }
 
 // writeMonitoringReport persists the assertion outcome next to the validation
