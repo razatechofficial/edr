@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -171,6 +172,12 @@ type EBPFDriver struct {
 	features  linuxFeatureSet
 
 	bpfObjectPath string // optional override; empty uses bpfObjectPathDefault
+	bpfPinPath    string // optional bpffs pin directory for maps
+
+	loadDiagMu sync.RWMutex
+	loadDiag   string // last ebpf load / verifier diagnostic (best-effort)
+
+	tamperEvents atomic.Uint64 // ebpf watchdog "program missing" signals
 }
 
 type linuxFeatureSet struct {
@@ -192,6 +199,45 @@ func NewEBPFDriver(agentID string, objectPathOverride string) (*EBPFDriver, erro
 		policy:        DefaultPolicy(),
 		bpfObjectPath: objectPathOverride,
 	}, nil
+}
+
+// SetBPFPinPath configures bpffs pinning for map objects (call before Start).
+func (d *EBPFDriver) SetBPFPinPath(path string) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	d.bpfPinPath = strings.TrimSpace(path)
+	d.mu.Unlock()
+}
+
+// LastLoadDiagnostics returns the most recent collection attach diagnostic text (verifier/kernel loader).
+func (d *EBPFDriver) LastLoadDiagnostics() string {
+	if d == nil {
+		return ""
+	}
+	d.loadDiagMu.RLock()
+	defer d.loadDiagMu.RUnlock()
+	return d.loadDiag
+}
+
+// TamperMetrics surfaces anti-tamper counters consumed by monitoring_health.json.
+func (d *EBPFDriver) TamperMetrics() map[string]any {
+	if d == nil {
+		return nil
+	}
+	return map[string]any{
+		"ebpf_program_missing_events": d.tamperEvents.Load(),
+	}
+}
+
+func (d *EBPFDriver) setLoadDiag(msg string) {
+	if d == nil {
+		return
+	}
+	d.loadDiagMu.Lock()
+	d.loadDiag = msg
+	d.loadDiagMu.Unlock()
 }
 
 // Name returns the driver identifier.
@@ -225,13 +271,35 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 
 	spec, err := d.loadCollection()
 	if err != nil {
+		d.setLoadDiag(err.Error())
 		return fmt.Errorf("loading ebpf collection: %w", err)
 	}
 
-	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{})
+	d.mu.RLock()
+	pinPath := d.bpfPinPath
+	d.mu.RUnlock()
+	if pinPath != "" {
+		if mkErr := os.MkdirAll(pinPath, 0o755); mkErr != nil {
+			d.captureVerifierDiag(mkErr)
+			return fmt.Errorf("bpffs pin path mkdir %s: %w", pinPath, mkErr)
+		}
+	}
+
+	opts := ebpf.CollectionOptions{
+		Programs: ebpf.ProgramOptions{
+			LogLevel: ebpf.LogLevelBranch,
+		},
+	}
+	if pinPath != "" {
+		opts.Maps.PinPath = pinPath
+	}
+
+	coll, err := ebpf.NewCollectionWithOptions(spec, opts)
 	if err != nil {
+		d.captureVerifierDiag(err)
 		return fmt.Errorf("creating ebpf collection: %w", err)
 	}
+	d.setLoadDiag("")
 	d.coll = coll
 
 	if err := d.attachTracepoints(); err != nil {
@@ -321,6 +389,18 @@ func (d *EBPFDriver) cleanup() {
 		d.coll.Close()
 		d.coll = nil
 	}
+}
+
+func (d *EBPFDriver) captureVerifierDiag(err error) {
+	if err == nil {
+		return
+	}
+	var ve *ebpf.VerifierError
+	if errors.As(err, &ve) {
+		d.setLoadDiag(ve.Error())
+		return
+	}
+	d.setLoadDiag(err.Error())
 }
 
 func (d *EBPFDriver) resolvedBPFObjectPath() string {

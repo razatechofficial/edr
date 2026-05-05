@@ -52,6 +52,7 @@ func (d *EBPFDriver) watchdogLoop(ctx context.Context) {
 }
 
 func (d *EBPFDriver) emitTamperEvent(progID uint32) {
+	d.tamperEvents.Add(1)
 	env := map[string]interface{}{
 		"type": "process",
 		"timestamp": time.Now().UTC(),
