@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
@@ -141,7 +142,9 @@ func WriteMonitoringHealth(cfg config.Config, collectors []Collector, log *slog.
 		}
 		sources = append(sources, snap)
 	}
-	sources = collapseMonitoringSourcesByName(sources)
+	if !strings.EqualFold(strings.TrimSpace(cfg.Monitoring.SecurityProfile), "strict_complete") {
+		sources = collapseMonitoringSourcesByName(sources)
+	}
 	sources = AppendSyntheticKernelAbsentIfNeeded(cfg, sources)
 	out := map[string]any{
 		"schema_version": MonitoringHealthSchemaVersion,
