@@ -26,6 +26,9 @@ type KernelCollector struct {
 	mu     sync.Mutex
 	events []Telemetry
 	cancel context.CancelFunc
+
+	neCtl    *kernel.NetworkExtensionCtl
+	revProbe *kernel.ESFRevocationProbe
 }
 
 // NewKernelCollector starts the ESF driver when running as root.
@@ -45,6 +48,8 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		hostname:   host,
 		cfg:        cfg,
 		users:      users,
+		neCtl:      kernel.NewNetworkExtensionCtl(),
+		revProbe:   kernel.NewESFRevocationProbe(),
 	}
 }
 
@@ -53,7 +58,22 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if kc == nil || kc.driver == nil || kc.buf == nil {
 		return nil
 	}
-	return KernelHealthMap("esf", kc.driver.Stats(), kc.buf.Stats(), nil)
+	extras := map[string]any{
+		"esf_auth":       kc.driver.AuthHealth(),
+		"ne_ctl":         kc.neCtl.Health(),
+		"esf_revocation": kc.revProbe.Health(),
+	}
+	rs := kc.buf.Stats()
+	extras["ring_bytes_used"] = rs.BytesUsed
+	extras["ring_capacity_bytes"] = rs.Capacity
+	extras["ring_backlog_pct"] = rs.BacklogPct
+	extras["esf_operator_mute_prefixes"] = len(kc.cfg.Monitoring.ESFMutePathPrefixes)
+	if ah := kc.driver.AuthHealth(); ah != nil {
+		if v, ok := ah["auth_denials"].(uint64); ok && v > 0 {
+			extras["tamper_esf_auth_denials"] = v
+		}
+	}
+	return KernelHealthMap("esf", kc.driver.Stats(), kc.buf.Stats(), extras)
 }
 
 func (kc *KernelCollector) Name() string { return "kernel" }
@@ -63,9 +83,12 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	pol := kernel.DefaultPolicy()
 	pol.MutePaths = append(kernel.DefaultESFMutePathPrefixes(), kc.cfg.Monitoring.ESFMutePathPrefixes...)
 	_ = kc.driver.SetPolicy(pol)
+	_ = kc.neCtl.Start()
 	if err := kc.driver.Start(ctx, kc.buf); err != nil {
+		kc.neCtl.Stop()
 		return err
 	}
+	go kc.revProbe.Run(ctx)
 	go kc.readLoop(ctx)
 	return nil
 }
@@ -82,6 +105,7 @@ func (kc *KernelCollector) Stop() {
 	if kc.cancel != nil {
 		kc.cancel()
 	}
+	kc.neCtl.Stop()
 	_ = kc.driver.Stop()
 }
 

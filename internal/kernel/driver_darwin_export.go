@@ -138,7 +138,9 @@ func goESFAuthCallback(eventType C.int, pid C.int, comm *C.char, pathStr *C.char
 	commStr := safeGoString(comm)
 
 	if decision, ok := d.cache.get(pathKey); ok {
+		d.authCacheHits.Add(1)
 		if decision == AuthDeny {
+			d.authDenials.Add(1)
 			return 1
 		}
 		return 0
@@ -170,10 +172,12 @@ func goESFAuthCallback(eventType C.int, pid C.int, comm *C.char, pathStr *C.char
 	case r := <-ch:
 		d.cache.set(pathKey, r.decision)
 		if r.decision == AuthDeny {
+			d.authDenials.Add(1)
 			return 1
 		}
 		return 0
 	case <-time.After(d.authTimeout):
+		d.authTimeouts.Add(1)
 		d.cache.set(pathKey, AuthAllow)
 		return 0
 	}
