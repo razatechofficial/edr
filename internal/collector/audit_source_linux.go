@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -41,6 +43,10 @@ type AuditSource struct {
 
 	pendingMu sync.Mutex
 	pending   map[string]*auditSyscallScratch // SYSCALL rows until PATH correlates (FIM who-data).
+
+	fileDedupe          *LinuxFileDeduper
+	managedRules        bool
+	managedRulesErr     atomic.Pointer[string]
 }
 
 type auditSyscallScratch struct {
@@ -61,7 +67,7 @@ type auditPacket struct {
 }
 
 // NewAuditSource constructs an audit netlink consumer.
-func NewAuditSource(endpointID, hostname string, tracker *LineageTracker) *AuditSource {
+func NewAuditSource(endpointID, hostname string, tracker *LineageTracker, dedupe *LinuxFileDeduper, managedRules bool) *AuditSource {
 	if hostname == "" {
 		if h, err := os.Hostname(); err == nil {
 			hostname = h
@@ -70,11 +76,13 @@ func NewAuditSource(endpointID, hostname string, tracker *LineageTracker) *Audit
 		}
 	}
 	return &AuditSource{
-		endpointID: endpointID,
-		hostname:   hostname,
-		tracker:    tracker,
-		fd:         -1,
-		pending:    make(map[string]*auditSyscallScratch),
+		endpointID:   endpointID,
+		hostname:     hostname,
+		tracker:      tracker,
+		fd:           -1,
+		pending:      make(map[string]*auditSyscallScratch),
+		fileDedupe:   dedupe,
+		managedRules: managedRules,
 	}
 }
 
@@ -100,6 +108,29 @@ func (a *AuditSource) Start() error {
 	}
 	a.fd = fd
 	a.started = true
+	if a.managedRules {
+		if err := a.installManagedAuditProbe(); err != nil {
+			msg := err.Error()
+			a.managedRulesErr.Store(&msg)
+		}
+	}
+	return nil
+}
+
+func (a *AuditSource) installManagedAuditProbe() error {
+	dir := "/var/lib/edr"
+	path := filepath.Join(dir, ".audit_managed_probe")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("managed audit mkdir: %w", err)
+	}
+	if err := os.WriteFile(path, []byte("edr-managed-audit-probe\n"), 0o644); err != nil {
+		return fmt.Errorf("managed audit probe file: %w", err)
+	}
+	cmd := exec.Command("auditctl", "-w", path, "-p", "wa", "-k", "edr_managed")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("auditctl: %w: %s", err, strings.TrimSpace(string(out)))
+	}
 	return nil
 }
 
@@ -160,6 +191,9 @@ func (a *AuditSource) parseAndDispatch(ctx context.Context, data []byte, sink *S
 		body := string(data[16:p.Length])
 		ev := a.parseAuditBody(p.Type, body)
 		if ev != nil {
+			if ev.File != nil && a.fileDedupe != nil && !a.fileDedupe.Allow(ev.File.Path) {
+				continue
+			}
 			if sink.Send(ctx, *ev) {
 				a.emitted.Add(1)
 			}
@@ -373,6 +407,22 @@ func (a *AuditSource) ExportMonitoringHealth() map[string]any {
 	if errPtr := a.errs.Load(); errPtr != nil && *errPtr != "" {
 		src.LastError = *errPtr
 		src.Status = "degraded"
+	}
+	var notes []string
+	if a.managedRules {
+		notes = append(notes, "managed_audit_probe=on")
+		if errPtr := a.managedRulesErr.Load(); errPtr != nil && *errPtr != "" {
+			notes = append(notes, "managed_audit_err="+*errPtr)
+			if src.Status == "healthy" {
+				src.Status = "degraded"
+			}
+		}
+	}
+	if a.fileDedupe != nil {
+		notes = append(notes, fmt.Sprintf("file_dedupe_skipped=%d", a.fileDedupe.Skipped()))
+	}
+	if len(notes) > 0 {
+		src.Notes = strings.Join(notes, "; ")
 	}
 	return src.ToMap()
 }

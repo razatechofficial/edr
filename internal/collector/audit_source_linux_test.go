@@ -16,7 +16,7 @@ func Test_parseAuditMsgSerial(t *testing.T) {
 }
 
 func TestAuditSource_parseAuditBody_syscallPathCorrelates(t *testing.T) {
-	a := NewAuditSource("ep1", "host1", nil)
+	a := NewAuditSource("ep1", "host1", nil, nil, false)
 
 	syscallBody := `type=SYSCALL msg=audit(1743524401.123:789): arch=c000003e syscall=257 success=yes exit=3 pid=4242 uid=1000 euid=1000 comm="cat" exe="/bin/cat"`
 	pathBody := `type=PATH msg=audit(1743524401.123:789): item=0 name="/tmp/secret" nametype=NORMAL`
