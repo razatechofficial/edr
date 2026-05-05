@@ -32,5 +32,8 @@ func (k *kernelCapabilityProbeCollector) ExportMonitoringHealth() map[string]any
 	if !cap.RunningAsRoot {
 		reason = "not_elevated"
 	}
-	return kernelTierCapabilityHealth("capability_probe", cap, reason)
+	m := kernelTierCapabilityHealth("capability_probe", cap, reason)
+	m["status"] = "degraded"
+	m["last_error"] = reason
+	return m
 }
