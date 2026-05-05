@@ -178,10 +178,10 @@ func exportOtherPlatformNetworkHealth(nc *NetworkCollector) map[string]any {
 	case "lsof_poll":
 		src.Source = "lsof_poll"
 	default:
-		src.Source = "none"
-		src.Status = "absent"
+		src.Source = "probe_chain"
+		src.Status = "degraded"
 		src.LastError = "no_connection_rows"
-		src.Notes = "no procfs/ss/netstat/lsof rows on this tick (rare GOOS); see probes_attempted"
+		src.Notes = "rare GOOS probe chain returned no rows this tick; see probes_attempted"
 	}
 	m := src.ToMap()
 	nc.otherProbesMu.Lock()
