@@ -3,6 +3,7 @@ package collector
 import (
 	"bufio"
 	"context"
+	"bytes"
 	"math"
 	"os"
 	"os/exec"
@@ -30,6 +31,9 @@ type DNSCollector struct {
 
 	emitted atomic.Uint64
 	dropped atomic.Uint64
+
+	rareProbes  []string
+	rareWinning string
 }
 
 func NewDNSCollector(endpointID string, cfg config.Config) *DNSCollector {
@@ -54,9 +58,21 @@ func NewDNSCollector(endpointID string, cfg config.Config) *DNSCollector {
 		base.sourceKind = "unconfigured"
 		return base
 	}
-	// Rare GOOS: surface explicit DNS absence for observability symmetry.
+	// Rare GOOS: use a full probe ladder (file tail, then command poll) before degrading.
 	if runtime.GOOS != "windows" {
-		base.sourceKind = "unsupported_goos"
+		path, probes, winner := probeRareDNSSource(cfg.Monitoring.DarwinDNSExtraLogPaths)
+		base.rareProbes = probes
+		base.rareWinning = winner
+		if path != "" {
+			base.logPath = path
+			base.sourceKind = "syslog_tail"
+			return base
+		}
+		if winner == "command_poll" {
+			base.sourceKind = "command_poll"
+			return base
+		}
+		base.sourceKind = "unconfigured"
 		return base
 	}
 	return nil
@@ -114,26 +130,30 @@ func (dc *DNSCollector) ExportMonitoringHealth() map[string]any {
 	out := dc.emitted.Load()
 	dropped := dc.dropped.Load()
 	switch dc.sourceKind {
-	case "unsupported_goos":
-		return MonitoringSource{
-			Name:      "dns",
-			OS:        runtime.GOOS,
-			Source:    "tier_minimal_noop",
-			Status:    "absent",
-			LastError: "dns collector not implemented for this GOOS tier",
-			EPSOut:    out,
-			Dropped:   dropped,
+	case "command_poll":
+		src := MonitoringSource{
+			Name:    "dns",
+			OS:      runtime.GOOS,
+			Source:  "rare_command_dns_poll",
+			Status:  "healthy",
+			EPSOut:  out,
+			Dropped: dropped,
 		}.ToMap()
+		src["probes_attempted"] = append([]string(nil), dc.rareProbes...)
+		src["winning_probe"] = dc.rareWinning
+		return src
 	case "unconfigured":
 		last := "no DNS syslog path found; enable monitoring.dns_journal_systemd (Linux) or provide resolvable syslog paths"
 		if runtime.GOOS == "darwin" {
 			last = "no DNS syslog paths; use monitoring.darwin_unified_log_dns / darwin_log_stream_dns_alt or darwin_dns_extra_log_paths"
+		} else if runtime.GOOS != "linux" {
+			last = "no DNS source configured for this GOOS; configure log tail paths or platform DNS source"
 		}
 		return MonitoringSource{
 			Name:      "dns",
 			OS:        runtime.GOOS,
-			Source:    "none",
-			Status:    "unavailable",
+			Source:    "resolver_fallback",
+			Status:    "degraded",
 			LastError: last,
 			EPSOut:    out,
 			Dropped:   dropped,
@@ -173,6 +193,8 @@ func (dc *DNSCollector) Start(ctx context.Context) error {
 	switch dc.sourceKind {
 	case "journal_systemd":
 		go dc.journalTailLoop(ctx)
+	case "command_poll":
+		go dc.rareCommandPollLoop(ctx)
 	default:
 		if dc.logPath == "" {
 			return nil
@@ -180,6 +202,49 @@ func (dc *DNSCollector) Start(ctx context.Context) error {
 		go dc.tailLoop(ctx)
 	}
 	return nil
+}
+
+func (dc *DNSCollector) rareCommandPollLoop(ctx context.Context) {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			lines := runRareDNSProbeCommand(ctx)
+			if len(lines) == 0 {
+				continue
+			}
+			for _, line := range lines {
+				if ev, ok := dc.parseDNSLine(line); ok {
+					dc.mu.Lock()
+					dc.events = append(dc.events, ev)
+					dc.mu.Unlock()
+				}
+			}
+		}
+	}
+}
+
+func runRareDNSProbeCommand(ctx context.Context) []string {
+	cmd := exec.CommandContext(ctx, "sh", "-c", "journalctl -n 200 --no-pager 2>/dev/null || tail -n 200 /var/log/messages /var/log/syslog 2>/dev/null")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return nil
+	}
+	if len(out) > 256*1024 {
+		out = out[:256*1024]
+	}
+	raw := bytes.Split(out, []byte{'\n'})
+	lines := make([]string, 0, len(raw))
+	for _, b := range raw {
+		s := strings.TrimSpace(string(b))
+		if s != "" {
+			lines = append(lines, s)
+		}
+	}
+	return lines
 }
 
 func (dc *DNSCollector) journalTailLoop(ctx context.Context) {
