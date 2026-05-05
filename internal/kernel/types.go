@@ -59,6 +59,8 @@ func DefaultPolicy() EventPolicy {
 	}
 }
 
+// Sentinel errors for monitoring orchestration live in errors.go (ErrKernelUnavailable, etc.).
+//
 // Driver is the interface all platform-specific kernel drivers implement.
 type Driver interface {
 	// Start begins kernel event collection. Events are written to the ring buffer.
@@ -98,6 +100,9 @@ type DriverStats struct {
 	LastEventTime   time.Time
 	UptimeSeconds   float64
 	ErrorCount      uint64
+
+	// CollectionMode is OS/driver-specific (e.g. Windows ETW secure vs standard realtime).
+	CollectionMode string `json:"collection_mode,omitempty"`
 }
 
 // ETWProviderHealth records per-provider subscribe status (Windows ETW).

@@ -23,11 +23,12 @@ const (
 
 // RingBufferStats contains operational metrics for a ring buffer.
 type RingBufferStats struct {
-	Produced  uint64
-	Consumed  uint64
-	Dropped   uint64
-	BytesUsed uint64
-	Capacity  uint64
+	Produced    uint64  `json:"produced"`
+	Consumed    uint64  `json:"consumed"`
+	Dropped     uint64  `json:"dropped"`
+	BytesUsed   uint64  `json:"bytes_used"`
+	Capacity    uint64  `json:"capacity"`
+	BacklogPct  float64 `json:"backlog_pct"` // 0–100 utilization of byte capacity (wp-rp)/capacity
 }
 
 // RingBuffer is a lock-free single-producer multi-consumer byte ring buffer
@@ -205,12 +206,21 @@ func (rb *RingBuffer) TryRead() ([]byte, error) {
 func (rb *RingBuffer) Stats() RingBufferStats {
 	wp := rb.writePos.Load()
 	rp := rb.readPos.Load()
+	used := wp - rp
+	var pct float64
+	if rb.capacity > 0 {
+		pct = 100 * float64(used) / float64(rb.capacity)
+		if pct > 100 {
+			pct = 100
+		}
+	}
 	return RingBufferStats{
-		Produced:  rb.produced.Load(),
-		Consumed:  rb.consumed.Load(),
-		Dropped:   rb.dropped.Load(),
-		BytesUsed: wp - rp,
-		Capacity:  rb.capacity,
+		Produced:   rb.produced.Load(),
+		Consumed:   rb.consumed.Load(),
+		Dropped:    rb.dropped.Load(),
+		BytesUsed:  used,
+		Capacity:   rb.capacity,
+		BacklogPct: pct,
 	}
 }
 
