@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"runtime"
@@ -28,6 +29,11 @@ const (
 	processTraceModeEventRecord          = 0x10000000
 	invalidProcesstraceHandle            = ^uint64(0)
 	filetimeToUnixEpochDelta       int64 = 116444736000000000
+
+	defaultETWIngestDepth = 4096
+	maxETWUserDataCopy    = 64 * 1024
+	// EVENT_TRACE_SECURE_MODE — prefer tamper-resistant realtime delivery where supported.
+	eventTraceSecureMode = 0x80000000
 )
 
 var (
@@ -157,6 +163,13 @@ type etwEventRecord struct {
 	ExtendedData      uintptr
 	UserData          uintptr
 	UserContext       uintptr
+}
+
+// etwRecordCopy is a bounded copy of EVENT_RECORD safe to decode off the ETW callback thread.
+type etwRecordCopy struct {
+	EventHeader   etwEventHeader
+	BufferContext etwBufferContext
+	UserData      []byte
 }
 
 type etwSystemTime struct {
@@ -297,6 +310,8 @@ type etwSession struct {
 	traceHandle   uint64
 	active        atomic.Bool
 	wg            sync.WaitGroup
+
+	recoveryAttempted atomic.Bool
 }
 
 // ETWDriver implements Driver using Event Tracing for Windows.
@@ -324,6 +339,15 @@ type ETWDriver struct {
 	fileObjPath map[uint64]string
 	fileObjFIFO []uint64
 	fileObjCap  int
+
+	// Callback → worker handoff (non-blocking enqueue).
+	ingestCh      chan etwRecordCopy
+	ingestWg      sync.WaitGroup
+	ingestDropped atomic.Uint64
+
+	secureTrace atomic.Bool
+
+	sessionRecoverAttempts atomic.Uint64
 }
 
 // globalETW holds the active ETWDriver for the event record callback.
@@ -367,11 +391,32 @@ func (d *ETWDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	}
 
 	d.buf = buf
-	_, d.cancel = context.WithCancel(ctx)
+	childCtx, cancel := context.WithCancel(ctx)
+	d.cancel = cancel
+
+	d.ingestCh = make(chan etwRecordCopy, defaultETWIngestDepth)
+	d.ingestWg.Add(1)
+	go d.ingestLoop(childCtx)
 
 	if !globalETW.CompareAndSwap(nil, d) {
+		cancel()
+		d.ingestWg.Wait()
+		d.ingestCh = nil
 		return fmt.Errorf("another etw driver instance is already active")
 	}
+
+	startOK := false
+	defer func() {
+		if startOK {
+			return
+		}
+		globalETW.Store(nil)
+		cancel()
+		d.stopAllSessions()
+		d.sessions = nil
+		d.ingestWg.Wait()
+		d.ingestCh = nil
+	}()
 
 	d.provMu.Lock()
 	d.provHealth = nil
@@ -385,8 +430,6 @@ func (d *ETWDriver) Start(ctx context.Context, buf *RingBuffer) error {
 				d.recordProviderHealth(p.name, false, err.Error())
 				continue
 			}
-			d.stopAllSessions()
-			globalETW.Store(nil)
 			return fmt.Errorf("creating %s session: %w", p.name, err)
 		}
 		if err := d.openAndProcess(sess); err != nil {
@@ -395,8 +438,6 @@ func (d *ETWDriver) Start(ctx context.Context, buf *RingBuffer) error {
 				d.recordProviderHealth(p.name, false, err.Error())
 				continue
 			}
-			d.stopAllSessions()
-			globalETW.Store(nil)
 			return fmt.Errorf("opening %s trace: %w", p.name, err)
 		}
 		d.sessions = append(d.sessions, sess)
@@ -404,12 +445,13 @@ func (d *ETWDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	}
 
 	if len(d.sessions) == 0 {
-		globalETW.Store(nil)
 		return fmt.Errorf("no ETW sessions were started (check policy)")
 	}
 
 	d.startTime = time.Now()
 	d.running.Store(true)
+	startOK = true
+
 	d.mu.RLock()
 	wantTI := d.policy.ETWThreatIntel
 	d.mu.RUnlock()
@@ -427,10 +469,14 @@ func (d *ETWDriver) Stop() error {
 	if !d.running.CompareAndSwap(true, false) {
 		return nil
 	}
-	d.cancel()
-	d.stopAllSessions()
-	d.sessions = nil
 	globalETW.Store(nil)
+	if d.cancel != nil {
+		d.cancel()
+	}
+	d.stopAllSessions()
+	d.ingestWg.Wait()
+	d.sessions = nil
+	d.ingestCh = nil
 	return nil
 }
 
@@ -448,12 +494,41 @@ func (d *ETWDriver) Stats() DriverStats {
 	if !d.startTime.IsZero() {
 		uptime = time.Since(d.startTime).Seconds()
 	}
+	mode := ""
+	if d.secureTrace.Load() {
+		mode = "secure_etw"
+	} else if !d.startTime.IsZero() {
+		mode = "standard_etw"
+	}
 	return DriverStats{
 		EventsReceived:  d.received.Load(),
 		EventsDropped:   d.dropped.Load(),
 		EventsProcessed: d.processed.Load(),
 		UptimeSeconds:   uptime,
 		ErrorCount:      d.errors.Load(),
+		CollectionMode:  mode,
+	}
+}
+
+// TamperMetrics reports ETW lifecycle anomalies relevant to anti-tamper monitoring.
+func (d *ETWDriver) TamperMetrics() map[string]any {
+	if d == nil {
+		return nil
+	}
+	return map[string]any{
+		"etw_session_recover_attempts": d.sessionRecoverAttempts.Load(),
+	}
+}
+
+// IngestMetrics exposes ETW callback-queue telemetry for monitoring_health.json.
+func (d *ETWDriver) IngestMetrics() map[string]any {
+	if d == nil || d.ingestCh == nil {
+		return nil
+	}
+	return map[string]any{
+		"ingest_queue_depth": len(d.ingestCh),
+		"ingest_queue_cap":   cap(d.ingestCh),
+		"ingest_dropped":     d.ingestDropped.Load(),
 	}
 }
 
@@ -527,6 +602,19 @@ func (d *ETWDriver) createSession(name string, provider windows.GUID) (*etwSessi
 		return nil, fmt.Errorf("encoding session name: %w", err)
 	}
 
+	sess, errSecure := d.startRealtimeTraceSession(sessionName, nameUTF16, provider, name, true)
+	if errSecure == nil {
+		d.secureTrace.Store(true)
+		return sess, nil
+	}
+	sess, errStd := d.startRealtimeTraceSession(sessionName, nameUTF16, provider, name, false)
+	if errStd != nil {
+		return nil, fmt.Errorf("StartTraceW secure=%v standard=%v", errSecure, errStd)
+	}
+	return sess, nil
+}
+
+func (d *ETWDriver) startRealtimeTraceSession(sessionName string, nameUTF16 *uint16, provider windows.GUID, providerName string, secure bool) (*etwSession, error) {
 	propSize := unsafe.Sizeof(etwTraceProperties{})
 	bufSize := propSize + uintptr(len(sessionName)+1)*2
 	buf := make([]byte, bufSize)
@@ -534,7 +622,11 @@ func (d *ETWDriver) createSession(name string, provider windows.GUID) (*etwSessi
 	props := (*etwTraceProperties)(unsafe.Pointer(&buf[0]))
 	props.Wnode.BufferSize = uint32(bufSize)
 	props.Wnode.Flags = wnodeFlagTracedGUID
-	props.LogFileMode = eventTraceRealTimeMode
+	mode := uint32(eventTraceRealTimeMode)
+	if secure {
+		mode |= eventTraceSecureMode
+	}
+	props.LogFileMode = mode
 	props.BufferSize = 64
 	props.MinimumBuffers = 16
 	props.MaximumBuffers = 64
@@ -573,7 +665,7 @@ func (d *ETWDriver) createSession(name string, provider windows.GUID) (*etwSessi
 		name:          sessionName,
 		nameUTF16:     nameUTF16,
 		provider:      provider,
-		providerName:  name,
+		providerName:  providerName,
 		sessionHandle: sessionHandle,
 	}, nil
 }
@@ -605,9 +697,60 @@ func (d *ETWDriver) openAndProcess(s *etwSession) error {
 			0,
 		)
 		s.active.Store(false)
+		d.maybeRecoverETWSession(s)
 	}()
 
 	return nil
+}
+
+func (d *ETWDriver) ingestLoop(ctx context.Context) {
+	defer d.ingestWg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			for {
+				select {
+				case rec := <-d.ingestCh:
+					d.processCopiedRecord(&rec)
+				default:
+					return
+				}
+			}
+		case rec := <-d.ingestCh:
+			d.processCopiedRecord(&rec)
+		}
+	}
+}
+
+func (d *ETWDriver) processCopiedRecord(rec *etwRecordCopy) {
+	var syn etwEventRecord
+	syn.EventHeader = rec.EventHeader
+	syn.BufferContext = rec.BufferContext
+	syn.UserDataLength = uint16(len(rec.UserData))
+	if len(rec.UserData) > 0 {
+		syn.UserData = uintptr(unsafe.Pointer(&rec.UserData[0]))
+	}
+	d.handleEventRecord(&syn)
+}
+
+// maybeRecoverETWSession retries OpenTrace/ProcessTrace once after an unexpected session end.
+func (d *ETWDriver) maybeRecoverETWSession(s *etwSession) {
+	if s == nil || !d.running.Load() {
+		return
+	}
+	if !s.recoveryAttempted.CompareAndSwap(false, true) {
+		return
+	}
+	d.sessionRecoverAttempts.Add(1)
+	go func() {
+		time.Sleep(2 * time.Second)
+		if !d.running.Load() {
+			return
+		}
+		if err := d.openAndProcess(s); err != nil {
+			d.errors.Add(1)
+		}
+	}()
 }
 
 func (d *ETWDriver) stopAllSessions() {
@@ -641,12 +784,34 @@ func (d *ETWDriver) stopSession(s *etwSession) {
 
 func etwEventRecordCallback(eventRecord uintptr) uintptr {
 	d := globalETW.Load()
-	if d == nil {
+	if d == nil || d.ingestCh == nil {
 		return 0
 	}
 
-	record := (*etwEventRecord)(unsafe.Pointer(eventRecord))
-	d.handleEventRecord(record)
+	rec := (*etwEventRecord)(unsafe.Pointer(eventRecord))
+	n := int(rec.UserDataLength)
+	if n > maxETWUserDataCopy {
+		n = maxETWUserDataCopy
+	}
+	var ud []byte
+	if n > 0 && rec.UserData != 0 {
+		src := unsafe.Slice((*byte)(unsafe.Pointer(rec.UserData)), rec.UserDataLength)
+		if len(src) < n {
+			n = len(src)
+		}
+		ud = make([]byte, n)
+		copy(ud, src[:n])
+	}
+	copyRec := etwRecordCopy{
+		EventHeader:   rec.EventHeader,
+		BufferContext: rec.BufferContext,
+		UserData:      ud,
+	}
+	select {
+	case d.ingestCh <- copyRec:
+	default:
+		d.ingestDropped.Add(1)
+	}
 	return 0
 }
 
@@ -713,6 +878,9 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 	}
 	if err := d.buf.Write(data); err != nil {
 		d.dropped.Add(1)
+		if errors.Is(err, ErrBufferFull) {
+			d.errors.Add(1)
+		}
 		return
 	}
 	d.processed.Add(1)

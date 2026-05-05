@@ -29,6 +29,9 @@ type KernelCollector struct {
 	fimPrefixes []string // lowercased FIM path prefixes for file enrichment gate
 	selfPID     uint32
 
+	mfCtl  *kernel.MinifilterCtl
+	wfpCtl *kernel.WFPCtl
+
 	// registryPeer optionally suppresses RegistryCollector polling while
 	// Kernel-Registry ETW is active (see WireWindowsKernelRegistryETW).
 	registryPeer *RegistryCollector
@@ -77,6 +80,8 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		users:       users,
 		fimPrefixes: prefixes,
 		selfPID:     uint32(os.Getpid()),
+		mfCtl:       kernel.NewMinifilterCtl(strings.TrimSpace(cfg.Monitoring.WindowsMinifilterPort)),
+		wfpCtl:      kernel.NewWFPCtl(),
 	}
 }
 
@@ -100,6 +105,34 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if tih.Reason != "" {
 		extras["etw_threat_intel_reason"] = tih.Reason
 	}
+	rs := kc.buf.Stats()
+	extras["ring_bytes_used"] = rs.BytesUsed
+	extras["ring_capacity_bytes"] = rs.Capacity
+	extras["ring_backlog_pct"] = rs.BacklogPct
+	if im := kc.driver.IngestMetrics(); im != nil {
+		for k, v := range im {
+			extras[k] = v
+		}
+	}
+	if kc.wfpCtl != nil {
+		extras["wfp_ctl"] = kc.wfpCtl.Health()
+	}
+	if kc.mfCtl != nil {
+		extras["minifilter_ctl"] = kc.mfCtl.Health()
+	}
+	posture := kernel.WindowsCollectionPosture()
+	extras["windows_collection_posture"] = posture
+	tamperSignals := map[string]any{}
+	for k, v := range kc.driver.TamperMetrics() {
+		extras[k] = v
+		tamperSignals[k] = v
+	}
+	if ti := kc.driver.ThreatIntelTamperSignals(); ti != nil {
+		for k, v := range ti {
+			tamperSignals[k] = v
+		}
+	}
+	extras = MergeTamperHealth(extras, "windows_kernel_monitoring", posture, tamperSignals)
 	return KernelHealthMap("etw_kernel", kc.driver.Stats(), kc.buf.Stats(), extras)
 }
 
@@ -117,6 +150,12 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	pol.ETWThreatIntel = m.ETWThreatIntel
 	pol.KernelFileObjectCache = m.ETWKernelFileObjectCache
 	_ = kc.driver.SetPolicy(pol)
+	if kc.cfg.Monitoring.WindowsWFPCtlProbe && kc.wfpCtl != nil {
+		_ = kc.wfpCtl.Start()
+	}
+	if strings.TrimSpace(kc.cfg.Monitoring.WindowsMinifilterPort) != "" && kc.mfCtl != nil {
+		_ = kc.mfCtl.Start()
+	}
 	if err := kc.driver.Start(ctx, kc.buf); err != nil {
 		return err
 	}
@@ -141,6 +180,12 @@ func (kc *KernelCollector) Stop() {
 	}
 	if kc.registryPeer != nil {
 		kc.registryPeer.SetETWActive(false)
+	}
+	if kc.wfpCtl != nil {
+		kc.wfpCtl.Stop()
+	}
+	if kc.mfCtl != nil {
+		kc.mfCtl.Stop()
 	}
 	_ = kc.driver.Stop()
 }

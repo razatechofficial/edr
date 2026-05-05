@@ -21,6 +21,7 @@ type tiCapability struct {
 	ok     atomic.Bool
 	status atomic.Value // string
 	reason atomic.Value // string
+	degradedEvents atomic.Uint64
 }
 
 var threatIntelGUID = windows.GUID{
@@ -71,6 +72,9 @@ func (c *tiCapability) skipThreatIntelProbe(reason string) {
 func (c *tiCapability) setStatus(status, reason string) {
 	c.status.Store(status)
 	c.reason.Store(reason)
+	if strings.HasPrefix(status, "degraded") || status == "disabled" {
+		c.degradedEvents.Add(1)
+	}
 }
 
 func (c *tiCapability) getStatus() (string, string) {
@@ -157,6 +161,21 @@ func (d *ETWDriver) ThreatIntelHealthSnapshot() ThreatIntelHealth {
 		OK:     d.tiCap.ok.Load(),
 		Status: st,
 		Reason: rsn,
+	}
+}
+
+// ThreatIntelTamperSignals exports anti-tamper signals around TI availability.
+func (d *ETWDriver) ThreatIntelTamperSignals() map[string]any {
+	if d == nil {
+		return nil
+	}
+	st, rsn := d.tiCap.getStatus()
+	return map[string]any{
+		"ti_status":          st,
+		"ti_reason":          rsn,
+		"ti_ok":              d.tiCap.ok.Load(),
+		"ti_probed":          d.tiCap.probed.Load(),
+		"ti_degraded_events": d.tiCap.degradedEvents.Load(),
 	}
 }
 
