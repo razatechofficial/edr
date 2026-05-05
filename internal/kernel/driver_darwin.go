@@ -338,7 +338,7 @@ func DefaultESFMutePathPrefixes() []string {
 
 const (
 	defaultAuthCacheTTL = 5 * time.Minute
-	defaultAuthTimeout  = 30 * time.Second
+	defaultAuthTimeout  = 750 * time.Millisecond
 )
 
 // globalESF holds the active ESFDriver instance for C callback routing.
@@ -423,6 +423,10 @@ type ESFDriver struct {
 	processed atomic.Uint64
 	errors    atomic.Uint64
 	esfSeq    atomic.Uint64
+
+	authCacheHits atomic.Uint64
+	authTimeouts  atomic.Uint64
+	authDenials   atomic.Uint64
 }
 
 // NewESFDriver creates a new Endpoint Security Framework driver.
@@ -594,6 +598,19 @@ func (d *ESFDriver) Stats() DriverStats {
 		EventsProcessed: d.processed.Load(),
 		UptimeSeconds:   uptime,
 		ErrorCount:      d.errors.Load(),
+	}
+}
+
+// AuthHealth exposes authorization callback behavior for monitoring_health.json.
+func (d *ESFDriver) AuthHealth() map[string]any {
+	if d == nil {
+		return nil
+	}
+	return map[string]any{
+		"auth_timeout_ms":          int(d.authTimeout / time.Millisecond),
+		"auth_cache_hits":          d.authCacheHits.Load(),
+		"auth_timeout_fallbacks":   d.authTimeouts.Load(),
+		"auth_denials":             d.authDenials.Load(),
 	}
 }
 
