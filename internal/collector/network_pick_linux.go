@@ -27,11 +27,9 @@ func (c *linuxSocketNetworkCollector) ExportMonitoringHealth() map[string]any {
 }
 
 func chooseNetworkCollector(cfg config.Config, endpointID string, tracker *LineageTracker) Collector {
-	if cfg.Monitoring.LinuxPIDNetwork {
-		return newLinuxSocketNetworkCollector(endpointID, tracker)
-	}
-	if nc := NewNetworkCollector(endpointID, cfg); nc != nil {
-		return nc
-	}
-	return NewNetworkStubCollector(endpointID)
+	_ = cfg
+	// Linux now uses a single canonical network implementation:
+	// PID-attributed socket snapshots from SocketSource.
+	// Legacy /proc_net polling collector is no longer selected on Linux.
+	return newLinuxSocketNetworkCollector(endpointID, tracker)
 }

@@ -33,5 +33,10 @@ func (k *kernelCapabilityProbeCollector) ExportMonitoringHealth() map[string]any
 	if !cap.RunningAsRoot {
 		reason = "non_root"
 	}
-	return kernelTierCapabilityHealth("capability_probe", cap, reason)
+	m := kernelTierCapabilityHealth("capability_probe", cap, reason)
+	// Linux strict completeness treats probe-only kernel path as degraded
+	// readiness rather than an implementation absence.
+	m["status"] = "degraded"
+	m["last_error"] = reason
+	return m
 }
