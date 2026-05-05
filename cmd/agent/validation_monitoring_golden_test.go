@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 )
 
@@ -85,6 +87,13 @@ func TestMonitoringHealthGolden_Fixtures(t *testing.T) {
 			b, err := os.ReadFile(tc.fixture)
 			if err != nil {
 				t.Fatal(err)
+			}
+			var fixture map[string]any
+			if err := json.Unmarshal(b, &fixture); err != nil {
+				t.Fatalf("fixture %s invalid json: %v", tc.fixture, err)
+			}
+			if got, _ := fixture["schema_version"].(float64); int(got) != collector.MonitoringHealthSchemaVersion {
+				t.Fatalf("fixture %s schema_version=%v want %d", tc.fixture, fixture["schema_version"], collector.MonitoringHealthSchemaVersion)
 			}
 			if err := os.WriteFile(filepath.Join(dir, "monitoring_health.json"), b, 0o644); err != nil {
 				t.Fatal(err)
