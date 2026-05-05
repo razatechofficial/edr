@@ -160,6 +160,10 @@ func Validate(cfg *Config) error {
 		validateEnum(&errs, "monitoring.checklist_tier", cfg.Monitoring.ChecklistTier,
 			"userland", "kernel_hooks", "full_edr")
 	}
+	if cfg.Monitoring.SecurityProfile != "" {
+		validateEnum(&errs, "monitoring.security_profile", cfg.Monitoring.SecurityProfile,
+			"standard", "regulated", "strict_complete")
+	}
 
 	return errs.err()
 }

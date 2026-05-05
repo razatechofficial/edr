@@ -300,7 +300,9 @@ type Config struct {
 		KernelEnabled    bool     `yaml:"kernel_enabled" env:"EDR_MONITORING_KERNEL"`
 		FIMPaths         []string `yaml:"fim_paths"`
 		UserlandFallback bool     `yaml:"userland_fallback"`
-		// SecurityProfile standard (default) or regulated — regulated forbids pillar stubs and requires inventory.
+		// SecurityProfile standard (default), regulated, or strict_complete.
+		// regulated/strict_complete forbid pillar stubs and require inventory;
+		// strict_complete also requires all mandatory pillars to attach.
 		SecurityProfile string `yaml:"security_profile" env:"EDR_MONITORING_SECURITY_PROFILE"`
 		// InventoryEnabled collects L1 snapshots; implied true when SecurityProfile is regulated.
 		InventoryEnabled bool `yaml:"inventory_enabled" env:"EDR_MONITORING_INVENTORY"`
