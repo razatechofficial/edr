@@ -338,6 +338,10 @@ type Config struct {
 		ETWTaskScheduler    bool `yaml:"etw_task_scheduler"`
 		// ETWThreatIntel enables Microsoft-Windows-Threat-Intelligence probing (requires PPL/signing pipeline for production; default off).
 		ETWThreatIntel bool `yaml:"etw_threat_intel" env:"EDR_MONITORING_ETW_TI"`
+		// WindowsMinifilterPort is the FilterConnectCommunicationPort name (e.g. "\\EdrPort"); empty skips minifilter control-plane attach.
+		WindowsMinifilterPort string `yaml:"windows_minifilter_port" env:"EDR_MONITORING_WIN_MINIFILTER_PORT"`
+		// WindowsWFPCtlProbe opens the local WFP engine handle for monitoring health (elevated agents).
+		WindowsWFPCtlProbe bool `yaml:"windows_wfp_ctl_probe"`
 		// HealthSnapshotSec writes monitoring_health.json under data_dir when > 0.
 		HealthSnapshotSec int `yaml:"health_snapshot_sec"`
 		// RequireKernel, when true, makes monitoring validation fail if the kernel source is absent/unavailable when kernel tier is configured.
@@ -354,6 +358,12 @@ type Config struct {
 		LinuxFanotifyMounts []string `yaml:"linux_fanotify_mounts"`
 		// Linux: audit NETLINK listener (distinct health name linux_audit).
 		LinuxAuditNetlink bool `yaml:"linux_audit_netlink"`
+		// LinuxAuditManagedRules installs a tiny auditctl watch under /var/lib/edr for FIM correlation probes (feature-gated; requires auditctl + CAP_AUDIT_CONTROL).
+		LinuxAuditManagedRules bool `yaml:"linux_audit_managed_rules"`
+		// LinuxBPFPinPath pins eBPF maps under this bpffs path (empty = no pinning). Recommended: /sys/fs/bpf/edr_<agent> namespaced dir.
+		LinuxBPFPinPath string `yaml:"linux_bpf_pin_path" env:"EDR_MONITORING_BPF_PIN_PATH"`
+		// LinuxFileEventDedupeMs drops duplicate file telemetry paths across fanotify vs audit within this window (0 = disabled).
+		LinuxFileEventDedupeMs int `yaml:"linux_file_event_dedupe_ms"`
 		// Linux: sysfs USB attach/detach watcher.
 		LinuxUSBBridge bool `yaml:"linux_usb_hotplug"`
 
@@ -502,6 +512,7 @@ func Defaults() Config {
 	cfg.Monitoring.InventoryIntervalSec = 120
 	cfg.Monitoring.InventoryPersistSnapshots = true
 	cfg.Monitoring.ETWKernelFileObjectCache = true
+	cfg.Monitoring.WindowsWFPCtlProbe = true
 
 	cfg.Service.TickInterval = time.Second
 	cfg.LegacyResponse.MinKillScore = 90
