@@ -4,9 +4,11 @@ package collector
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -156,22 +158,26 @@ func (s *evtxLogTargetState) collect(endpointID, hostname, channel string) ([]Te
 			if !s.primed {
 				continue
 			}
-			ts := time.Now().UTC()
-			ev := schema.FileEvent{
-				BaseEvent: schema.BaseEvent{
-					SchemaVersion: schema.SchemaVersionV1,
-					EventType:     schema.EventFile,
-					EndpointID:    endpointID,
-					Timestamp:     ts,
-					Hostname:      hostname,
-					OS:            "windows",
-				},
-				Path:         channel,
-				Operation:    "log_evtx_xml",
-				ActorPID:     0,
-				BytesWritten: uint64(len(xmlText)),
+			if tel := mapLogTargetEventXML(endpointID, hostname, channel, xmlText); tel != nil {
+				out = append(out, *tel)
+			} else {
+				ts := time.Now().UTC()
+				ev := schema.FileEvent{
+					BaseEvent: schema.BaseEvent{
+						SchemaVersion: schema.SchemaVersionV1,
+						EventType:     schema.EventFile,
+						EndpointID:    endpointID,
+						Timestamp:     ts,
+						Hostname:      hostname,
+						OS:            "windows",
+					},
+					Path:         channel,
+					Operation:    "log_evtx_xml",
+					ActorPID:     0,
+					BytesWritten: uint64(len(xmlText)),
+				}
+				out = append(out, Telemetry{File: &ev})
 			}
-			out = append(out, Telemetry{File: &ev})
 			s.seenEvents++
 			if s.seenEvents%50 == 0 {
 				_ = s.saveBookmarkAtomic()
@@ -186,6 +192,25 @@ func (s *evtxLogTargetState) collect(endpointID, hostname, channel string) ([]Te
 		_ = s.saveBookmarkAtomic()
 	}
 	return out, nil
+}
+
+func mapLogTargetEventXML(endpointID, hostname, channel, xmlText string) *Telemetry {
+	var ev winEventXML
+	if err := xml.Unmarshal([]byte(xmlText), &ev); err != nil {
+		return nil
+	}
+	fields := evtFields(ev)
+	base := evtBase(endpointID, hostname, ev)
+	base.EventType = schema.EventProcess
+	pe := &schema.ProcessEvent{
+		BaseEvent:   base,
+		PID:         atoiSafe(firstNonEmpty(fields["ProcessId"], fields["Execution ProcessID"])),
+		ProcessName: "log_target_eventchannel",
+		ProcessPath: channel,
+		CommandLine: firstNonEmpty(fields["TaskName"], fields["ServiceName"], fields["CommandLine"], "event_id="+strconv.FormatUint(uint64(ev.System.EventID), 10)),
+		Tags:        []string{"log_target", "eventchannel", strings.ToLower(strings.ReplaceAll(channel, " ", "_"))},
+	}
+	return &Telemetry{Process: pe}
 }
 
 func renderEvtXML(h windows.Handle) (string, error) {
