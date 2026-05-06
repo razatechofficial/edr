@@ -159,6 +159,32 @@ func TestValidateMonitoringSecurityProfileModes(t *testing.T) {
 	}
 }
 
+func TestValidateMonitoringWindowsControlPlaneRequired(t *testing.T) {
+	cfg := Defaults()
+	cfg.Monitoring.WindowsControlPlaneRequired = true
+	cfg.Monitoring.WindowsWFPCtlProbe = false
+	cfg.Monitoring.WindowsMinifilterPort = ""
+	if err := Validate(&cfg); err == nil {
+		t.Fatal("expected validation error when windows_control_plane_required is true without WFP/minifilter settings")
+	}
+
+	cfg = Defaults()
+	cfg.Monitoring.WindowsControlPlaneRequired = true
+	cfg.Monitoring.WindowsWFPCtlProbe = true
+	cfg.Monitoring.WindowsServiceHardening = true
+	if err := Validate(&cfg); err != nil {
+		t.Fatalf("expected valid config when WFP probe enabled: %v", err)
+	}
+
+	cfg = Defaults()
+	cfg.Monitoring.WindowsControlPlaneRequired = true
+	cfg.Monitoring.WindowsWFPCtlProbe = true
+	cfg.Monitoring.WindowsServiceHardening = false
+	if err := Validate(&cfg); err == nil {
+		t.Fatal("expected validation error when control plane required without service hardening")
+	}
+}
+
 func TestValidateMLRequireRuntimeRequiresMLEnabled(t *testing.T) {
 	t.Parallel()
 	cfg := Defaults()

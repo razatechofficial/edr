@@ -310,14 +310,20 @@ type Config struct {
 		InventoryIntervalSec int `yaml:"inventory_interval_sec"`
 		// InventoryPersistSnapshots writes canonical JSON + SHA256 under agent data_dir for manager/delta workflows (G-L1-SYNC-lite).
 		InventoryPersistSnapshots bool `yaml:"inventory_persist_snapshots" env:"EDR_MONITORING_INVENTORY_PERSIST"`
+		// InventoryEmitDeltas writes inventory_delta.json when inventory snapshots change (agent-side artifact; see docs/monitoring_inventory_delta_protocol.md).
+		InventoryEmitDeltas bool `yaml:"inventory_emit_deltas"`
 		// InventoryStrictListenerAttribution, when true with regulated profile, marks inventory health degraded if listener attribution is count_only or unavailable (tier-1 scans).
 		InventoryStrictListenerAttribution bool `yaml:"inventory_strict_listener_attribution"`
 		// AdditionalLogTailPaths (optional) tails text files for supplementary logcollector-style coverage (G-L4-BREADTH).
 		AdditionalLogTailPaths []string `yaml:"additional_log_tail_paths"`
+		// LogTargets is a typed logcollector list (file, eventchannel, journald, command, full_command); see docs/monitoring_rollout_operational_guide.md.
+		LogTargets []LogTarget `yaml:"log_targets"`
 		// LogTailTelemetryMode: empty or none — health/read-only drain (default); file_events reserved for future capped FileEvent emission (see log_tail collector).
 		LogTailTelemetryMode string `yaml:"log_tail_telemetry_mode"`
 		// PostureEnabled opts into lightweight read-only posture probes (G-POSTURE); off by default.
 		PostureEnabled bool `yaml:"posture_enabled" env:"EDR_MONITORING_POSTURE"`
+		// PostureProbes selects optional rootcheck-lite probes (posture_suid_sweep, posture_hidden_pid, posture_hidden_port, posture_dev_walker).
+		PostureProbes []string `yaml:"posture_probes"`
 		// ETWKernelFileObjectCache (Windows) LRU cache FileObject→path for kernel file telemetry.
 		ETWKernelFileObjectCache bool `yaml:"etw_kernel_file_object_cache"`
 		// ETWRegulatedVerbose (Windows) enables WMI, PS script, pipes, BITS, Task Scheduler ETW together.
@@ -342,6 +348,14 @@ type Config struct {
 		WindowsMinifilterPort string `yaml:"windows_minifilter_port" env:"EDR_MONITORING_WIN_MINIFILTER_PORT"`
 		// WindowsWFPCtlProbe opens the local WFP engine handle for monitoring health (elevated agents).
 		WindowsWFPCtlProbe bool `yaml:"windows_wfp_ctl_probe"`
+		// WindowsControlPlaneRequired makes startup fail when requested WFP/minifilter control planes are unavailable.
+		WindowsControlPlaneRequired bool `yaml:"windows_control_plane_required"`
+		// WindowsServiceHardening applies SCM failure/recovery actions during service install (see service_hardening_posture.json).
+		WindowsServiceHardening bool `yaml:"windows_service_hardening"`
+		// WindowsServiceHardeningACL runs best-effort install-directory icacls when WindowsServiceHardening is true.
+		WindowsServiceHardeningACL bool `yaml:"windows_service_hardening_acl"`
+		// WindowsServiceLaunchProtected sets SERVICE_LAUNCH_PROTECTED (Windows Light) during install when hardening is enabled.
+		WindowsServiceLaunchProtected bool `yaml:"windows_service_launch_protected"`
 		// HealthSnapshotSec writes monitoring_health.json under data_dir when > 0.
 		HealthSnapshotSec int `yaml:"health_snapshot_sec"`
 		// RequireKernel, when true, makes monitoring validation fail if the kernel source is absent/unavailable when kernel tier is configured.
@@ -367,6 +381,8 @@ type Config struct {
 		// Linux: sysfs USB attach/detach watcher.
 		LinuxUSBBridge bool `yaml:"linux_usb_hotplug"`
 
+		// DarwinNEBundleID filters systemextensionsctl health parsing for this extension id (optional).
+		DarwinNEBundleID string `yaml:"darwin_ne_bundle_id"`
 		// Darwin: log stream DNS (health name dns_unified_log).
 		DarwinUnifiedLogDNS bool `yaml:"darwin_unified_log_dns"`
 		// Darwin: alternate unified-log DNS collector (dns_log_stream_alt health).
@@ -513,6 +529,10 @@ func Defaults() Config {
 	cfg.Monitoring.InventoryPersistSnapshots = true
 	cfg.Monitoring.ETWKernelFileObjectCache = true
 	cfg.Monitoring.WindowsWFPCtlProbe = true
+	cfg.Monitoring.WindowsControlPlaneRequired = false
+	cfg.Monitoring.WindowsServiceHardening = false
+		cfg.Monitoring.WindowsServiceHardeningACL = false
+		cfg.Monitoring.WindowsServiceLaunchProtected = false
 
 	cfg.Service.TickInterval = time.Second
 	cfg.LegacyResponse.MinKillScore = 90
