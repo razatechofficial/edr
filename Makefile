@@ -71,7 +71,7 @@ BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/l
 .PHONY: build-linux build-darwin build-windows build-darwin-nosec build-all
 .PHONY: bundle-enterprise build-installer-embedded
 .PHONY: ebpf ebpf-link ebpf-install bpf-version-check proto
-.PHONY: test test-collector test-detection test-response test-race monitoring-soak test-coverage
+.PHONY: test test-collector test-detection test-response test-race monitoring-soak test-coverage local-validate-monitoring diagnose-esf
 .PHONY: run-agent run-agent-ml test-edr-macos-lab
 .PHONY: test-bench
 .PHONY: vulncheck
@@ -241,6 +241,74 @@ test-race:
 monitoring-soak:
 	@echo "==> Monitoring layer soak (collector + agent CLI, race, nosec)"
 	EDR_SOAK_MONITORING=1 go test -race -count=1 -timeout 300s -tags nosec ./internal/collector/... ./cmd/agent/...
+
+local-validate-monitoring:
+	@echo "==> Local monitoring validation (auto fallback to nosec when ESF unavailable)"
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		ESF_SDK="$$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)/System/Library/Frameworks/EndpointSecurity.framework"; \
+		ESF_SYS="/System/Library/Frameworks/EndpointSecurity.framework"; \
+		ESF_OK=0; \
+		if [ -d "$$ESF_SYS" ] || [ -d "$$ESF_SDK" ]; then ESF_OK=1; fi; \
+		if [ $$ESF_OK -eq 1 ] && [ "$${CGO_ENABLED:-1}" != "0" ]; then \
+			echo "    ESF framework detected; running full local monitoring validation"; \
+			go test ./internal/collector/... ./internal/kernel/... ./cmd/agent/... -count=1 -timeout 180s; \
+			go test -tags nosec ./internal/kernel/... ./internal/collector/... -run 'TestReattach|TestWatchdog|TestNetworkExtension|TestESFRevocation|TestLinuxFileDeduper|TestEffectiveLogTargets|TestLogTargetsCollectorHealthRows|TestPersistInventoryRecordsAndMaybeDelta' -count=1; \
+		else \
+			if [ $$ESF_OK -ne 1 ]; then \
+				echo "    reason: EndpointSecurity.framework missing (checked $$ESF_SYS and $$ESF_SDK)"; \
+			fi; \
+			if [ "$${CGO_ENABLED:-1}" = "0" ]; then \
+				echo "    reason: CGO_ENABLED=0"; \
+			fi; \
+			echo "    using nosec fallback"; \
+			go test -tags nosec ./internal/collector/... ./internal/kernel/... ./cmd/agent/... -count=1 -timeout 180s; \
+			go test -tags nosec ./internal/kernel/... ./internal/collector/... -run 'TestReattach|TestWatchdog|TestNetworkExtension|TestESFRevocation|TestLinuxFileDeduper|TestEffectiveLogTargets|TestLogTargetsCollectorHealthRows|TestPersistInventoryRecordsAndMaybeDelta' -count=1; \
+		fi; \
+	else \
+		echo "    non-Darwin host; using nosec validation path"; \
+		go test -tags nosec ./internal/collector/... ./internal/kernel/... ./cmd/agent/... -count=1 -timeout 180s; \
+		go test -tags nosec ./internal/kernel/... ./internal/collector/... -run 'TestReattach|TestWatchdog|TestNetworkExtension|TestESFRevocation|TestLinuxFileDeduper|TestEffectiveLogTargets|TestLogTargetsCollectorHealthRows|TestPersistInventoryRecordsAndMaybeDelta' -count=1; \
+	fi
+
+diagnose-esf:
+	@echo "==> Diagnose EndpointSecurity toolchain readiness"
+	@if [ "$$(uname -s)" != "Darwin" ]; then \
+		echo "host_os=$$(uname -s)"; \
+		echo "result=non-darwin"; \
+		echo "recommended_mode=nosec"; \
+		exit 0; \
+	fi
+	@set -e; \
+	SDKROOT="$$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"; \
+	echo "sdkroot=$$SDKROOT"; \
+	echo "cgo_enabled=$${CGO_ENABLED:-unset}"; \
+	PROBE_C="$${TMPDIR:-/tmp}/es_probe.c"; \
+	PROBE_BIN="$${TMPDIR:-/tmp}/es_probe"; \
+	printf '%s\n' '#include <EndpointSecurity/EndpointSecurity.h>' 'int main(void) { return 0; }' >"$$PROBE_C"; \
+	HDR_OK=0; \
+	LINK_OK=0; \
+	if xcrun --sdk macosx clang -isysroot "$$SDKROOT" -fsyntax-only "$$PROBE_C" >/dev/null 2>&1; then \
+		HDR_OK=1; \
+	fi; \
+	if xcrun --sdk macosx clang -isysroot "$$SDKROOT" "$$PROBE_C" -framework EndpointSecurity -o "$$PROBE_BIN" >/dev/null 2>&1; then \
+		LINK_OK=1; \
+	fi; \
+	echo "header_probe=$$HDR_OK"; \
+	echo "link_probe=$$LINK_OK"; \
+	if [ $$LINK_OK -eq 1 ] && [ "$${CGO_ENABLED:-1}" != "0" ]; then \
+		echo "result=esf_link_ready"; \
+		echo "recommended_mode=full"; \
+	else \
+		echo "result=esf_link_unavailable"; \
+		if [ $$HDR_OK -eq 1 ] && [ $$LINK_OK -ne 1 ]; then \
+			echo "reason=headers_present_but_framework_unlinkable"; \
+		fi; \
+		if [ "$${CGO_ENABLED:-1}" = "0" ]; then \
+			echo "reason=cgo_disabled"; \
+		fi; \
+		echo "recommended_mode=nosec"; \
+	fi; \
+	rm -f "$$PROBE_C" "$$PROBE_BIN"
 
 test-coverage:
 	@echo "==> Running tests with coverage"

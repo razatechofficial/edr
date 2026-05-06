@@ -66,6 +66,16 @@ jobs:
       - name: Collector tests (no CGO / no ESF link)
         run: make test-collector
 
+      - name: Monitoring validation gates
+        run: |
+          go test -tags nosec ./cmd/agent -run 'TestMonitoringHealthGolden_Fixtures|TestMonitoringValidation_PlatformKernelContracts' -count=1
+          go test -tags nosec ./cmd/agent -run 'TestRunMonitoringValidation_.*|TestAssertStrictNoPlaceholderSources_.*' -count=1
+          go test -tags nosec ./internal/kernel/... ./internal/collector/... -run 'TestReattach|TestWatchdog|TestNetworkExtension|TestESFRevocation|TestLinuxFileDeduper|TestEffectiveLogTargets|TestLogTargetsCollectorHealthRows|TestPersistInventoryRecordsAndMaybeDelta' -count=1
+          go test -tags nosec ./internal/response/... -run 'TestDefaultExecutorCollectArtifacts' -count=1
+
+      - name: Windows driver stub (compile-test)
+        run: GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/kernel/...
+
       - name: Race detector
         run: make test-race
 

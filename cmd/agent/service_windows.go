@@ -5,7 +5,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/razatechofficial/edr/internal/config"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -13,6 +15,7 @@ import (
 
 const (
 	windowsServiceName = "EDRAgent"
+	windowsControlPlaneIntentPath = `C:\ProgramData\EDR Agent\control_plane.intent`
 )
 
 func installService() error {
@@ -46,7 +49,18 @@ func installService() error {
 	}
 	defer s.Close()
 	_ = eventlog.Remove(windowsServiceName)
-	return eventlog.InstallAsEventCreate(windowsServiceName, eventlog.Error|eventlog.Warning|eventlog.Info)
+	if err := eventlog.InstallAsEventCreate(windowsServiceName, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
+		return err
+	}
+	cfgPath := `C:\ProgramData\EDR Agent\config.yml`
+	var posture map[string]any
+	if c, err := config.Load(cfgPath); err == nil {
+		posture = applyWindowsServiceHardening(s, exePath, c)
+	} else {
+		posture = map[string]any{"applied": false, "reason": "config_unavailable", "error": err.Error()}
+	}
+	_ = writeServiceHardeningPosture(posture)
+	return installWindowsControlPlaneIntent()
 }
 
 func uninstallService() error {
@@ -65,5 +79,20 @@ func uninstallService() error {
 		return err
 	}
 	_ = eventlog.Remove(windowsServiceName)
+	_ = uninstallWindowsControlPlaneIntent()
+	return nil
+}
+
+func installWindowsControlPlaneIntent() error {
+	if err := os.MkdirAll(filepath.Dir(windowsControlPlaneIntentPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(windowsControlPlaneIntentPath, []byte("wfp=minimal\nminifilter=optional\n"), 0o644)
+}
+
+func uninstallWindowsControlPlaneIntent() error {
+	if err := os.Remove(windowsControlPlaneIntentPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return nil
 }
