@@ -103,6 +103,10 @@ type DriverStats struct {
 
 	// CollectionMode is OS/driver-specific (e.g. Windows ETW secure vs standard realtime).
 	CollectionMode string `json:"collection_mode,omitempty"`
+
+	// LostEvents / RealtimeBuffersLost are populated on Windows ETW (ControlTrace QUERY); zero elsewhere.
+	LostEvents              uint32 `json:"lost_events,omitempty"`
+	RealtimeBuffersLost     uint32 `json:"realtime_buffers_lost,omitempty"`
 }
 
 // ETWProviderHealth records per-provider subscribe status (Windows ETW).
