@@ -14,6 +14,8 @@ var (
 	ErrMinifilterDriverNotPresent  = errors.New("kernel: minifilter driver or communication port not available")
 	ErrWFPNotAvailable             = errors.New("kernel: Windows Filtering Platform engine or callouts not available")
 	ErrNetworkExtensionUnavailable = errors.New("kernel: macOS Network Extension provider not loaded")
+	// ErrControlPlaneTransient indicates a likely recoverable Windows control-plane failure (RPC/engine busy).
+	ErrControlPlaneTransient = errors.New("kernel: windows control plane transient failure")
 )
 
 // WrapDriverSessionLost annotates err as a session-loss failure for errors.Is checks.
