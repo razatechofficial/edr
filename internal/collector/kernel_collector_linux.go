@@ -49,10 +49,47 @@ type KernelCollector struct {
 	hostname   string
 	cfg        config.Config
 	users      *UsernameCache
+	fileDedupe *LinuxFileDeduper
+	lineage    *LineageTracker
 
 	mu     sync.Mutex
 	events []Telemetry
 	cancel context.CancelFunc
+}
+
+// AttachLinuxFileDedupe wires the shared Linux file-event deduper for health stats (optional).
+func (kc *KernelCollector) AttachLinuxFileDedupe(d *LinuxFileDeduper) {
+	if kc == nil {
+		return
+	}
+	kc.fileDedupe = d
+}
+
+// AttachLineageTracker enriches eBPF file events with process image/comm from the shared tracker.
+func (kc *KernelCollector) AttachLineageTracker(t *LineageTracker) {
+	if kc == nil {
+		return
+	}
+	kc.lineage = t
+}
+
+func (kc *KernelCollector) enrichFileLineage(fe *schema.FileEvent) {
+	if kc == nil || kc.lineage == nil || fe == nil || fe.ActorPID <= 0 {
+		return
+	}
+	e, ok := kc.lineage.Get(uint32(fe.ActorPID))
+	if !ok {
+		return
+	}
+	if fe.ActorExe == "" && e.ImagePath != "" {
+		fe.ActorExe = e.ImagePath
+	}
+	if fe.ActorComm == "" && e.Comm != "" {
+		fe.ActorComm = e.Comm
+	}
+	if fe.ActorPPID == 0 && e.ParentPID != 0 {
+		fe.ActorPPID = int(e.ParentPID)
+	}
 }
 
 // NewKernelCollector creates a collector backed by the Linux eBPF driver.
@@ -86,6 +123,13 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	}
 	if ld := kc.driver.LastLoadDiagnostics(); ld != "" {
 		extras["bpf_load_diag"] = ld
+	}
+	if kc.fileDedupe != nil {
+		if sm := kc.fileDedupe.StatsMap(); sm != nil {
+			for k, v := range sm {
+				extras["file_dedupe_"+k] = v
+			}
+		}
 	}
 	rs := kc.buf.Stats()
 	extras["ring_bytes_used"] = rs.BytesUsed
@@ -160,7 +204,11 @@ func (kc *KernelCollector) parseEvent(data []byte) *Telemetry {
 			return tel
 		}
 	}
-	return MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
+	tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
+	if tel != nil && tel.File != nil {
+		kc.enrichFileLineage(tel.File)
+	}
+	return tel
 }
 
 func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
@@ -268,6 +316,7 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 			}
 			fe.SUID = fe.ChmodMode&04000 != 0
 		}
+		kc.enrichFileLineage(fe)
 		return &Telemetry{File: fe}
 
 	case bpfEvtModule:
