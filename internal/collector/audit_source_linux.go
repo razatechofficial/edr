@@ -199,6 +199,14 @@ func (a *AuditSource) parseAndDispatch(ctx context.Context, data []byte, sink *S
 			return
 		}
 		body := string(data[16:p.Length])
+		// netlink alignment: round up to 4 bytes. Advance the packet view before
+		// event handling so duplicate-suppression branches cannot stall parsing.
+		aligned := (p.Length + 3) &^ 3
+		if int(aligned) > len(data) {
+			return
+		}
+		data = data[aligned:]
+
 		ev := a.parseAuditBody(p.Type, body)
 		if ev != nil {
 			if ev.File != nil && a.fileDedupe != nil && !a.fileDedupe.AllowWithSource(ev.File.Path, DedupeSourceAudit) {
@@ -208,12 +216,6 @@ func (a *AuditSource) parseAndDispatch(ctx context.Context, data []byte, sink *S
 				a.emitted.Add(1)
 			}
 		}
-		// netlink alignment: round up to 4 bytes.
-		aligned := (p.Length + 3) &^ 3
-		if int(aligned) > len(data) {
-			return
-		}
-		data = data[aligned:]
 	}
 }
 

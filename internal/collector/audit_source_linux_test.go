@@ -3,7 +3,10 @@
 package collector
 
 import (
+	"context"
+	"encoding/binary"
 	"testing"
+	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
 )
@@ -39,5 +42,38 @@ func TestAuditSource_parseAuditBody_syscallPathCorrelates(t *testing.T) {
 	}
 	if ev.File.EventType != schema.EventFile {
 		t.Fatalf("event type %v", ev.File.EventType)
+	}
+}
+
+func TestAuditSource_parseAndDispatch_DedupeSkipStillAdvances(t *testing.T) {
+	a := NewAuditSource("ep1", "host1", nil, NewLinuxFileDeduper(time.Minute), false)
+	const path = "/tmp/dup"
+	if !a.fileDedupe.AllowWithSource(path, DedupeSourceAudit) {
+		t.Fatal("failed to prime dedupe")
+	}
+	body := `type=PATH msg=audit(1743524401.123:789): item=0 name="` + path + `" nametype=NORMAL`
+	msgLen := 16 + len(body)
+	aligned := (msgLen + 3) &^ 3
+	pkt := make([]byte, aligned)
+	binary.LittleEndian.PutUint32(pkt[0:4], uint32(msgLen))
+	binary.LittleEndian.PutUint16(pkt[4:6], uint16(1302)) // AUDIT_PATH
+	copy(pkt[16:], []byte(body))
+
+	ch := make(chan Telemetry, 1)
+	sink := &StreamingSink{ch: ch}
+	done := make(chan struct{})
+	go func() {
+		a.parseAndDispatch(context.Background(), pkt, sink)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("parseAndDispatch did not return; possible packet-advance stall")
+	}
+	select {
+	case <-ch:
+		t.Fatal("expected deduped event to be skipped")
+	default:
 	}
 }

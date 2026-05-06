@@ -48,6 +48,7 @@ const (
 	bpfEvtNetConn      = 11
 	bpfEvtNetAccept    = 12
 	bpfEvtNetBind      = 13
+	bpfEvtNetClose     = 14
 	bpfEvtModule       = 22
 	bpfEvtMount        = 23
 	bpfEvtPtrace       = 24
@@ -708,7 +709,7 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeFileEvent(raw)
-	case bpfEvtNetConn, bpfEvtNetAccept, bpfEvtNetBind:
+	case bpfEvtNetConn, bpfEvtNetAccept, bpfEvtNetBind, bpfEvtNetClose:
 		if !p.NetworkEvents {
 			return nil
 		}
