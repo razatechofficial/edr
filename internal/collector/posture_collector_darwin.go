@@ -18,6 +18,7 @@ type PostureCollector struct {
 	cfg           config.Config
 	mu            sync.Mutex
 	lastNote      string
+	probeOut      map[string]any
 	worldWritable atomic.Uint64
 	dirsScanned   atomic.Uint64
 	tick          atomic.Uint64
@@ -69,6 +70,7 @@ func (p *PostureCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 	p.mu.Lock()
 	p.lastNote = ""
 	p.mu.Unlock()
+	p.runOptionalPostureProbes(ctx)
 	return nil, nil
 }
 
@@ -83,5 +85,10 @@ func (p *PostureCollector) ExportMonitoringHealth() map[string]any {
 	}.ToMap()
 	src["world_writable_files_sampled"] = float64(p.worldWritable.Load())
 	src["files_scanned_cap_5k"] = float64(p.dirsScanned.Load())
+	p.mu.Lock()
+	if len(p.probeOut) > 0 {
+		src["posture_probes"] = p.probeOut
+	}
+	p.mu.Unlock()
 	return src
 }

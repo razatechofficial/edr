@@ -83,8 +83,8 @@ func TestStrictMandatorySources_Conditional(t *testing.T) {
 	if !containsName(got, "posture") {
 		t.Fatal("expected posture in strict mandatory sources when enabled")
 	}
-	if !containsName(got, "log_tail") {
-		t.Fatal("expected log_tail in strict mandatory sources when paths configured")
+	if !containsName(got, "log_targets") {
+		t.Fatal("expected log_targets in strict mandatory sources when paths configured")
 	}
 }
 
