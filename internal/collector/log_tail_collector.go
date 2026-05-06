@@ -48,7 +48,7 @@ type LogTailCollector struct {
 
 // NewLogTailCollector returns nil when no paths configured.
 func NewLogTailCollector(cfg config.Config) *LogTailCollector {
-	paths := normalizeLogTailPaths(cfg.Monitoring.AdditionalLogTailPaths)
+	paths := NormalizeAdditionalLogTailPaths(cfg.Monitoring.AdditionalLogTailPaths)
 	if len(paths) == 0 {
 		return nil
 	}
@@ -69,12 +69,13 @@ func NewLogTailCollector(cfg config.Config) *LogTailCollector {
 	return lt
 }
 
-// LogTailPathsConfigured reports whether additional log tail paths are configured.
+// LogTailPathsConfigured reports whether log breadth is configured (log_targets and/or additional_log_tail_paths).
 func LogTailPathsConfigured(cfg config.Config) bool {
-	return len(normalizeLogTailPaths(cfg.Monitoring.AdditionalLogTailPaths)) > 0
+	return LogTargetsBreadthConfigured(cfg)
 }
 
-func normalizeLogTailPaths(in []string) []string {
+// NormalizeAdditionalLogTailPaths deduplicates non-empty monitoring.additional_log_tail_paths entries.
+func NormalizeAdditionalLogTailPaths(in []string) []string {
 	var out []string
 	seen := map[string]struct{}{}
 	for _, p := range in {
