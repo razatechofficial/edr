@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ type KernelCollector struct {
 
 	neCtl    *kernel.NetworkExtensionCtl
 	revProbe *kernel.ESFRevocationProbe
+	wg       sync.WaitGroup
 }
 
 // NewKernelCollector starts the ESF driver when running as root.
@@ -48,7 +50,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		hostname:   host,
 		cfg:        cfg,
 		users:      users,
-		neCtl:      kernel.NewNetworkExtensionCtl(),
+		neCtl:      kernel.NewNetworkExtensionCtl(strings.TrimSpace(cfg.Monitoring.DarwinNEBundleID)),
 		revProbe:   kernel.NewESFRevocationProbe(),
 	}
 }
@@ -63,6 +65,11 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 		"ne_ctl":         kc.neCtl.Health(),
 		"esf_revocation": kc.revProbe.Health(),
 	}
+	if im := kc.driver.ESFNotifyIngestMetrics(); im != nil {
+		for k, v := range im {
+			extras[k] = v
+		}
+	}
 	rs := kc.buf.Stats()
 	extras["ring_bytes_used"] = rs.BytesUsed
 	extras["ring_capacity_bytes"] = rs.Capacity
@@ -73,6 +80,21 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 			extras["tamper_esf_auth_denials"] = v
 		}
 	}
+	posture := map[string]any{
+		"esf_operator_mute_prefixes": len(kc.cfg.Monitoring.ESFMutePathPrefixes),
+	}
+	tamperSignals := map[string]any{}
+	if ne, ok := extras["ne_ctl"].(map[string]any); ok {
+		if st, _ := ne["network_extension_status"].(string); st == "degraded" {
+			tamperSignals["ne_degraded"] = true
+		}
+	}
+	if rv, ok := extras["esf_revocation"].(map[string]any); ok {
+		if st, _ := rv["esf_revocation_status"].(string); st == "degraded" {
+			tamperSignals["esf_revocation_degraded"] = true
+		}
+	}
+	extras = MergeTamperHealth(extras, "darwin_esf_ne_monitoring", posture, tamperSignals)
 	return KernelHealthMap("esf", kc.driver.Stats(), kc.buf.Stats(), extras)
 }
 
@@ -84,12 +106,24 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	pol.MutePaths = append(kernel.DefaultESFMutePathPrefixes(), kc.cfg.Monitoring.ESFMutePathPrefixes...)
 	_ = kc.driver.SetPolicy(pol)
 	_ = kc.neCtl.Start()
+	kc.revProbe.SetSysextBundleID(kc.cfg.Monitoring.DarwinNEBundleID)
 	if err := kc.driver.Start(ctx, kc.buf); err != nil {
 		kc.neCtl.Stop()
 		return err
 	}
-	go kc.revProbe.Run(ctx)
-	go kc.readLoop(ctx)
+	kc.wg.Add(3)
+	go func() {
+		defer kc.wg.Done()
+		kc.revProbe.Run(ctx)
+	}()
+	go func() {
+		defer kc.wg.Done()
+		kc.readLoop(ctx)
+	}()
+	go func() {
+		defer kc.wg.Done()
+		kc.controlPlaneLoop(ctx)
+	}()
 	return nil
 }
 
@@ -107,6 +141,22 @@ func (kc *KernelCollector) Stop() {
 	}
 	kc.neCtl.Stop()
 	_ = kc.driver.Stop()
+	kc.wg.Wait()
+}
+
+func (kc *KernelCollector) controlPlaneLoop(ctx context.Context) {
+	t := time.NewTicker(45 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if ok := kc.neCtl.Probe(ctx); !ok {
+				kc.revProbe.RecordFailure("network_extension_probe_failed")
+			}
+		}
+	}
 }
 
 const maxDarwinExecImageHashBytes = 32 << 20

@@ -39,8 +39,11 @@ type KernelCollector struct {
 	mu     sync.Mutex
 	events []Telemetry
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	fileDropped uint64 // events filtered out because path is not under FIM set
+
+	controlPlaneDegraded atomic.Uint64
 }
 
 func isWindowsElevated() bool {
@@ -120,6 +123,16 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if kc.mfCtl != nil {
 		extras["minifilter_ctl"] = kc.mfCtl.Health()
 	}
+	el, rl := kc.driver.SnapshotETWSessionLoss()
+	extras["etw_lost_events"] = el
+	extras["etw_buffers_lost_realtime"] = rl
+	if sh := kernel.WindowsServiceHardeningPosture(); sh != nil {
+		extras["service_hardening_posture"] = sh
+	}
+	controlReady := kc.controlPlaneReady(extras)
+	extras["control_plane_required"] = kc.cfg.Monitoring.WindowsControlPlaneRequired
+	extras["control_plane_ready"] = controlReady
+	extras["control_plane_degraded_count"] = kc.controlPlaneDegraded.Load()
 	posture := kernel.WindowsCollectionPosture()
 	extras["windows_collection_posture"] = posture
 	tamperSignals := map[string]any{}
@@ -130,6 +143,16 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if ti := kc.driver.ThreatIntelTamperSignals(); ti != nil {
 		for k, v := range ti {
 			tamperSignals[k] = v
+		}
+	}
+	if wfp, ok := extras["wfp_ctl"].(map[string]any); ok {
+		if s, _ := wfp["state"].(string); s == "degraded" {
+			tamperSignals["wfp_ctl_degraded"] = true
+		}
+	}
+	if mf, ok := extras["minifilter_ctl"].(map[string]any); ok {
+		if s, _ := mf["state"].(string); s == "degraded" {
+			tamperSignals["minifilter_ctl_degraded"] = true
 		}
 	}
 	extras = MergeTamperHealth(extras, "windows_kernel_monitoring", posture, tamperSignals)
@@ -150,11 +173,8 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	pol.ETWThreatIntel = m.ETWThreatIntel
 	pol.KernelFileObjectCache = m.ETWKernelFileObjectCache
 	_ = kc.driver.SetPolicy(pol)
-	if kc.cfg.Monitoring.WindowsWFPCtlProbe && kc.wfpCtl != nil {
-		_ = kc.wfpCtl.Start()
-	}
-	if strings.TrimSpace(kc.cfg.Monitoring.WindowsMinifilterPort) != "" && kc.mfCtl != nil {
-		_ = kc.mfCtl.Start()
+	if !kc.ensureWindowsControlPlane(false) && kc.cfg.Monitoring.WindowsControlPlaneRequired {
+		return kernel.ErrKernelUnavailable
 	}
 	if err := kc.driver.Start(ctx, kc.buf); err != nil {
 		return err
@@ -162,7 +182,15 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	if kc.registryPeer != nil {
 		kc.registryPeer.SetETWActive(true)
 	}
-	go kc.readLoop(ctx)
+	kc.wg.Add(2)
+	go func() {
+		defer kc.wg.Done()
+		kc.readLoop(ctx)
+	}()
+	go func() {
+		defer kc.wg.Done()
+		kc.controlPlaneLoop(ctx)
+	}()
 	return nil
 }
 
@@ -188,6 +216,110 @@ func (kc *KernelCollector) Stop() {
 		kc.mfCtl.Stop()
 	}
 	_ = kc.driver.Stop()
+	kc.wg.Wait()
+}
+
+func (kc *KernelCollector) controlPlaneLoop(ctx context.Context) {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			kc.ensureWindowsControlPlane(true)
+		}
+	}
+}
+
+func healthCauseIsPermanent(h map[string]any) bool {
+	if h == nil {
+		return false
+	}
+	cc, _ := h["cause_class"].(string)
+	return cc == "permanent"
+}
+
+func wfpHealthReady(h map[string]any) bool {
+	if h == nil {
+		return false
+	}
+	v, _ := h["engine_open"].(bool)
+	return v
+}
+
+func minifilterHealthReady(h map[string]any) bool {
+	if h == nil {
+		return false
+	}
+	v, _ := h["connected"].(bool)
+	return v
+}
+
+func (kc *KernelCollector) ensureWindowsControlPlane(recover bool) bool {
+	ok := true
+	if kc.cfg.Monitoring.WindowsWFPCtlProbe && kc.wfpCtl != nil {
+		h := kc.wfpCtl.Health()
+		if recover && healthCauseIsPermanent(h) {
+			if !wfpHealthReady(h) {
+				ok = false
+			}
+		} else {
+			var err error
+			if recover {
+				err = kc.wfpCtl.Recover()
+			} else {
+				err = kc.wfpCtl.Start()
+			}
+			if err != nil {
+				ok = false
+			}
+		}
+	}
+	if strings.TrimSpace(kc.cfg.Monitoring.WindowsMinifilterPort) != "" && kc.mfCtl != nil {
+		h := kc.mfCtl.Health()
+		if recover && healthCauseIsPermanent(h) {
+			if !minifilterHealthReady(h) {
+				ok = false
+			}
+		} else {
+			var err error
+			if recover {
+				err = kc.mfCtl.Recover()
+			} else {
+				err = kc.mfCtl.Start()
+			}
+			if err != nil {
+				ok = false
+			}
+		}
+	}
+	if !ok {
+		kc.controlPlaneDegraded.Add(1)
+	}
+	return ok
+}
+
+func (kc *KernelCollector) controlPlaneReady(extras map[string]any) bool {
+	wfpReady := true
+	if kc.cfg.Monitoring.WindowsWFPCtlProbe {
+		wfpReady = false
+		if h, ok := extras["wfp_ctl"].(map[string]any); ok {
+			if v, ok := h["engine_open"].(bool); ok {
+				wfpReady = v
+			}
+		}
+	}
+	mfReady := true
+	if strings.TrimSpace(kc.cfg.Monitoring.WindowsMinifilterPort) != "" {
+		mfReady = false
+		if h, ok := extras["minifilter_ctl"].(map[string]any); ok {
+			if v, ok := h["connected"].(bool); ok {
+				mfReady = v
+			}
+		}
+	}
+	return wfpReady && mfReady
 }
 
 func (kc *KernelCollector) readLoop(ctx context.Context) {
