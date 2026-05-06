@@ -8,12 +8,40 @@ package kernel
 
 #include <EndpointSecurity/EndpointSecurity.h>
 #include <bsm/libbsm.h>
+#include <mach/mach_time.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
 extern void goESFEventCallback(int eventType, int pid, int ppid, int uid, int gid,
     const char *comm, const char *path, const char *exec_args, const char *exec_env);
-extern int goESFAuthCallback(int eventType, int pid, const char *comm, const char *path);
+extern int goESFAuthCallback(int eventType, int pid, const char *comm, const char *path, int budget_ms);
+
+// esf_auth_budget_ms converts ESF message deadline to remaining milliseconds (best-effort).
+static int esf_auth_budget_ms(const es_message_t *msg) {
+    if (msg == NULL) {
+        return -1;
+    }
+    uint64_t dl = msg->deadline;
+    if (dl == 0ULL) {
+        return -1;
+    }
+    uint64_t now = mach_absolute_time();
+    if (dl <= now) {
+        return 0;
+    }
+    mach_timebase_info_data_t tb;
+    if (mach_timebase_info(&tb) != KERN_SUCCESS) {
+        return -1;
+    }
+    uint64_t delta = dl - now;
+    uint64_t ns = delta * (uint64_t)tb.numer / (uint64_t)tb.denom;
+    uint64_t ms = ns / 1000000ULL;
+    if (ms > (uint64_t)INT_MAX) {
+        return INT_MAX;
+    }
+    return (int)ms;
+}
 
 static es_client_t *_esf_client = NULL;
 
@@ -197,7 +225,7 @@ static void esf_handle_message(es_client_t *client, const es_message_t *msg) {
     char *path = esf_event_path(msg);
 
     if (msg->action_type == ES_ACTION_TYPE_AUTH) {
-        int decision = goESFAuthCallback((int)msg->event_type, (int)pid, comm, path);
+        int decision = goESFAuthCallback((int)msg->event_type, (int)pid, comm, path, esf_auth_budget_ms(msg));
         if (decision == 0) {
             es_respond_auth_result(client, msg, ES_AUTH_RESULT_ALLOW, false);
         } else {
@@ -311,6 +339,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -339,7 +368,21 @@ func DefaultESFMutePathPrefixes() []string {
 const (
 	defaultAuthCacheTTL = 5 * time.Minute
 	defaultAuthTimeout  = 750 * time.Millisecond
+	esfNotifyQueueDepth = 4096
 )
+
+// ESFNotifyPayload carries a notify/auth-adjacent ES event off the ESF callback thread.
+type ESFNotifyPayload struct {
+	EventType int
+	PID       int
+	PPID      int
+	UID       int
+	GID       int
+	Comm      string
+	Path      string
+	Args      string
+	Env       string
+}
 
 // globalESF holds the active ESFDriver instance for C callback routing.
 // Only one ESF client is supported per process.
@@ -427,6 +470,16 @@ type ESFDriver struct {
 	authCacheHits atomic.Uint64
 	authTimeouts  atomic.Uint64
 	authDenials   atomic.Uint64
+
+	notifyCh               chan ESFNotifyPayload
+	notifyDropped          atomic.Uint64
+	authBudgetSumMs        atomic.Uint64
+	authBudgetCount        atomic.Uint64
+	authDeadlineViolations atomic.Uint64
+
+	authSampleMu   sync.Mutex
+	authSamples    []uint32
+	authSampleRing int // next slot when ring is full (1024)
 }
 
 // NewESFDriver creates a new Endpoint Security Framework driver.
@@ -468,19 +521,36 @@ func (d *ESFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 
 	d.buf = buf
 
+	var child context.Context
+	child, d.cancel = context.WithCancel(ctx)
+
+	d.notifyCh = make(chan ESFNotifyPayload, esfNotifyQueueDepth)
+	d.wg.Add(2)
+	go d.cache.cleanupLoop(child, &d.wg)
+	go d.notifyWorker(child)
+
 	if !globalESF.CompareAndSwap(nil, d) {
+		d.cancel()
+		d.wg.Wait()
+		d.notifyCh = nil
 		return fmt.Errorf("another esf driver instance is already active")
 	}
 
 	result := int(C.esf_create_client())
 	if result != 0 {
 		globalESF.Store(nil)
+		d.cancel()
+		d.wg.Wait()
+		d.notifyCh = nil
 		return d.clientCreateError(result)
 	}
 
 	if ret := C.esf_subscribe_all(); ret != 0 {
 		C.esf_delete_client()
 		globalESF.Store(nil)
+		d.cancel()
+		d.wg.Wait()
+		d.notifyCh = nil
 		return fmt.Errorf("failed to subscribe to ESF events")
 	}
 
@@ -497,16 +567,71 @@ func (d *ESFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 		C.free(unsafe.Pointer(cs))
 	}
 
-	var child context.Context
-	child, d.cancel = context.WithCancel(ctx)
 	d.startTime = time.Now()
 	d.running.Store(true)
 	_ = d.emitFeatureStatusEvent()
 
-	d.wg.Add(1)
-	go d.cache.cleanupLoop(child, &d.wg)
-
 	return nil
+}
+
+func (d *ESFDriver) notifyWorker(ctx context.Context) {
+	defer d.wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			for {
+				select {
+				case p := <-d.notifyCh:
+					processESFNotifyPayload(d, &p)
+				default:
+					return
+				}
+			}
+		case p := <-d.notifyCh:
+			processESFNotifyPayload(d, &p)
+		}
+	}
+}
+
+func (d *ESFDriver) observeAuthBudgetMs(ms int) {
+	if ms < 0 {
+		return
+	}
+	d.authBudgetSumMs.Add(uint64(ms))
+	d.authBudgetCount.Add(1)
+	const capSamples = 1024
+	v := uint32(ms)
+	if ms > 0x7fffffff {
+		v = 0x7fffffff
+	}
+	d.authSampleMu.Lock()
+	if len(d.authSamples) < capSamples {
+		d.authSamples = append(d.authSamples, v)
+	} else {
+		idx := d.authSampleRing % capSamples
+		d.authSamples[idx] = v
+		d.authSampleRing++
+	}
+	d.authSampleMu.Unlock()
+}
+
+// ESFNotifyIngestMetrics reports notify-path queue telemetry (C2 offload).
+func (d *ESFDriver) ESFNotifyIngestMetrics() map[string]any {
+	if d == nil {
+		return nil
+	}
+	if d.notifyCh == nil {
+		return map[string]any{
+			"esf_ingest_queue_depth": 0,
+			"esf_ingest_queue_cap":   0,
+			"esf_ingest_dropped":     d.notifyDropped.Load(),
+		}
+	}
+	return map[string]any{
+		"esf_ingest_queue_depth": len(d.notifyCh),
+		"esf_ingest_queue_cap":   cap(d.notifyCh),
+		"esf_ingest_dropped":     d.notifyDropped.Load(),
+	}
 }
 
 func (d *ESFDriver) emitFeatureStatusEvent() error {
@@ -551,13 +676,14 @@ func (d *ESFDriver) Stop() error {
 	if !d.running.CompareAndSwap(true, false) {
 		return nil
 	}
+	globalESF.Store(nil)
 	d.cancel()
 
 	C.esf_unsubscribe_all()
 	C.esf_delete_client()
 
-	globalESF.Store(nil)
 	d.wg.Wait()
+	d.notifyCh = nil
 	return nil
 }
 
@@ -606,12 +732,25 @@ func (d *ESFDriver) AuthHealth() map[string]any {
 	if d == nil {
 		return nil
 	}
-	return map[string]any{
-		"auth_timeout_ms":          int(d.authTimeout / time.Millisecond),
-		"auth_cache_hits":          d.authCacheHits.Load(),
-		"auth_timeout_fallbacks":   d.authTimeouts.Load(),
-		"auth_denials":             d.authDenials.Load(),
+	m := map[string]any{
+		"auth_timeout_ms":        int(d.authTimeout / time.Millisecond),
+		"auth_cache_hits":        d.authCacheHits.Load(),
+		"auth_timeout_fallbacks": d.authTimeouts.Load(),
+		"auth_denials":           d.authDenials.Load(),
 	}
+	if c := d.authBudgetCount.Load(); c > 0 {
+		m["auth_deadline_avg_ms"] = int(d.authBudgetSumMs.Load() / c)
+	}
+	m["auth_deadline_violations"] = d.authDeadlineViolations.Load()
+
+	d.authSampleMu.Lock()
+	samples := append([]uint32(nil), d.authSamples...)
+	d.authSampleMu.Unlock()
+	if len(samples) > 0 {
+		sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+		m["auth_deadline_p50_ms"] = int(samples[len(samples)/2])
+	}
+	return m
 }
 
 // mapESFEventType maps raw ESF event type integers to internal EventType

@@ -16,7 +16,7 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 	comm *C.char, pathStr *C.char, execArgs *C.char, execEnv *C.char) {
 
 	d := globalESF.Load()
-	if d == nil {
+	if d == nil || d.notifyCh == nil {
 		return
 	}
 	d.received.Add(1)
@@ -58,29 +58,52 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 		}
 	}
 
-	pathGo := safeGoString(pathStr)
-	argTok := safeGoString(execArgs)
-	envTok := safeGoString(execEnv)
-	// C bridge uses ASCII RS (0x1e) between argv/env tokens; expose human spacing in "args".
+	payload := ESFNotifyPayload{
+		EventType: int(eventType),
+		PID:       int(pid),
+		PPID:      int(ppid),
+		UID:       int(uid),
+		GID:       int(gid),
+		Comm:      safeGoString(comm),
+		Path:      safeGoString(pathStr),
+		Args:      safeGoString(execArgs),
+		Env:       safeGoString(execEnv),
+	}
+	select {
+	case d.notifyCh <- payload:
+	default:
+		d.notifyDropped.Add(1)
+		d.dropped.Add(1)
+	}
+}
+
+func processESFNotifyPayload(d *ESFDriver, p *ESFNotifyPayload) {
+	if d == nil || p == nil {
+		return
+	}
+	evtType := mapESFEventType(p.EventType)
+	pathGo := p.Path
+	argTok := p.Args
+	envTok := p.Env
 	argsDisplay := strings.ReplaceAll(argTok, "\x1e", " ")
 	envelope := map[string]interface{}{
 		"type":      evtType,
 		"timestamp": time.Now().UTC(),
 		"agent_id":  d.agentID,
-		"esf_type":  int(eventType),
-		"esf_op":    esfOperationName(int(eventType)),
+		"esf_type":  p.EventType,
+		"esf_op":    esfOperationName(p.EventType),
 		"seq":       d.esfSeq.Add(1),
-		"pid":       int(pid),
-		"ppid":      int(ppid),
-		"uid":       int(uid),
-		"gid":       int(gid),
-		"comm":      safeGoString(comm),
+		"pid":       p.PID,
+		"ppid":      p.PPID,
+		"uid":       p.UID,
+		"gid":       p.GID,
+		"comm":      p.Comm,
 		"path":      pathGo,
 		"args":      argsDisplay,
 		"exec_env":  envTok,
 	}
 	classifyAppleScriptEnvelope(envelope, pathGo, argsDisplay)
-	if esfIsExecEvent(int(eventType)) {
+	if esfIsExecEvent(p.EventType) {
 		if pathGo != "" {
 			tid, cdh, flg := esfExecSigningInfo(pathGo)
 			if tid != "" {
@@ -127,7 +150,7 @@ func classifyAppleScriptEnvelope(envelope map[string]interface{}, pathGo, args s
 }
 
 //export goESFAuthCallback
-func goESFAuthCallback(eventType C.int, pid C.int, comm *C.char, pathStr *C.char) C.int {
+func goESFAuthCallback(eventType C.int, pid C.int, comm *C.char, pathStr *C.char, budgetMs C.int) C.int {
 	d := globalESF.Load()
 	if d == nil {
 		return 0
@@ -136,6 +159,25 @@ func goESFAuthCallback(eventType C.int, pid C.int, comm *C.char, pathStr *C.char
 	// Copy C strings before any async work to avoid use-after-free.
 	pathKey := safeGoString(pathStr)
 	commStr := safeGoString(comm)
+
+	budget := int(budgetMs)
+	if budget >= 0 {
+		d.observeAuthBudgetMs(budget)
+	}
+	wait := d.authTimeout
+	if budget >= 0 {
+		if budget == 0 {
+			wait = 5 * time.Millisecond
+		} else {
+			bd := time.Duration(budget) * time.Millisecond
+			if bd < wait {
+				wait = bd
+			}
+		}
+	}
+	if wait < time.Millisecond {
+		wait = time.Millisecond
+	}
 
 	if decision, ok := d.cache.get(pathKey); ok {
 		d.authCacheHits.Add(1)
@@ -176,8 +218,11 @@ func goESFAuthCallback(eventType C.int, pid C.int, comm *C.char, pathStr *C.char
 			return 1
 		}
 		return 0
-	case <-time.After(d.authTimeout):
+	case <-time.After(wait):
 		d.authTimeouts.Add(1)
+		if budget >= 0 && time.Duration(budget)*time.Millisecond <= wait+2*time.Millisecond {
+			d.authDeadlineViolations.Add(1)
+		}
 		d.cache.set(pathKey, AuthAllow)
 		return 0
 	}
