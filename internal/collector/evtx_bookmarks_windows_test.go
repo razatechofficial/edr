@@ -17,6 +17,11 @@ func TestEvtxBookmarkFilesRoundTrip_allChannels(t *testing.T) {
 		"powershell_bookmark.xml",
 		"defender_bookmark.xml",
 		"applocker_bookmark.xml",
+		"taskscheduler_bookmark.xml",
+		"wmi_activity_bookmark.xml",
+		"bits_client_bookmark.xml",
+		"firewall_bookmark.xml",
+		"system_svc_install_bookmark.xml",
 	}
 	want := []byte(`<BookmarkList><Bookmark Channel='Test' RecordId='42' IsCurrent='true'/></BookmarkList>`)
 	for _, name := range cases {

@@ -62,6 +62,18 @@ func (i *InventoryCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 				sum["inventory_snapshot_changed"] = changed
 				sum["inventory_snapshot_path"] = snapPath
 			}
+			rs := BuildInventoryRecordsFromSummary(sum)
+			recPath, deltaPath, rerr := PersistInventoryRecordsAndMaybeDelta(i.cfg.Agent.DataDir, rs, i.cfg.Monitoring.InventoryEmitDeltas)
+			if rerr != nil {
+				i.lastErr = rerr.Error()
+			} else {
+				if recPath != "" {
+					sum["inventory_records_path"] = recPath
+				}
+				if deltaPath != "" {
+					sum["inventory_delta_path"] = deltaPath
+				}
+			}
 		}
 		if IsRegulatedMonitoring(i.cfg) && i.cfg.Monitoring.InventoryStrictListenerAttribution {
 			a, _ := sum["inventory_listener_attribution"].(string)
