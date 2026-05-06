@@ -88,8 +88,8 @@ func StrictMandatorySources(cfg config.Config) []string {
 	if cfg.Monitoring.PostureEnabled {
 		base = append(base, "posture")
 	}
-	if LogTailPathsConfigured(cfg) {
-		base = append(base, "log_tail")
+	if LogTargetsBreadthConfigured(cfg) {
+		base = append(base, "log_targets")
 	}
 	return base
 }

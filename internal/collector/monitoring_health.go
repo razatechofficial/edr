@@ -31,6 +31,12 @@ type ExportMonitoringHealth interface {
 	ExportMonitoringHealth() map[string]any
 }
 
+// ExportMonitoringHealthMulti emits multiple monitoring_health source rows
+// (e.g. per log_target.*) without registering a collector per row.
+type ExportMonitoringHealthMulti interface {
+	ExportMonitoringHealthRows() []map[string]any
+}
+
 // MonitoringSource is the canonical per-collector record shape that callers
 // SHOULD return from ExportMonitoringHealth(). Returning a map[string]any
 // remains supported for back-compat; this struct exists so collectors emit a
@@ -119,6 +125,7 @@ func KernelHealthMap(backend string, driverStats, ringBufStats any, extras map[s
 }
 
 // MergeTamperHealth normalizes anti-tamper posture/signals under one key.
+// Optional signals["degraded_reasons"] ([]string or []any) is also copied to tamper.degraded_reason for operators.
 func MergeTamperHealth(extras map[string]any, component string, posture map[string]any, signals map[string]any) map[string]any {
 	if extras == nil {
 		extras = map[string]any{}
@@ -131,6 +138,11 @@ func MergeTamperHealth(extras map[string]any, component string, posture map[stri
 	}
 	if len(signals) > 0 {
 		t["signals"] = signals
+		if dr, ok := signals["degraded_reasons"].([]string); ok && len(dr) > 0 {
+			t["degraded_reason"] = dr
+		} else if dr2, ok := signals["degraded_reasons"].([]any); ok && len(dr2) > 0 {
+			t["degraded_reason"] = dr2
+		}
 	}
 	extras["tamper"] = t
 	return extras
@@ -185,6 +197,14 @@ func WriteMonitoringHealth(cfg config.Config, collectors []Collector, log *slog.
 	}
 	sources := make([]map[string]any, 0, len(collectors))
 	for _, c := range collectors {
+		if mh, ok := c.(ExportMonitoringHealthMulti); ok {
+			for _, row := range mh.ExportMonitoringHealthRows() {
+				if row != nil {
+					sources = append(sources, row)
+				}
+			}
+			continue
+		}
 		h, ok := c.(ExportMonitoringHealth)
 		if !ok {
 			continue
