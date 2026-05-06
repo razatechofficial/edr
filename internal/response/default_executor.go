@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/razatechofficial/edr/internal/detection"
+	"github.com/razatechofficial/edr/internal/forensics"
 	"github.com/razatechofficial/edr/internal/response/actions"
 	"go.uber.org/zap"
 )
@@ -64,6 +65,8 @@ func (e *DefaultActionExecutor) Execute(ctx context.Context, op string, params m
 		return e.runKill(ctx, params, d, log)
 	case "collect_forensics":
 		return e.runForensics(ctx, params, d, log)
+	case "collect_artifacts":
+		return e.runCollectArtifacts(ctx, params, d, log)
 	case "alert":
 		e.runAlert(ctx, params, d, log)
 		return nil
@@ -102,6 +105,18 @@ func (e *DefaultActionExecutor) runKill(ctx context.Context, params map[string]i
 		steps["process_name"] = d.Event.Process.ProcessName
 	}
 	_, err := e.Eng.Execute(ctx, OpKillProcess, steps)
+	return err
+}
+
+func (e *DefaultActionExecutor) runCollectArtifacts(ctx context.Context, params map[string]interface{}, d detection.Detection, log *zap.Logger) error {
+	_ = params // reserved: memdump | filedump | regdump step filters
+	meta := forensics.AlertTriggerMeta{
+		AlertID:    d.ID,
+		RuleID:     d.RuleID,
+		Severity:   fmt.Sprint(d.Severity),
+		EndpointID: e.HostID,
+	}
+	_, err := forensics.CollectArtifactsForAlert(ctx, log, meta)
 	return err
 }
 

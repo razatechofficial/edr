@@ -60,6 +60,13 @@ type FileEvent struct {
 	Path      string `json:"path"`
 	Operation string `json:"operation"`
 	ActorPID  int    `json:"actor_pid"`
+	// Who-data parity (audit / eBPF / ESF).
+	ActorPPID    int    `json:"actor_ppid,omitempty"`
+	AuditUID     string `json:"audit_uid,omitempty"`
+	EffectiveUID string `json:"effective_uid,omitempty"`
+	ActorComm    string `json:"actor_comm,omitempty"`
+	ActorExe     string `json:"actor_exe,omitempty"`
+	Syscall      string `json:"syscall,omitempty"`
 	// SubjectUID is the auditing subject UID when known (auditd / enriched JSON sources).
 	SubjectUID    string `json:"subject_uid,omitempty"`
 	Hash          string `json:"hash,omitempty"`

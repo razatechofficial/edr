@@ -189,8 +189,8 @@ func expectedHealthSourceNames(cfg config.Config) []string {
 	if cfg.Monitoring.PostureEnabled {
 		out = append(out, "posture")
 	}
-	if collector.LogTailPathsConfigured(cfg) {
-		out = append(out, "log_tail")
+	if collector.LogTargetsBreadthConfigured(cfg) {
+		out = append(out, "log_targets")
 	}
 	// Rare GOOS: DNS collector always attaches with explicit absent/unavailable health.
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
