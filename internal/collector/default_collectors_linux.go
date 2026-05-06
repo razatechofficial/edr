@@ -2,17 +2,9 @@
 
 package collector
 
-import (
-	"time"
+import "github.com/razatechofficial/edr/internal/config"
 
-	"github.com/razatechofficial/edr/internal/config"
-)
-
-func extendLinuxMonitoringCollectors(cols []Collector, cfg config.Config, endpointID string, tracker *LineageTracker, addDistinctJournaldAuth bool) []Collector {
-	var fileDedupe *LinuxFileDeduper
-	if ms := cfg.Monitoring.LinuxFileEventDedupeMs; ms > 0 {
-		fileDedupe = NewLinuxFileDeduper(time.Duration(ms) * time.Millisecond)
-	}
+func extendLinuxMonitoringCollectors(cols []Collector, cfg config.Config, endpointID string, tracker *LineageTracker, addDistinctJournaldAuth bool, fileDedupe *LinuxFileDeduper) []Collector {
 	if cfg.Monitoring.JournaldAuth && addDistinctJournaldAuth {
 		j := NewJournaldSource(endpointID, "", tracker, nil)
 		cols = append(cols, newStreamingRunCollector("journald_auth", 256, cfg.Monitoring.StreamMaxEPS, j.Run, j.ExportMonitoringHealth))

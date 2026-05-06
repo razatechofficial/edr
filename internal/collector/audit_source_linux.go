@@ -47,11 +47,19 @@ type AuditSource struct {
 	fileDedupe          *LinuxFileDeduper
 	managedRules        bool
 	managedRulesErr     atomic.Pointer[string]
+
+	livenessMu   sync.Mutex
+	livenessRan  bool
+	livenessOK   bool
+	livenessNote string
 }
 
 type auditSyscallScratch struct {
 	pid     int
+	ppid    int
 	uid     string
+	auid    string
+	euid    string
 	syscall string
 	exe     string
 	comm    string
@@ -153,6 +161,8 @@ func (a *AuditSource) Run(ctx context.Context, sink *StreamingSink) error {
 	}
 	defer a.Stop()
 
+	a.runPostStartLivenessProbe(ctx)
+
 	buf := make([]byte, 8192)
 	for {
 		if ctx.Err() != nil {
@@ -191,7 +201,7 @@ func (a *AuditSource) parseAndDispatch(ctx context.Context, data []byte, sink *S
 		body := string(data[16:p.Length])
 		ev := a.parseAuditBody(p.Type, body)
 		if ev != nil {
-			if ev.File != nil && a.fileDedupe != nil && !a.fileDedupe.Allow(ev.File.Path) {
+			if ev.File != nil && a.fileDedupe != nil && !a.fileDedupe.AllowWithSource(ev.File.Path, DedupeSourceAudit) {
 				continue
 			}
 			if sink.Send(ctx, *ev) {
@@ -287,10 +297,14 @@ func syscallScratchFrom(fields map[string]string) *auditSyscallScratch {
 			s.pid = x
 		}
 	}
-	s.uid = firstNonEmpty(fields["uid"], fields["euid"])
-	if s.uid == "" {
-		s.uid = fields["auid"]
+	if v := fields["ppid"]; v != "" {
+		if x, err := strconv.Atoi(v); err == nil {
+			s.ppid = x
+		}
 	}
+	s.auid = fields["auid"]
+	s.euid = firstNonEmpty(fields["euid"], fields["uid"])
+	s.uid = firstNonEmpty(s.euid, s.auid)
 	s.syscall = fields["syscall"]
 	s.exe = fields["exe"]
 	s.comm = fields["comm"]
@@ -358,6 +372,14 @@ func (a *AuditSource) telemetryFromAuditPATH(fields map[string]string, serial st
 		ActorPID:   p,
 		SubjectUID: subjUID,
 	}
+	if sc != nil {
+		fe.AuditUID = sc.auid
+		fe.EffectiveUID = firstNonEmpty(sc.euid, sc.uid)
+		fe.ActorPPID = sc.ppid
+		fe.ActorExe = sc.exe
+		fe.ActorComm = sc.comm
+		fe.Syscall = sc.syscall
+	}
 	return &Telemetry{File: fe}
 }
 
@@ -424,7 +446,74 @@ func (a *AuditSource) ExportMonitoringHealth() map[string]any {
 	if len(notes) > 0 {
 		src.Notes = strings.Join(notes, "; ")
 	}
-	return src.ToMap()
+	m := src.ToMap()
+	a.livenessMu.Lock()
+	ran, ok, note := a.livenessRan, a.livenessOK, a.livenessNote
+	a.livenessMu.Unlock()
+	if ran {
+		m["liveness_probe_ok"] = ok
+		if note != "" {
+			m["liveness_probe_detail"] = note
+		}
+		if !ok && a.managedRules && src.Status == "healthy" {
+			m["status"] = "degraded"
+		}
+	}
+	return m
+}
+
+// runPostStartLivenessProbe writes the managed probe file (when rules are managed) and expects audit netlink traffic.
+func (a *AuditSource) runPostStartLivenessProbe(ctx context.Context) {
+	a.livenessMu.Lock()
+	defer a.livenessMu.Unlock()
+	a.livenessRan = true
+	if !a.started || a.fd < 0 {
+		a.livenessOK = false
+		a.livenessNote = "not_started"
+		return
+	}
+	if !a.managedRules {
+		a.livenessOK = true
+		a.livenessNote = "skipped_no_managed_probe"
+		return
+	}
+	path := filepath.Join("/var/lib/edr", ".audit_managed_probe")
+	if err := os.WriteFile(path, []byte("liveness\n"), 0o644); err != nil {
+		a.livenessOK = false
+		a.livenessNote = "write:" + err.Error()
+		return
+	}
+	ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	buf := make([]byte, 8192)
+	for {
+		if ctx2.Err() != nil {
+			a.livenessOK = false
+			a.livenessNote = "timeout_no_netlink"
+			return
+		}
+		n, err := unix.Read(a.fd, buf)
+		if err != nil {
+			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) {
+				select {
+				case <-ctx2.Done():
+					a.livenessOK = false
+					a.livenessNote = "timeout_no_netlink"
+					return
+				case <-time.After(20 * time.Millisecond):
+				}
+				continue
+			}
+			a.livenessOK = false
+			a.livenessNote = err.Error()
+			return
+		}
+		if n > 0 {
+			a.livenessOK = true
+			a.livenessNote = ""
+			return
+		}
+	}
 }
 
 func (a *AuditSource) recordError(err error) {
