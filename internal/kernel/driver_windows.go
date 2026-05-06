@@ -24,6 +24,7 @@ const (
 	wnodeFlagTracedGUID                  = 0x00020000
 	eventControlCodeEnableProvider       = 1
 	eventTraceControlStop                = 1
+	eventTraceControlQuery               = 2 // EVENT_TRACE_CONTROL_QUERY
 	traceLevelVerbose                    = 5
 	processTraceModeRealTime             = 0x00000100
 	processTraceModeEventRecord          = 0x10000000
@@ -311,7 +312,7 @@ type etwSession struct {
 	active        atomic.Bool
 	wg            sync.WaitGroup
 
-	recoveryAttempted atomic.Bool
+	recoveryRunning atomic.Bool // limits concurrent recovery goroutines per session
 }
 
 // ETWDriver implements Driver using Event Tracing for Windows.
@@ -348,6 +349,7 @@ type ETWDriver struct {
 	secureTrace atomic.Bool
 
 	sessionRecoverAttempts atomic.Uint64
+	etwRecoverState        atomic.Pointer[string] // active | reopening | degraded
 }
 
 // globalETW holds the active ETWDriver for the event record callback.
@@ -357,12 +359,15 @@ var etwCallbackPtr = windows.NewCallback(etwEventRecordCallback)
 
 // NewETWDriver creates a new ETW-based kernel driver for Windows.
 func NewETWDriver(agentID string) (*ETWDriver, error) {
-	return &ETWDriver{
+	d := &ETWDriver{
 		agentID:     agentID,
 		policy:      DefaultPolicy(),
 		fileObjPath: make(map[uint64]string),
 		fileObjCap:  65536,
-	}, nil
+	}
+	s := "active"
+	d.etwRecoverState.Store(&s)
+	return d, nil
 }
 
 // Name returns the driver identifier.
@@ -451,6 +456,8 @@ func (d *ETWDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	d.startTime = time.Now()
 	d.running.Store(true)
 	startOK = true
+	rs := "active"
+	d.etwRecoverState.Store(&rs)
 
 	d.mu.RLock()
 	wantTI := d.policy.ETWThreatIntel
@@ -500,13 +507,16 @@ func (d *ETWDriver) Stats() DriverStats {
 	} else if !d.startTime.IsZero() {
 		mode = "standard_etw"
 	}
+	el, rl := d.SnapshotETWSessionLoss()
 	return DriverStats{
-		EventsReceived:  d.received.Load(),
-		EventsDropped:   d.dropped.Load(),
-		EventsProcessed: d.processed.Load(),
-		UptimeSeconds:   uptime,
-		ErrorCount:      d.errors.Load(),
-		CollectionMode:  mode,
+		EventsReceived:      d.received.Load(),
+		EventsDropped:       d.dropped.Load(),
+		EventsProcessed:     d.processed.Load(),
+		UptimeSeconds:       uptime,
+		ErrorCount:          d.errors.Load(),
+		CollectionMode:      mode,
+		LostEvents:          el,
+		RealtimeBuffersLost: rl,
 	}
 }
 
@@ -517,7 +527,61 @@ func (d *ETWDriver) TamperMetrics() map[string]any {
 	}
 	return map[string]any{
 		"etw_session_recover_attempts": d.sessionRecoverAttempts.Load(),
+		"etw_recover_state":            d.ETWRecoverState(),
 	}
+}
+
+// ETWRecoverState returns the multi-stage session recovery state machine label.
+func (d *ETWDriver) ETWRecoverState() string {
+	if d == nil {
+		return ""
+	}
+	p := d.etwRecoverState.Load()
+	if p == nil {
+		return "active"
+	}
+	return *p
+}
+
+func (d *ETWDriver) setETWRecoverState(state string) {
+	if d == nil {
+		return
+	}
+	s := state
+	d.etwRecoverState.Store(&s)
+}
+
+// SnapshotETWSessionLoss queries kernel ETW logger statistics (best-effort).
+func (d *ETWDriver) SnapshotETWSessionLoss() (eventsLost, realtimeBuffersLost uint32) {
+	if d == nil {
+		return 0, 0
+	}
+	d.mu.RLock()
+	sessions := append([]*etwSession(nil), d.sessions...)
+	d.mu.RUnlock()
+	for _, s := range sessions {
+		if s == nil || s.sessionHandle == 0 {
+			continue
+		}
+		propSize := unsafe.Sizeof(etwTraceProperties{})
+		bufSize := propSize + 256*2
+		buf := make([]byte, bufSize)
+		props := (*etwTraceProperties)(unsafe.Pointer(&buf[0]))
+		props.Wnode.BufferSize = uint32(bufSize)
+		props.LoggerNameOffset = uint32(propSize)
+		ret, _, _ := procControlTrace.Call(
+			uintptr(s.sessionHandle),
+			0,
+			uintptr(unsafe.Pointer(props)),
+			eventTraceControlQuery,
+		)
+		if ret != 0 {
+			continue
+		}
+		eventsLost += props.EventsLost
+		realtimeBuffersLost += props.RealTimeBuffersLost
+	}
+	return eventsLost, realtimeBuffersLost
 }
 
 // IngestMetrics exposes ETW callback-queue telemetry for monitoring_health.json.
@@ -733,24 +797,39 @@ func (d *ETWDriver) processCopiedRecord(rec *etwRecordCopy) {
 	d.handleEventRecord(&syn)
 }
 
-// maybeRecoverETWSession retries OpenTrace/ProcessTrace once after an unexpected session end.
+// maybeRecoverETWSession runs a bounded multi-stage backoff loop after ProcessTrace returns.
 func (d *ETWDriver) maybeRecoverETWSession(s *etwSession) {
 	if s == nil || !d.running.Load() {
 		return
 	}
-	if !s.recoveryAttempted.CompareAndSwap(false, true) {
+	if !s.recoveryRunning.CompareAndSwap(false, true) {
 		return
 	}
-	d.sessionRecoverAttempts.Add(1)
-	go func() {
-		time.Sleep(2 * time.Second)
+	go d.runETWRecoverLoop(s)
+}
+
+func (d *ETWDriver) runETWRecoverLoop(s *etwSession) {
+	defer s.recoveryRunning.Store(false)
+	d.setETWRecoverState("reopening")
+	delays := []time.Duration{400 * time.Millisecond, 2 * time.Second, 5 * time.Second}
+	for _, delay := range delays {
 		if !d.running.Load() {
+			d.setETWRecoverState("active")
 			return
 		}
-		if err := d.openAndProcess(s); err != nil {
-			d.errors.Add(1)
+		time.Sleep(delay)
+		if !d.running.Load() {
+			d.setETWRecoverState("active")
+			return
 		}
-	}()
+		d.sessionRecoverAttempts.Add(1)
+		if err := d.openAndProcess(s); err == nil {
+			d.setETWRecoverState("active")
+			return
+		}
+		d.errors.Add(1)
+	}
+	d.setETWRecoverState("degraded")
 }
 
 func (d *ETWDriver) stopAllSessions() {

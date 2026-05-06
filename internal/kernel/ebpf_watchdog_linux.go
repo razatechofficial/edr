@@ -27,32 +27,49 @@ func (d *EBPFDriver) collectOwnProgramIDs() {
 	}
 }
 
-func ebpfProgramExists(progID uint32) bool {
+// ebpfProgramExistsForWatchdog is swappable in unit tests.
+var ebpfProgramExistsForWatchdog = func(progID uint32) bool {
 	_, err := ebpf.NewProgramFromID(ebpf.ProgramID(progID))
 	return err == nil
 }
 
+// ebpfWatchdogInterval is the watchdog poll interval (overridable in tests).
+var ebpfWatchdogInterval = 30 * time.Second
+
 func (d *EBPFDriver) watchdogLoop(ctx context.Context) {
-	t := time.NewTicker(30 * time.Second)
+	t := time.NewTicker(ebpfWatchdogInterval)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			var missing []uint32
 			for _, id := range d.ownProgIDs {
-				if ebpfProgramExists(id) {
+				if ebpfProgramExistsForWatchdog(id) {
 					continue
 				}
-				d.emitTamperEvent(id)
-				_ = d.reloadPrograms()
+				missing = append(missing, id)
 			}
+			if len(missing) == 0 {
+				continue
+			}
+			for _, id := range missing {
+				d.emitTamperEvent(id)
+			}
+			_ = d.reattachWithBoundedRetry(3)
 		}
 	}
 }
 
 func (d *EBPFDriver) emitTamperEvent(progID uint32) {
 	d.tamperEvents.Add(1)
+	d.tamperByProgMu.Lock()
+	if d.tamperByProg == nil {
+		d.tamperByProg = make(map[uint32]uint64)
+	}
+	d.tamperByProg[progID]++
+	d.tamperByProgMu.Unlock()
 	env := map[string]interface{}{
 		"type": "process",
 		"timestamp": time.Now().UTC(),
@@ -63,9 +80,4 @@ func (d *EBPFDriver) emitTamperEvent(progID uint32) {
 	}
 	b, _ := json.Marshal(env)
 	_ = d.buf.Write(b)
-}
-
-func (d *EBPFDriver) reloadPrograms() error {
-	// Best-effort hot reload: sync policy to maps and keep links alive.
-	return d.syncPolicyToMaps()
 }

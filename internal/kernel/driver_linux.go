@@ -160,10 +160,13 @@ type EBPFDriver struct {
 	reader     *ringbuf.Reader
 	readers    []*ringbuf.Reader
 
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	running atomic.Bool
-	buf     *RingBuffer
+	rootCtx     context.Context
+	rootCancel  context.CancelFunc
+	eventCtx    context.Context
+	eventCancel context.CancelFunc
+	wg          sync.WaitGroup
+	running     atomic.Bool
+	buf         *RingBuffer
 
 	received  atomic.Uint64
 	dropped   atomic.Uint64
@@ -177,7 +180,14 @@ type EBPFDriver struct {
 	loadDiagMu sync.RWMutex
 	loadDiag   string // last ebpf load / verifier diagnostic (best-effort)
 
-	tamperEvents atomic.Uint64 // ebpf watchdog "program missing" signals
+	tamperEvents            atomic.Uint64 // ebpf watchdog "program missing" signals
+	programReattachAttempts atomic.Uint64
+	programReattachFailures atomic.Uint64
+	lastReattachUnix        atomic.Int64
+	reattachMu              sync.Mutex // serializes reattach vs concurrent paths
+
+	tamperByProgMu sync.Mutex
+	tamperByProg   map[uint32]uint64 // per-program missing detections
 }
 
 type linuxFeatureSet struct {
@@ -226,9 +236,24 @@ func (d *EBPFDriver) TamperMetrics() map[string]any {
 	if d == nil {
 		return nil
 	}
-	return map[string]any{
+	m := map[string]any{
 		"ebpf_program_missing_events": d.tamperEvents.Load(),
+		"program_reattach_attempts":   d.programReattachAttempts.Load(),
+		"program_reattach_failures":     d.programReattachFailures.Load(),
 	}
+	if ts := d.lastReattachUnix.Load(); ts > 0 {
+		m["last_reattach_unix"] = ts
+	}
+	d.tamperByProgMu.Lock()
+	if len(d.tamperByProg) > 0 {
+		cp := make(map[string]uint64, len(d.tamperByProg))
+		for id, n := range d.tamperByProg {
+			cp[fmt.Sprintf("%d", id)] = n
+		}
+		m["ebpf_program_tamper_by_id"] = cp
+	}
+	d.tamperByProgMu.Unlock()
+	return m
 }
 
 func (d *EBPFDriver) setLoadDiag(msg string) {
@@ -266,9 +291,39 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	d.buf = buf
 	d.features = probeLinuxFeatures()
 
-	var child context.Context
-	child, d.cancel = context.WithCancel(ctx)
+	rootCtx, rootCancel := context.WithCancel(ctx)
+	d.rootCtx = rootCtx
+	d.rootCancel = rootCancel
+	evCtx, evCancel := context.WithCancel(rootCtx)
+	d.eventCtx = evCtx
+	d.eventCancel = evCancel
 
+	if err := d.bootstrapLoadedCollection(); err != nil {
+		d.cleanup()
+		rootCancel()
+		d.rootCtx = nil
+		d.rootCancel = nil
+		d.eventCtx = nil
+		d.eventCancel = nil
+		return err
+	}
+
+	d.startTime = time.Now()
+	d.running.Store(true)
+	d.collectOwnProgramIDs()
+	_ = d.emitFeatureStatusEvent()
+
+	d.wg.Add(len(d.readers))
+	for _, r := range d.readers {
+		go d.eventLoop(evCtx, r)
+	}
+	go d.watchdogLoop(rootCtx)
+
+	return nil
+}
+
+// bootstrapLoadedCollection loads the BPF object, attaches tracepoints, opens ringbuf readers, and syncs policy.
+func (d *EBPFDriver) bootstrapLoadedCollection() error {
 	spec, err := d.loadCollection()
 	if err != nil {
 		d.setLoadDiag(err.Error())
@@ -316,18 +371,6 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 		d.cleanup()
 		return fmt.Errorf("syncing initial policy: %w", err)
 	}
-
-	d.startTime = time.Now()
-	d.running.Store(true)
-	d.collectOwnProgramIDs()
-	_ = d.emitFeatureStatusEvent()
-
-	d.wg.Add(len(d.readers))
-	for _, r := range d.readers {
-		go d.eventLoop(child, r)
-	}
-	go d.watchdogLoop(child)
-
 	return nil
 }
 
@@ -336,14 +379,95 @@ func (d *EBPFDriver) Stop() error {
 	if !d.running.CompareAndSwap(true, false) {
 		return nil
 	}
-	d.cancel()
+	if d.rootCancel != nil {
+		d.rootCancel()
+	}
 	for _, r := range d.readers {
-		r.Close()
+		if r != nil {
+			_ = r.Close()
+		}
 	}
 	d.wg.Wait()
 	d.cleanup()
+	d.rootCtx = nil
+	d.rootCancel = nil
+	d.eventCtx = nil
+	d.eventCancel = nil
 	return nil
 }
+
+// reattachWithBoundedRetry tears down the current collection (without stopping the watchdog),
+// reloads programs, reattaches tracepoints, and restarts ringbuf reader loops.
+func (d *EBPFDriver) reattachWithBoundedRetry(maxAttempts int) error {
+	if d == nil || maxAttempts <= 0 {
+		return nil
+	}
+	if !d.running.Load() {
+		return nil
+	}
+
+	d.reattachMu.Lock()
+	defer d.reattachMu.Unlock()
+
+	if !d.running.Load() {
+		return nil
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		d.programReattachAttempts.Add(1)
+		var err error
+		if testEbpfReattachOverride != nil {
+			err = testEbpfReattachOverride(d, attempt)
+		} else {
+			err = d.reattachOnce()
+		}
+		if err != nil {
+			lastErr = err
+			d.programReattachFailures.Add(1)
+			backoff := time.Duration(attempt+1) * 200 * time.Millisecond
+			time.Sleep(backoff)
+			continue
+		}
+		d.lastReattachUnix.Store(time.Now().Unix())
+		d.collectOwnProgramIDs()
+		return nil
+	}
+	return lastErr
+}
+
+func (d *EBPFDriver) reattachOnce() error {
+	if d.rootCtx == nil || d.eventCancel == nil {
+		return fmt.Errorf("ebpf driver event context not initialized")
+	}
+	// Stop reader goroutines only; keep rootCtx alive for watchdog.
+	d.eventCancel()
+	for _, r := range d.readers {
+		if r != nil {
+			_ = r.Close()
+		}
+	}
+	d.wg.Wait()
+
+	d.cleanup()
+
+	evCtx, evCancel := context.WithCancel(d.rootCtx)
+	d.eventCtx = evCtx
+	d.eventCancel = evCancel
+
+	if err := d.bootstrapLoadedCollection(); err != nil {
+		return err
+	}
+
+	d.wg.Add(len(d.readers))
+	for _, r := range d.readers {
+		go d.eventLoop(evCtx, r)
+	}
+	return nil
+}
+
+// test-only hook: if set, reattachWithBoundedRetry delegates here.
+var testEbpfReattachOverride func(d *EBPFDriver, maxAttempts int) error
 
 // SetPolicy updates the event collection policy by writing to eBPF maps.
 func (d *EBPFDriver) SetPolicy(policy EventPolicy) error {
