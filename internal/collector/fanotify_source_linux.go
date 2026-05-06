@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -41,6 +42,11 @@ type FanotifySource struct {
 	errs    atomic.Pointer[string]
 
 	fileDedupe *LinuxFileDeduper
+
+	livenessMu   sync.Mutex
+	livenessRan  bool
+	livenessOK   bool
+	livenessNote string
 }
 
 // NewFanotifySource constructs a source that will watch the given mount
@@ -116,6 +122,8 @@ func (f *FanotifySource) Run(ctx context.Context, sink *StreamingSink) error {
 	}
 	defer f.Stop()
 
+	f.runPostStartLivenessProbe(ctx)
+
 	const evSize = 24 // sizeof(fanotify_event_metadata) on Linux for the variant we use
 	buf := make([]byte, 4096)
 
@@ -180,7 +188,7 @@ func (f *FanotifySource) parseAndDispatch(ctx context.Context, data []byte, sink
 			Path:      path,
 			Operation: op,
 		}
-		if fe.Path != "" && f.fileDedupe != nil && !f.fileDedupe.Allow(fe.Path) {
+		if fe.Path != "" && f.fileDedupe != nil && !f.fileDedupe.AllowWithSource(fe.Path, DedupeSourceFanotify) {
 			data = data[eventLen:]
 			continue
 		}
@@ -223,7 +231,75 @@ func (f *FanotifySource) ExportMonitoringHealth() map[string]any {
 	if f.fileDedupe != nil {
 		src.Notes = fmt.Sprintf("file_dedupe_skipped=%d", f.fileDedupe.Skipped())
 	}
-	return src.ToMap()
+	m := src.ToMap()
+	f.livenessMu.Lock()
+	ran, ok, note := f.livenessRan, f.livenessOK, f.livenessNote
+	f.livenessMu.Unlock()
+	if ran {
+		m["liveness_probe_ok"] = ok
+		if note != "" {
+			m["liveness_probe_detail"] = note
+		}
+		if !ok && src.Status == "healthy" {
+			m["status"] = "degraded"
+		}
+	}
+	return m
+}
+
+// runPostStartLivenessProbe performs a one-shot write under a watched mount and expects a fanotify event.
+func (f *FanotifySource) runPostStartLivenessProbe(ctx context.Context) {
+	f.livenessMu.Lock()
+	defer f.livenessMu.Unlock()
+	f.livenessRan = true
+	if !f.started || f.fd < 0 {
+		f.livenessOK = false
+		f.livenessNote = "not_started"
+		return
+	}
+	dir := "/var/lib/edr"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		f.livenessOK = false
+		f.livenessNote = "mkdir:" + err.Error()
+		return
+	}
+	path := filepath.Join(dir, ".fanotify_liveness_probe")
+	if err := os.WriteFile(path, []byte("liveness\n"), 0o644); err != nil {
+		f.livenessOK = false
+		f.livenessNote = "write:" + err.Error()
+		return
+	}
+	ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	buf := make([]byte, 4096)
+	for {
+		if ctx2.Err() != nil {
+			f.livenessOK = false
+			f.livenessNote = "timeout_or_cancelled"
+			return
+		}
+		n, err := unix.Read(f.fd, buf)
+		if err != nil {
+			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) {
+				select {
+				case <-ctx2.Done():
+					f.livenessOK = false
+					f.livenessNote = "timeout_or_cancelled"
+					return
+				case <-time.After(15 * time.Millisecond):
+				}
+				continue
+			}
+			f.livenessOK = false
+			f.livenessNote = err.Error()
+			return
+		}
+		if n >= 24 {
+			f.livenessOK = true
+			f.livenessNote = ""
+			return
+		}
+	}
 }
 
 func (f *FanotifySource) recordError(err error) {
