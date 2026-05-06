@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/google/uuid"
@@ -182,6 +183,12 @@ func Validate(cfg *Config) error {
 		}
 		if lt.Interval < 0 {
 			errs.add("monitoring.log_targets[%d].interval must be >= 0", i)
+		}
+		if t == "eventchannel" && runtime.GOOS != "windows" {
+			errs.add("monitoring.log_targets[%d].type=eventchannel requires windows", i)
+		}
+		if t == "journald" && runtime.GOOS != "linux" {
+			errs.add("monitoring.log_targets[%d].type=journald requires linux", i)
 		}
 	}
 
