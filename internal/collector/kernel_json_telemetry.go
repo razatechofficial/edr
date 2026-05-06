@@ -238,7 +238,13 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 			fe.Operation = "event"
 		}
 		fe.ActorPID = jsonInt(raw, "pid")
-		fe.SubjectUID = firstNonEmpty(jsonString(raw, "subject_uid"), jsonString(raw, "audit_uid"))
+		fe.ActorPPID = jsonInt(raw, "ppid", "actor_ppid")
+		fe.AuditUID = jsonString(raw, "audit_uid")
+		fe.EffectiveUID = firstNonEmpty(jsonString(raw, "effective_uid"), jsonString(raw, "euid"))
+		fe.ActorComm = firstNonEmpty(jsonString(raw, "actor_comm"), jsonString(raw, "comm"))
+		fe.ActorExe = firstNonEmpty(jsonString(raw, "actor_exe"), jsonString(raw, "exe"), jsonString(raw, "process_path"))
+		fe.Syscall = jsonString(raw, "syscall")
+		fe.SubjectUID = firstNonEmpty(jsonString(raw, "subject_uid"), jsonString(raw, "audit_uid"), fe.AuditUID)
 		fe.Hash = jsonString(raw, "hash")
 		fe.WriteFD = jsonInt(raw, "write_fd")
 		fe.BytesWritten = jsonUint64(raw, "bytes_written")
