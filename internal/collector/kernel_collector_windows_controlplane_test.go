@@ -37,3 +37,28 @@ func TestControlPlaneReady_RequiredDegraded(t *testing.T) {
 		t.Fatal("expected control plane to be degraded")
 	}
 }
+
+func TestControlPlaneReady_OptionalWhenNotConfigured(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Monitoring.WindowsWFPCtlProbe = false
+	cfg.Monitoring.WindowsMinifilterPort = ""
+	kc := &KernelCollector{cfg: cfg}
+
+	extras := map[string]any{}
+	if !kc.controlPlaneReady(extras) {
+		t.Fatal("expected control plane ready when probes are not requested")
+	}
+}
+
+func TestControlPlaneReady_MissingWFPMapWhenRequired(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Monitoring.WindowsWFPCtlProbe = true
+	kc := &KernelCollector{cfg: cfg}
+
+	extras := map[string]any{
+		"minifilter_ctl": map[string]any{"connected": true},
+	}
+	if kc.controlPlaneReady(extras) {
+		t.Fatal("expected degraded readiness when wfp map missing but required")
+	}
+}

@@ -4,6 +4,7 @@ package kernel
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -29,5 +30,22 @@ func TestClassifyWFPEngineErr(t *testing.T) {
 		if err == nil {
 			t.Fatalf("code=%d: expected error", tc.code)
 		}
+	}
+}
+
+func TestWFPCtlRecoverOutcomeClassification(t *testing.T) {
+	t.Parallel()
+	w := NewWFPCtl()
+	_ = w.Recover()
+	h := w.Health()
+	outcome, _ := h["last_recover_outcome"].(string)
+	if outcome == "" {
+		t.Fatalf("missing recover outcome: %#v", h)
+	}
+	if !strings.HasPrefix(outcome, "recover_failed_") && outcome != "recovered" {
+		t.Fatalf("unexpected recover outcome %q", outcome)
+	}
+	if _, ok := h["recoveries"]; !ok {
+		t.Fatalf("expected recoveries counter: %#v", h)
 	}
 }
