@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,36 @@ var pwshDefenderChannels = []pwshDefenderChannel{
 		query:    "*[System[(EventID=8003 or EventID=8004 or EventID=8006 or EventID=8007)]]",
 		bookmark: "applocker_bookmark.xml",
 		mapEvent: mapAppLockerEventXML,
+	},
+	{
+		name:     "Microsoft-Windows-TaskScheduler/Operational",
+		query:    "*[System[(EventID=106 or EventID=200 or EventID=201)]]",
+		bookmark: "taskscheduler_bookmark.xml",
+		mapEvent: mapGenericOperationalXML("taskscheduler"),
+	},
+	{
+		name:     "Microsoft-Windows-WMI-Activity/Operational",
+		query:    "*",
+		bookmark: "wmi_activity_bookmark.xml",
+		mapEvent: mapGenericOperationalXML("wmi_activity"),
+	},
+	{
+		name:     "Microsoft-Windows-BITS-Client/Operational",
+		query:    "*",
+		bookmark: "bits_client_bookmark.xml",
+		mapEvent: mapGenericOperationalXML("bits_client"),
+	},
+	{
+		name:     "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall",
+		query:    "*",
+		bookmark: "firewall_bookmark.xml",
+		mapEvent: mapGenericOperationalXML("firewall"),
+	},
+	{
+		name:     "System",
+		query:    "*[System[EventID=7045]]",
+		bookmark: "system_svc_install_bookmark.xml",
+		mapEvent: mapGenericOperationalXML("system_service_install"),
 	},
 }
 
@@ -346,6 +377,28 @@ func mapDefenderEventXML(endpointID, hostname, xmlText string) *Telemetry {
 }
 
 // mapAppLockerEventXML maps AppLocker EXE/DLL channel events.
+// mapGenericOperationalXML maps additional bookmarked operational channels (G-BLS-MATRIX).
+func mapGenericOperationalXML(kind string) func(endpointID, hostname, xmlText string) *Telemetry {
+	return func(endpointID, hostname, xmlText string) *Telemetry {
+		var ev winEventXML
+		if err := xml.Unmarshal([]byte(xmlText), &ev); err != nil {
+			return nil
+		}
+		fields := evtFields(ev)
+		base := evtBase(endpointID, hostname, ev)
+		base.EventType = schema.EventProcess
+		pe := &schema.ProcessEvent{
+			BaseEvent:   base,
+			ProcessName: kind,
+			CommandLine: firstNonEmpty(
+				fmt.Sprintf("eid=%d", ev.System.EventID),
+				fields["TaskName"], fields["SubjectUserName"], fields["ServiceName"], fields["ClientMachine"]),
+			Tags: []string{kind, "evtx_operational"},
+		}
+		return &Telemetry{Process: pe}
+	}
+}
+
 func mapAppLockerEventXML(endpointID, hostname, xmlText string) *Telemetry {
 	var ev winEventXML
 	if err := xml.Unmarshal([]byte(xmlText), &ev); err != nil {
