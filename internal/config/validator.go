@@ -164,6 +164,26 @@ func Validate(cfg *Config) error {
 		validateEnum(&errs, "monitoring.security_profile", cfg.Monitoring.SecurityProfile,
 			"standard", "regulated", "strict_complete")
 	}
+	if cfg.Monitoring.WindowsControlPlaneRequired &&
+		!cfg.Monitoring.WindowsWFPCtlProbe &&
+		strings.TrimSpace(cfg.Monitoring.WindowsMinifilterPort) == "" {
+		errs.add("monitoring.windows_control_plane_required=true needs windows_wfp_ctl_probe=true or windows_minifilter_port set")
+	}
+	if cfg.Monitoring.WindowsControlPlaneRequired && !cfg.Monitoring.WindowsServiceHardening {
+		errs.add("monitoring.windows_control_plane_required=true requires monitoring.windows_service_hardening=true (SCM posture)")
+	}
+
+	for i, lt := range cfg.Monitoring.LogTargets {
+		t := strings.ToLower(strings.TrimSpace(lt.Type))
+		validateEnum(&errs, fmt.Sprintf("monitoring.log_targets[%d].type", i), t,
+			"file", "eventchannel", "journald", "command", "full_command")
+		if strings.TrimSpace(lt.Path) == "" && t != "journald" {
+			errs.add("monitoring.log_targets[%d].path is required for type %q", i, t)
+		}
+		if lt.Interval < 0 {
+			errs.add("monitoring.log_targets[%d].interval must be >= 0", i)
+		}
+	}
 
 	return errs.err()
 }
