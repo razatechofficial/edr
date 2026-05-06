@@ -45,7 +45,7 @@ type logTargetRuntime struct {
 	target config.LogTarget
 
 	lastErr string
-	tick    atomic.Uint64
+	tick    uint64
 	status  string
 
 	cmd *CommandRunner
@@ -139,7 +139,7 @@ func (l *LogTargetsCollector) Collect(ctx context.Context) ([]Telemetry, error) 
 			break
 		}
 		st := &l.states[i]
-		st.tick.Add(1)
+		st.tick++
 		ty := strings.ToLower(strings.TrimSpace(st.target.Type))
 
 		switch ty {
@@ -177,7 +177,7 @@ func (l *LogTargetsCollector) Collect(ctx context.Context) ([]Telemetry, error) 
 				errs = append(errs, fmt.Sprintf("journald[%d]: linux only", st.idx))
 				continue
 			}
-			n, err := l.collectJournaldSnapshot(ctx, st)
+			evs, n, err := l.collectJournaldSnapshot(ctx, st)
 			if err != nil {
 				st.status = "error"
 				st.lastErr = err.Error()
@@ -186,6 +186,7 @@ func (l *LogTargetsCollector) Collect(ctx context.Context) ([]Telemetry, error) 
 				st.status = "ok"
 				st.lastErr = ""
 				l.readBytes.Add(n)
+				out = append(out, evs...)
 			}
 		case "command", "full_command":
 			b, err := st.cmd.Run(ctx)
@@ -398,7 +399,7 @@ func (l *LogTargetsCollector) ExportMonitoringHealthRows() []map[string]any {
 			OS:        runtime.GOOS,
 			Source:    ty,
 			Status:    status,
-			EPSOut:    st.tick.Load(),
+			EPSOut:    st.tick,
 			LastError: st.lastErr,
 			Dropped:   l.dropped.Load(),
 			Notes:     logTargetFormatNotes(st.target.Format),
