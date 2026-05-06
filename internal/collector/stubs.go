@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"runtime"
+	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
 )
@@ -117,8 +118,23 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 
 	cols := []Collector{pc, netCol, authCol, fileCol}
 
+	var linuxSharedFileDedupe *LinuxFileDeduper
+	if runtime.GOOS == "linux" && cfgEff.Monitoring.LinuxFileEventDedupeMs > 0 {
+		linuxSharedFileDedupe = NewLinuxFileDeduper(time.Duration(cfgEff.Monitoring.LinuxFileEventDedupeMs) * time.Millisecond)
+	}
+
 	if WantKernelTier(cfgEff) {
 		if kc := NewKernelCollector(endpointID, cfgEff, users); kc != nil {
+			if att, ok := any(kc).(interface {
+				AttachLinuxFileDedupe(*LinuxFileDeduper)
+			}); ok && linuxSharedFileDedupe != nil {
+				att.AttachLinuxFileDedupe(linuxSharedFileDedupe)
+			}
+			if att, ok := any(kc).(interface {
+				AttachLineageTracker(*LineageTracker)
+			}); ok {
+				att.AttachLineageTracker(tracker)
+			}
 			cols = append(cols, kc)
 		} else if kcap := newKernelCapabilityProbeCollectorWhenNil(endpointID, cfgEff, users); kcap != nil {
 			cols = append(cols, kcap)
@@ -139,14 +155,14 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 		WireWindowsKernelRegistryETW(cols)
 	}
 
-	cols = extendLinuxMonitoringCollectors(cols, cfgEff, endpointID, tracker, linuxJournalStandalone)
+	cols = extendLinuxMonitoringCollectors(cols, cfgEff, endpointID, tracker, linuxJournalStandalone, linuxSharedFileDedupe)
 	cols = extendDarwinMonitoringCollectors(cols, cfgEff, endpointID, tracker)
 
 	if InventoryWanted(cfgEff) {
 		cols = append(cols, NewInventoryCollector(cfgEff))
 	}
 
-	if ltc := NewLogTailCollector(cfgEff); ltc != nil {
+	if ltc := NewLogTargetsCollector(cfgEff); ltc != nil {
 		cols = append(cols, ltc)
 	}
 	if pc := NewPostureCollector(cfgEff); pc != nil {
