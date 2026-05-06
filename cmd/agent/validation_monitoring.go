@@ -125,6 +125,15 @@ func runMonitoringValidation(ctx context.Context, cfg *config.Config) Monitoring
 	rep.Assertions = append(rep.Assertions,
 		assertStrictNoPlaceholderSources(rep.Sources, cfg)...,
 	)
+	rep.Assertions = append(rep.Assertions,
+		assertPlatformKernelContracts(rep.Sources, cfg)...,
+	)
+	rep.Assertions = append(rep.Assertions,
+		assertWindowsServiceHardeningDepth(cfg)...,
+	)
+	rep.Assertions = append(rep.Assertions,
+		assertInventoryDeltaWhenEnabled(cfg)...,
+	)
 
 	for _, a := range rep.Assertions {
 		if a.Failed {
@@ -218,8 +227,8 @@ func perOSExpectedSources(cfg *config.Config) []string {
 		if cfg != nil && cfg.Monitoring.PostureEnabled {
 			out = append(out, "posture")
 		}
-		if cfg != nil && collector.LogTailPathsConfigured(*cfg) {
-			out = append(out, "log_tail")
+		if cfg != nil && collector.LogTargetsBreadthConfigured(*cfg) {
+			out = append(out, "log_targets")
 		}
 		if cfg != nil && collector.InventoryWanted(*cfg) {
 			out = append(out, "inventory")
@@ -299,7 +308,7 @@ func assertSourcesPresent(sources []map[string]any, expected []string, cfg *conf
 }
 
 func assertNoDrops(sources []map[string]any, cfg *config.Config) []monitoringAssertion {
-	strict := cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.Monitoring.SecurityProfile), "strict_complete")
+	_ = cfg
 	var out []monitoringAssertion
 	for _, src := range sources {
 		name, _ := src["name"].(string)
@@ -308,14 +317,14 @@ func assertNoDrops(sources []map[string]any, cfg *config.Config) []monitoringAss
 			out = append(out, monitoringAssertion{
 				Name:   "drops." + name,
 				Detail: fmt.Sprintf("dropped=%.0f (idle should be 0)", dropped),
-				Failed: strict,
+				Failed: true,
 			})
 		}
 		if rl := rateLimitedPositive(src["rate_limited_drops"]); rl > 0 {
 			out = append(out, monitoringAssertion{
 				Name:   "rate_limit_drops." + name,
 				Detail: fmt.Sprintf("rate_limited_drops=%.0f (stream_max_eps)", rl),
-				Failed: strict,
+				Failed: true,
 			})
 		}
 	}
@@ -388,7 +397,7 @@ func assertHeapBudget(heapMiB uint64) []monitoringAssertion {
 }
 
 func assertStrictNoPlaceholderSources(sources []map[string]any, cfg *config.Config) []monitoringAssertion {
-	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.Monitoring.SecurityProfile), "strict_complete") {
+	if cfg == nil {
 		return nil
 	}
 	var out []monitoringAssertion
@@ -408,6 +417,184 @@ func assertStrictNoPlaceholderSources(sources []map[string]any, cfg *config.Conf
 		}
 	}
 	return out
+}
+
+func assertPlatformKernelContracts(sources []map[string]any, cfg *config.Config) []monitoringAssertion {
+	if !wantMonitoringKernelTier(cfg) {
+		return nil
+	}
+	var kernelRow map[string]any
+	for _, s := range sources {
+		if name, _ := s["name"].(string); name == "kernel" {
+			kernelRow = s
+			break
+		}
+	}
+	if kernelRow == nil {
+		return nil
+	}
+	status, _ := kernelRow["status"].(string)
+	if status == "absent" || status == "unavailable" {
+		return nil
+	}
+	tamper, hasTamper := kernelRow["tamper"].(map[string]any)
+	switch runtime.GOOS {
+	case "linux":
+		if v, ok := kernelRow["bpf_load_diag"]; ok {
+			if _, isStr := v.(string); !isStr {
+				return []monitoringAssertion{{
+					Name:   "kernel.linux.bpf_load_diag",
+					Detail: "bpf_load_diag must be a string when present",
+					Failed: true,
+				}}
+			}
+		}
+		return nil
+	case "windows":
+		if v, ok := kernelRow["control_plane_ready"].(bool); !ok {
+			return []monitoringAssertion{{
+				Name:   "kernel.windows.control_plane_ready",
+				Detail: "missing boolean control_plane_ready",
+				Failed: true,
+			}}
+		} else if !v && cfg != nil && cfg.Monitoring.WindowsControlPlaneRequired {
+			return []monitoringAssertion{{
+				Name:   "kernel.windows.control_plane_ready",
+				Detail: "control plane degraded while windows_control_plane_required=true",
+				Failed: true,
+			}}
+		}
+		if cfg != nil && cfg.Monitoring.WindowsControlPlaneRequired {
+			sh, ok := kernelRow["service_hardening_posture"].(map[string]any)
+			if !ok {
+				return []monitoringAssertion{{
+					Name:   "kernel.windows.service_hardening_posture",
+					Detail: "missing service_hardening_posture while windows_control_plane_required=true",
+					Failed: true,
+				}}
+			}
+			applied, _ := sh["applied"].(bool)
+			fac, _ := sh["failure_actions_configured"].(bool)
+			if !applied || !fac {
+				return []monitoringAssertion{{
+					Name:   "kernel.windows.service_hardening_posture",
+					Detail: "expected applied=true and failure_actions_configured=true",
+					Failed: true,
+				}}
+			}
+		}
+		if !hasTamper {
+			return []monitoringAssertion{{
+				Name:   "kernel.windows.tamper",
+				Detail: "missing normalized tamper object",
+				Failed: true,
+			}}
+		}
+		_, hasSignals := tamper["signals"].(map[string]any)
+		return []monitoringAssertion{{
+			Name:   "kernel.windows.tamper",
+			Detail: fmt.Sprintf("tamper_signals=%v", hasSignals),
+			Failed: !hasSignals,
+		}}
+	case "darwin":
+		if _, ok := kernelRow["ne_ctl"].(map[string]any); !ok {
+			return []monitoringAssertion{{
+				Name:   "kernel.darwin.ne_ctl",
+				Detail: "missing ne_ctl object",
+				Failed: true,
+			}}
+		}
+		rv, ok := kernelRow["esf_revocation"].(map[string]any)
+		if !ok {
+			return []monitoringAssertion{{
+				Name:   "kernel.darwin.esf_revocation",
+				Detail: "missing esf_revocation object",
+				Failed: true,
+			}}
+		}
+		if _, ok := rv["esf_revocation_probes"]; !ok {
+			return []monitoringAssertion{{
+				Name:   "kernel.darwin.esf_revocation_probes",
+				Detail: "missing non-heartbeat esf_revocation_probes map",
+				Failed: true,
+			}}
+		}
+		capv, ok := kernelRow["esf_ingest_queue_cap"].(float64)
+		if !ok || capv <= 0 {
+			return []monitoringAssertion{{
+				Name:   "kernel.darwin.esf_ingest",
+				Detail: "expected esf_ingest_queue_cap > 0",
+				Failed: true,
+			}}
+		}
+		if !hasTamper {
+			return []monitoringAssertion{{
+				Name:   "kernel.darwin.tamper",
+				Detail: "missing normalized tamper object",
+				Failed: true,
+			}}
+		}
+		return []monitoringAssertion{{
+			Name:   "kernel.darwin.contract",
+			Detail: "ne_ctl+esf_revocation+tamper present",
+		}}
+	default:
+		return nil
+	}
+}
+
+func assertWindowsServiceHardeningDepth(cfg *config.Config) []monitoringAssertion {
+	if cfg == nil || runtime.GOOS != "windows" || !cfg.Monitoring.WindowsServiceHardening {
+		return nil
+	}
+	const path = `C:\ProgramData\EDR Agent\service_hardening_posture.json`
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return []monitoringAssertion{{
+			Name:   "windows_service_hardening_depth",
+			Detail: fmt.Sprintf("read posture: %v", err),
+			Failed: true,
+		}}
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return []monitoringAssertion{{
+			Name:   "windows_service_hardening_depth",
+			Detail: err.Error(),
+			Failed: true,
+		}}
+	}
+	rp, _ := m["required_privileges_set"].(bool)
+	sid, _ := m["service_sid_type"].(string)
+	if !rp || sid != "restricted" {
+		return []monitoringAssertion{{
+			Name:   "windows_service_hardening_depth",
+			Detail: fmt.Sprintf("required_privileges_set=%v service_sid_type=%q want true+restricted", rp, sid),
+			Failed: true,
+		}}
+	}
+	return []monitoringAssertion{{
+		Name:   "windows_service_hardening_depth",
+		Detail: "required_privileges_set+restricted ok",
+	}}
+}
+
+func assertInventoryDeltaWhenEnabled(cfg *config.Config) []monitoringAssertion {
+	if cfg == nil || !cfg.Monitoring.InventoryEmitDeltas || strings.TrimSpace(cfg.Agent.DataDir) == "" {
+		return nil
+	}
+	p := filepath.Join(cfg.Agent.DataDir, "inventory_delta.json")
+	if _, err := os.Stat(p); err != nil {
+		return []monitoringAssertion{{
+			Name:   "inventory_delta",
+			Detail: fmt.Sprintf("missing %s: %v", p, err),
+			Failed: true,
+		}}
+	}
+	return []monitoringAssertion{{
+		Name:   "inventory_delta",
+		Detail: p + " ok",
+	}}
 }
 
 func isApprovedStrictEquivalentSource(name, src string) bool {

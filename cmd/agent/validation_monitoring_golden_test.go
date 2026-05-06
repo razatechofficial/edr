@@ -130,3 +130,86 @@ func TestMonitoringHealthGolden_Fixtures(t *testing.T) {
 		})
 	}
 }
+
+func TestMonitoringValidation_PlatformKernelContracts(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Monitoring.Mode = "auto"
+	cfg.Monitoring.KernelEnabled = true
+
+	switch runtime.GOOS {
+	case "windows":
+		sources := []map[string]any{
+			{
+				"name":                "kernel",
+				"status":              "healthy",
+				"control_plane_ready": true,
+				"tamper": map[string]any{
+					"signals": map[string]any{
+						"etw_session_recover_attempts": float64(0),
+					},
+				},
+			},
+		}
+		assertions := assertPlatformKernelContracts(sources, &cfg)
+		for _, a := range assertions {
+			if a.Failed {
+				t.Fatalf("windows kernel contract failed: %+v", a)
+			}
+		}
+		t.Run("control_plane_required", func(t *testing.T) {
+			cfg2 := cfg
+			cfg2.Monitoring.WindowsControlPlaneRequired = true
+			cfg2.Monitoring.WindowsServiceHardening = true
+			cfg2.Monitoring.WindowsWFPCtlProbe = true
+			sources2 := []map[string]any{
+				{
+					"name":                "kernel",
+					"status":              "healthy",
+					"control_plane_ready": true,
+					"service_hardening_posture": map[string]any{
+						"applied":                    true,
+						"failure_actions_configured": true,
+					},
+					"tamper": map[string]any{
+						"signals": map[string]any{"x": true},
+					},
+				},
+			}
+			for _, a := range assertPlatformKernelContracts(sources2, &cfg2) {
+				if a.Failed {
+					t.Fatalf("windows required contract failed: %+v", a)
+				}
+			}
+		})
+	case "darwin":
+		sources := []map[string]any{
+			{
+				"name":                 "kernel",
+				"status":               "healthy",
+				"esf_ingest_queue_cap": float64(4096),
+				"ne_ctl": map[string]any{
+					"network_extension_status": "running_scaffold",
+				},
+				"esf_revocation": map[string]any{
+					"esf_revocation_status": "healthy",
+					"esf_revocation_probes": map[string]any{
+						"probe_sip": "System Integrity Protection status: enabled.",
+					},
+				},
+				"tamper": map[string]any{
+					"signals": map[string]any{
+						"ne_degraded": false,
+					},
+				},
+			},
+		}
+		assertions := assertPlatformKernelContracts(sources, &cfg)
+		for _, a := range assertions {
+			if a.Failed {
+				t.Fatalf("darwin kernel contract failed: %+v", a)
+			}
+		}
+	default:
+		t.Skip("platform-specific contract test only for windows/darwin")
+	}
+}
