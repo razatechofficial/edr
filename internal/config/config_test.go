@@ -185,6 +185,23 @@ func TestValidateMonitoringWindowsControlPlaneRequired(t *testing.T) {
 	}
 }
 
+func TestValidateLogTargetsOSCompatibility(t *testing.T) {
+	cfg := Defaults()
+	if runtime.GOOS != "windows" {
+		cfg.Monitoring.LogTargets = []LogTarget{{Type: "eventchannel", Path: "Security"}}
+		if err := Validate(&cfg); err == nil {
+			t.Fatal("expected eventchannel validation error on non-windows")
+		}
+	}
+	cfg = Defaults()
+	if runtime.GOOS != "linux" {
+		cfg.Monitoring.LogTargets = []LogTarget{{Type: "journald"}}
+		if err := Validate(&cfg); err == nil {
+			t.Fatal("expected journald validation error on non-linux")
+		}
+	}
+}
+
 func TestValidateMLRequireRuntimeRequiresMLEnabled(t *testing.T) {
 	t.Parallel()
 	cfg := Defaults()
