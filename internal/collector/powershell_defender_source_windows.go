@@ -99,10 +99,12 @@ type PowerShellDefenderSource struct {
 
 type pwshChannelState struct {
 	cfg      pwshDefenderChannel
+	bmPath   string
 	bookmark windows.Handle
 	result   windows.Handle
 	primed   bool
 	useSub   bool
+	seen     uint64
 }
 
 // NewPowerShellDefenderSource constructs the multi-channel event log source.
@@ -177,6 +179,10 @@ func (s *PowerShellDefenderSource) Snapshot(ctx context.Context) ([]Telemetry, e
 				}
 				out = append(out, *tel)
 				s.emitted.Add(1)
+				st.seen++
+				if st.seen%100 == 0 {
+					_ = st.saveBookmarkAtomic()
+				}
 			}
 			if !st.useSub {
 				break
@@ -184,6 +190,7 @@ func (s *PowerShellDefenderSource) Snapshot(ctx context.Context) ([]Telemetry, e
 		}
 		if !st.primed {
 			st.primed = true
+			_ = st.saveBookmarkAtomic()
 		}
 	}
 	return out, nil
@@ -263,6 +270,7 @@ func (s *PowerShellDefenderSource) initLocked() error {
 func (s *PowerShellDefenderSource) openChannel(cfg pwshDefenderChannel) (*pwshChannelState, error) {
 	st := &pwshChannelState{cfg: cfg}
 	bookmarkPath := filepath.Join(s.dataDir, cfg.bookmark)
+	st.bmPath = bookmarkPath
 	if _, err := readBookmarkFile(bookmarkPath); err == nil {
 		pathU16, _ := windows.UTF16PtrFromString(bookmarkPath)
 		if h, err := kernel.EvtLoadBookmark(pathU16); err == nil {
@@ -293,6 +301,25 @@ func (s *PowerShellDefenderSource) openChannel(cfg pwshDefenderChannel) (*pwshCh
 	st.result = rs
 	st.useSub = false
 	return st, nil
+}
+
+func (s *pwshChannelState) saveBookmarkAtomic() error {
+	if s == nil || s.bookmark == 0 || s.bmPath == "" {
+		return nil
+	}
+	tmp := s.bmPath + ".tmp"
+	tmpU16, err := windows.UTF16PtrFromString(tmp)
+	if err != nil {
+		return err
+	}
+	if err := kernel.EvtSaveBookmark(s.bookmark, tmpU16); err != nil {
+		return err
+	}
+	b, err := os.ReadFile(tmp)
+	if err != nil {
+		return err
+	}
+	return writeBookmarkFile(s.bmPath, b)
 }
 
 func (s *PowerShellDefenderSource) renderAndMap(st *pwshChannelState, h windows.Handle) *Telemetry {

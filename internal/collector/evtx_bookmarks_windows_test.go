@@ -41,3 +41,24 @@ func TestEvtxBookmarkFilesRoundTrip_allChannels(t *testing.T) {
 		})
 	}
 }
+
+func TestEvtxBookmarkCoverage_IncludesPowerShellDefenderChannels(t *testing.T) {
+	t.Parallel()
+	got := map[string]struct{}{
+		"auth_bookmark.xml":               {},
+		"sysmon_bookmark.xml":             {},
+		"powershell_bookmark.xml":         {},
+		"defender_bookmark.xml":           {},
+		"applocker_bookmark.xml":          {},
+		"taskscheduler_bookmark.xml":      {},
+		"wmi_activity_bookmark.xml":       {},
+		"bits_client_bookmark.xml":        {},
+		"firewall_bookmark.xml":           {},
+		"system_svc_install_bookmark.xml": {},
+	}
+	for _, ch := range pwshDefenderChannels {
+		if _, ok := got[ch.bookmark]; !ok {
+			t.Fatalf("missing bookmark coverage for channel %q bookmark %q", ch.name, ch.bookmark)
+		}
+	}
+}
