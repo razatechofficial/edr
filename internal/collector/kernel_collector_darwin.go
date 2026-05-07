@@ -30,6 +30,7 @@ type KernelCollector struct {
 	cancel context.CancelFunc
 
 	neCtl    *kernel.NetworkExtensionCtl
+	neReader *DarwinNEReader
 	revProbe *kernel.ESFRevocationProbe
 	wg       sync.WaitGroup
 
@@ -70,6 +71,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		cfg:        cfg,
 		users:      users,
 		neCtl:      kernel.NewNetworkExtensionCtl(strings.TrimSpace(cfg.Monitoring.DarwinNEBundleID)),
+		neReader:   NewDarwinNEReader(endpointID, host, "/var/run/edr/ne.sock"),
 		revProbe:   kernel.NewESFRevocationProbe(),
 	}
 	kc.prio = newKernelRingPriority(cfg)
@@ -98,6 +100,11 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 		"esf_auth":       kc.driver.AuthHealth(),
 		"ne_ctl":         kc.neCtl.Health(),
 		"esf_revocation": kc.revProbe.Health(),
+	}
+	if kc.neReader != nil {
+		for k, v := range kc.neReader.Health() {
+			extras[k] = v
+		}
 	}
 	if im := kc.driver.ESFNotifyIngestMetrics(); im != nil {
 		for k, v := range im {
