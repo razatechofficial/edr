@@ -36,6 +36,11 @@ type RegistryCollector struct {
 	scans     atomic.Uint64
 	emitted   atomic.Uint64
 	skipped   atomic.Uint64
+
+	notifyOnce    sync.Once
+	notifyRunning atomic.Bool
+	notifyPending atomic.Bool
+	notifyWakeups atomic.Uint64
 }
 
 func NewRegistryCollector(endpointID string) *RegistryCollector {
@@ -47,7 +52,13 @@ func NewRegistryCollector(endpointID string) *RegistryCollector {
 			`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run`,
 			`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce`,
 			`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run`,
+			`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce`,
 			`HKLM\SYSTEM\CurrentControlSet\Services`,
+			`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`,
+			`HKCU\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`,
+			`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows`,
+			`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options`,
+			`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper Objects`,
 		},
 		prev:        make(map[string]map[string]string),
 		initialized: make(map[string]bool),
@@ -120,8 +131,18 @@ func (rc *RegistryCollector) ExportMonitoringHealth() map[string]any {
 	if rc.etwActive.Load() {
 		src.Status = "standby"
 		src.Notes = "ETW Kernel-Registry is primary; polling disabled"
+	} else {
+		if rc.notifyRunning.Load() {
+			if src.Notes != "" {
+				src.Notes += "; "
+			}
+			src.Notes += "reg_notify=on"
+		}
 	}
-	return src.ToMap()
+	m := src.ToMap()
+	m["reg_notify_wakeups"] = float64(rc.notifyWakeups.Load())
+	m["reg_notify_pending"] = rc.notifyPending.Load()
+	return m
 }
 
 func (rc *RegistryCollector) Collect(_ context.Context) ([]Telemetry, error) {
@@ -130,6 +151,10 @@ func (rc *RegistryCollector) Collect(_ context.Context) ([]Telemetry, error) {
 		rc.skipped.Add(1)
 		return nil, nil
 	}
+	rc.notifyOnce.Do(func() {
+		rc.StartRegistryNotifyLoop(context.Background())
+	})
+	_ = rc.notifyPending.Swap(false)
 	rc.scans.Add(1)
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
