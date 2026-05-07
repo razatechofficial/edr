@@ -87,6 +87,17 @@ func (d *EBPFDriver) reattachMissingLinks(missing []uint32) error {
 			_ = old.Unpin()
 			_ = old.Close()
 		}
+		if spec.lsm {
+			nl, err := link.AttachLSM(link.LSMOptions{Program: prog})
+			if err != nil {
+				hadErr = true
+				continue
+			}
+			d.linkByProg[id] = nl
+			d.links = append(d.links, nl)
+			d.tryPinTraceLink(spec.progName, nl)
+			continue
+		}
 		pinBase := strings.TrimSpace(d.bpfPinPath)
 		if pinBase != "" {
 			pp := ebpfPinnedTraceLinkPath(pinBase, spec.progName)

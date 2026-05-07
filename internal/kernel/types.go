@@ -25,6 +25,8 @@ type EventPolicy struct {
 	SignalEvents   bool
 	// SchedEvents enables Linux eBPF scheduler tracepoint telemetry (high volume).
 	SchedEvents bool
+	// LSMFimEvents enables Linux BPF LSM observe-only FIM events (path_unlink/path_rename/inode_setattr).
+	LSMFimEvents bool
 
 	// MutePaths lists process paths that should be silently ignored.
 	MutePaths []string
@@ -63,6 +65,7 @@ func DefaultPolicy() EventPolicy {
 		PtraceEvents:   true,
 		SignalEvents:   true,
 		SchedEvents:    false,
+		LSMFimEvents:   false,
 		// Windows: broad security ETW (AMSI / CI / AppLocker / Defender); ignored on other OSes.
 		ETWSecurityProviders: true,
 	}

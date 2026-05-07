@@ -49,6 +49,9 @@ const (
 	bpfEvtSchedSwitch  = 36
 	bpfEvtSchedWakeup  = 37
 	bpfEvtSchedMigrate = 38
+	bpfEvtLSMFimUnlink  = 39
+	bpfEvtLSMFimRename  = 40
+	bpfEvtLSMFimSetattr = 41
 	bpfEvtNetConn      = 11
 	bpfEvtNetAccept    = 12
 	bpfEvtNetBind      = 13
@@ -211,6 +214,7 @@ type tracepointAttachSpec struct {
 	progName string
 	group    string
 	tp       string
+	lsm      bool
 }
 
 type linuxFeatureSet struct {
@@ -386,6 +390,7 @@ func (d *EBPFDriver) bootstrapLoadedCollection() error {
 		d.cleanup()
 		return fmt.Errorf("attaching tracepoints: %w", err)
 	}
+	d.attachLSMPrograms()
 
 	if err := d.openReaders(); err != nil {
 		d.cleanup()
@@ -643,7 +648,7 @@ func (d *EBPFDriver) attachTracepoints() error {
 					if id, ok := info.ID(); ok {
 						pid := uint32(id)
 						d.linkByProg[pid] = pl
-						d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp}
+						d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp, lsm: false}
 					}
 				}
 				continue
@@ -662,7 +667,7 @@ func (d *EBPFDriver) attachTracepoints() error {
 			if id, ok := info.ID(); ok {
 				pid := uint32(id)
 				d.linkByProg[pid] = l
-				d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp}
+				d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp, lsm: false}
 				d.tryPinTraceLink(name, l)
 			}
 		}
@@ -671,6 +676,39 @@ func (d *EBPFDriver) attachTracepoints() error {
 		return fmt.Errorf("no tracepoints attached; verify ebpf programs are present")
 	}
 	return nil
+}
+
+// attachLSMPrograms links observe-only FIM programs (name prefix fim_). Other LSM
+// programs in the object (e.g. enforcement hooks) are intentionally skipped.
+func (d *EBPFDriver) attachLSMPrograms() {
+	if d == nil || d.coll == nil || !d.features.HasBPFLSM {
+		return
+	}
+	for name, prog := range d.coll.Programs {
+		if prog == nil {
+			continue
+		}
+		if prog.Type() != ebpf.LSM {
+			continue
+		}
+		if !strings.HasPrefix(name, "fim_") {
+			continue
+		}
+		l, err := link.AttachLSM(link.LSMOptions{Program: prog})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WARN ebpf: skipping LSM attach %s: %v\n", name, err)
+			continue
+		}
+		d.links = append(d.links, l)
+		if info, ierr := prog.Info(); ierr == nil {
+			if id, ok := info.ID(); ok {
+				pid := uint32(id)
+				d.linkByProg[pid] = l
+				d.specByProg[pid] = tracepointAttachSpec{progName: name, lsm: true}
+			}
+		}
+		d.tryPinTraceLink(name, l)
+	}
 }
 
 func (d *EBPFDriver) tryPinTraceLink(progName string, l link.Link) {
@@ -788,6 +826,11 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeFileEvent(raw)
+	case bpfEvtLSMFimUnlink, bpfEvtLSMFimRename, bpfEvtLSMFimSetattr:
+		if !p.FileEvents || !p.LSMFimEvents {
+			return nil
+		}
+		return d.decodeFileEvent(raw)
 	case bpfEvtNetConn, bpfEvtNetAccept, bpfEvtNetBind, bpfEvtNetClose:
 		if !p.NetworkEvents {
 			return nil
@@ -885,6 +928,16 @@ func (d *EBPFDriver) decodeFileEvent(data []byte) error {
 		payload = appendString(payload, nullTerminated(evt.Filename[:]))
 		payload = appendString(payload, nullTerminated(evt.NewName[:]))
 	case bpfEvtFileChmod:
+		payload = appendString(payload, nullTerminated(evt.Filename[:]))
+		payload = appendUint32(payload, evt.Mode)
+		payload = appendUint32(payload, evt.Flags)
+	case bpfEvtLSMFimUnlink:
+		payload = appendString(payload, nullTerminated(evt.Filename[:]))
+	case bpfEvtLSMFimRename:
+		payload = appendString(payload, nullTerminated(evt.Filename[:]))
+		payload = appendString(payload, nullTerminated(evt.NewName[:]))
+		payload = appendUint32(payload, evt.Flags)
+	case bpfEvtLSMFimSetattr:
 		payload = appendString(payload, nullTerminated(evt.Filename[:]))
 		payload = appendUint32(payload, evt.Mode)
 		payload = appendUint32(payload, evt.Flags)
