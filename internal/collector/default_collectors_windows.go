@@ -34,5 +34,17 @@ func extendWindowsEvtCollectors(cols []Collector, cfg config.Config, endpointID 
 		// in source/notes within ExportMonitoringHealth.
 		cols = append(cols, newStreamingRunCollector("dns", 256, cfg.Monitoring.StreamMaxEPS, dns.Run, dns.ExportMonitoringHealth))
 	}
+	if cfg.Monitoring.WindowsAmsiTamperEnabled || cfg.Monitoring.WindowsEtwTamperEnabled {
+		am := NewAmsiEtwTamperSource(endpointID, host, cfg)
+		cols = append(cols, newStreamingRunCollector("amsi_etw_tamper", 32, cfg.Monitoring.StreamMaxEPS, am.Run, am.ExportMonitoringHealth))
+	}
+	if cfg.Monitoring.WindowsADSEnumerator {
+		ad := NewADSEnumeratorSource(endpointID, host, cfg)
+		cols = append(cols, newStreamingRunCollector("ads_enumerator", 64, cfg.Monitoring.StreamMaxEPS, ad.Run, ad.ExportMonitoringHealth))
+	}
+	if cfg.Monitoring.WindowsAutorunsLite {
+		ar := NewAutorunsLiteSource(endpointID, host, cfg)
+		cols = append(cols, newStreamingRunCollector("autoruns_lite", 128, cfg.Monitoring.StreamMaxEPS, ar.Run, ar.ExportMonitoringHealth))
+	}
 	return cols
 }
