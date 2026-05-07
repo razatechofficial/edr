@@ -128,6 +128,18 @@ func (s *Sender) Stop() {
 	})
 }
 
+// Health exposes sender-level counters for diagnostics.
+func (s *Sender) Health() map[string]any {
+	if s == nil {
+		return map[string]any{"sealer_active": false}
+	}
+	return map[string]any{
+		"sealer_active": s.sealer != nil,
+		"sealed_ok":     s.sealedOK.Load(),
+		"sealed_err":    s.sealedErr.Load(),
+	}
+}
+
 func (s *Sender) backoff(attempt int) time.Duration {
 	base := float64(s.cfg.BaseBackoff)
 	d := base * math.Pow(2, float64(attempt))

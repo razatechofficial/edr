@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
@@ -17,6 +18,9 @@ type TelemetryRelay struct {
 	client   *http.Client
 	q        *telemetryqueue.Manager
 	log      *slog.Logger
+	sealer   func([]byte) ([]byte, error)
+	sealedOK atomic.Uint64
+	sealedErr atomic.Uint64
 }
 
 // NewTelemetryRelay builds a relay. endpoint must be a full URL (e.g. https://host/api/telemetry).
@@ -37,7 +41,17 @@ func (r *TelemetryRelay) TrySend(ctx context.Context, line []byte) error {
 	if r == nil || len(line) == 0 {
 		return nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint, bytes.NewReader(line))
+	payload := line
+	if r.sealer != nil {
+		sealed, err := r.sealer(line)
+		if err != nil {
+			r.sealedErr.Add(1)
+			return err
+		}
+		r.sealedOK.Add(1)
+		payload = sealed
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -51,6 +65,13 @@ func (r *TelemetryRelay) TrySend(ctx context.Context, line []byte) error {
 		return errors.New("telemetry post non-2xx")
 	}
 	return nil
+}
+
+func (r *TelemetryRelay) SetSealer(sealer func([]byte) ([]byte, error)) {
+	if r == nil {
+		return
+	}
+	r.sealer = sealer
 }
 
 // Enqueue persists a line to the on-disk queue.
