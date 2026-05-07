@@ -35,6 +35,8 @@ type KernelCollector struct {
 
 	prio         *kernelRingPriority
 	priorityDrop atomic.Uint64
+	fallbackFile *FSEventsFallbackSource
+	fallbackMode bool
 }
 
 // NewKernelCollector starts the ESF driver when running as root.
@@ -44,7 +46,20 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 	}
 	d, err := kernel.NewESFDriver(endpointID)
 	if err != nil {
-		return nil
+		if !cfg.Monitoring.UserlandFallback {
+			return nil
+		}
+		host, _ := os.Hostname()
+		return &KernelCollector{
+			driver:       nil,
+			buf:          nil,
+			endpointID:   endpointID,
+			hostname:     host,
+			cfg:          cfg,
+			users:        users,
+			fallbackFile: NewFSEventsFallbackSource(endpointID, host, cfg.Monitoring.FIMPaths),
+			fallbackMode: true,
+		}
 	}
 	host, _ := os.Hostname()
 	kc := &KernelCollector{
@@ -63,7 +78,20 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 
 // ExportMonitoringHealth implements ExportMonitoringHealth for monitoring doctor snapshots.
 func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
-	if kc == nil || kc.driver == nil || kc.buf == nil {
+	if kc == nil {
+		return nil
+	}
+	if kc.fallbackMode {
+		src := MonitoringSource{
+			Name:   "kernel",
+			OS:     "darwin",
+			Source: "fsevents_fallback",
+			Status: "degraded",
+			Notes:  "ESF init failed; using FSEvents-style polling fallback",
+		}
+		return src.ToMap()
+	}
+	if kc.driver == nil || kc.buf == nil {
 		return nil
 	}
 	extras := map[string]any{
@@ -110,6 +138,15 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 func (kc *KernelCollector) Name() string { return "kernel" }
 
 func (kc *KernelCollector) Start(ctx context.Context) error {
+	if kc.fallbackMode && kc.fallbackFile != nil {
+		ctx, kc.cancel = context.WithCancel(ctx)
+		kc.wg.Add(1)
+		go func() {
+			defer kc.wg.Done()
+			kc.fallbackLoop(ctx)
+		}()
+		return nil
+	}
 	ctx, kc.cancel = context.WithCancel(ctx)
 	pol := kernel.DefaultPolicy()
 	pol.MutePaths = append(kernel.DefaultESFMutePathPrefixes(), kc.cfg.Monitoring.ESFMutePathPrefixes...)
@@ -148,6 +185,10 @@ func (kc *KernelCollector) Collect(_ context.Context) ([]Telemetry, error) {
 func (kc *KernelCollector) Stop() {
 	if kc.cancel != nil {
 		kc.cancel()
+	}
+	if kc.fallbackMode {
+		kc.wg.Wait()
+		return
 	}
 	kc.neCtl.Stop()
 	_ = kc.driver.Stop()
@@ -206,6 +247,28 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 			kc.maybeEnrichProcessImageHash(tel)
 			kc.mu.Lock()
 			kc.events = append(kc.events, *tel)
+			kc.mu.Unlock()
+		}
+	}
+}
+
+func (kc *KernelCollector) fallbackLoop(ctx context.Context) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if kc.fallbackFile == nil {
+				continue
+			}
+			evs := kc.fallbackFile.Snapshot()
+			if len(evs) == 0 {
+				continue
+			}
+			kc.mu.Lock()
+			kc.events = append(kc.events, evs...)
 			kc.mu.Unlock()
 		}
 	}
