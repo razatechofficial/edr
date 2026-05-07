@@ -362,6 +362,8 @@ type Config struct {
 		WindowsServiceHardening bool `yaml:"windows_service_hardening"`
 		// WindowsServiceHardeningACL runs best-effort install-directory icacls when WindowsServiceHardening is true.
 		WindowsServiceHardeningACL bool `yaml:"windows_service_hardening_acl"`
+		// WindowsServiceDaclHardened applies service object DACL hardening (deny stop/delete for non-admin/non-SYSTEM).
+		WindowsServiceDaclHardened bool `yaml:"windows_service_dacl_hardened"`
 		// WindowsServiceLaunchProtected sets SERVICE_LAUNCH_PROTECTED (Windows Light) during install when hardening is enabled.
 		WindowsServiceLaunchProtected bool `yaml:"windows_service_launch_protected"`
 		// HealthSnapshotSec writes monitoring_health.json under data_dir when > 0.
@@ -545,6 +547,7 @@ func Defaults() Config {
 	cfg.Monitoring.WindowsControlPlaneRequired = false
 	cfg.Monitoring.WindowsServiceHardening = false
 	cfg.Monitoring.WindowsServiceHardeningACL = false
+	cfg.Monitoring.WindowsServiceDaclHardened = false
 	cfg.Monitoring.WindowsServiceLaunchProtected = false
 
 	cfg.Service.TickInterval = time.Second

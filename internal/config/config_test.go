@@ -185,6 +185,22 @@ func TestValidateMonitoringWindowsControlPlaneRequired(t *testing.T) {
 	}
 }
 
+func TestValidateMonitoringWindowsServiceDACLRequiresHardening(t *testing.T) {
+	cfg := Defaults()
+	cfg.Monitoring.WindowsServiceDaclHardened = true
+	cfg.Monitoring.WindowsServiceHardening = false
+	if err := Validate(&cfg); err == nil {
+		t.Fatal("expected validation error when windows_service_dacl_hardened is true without windows_service_hardening")
+	}
+
+	cfg = Defaults()
+	cfg.Monitoring.WindowsServiceHardening = true
+	cfg.Monitoring.WindowsServiceDaclHardened = true
+	if err := Validate(&cfg); err != nil {
+		t.Fatalf("expected valid config with service hardening + dacl hardening: %v", err)
+	}
+}
+
 func TestValidateLogTargetsOSCompatibility(t *testing.T) {
 	cfg := Defaults()
 	if runtime.GOOS != "windows" {

@@ -173,6 +173,9 @@ func Validate(cfg *Config) error {
 	if cfg.Monitoring.WindowsControlPlaneRequired && !cfg.Monitoring.WindowsServiceHardening {
 		errs.add("monitoring.windows_control_plane_required=true requires monitoring.windows_service_hardening=true (SCM posture)")
 	}
+	if cfg.Monitoring.WindowsServiceDaclHardened && !cfg.Monitoring.WindowsServiceHardening {
+		errs.add("monitoring.windows_service_dacl_hardened=true requires monitoring.windows_service_hardening=true")
+	}
 
 	for i, lt := range cfg.Monitoring.LogTargets {
 		t := strings.ToLower(strings.TrimSpace(lt.Type))
