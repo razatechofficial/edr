@@ -51,6 +51,10 @@ enum event_type {
 	EVENT_SCHED_SWITCH  = 36,
 	EVENT_SCHED_WAKEUP  = 37,
 	EVENT_SCHED_MIGRATE = 38,
+	/* BPF LSM FIM hooks (userspace-gated by policy.LSMFimEvents). */
+	EVENT_LSM_FIM_UNLINK  = 39,
+	EVENT_LSM_FIM_RENAME  = 40,
+	EVENT_LSM_FIM_SETATTR = 41,
 };
 
 struct event_header {
