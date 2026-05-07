@@ -63,6 +63,17 @@ func TestMapKernelJSONToTelemetry_Fork(t *testing.T) {
 	}
 }
 
+func TestMapKernelJSONToTelemetry_SchedHook(t *testing.T) {
+	raw := `{"type":"process","operation":"sched_switch","pid":10,"process_name":"swapper","sched_prev_pid":1,"sched_next_pid":2,"sched_cpu":0,"sched_target_cpu":0,"sched_runtime_ns":1234,"timestamp":"2020-01-02T15:04:05Z"}`
+	tel := MapKernelJSONToTelemetry([]byte(raw), "e", "h", "linux", nil)
+	if tel == nil || tel.Process == nil {
+		t.Fatalf("got %+v", tel)
+	}
+	if tel.Process.PID != 10 || len(tel.Process.Tags) != 2 || tel.Process.Tags[0] != "kernel_sched" {
+		t.Fatalf("%+v", tel.Process)
+	}
+}
+
 func TestMapKernelJSONToTelemetry_Module(t *testing.T) {
 	raw := `{"type":"module","timestamp":"2020-01-02T15:04:05Z"}`
 	tel := MapKernelJSONToTelemetry([]byte(raw), "e", "h", "linux", nil)
