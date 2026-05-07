@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
@@ -31,6 +32,9 @@ type KernelCollector struct {
 	neCtl    *kernel.NetworkExtensionCtl
 	revProbe *kernel.ESFRevocationProbe
 	wg       sync.WaitGroup
+
+	prio         *kernelRingPriority
+	priorityDrop atomic.Uint64
 }
 
 // NewKernelCollector starts the ESF driver when running as root.
@@ -43,7 +47,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		return nil
 	}
 	host, _ := os.Hostname()
-	return &KernelCollector{
+	kc := &KernelCollector{
 		driver:     d,
 		buf:        kernel.NewRingBuffer(65536),
 		endpointID: endpointID,
@@ -53,6 +57,8 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		neCtl:      kernel.NewNetworkExtensionCtl(strings.TrimSpace(cfg.Monitoring.DarwinNEBundleID)),
 		revProbe:   kernel.NewESFRevocationProbe(),
 	}
+	kc.prio = newKernelRingPriority(cfg)
+	return kc
 }
 
 // ExportMonitoringHealth implements ExportMonitoringHealth for monitoring doctor snapshots.
@@ -69,6 +75,9 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 		for k, v := range im {
 			extras[k] = v
 		}
+	}
+	if pd := kc.priorityDrop.Load(); pd > 0 {
+		extras["priority_sampling_kernel_drops"] = pd
 	}
 	rs := kc.buf.Stats()
 	extras["ring_bytes_used"] = rs.BytesUsed
@@ -104,6 +113,7 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	ctx, kc.cancel = context.WithCancel(ctx)
 	pol := kernel.DefaultPolicy()
 	pol.MutePaths = append(kernel.DefaultESFMutePathPrefixes(), kc.cfg.Monitoring.ESFMutePathPrefixes...)
+	pol.ESFAuthDenyBudgetMs = kc.cfg.Monitoring.ESFAuthDenyBudgetMs
 	_ = kc.driver.SetPolicy(pol)
 	_ = kc.neCtl.Start()
 	kc.revProbe.SetSysextBundleID(kc.cfg.Monitoring.DarwinNEBundleID)
@@ -188,6 +198,11 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 		}
 		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
 		if tel != nil {
+			kc.prio.observeRing(kc.buf)
+			if kc.prio != nil && !kc.prio.allowSample(tel) {
+				kc.priorityDrop.Add(1)
+				continue
+			}
 			kc.maybeEnrichProcessImageHash(tel)
 			kc.mu.Lock()
 			kc.events = append(kc.events, *tel)
