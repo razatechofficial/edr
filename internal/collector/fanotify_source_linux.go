@@ -52,6 +52,10 @@ type FanotifySource struct {
 	// fanReportFIDEnabled tracks whether FAN_REPORT_FID was successfully enabled at init.
 	fanReportFIDEnabled bool
 
+	mountFID        *mountFIDCache
+	fidResolveOK    atomic.Uint64
+	fidResolveFail  atomic.Uint64
+
 	livenessMu   sync.Mutex
 	livenessRan  bool
 	livenessOK   bool
@@ -79,6 +83,7 @@ func NewFanotifySource(endpointID, hostname string, tracker *LineageTracker, mou
 		fd:         -1,
 		fileDedupe: dedupe,
 		fanReportFIDCap: probeFanReportFIDCapability(),
+		mountFID:        newMountFIDCache(64),
 	}
 }
 
@@ -133,6 +138,9 @@ func (f *FanotifySource) Stop() {
 	if f.fd >= 0 {
 		_ = unix.Close(f.fd)
 		f.fd = -1
+	}
+	if f.mountFID != nil {
+		f.mountFID.closeAll()
 	}
 	f.started = false
 }
@@ -201,6 +209,13 @@ func (f *FanotifySource) parseAndDispatch(ctx context.Context, data []byte, sink
 				path = p
 			}
 			_ = unix.Close(int(fd))
+		} else if f.fanReportFIDEnabled && int(fd) == unix.FAN_NOFD {
+			if p := f.resolveFanotifyFIDPath(data[:eventLen]); p != "" {
+				path = p
+				f.fidResolveOK.Add(1)
+			} else {
+				f.fidResolveFail.Add(1)
+			}
 		}
 		op := fanotifyOpName(mask)
 		fe := &schema.FileEvent{
@@ -273,6 +288,12 @@ func (f *FanotifySource) ExportMonitoringHealth() map[string]any {
 			src.Notes += "; fan_report_fid_enabled=true"
 		} else {
 			src.Notes += "; fan_report_fid_enabled=false"
+		}
+		if n := f.fidResolveOK.Load(); n > 0 {
+			src.Notes += fmt.Sprintf("; fan_report_fid_resolved_ok=%d", n)
+		}
+		if n := f.fidResolveFail.Load(); n > 0 {
+			src.Notes += fmt.Sprintf("; fan_report_fid_resolve_fail=%d", n)
 		}
 	} else {
 		if src.Notes != "" {
