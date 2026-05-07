@@ -23,6 +23,7 @@ type PostureCollector struct {
 	worldWritable atomic.Uint64
 	dirsScanned   atomic.Uint64
 	tick          atomic.Uint64
+	ldPreloadHash string // last seen sha256 of /etc/ld.so.preload for ld_so_preload_hash probe
 }
 
 // NewPostureCollector returns a Linux posture collector or nil when disabled / unsupported OS.

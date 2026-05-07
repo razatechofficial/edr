@@ -38,6 +38,12 @@ func (p *PostureCollector) runOptionalPostureProbes(ctx context.Context) {
 			out[name] = postureKmodSummaryLinux()
 		case "posture_dev_walker":
 			out[name] = postureDevWalkerLinux(ctx)
+		case "ld_so_preload_hash":
+			out[name] = p.probeLdSoPreloadHash()
+		case "dev_anomaly":
+			out[name] = postureDevAnomalyNonRecursive()
+		case "rootkit_iocs":
+			out[name] = postureRootkitIOCPaths()
 		default:
 			out[name] = map[string]any{"status": "unknown_probe"}
 		}
@@ -140,4 +146,96 @@ func postureDevWalkerLinux(ctx context.Context) map[string]any {
 		return nil
 	})
 	return map[string]any{"unexpected_regular_files": regFiles, "sample": sample}
+}
+
+// Canonical rootkit-related paths often referenced in public writeups; matches
+// are only counted when the path exists as a regular file (not a symlink).
+var rootkitIOCPathList = []string{
+	"/dev/.udev",
+	"/usr/bin/.sshd",
+	"/sbin/.mgik",
+	"/tmp/.ICE-unix",
+	"/lib/libkeyutils.so.1.5",
+	"/etc/hosts.deny.bak",
+	"/usr/sbin/udhcpc",
+	"/bin/.login",
+}
+
+func (p *PostureCollector) probeLdSoPreloadHash() map[string]any {
+	const path = "/etc/ld.so.preload"
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{"path": path, "exists": false, "sha256": "", "changed": false}
+		}
+		return map[string]any{"path": path, "error": err.Error()}
+	}
+	sum := sha256.Sum256(b)
+	h := hex.EncodeToString(sum[:])
+	var prev string
+	var changed bool
+	if p != nil {
+		p.mu.Lock()
+		prev = p.ldPreloadHash
+		changed = prev != "" && prev != h
+		p.ldPreloadHash = h
+		p.mu.Unlock()
+	}
+	return map[string]any{
+		"path":    path,
+		"exists":  true,
+		"size":    len(b),
+		"sha256":  h,
+		"changed": changed,
+	}
+}
+
+// postureDevAnomalyNonRecursive lists unexpected non-device nodes in /dev (non-recursive).
+func postureDevAnomalyNonRecursive() map[string]any {
+	ents, err := os.ReadDir("/dev")
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	var anom []string
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		mode := info.Mode()
+		if mode&os.ModeSymlink != 0 {
+			continue
+		}
+		isChar := mode&os.ModeCharDevice != 0
+		isBlock := mode&os.ModeDevice != 0 && mode&os.ModeCharDevice == 0
+		if isChar || isBlock {
+			continue
+		}
+		name := e.Name()
+		if name == "core" || name == "stdout" || name == "stderr" {
+			continue
+		}
+		anom = append(anom, filepath.Join("/dev", name))
+		if len(anom) > 32 {
+			break
+		}
+	}
+	return map[string]any{"anomaly_count": len(anom), "sample": anom}
+}
+
+func postureRootkitIOCPaths() map[string]any {
+	var hits []string
+	for _, pth := range rootkitIOCPathList {
+		st, err := os.Lstat(pth)
+		if err != nil {
+			continue
+		}
+		if st.Mode().IsRegular() {
+			hits = append(hits, pth)
+		}
+	}
+	return map[string]any{"ioc_hits": len(hits), "paths": hits}
 }
