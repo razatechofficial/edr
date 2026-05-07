@@ -88,6 +88,7 @@ type SystemArtifacts struct {
 	StartupItems  []string `json:"startup_items,omitempty"`
 	KernelModules []string `json:"kernel_modules,omitempty"`
 	USBHistory    []string `json:"usb_history,omitempty"`
+	Deep          *DeepArtifactsBundle `json:"deep,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -98,12 +99,18 @@ type SystemArtifacts struct {
 // category is collected by a dedicated sub-collector with platform-specific
 // dispatch via runtime.GOOS.
 type ArtifactCollector struct {
-	logger *zap.Logger
+	logger  *zap.Logger
+	deepCfg ForensicsDeepConfig
 }
 
 // NewArtifactCollector creates a collector that logs progress to logger.
-func NewArtifactCollector(logger *zap.Logger) *ArtifactCollector {
-	return &ArtifactCollector{logger: logger}
+// When deep is non-nil, optional deep artifact collectors run during system artifact gathering.
+func NewArtifactCollector(logger *zap.Logger, deep *ForensicsDeepConfig) *ArtifactCollector {
+	ac := &ArtifactCollector{logger: logger}
+	if deep != nil {
+		ac.deepCfg = *deep
+	}
+	return ac
 }
 
 // CollectAll runs every sub-collector and returns an ArtifactBundle.
@@ -483,6 +490,9 @@ func (ac *ArtifactCollector) collectSystemArtifacts(ctx context.Context) *System
 	}
 
 	sa.USBHistory = collectUSBHistory(ctx)
+	if ac.deepCfg.AnyEnabled() {
+		ac.collectDeepArtifacts(ctx, sa, ac.deepCfg)
+	}
 	return sa
 }
 
