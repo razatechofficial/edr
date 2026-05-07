@@ -334,6 +334,12 @@ type Config struct {
 
 		// ESFMutePathPrefixes are appended after built-in ESF mutes (macOS only).
 		ESFMutePathPrefixes []string `yaml:"esf_mute_path_prefixes"`
+		// ESFAuthDenyBudgetMs (macOS): fail-closed ESF AUTH when remaining deadline is below this many ms (0=disabled).
+		ESFAuthDenyBudgetMs int `yaml:"esf_auth_deny_budget_ms"`
+		// PrioritySamplingKernel enables class-biased drops on kernel-tier telemetry after ring-buffer drops exceed threshold.
+		PrioritySamplingKernel bool `yaml:"priority_sampling_kernel"`
+		// PrioritySamplingThreshold is the ring-buffer drop count before sampling engages (0 = default 100).
+		PrioritySamplingThreshold uint64 `yaml:"priority_sampling_threshold"`
 		// EnrichExecImageSHA256 hashes process image paths for kernel exec events (all OS; I/O heavy).
 		EnrichExecImageSHA256 bool `yaml:"enrich_exec_image_sha256"`
 		// ETW optional providers (Windows only; verbose).
@@ -344,6 +350,8 @@ type Config struct {
 		ETWTaskScheduler    bool `yaml:"etw_task_scheduler"`
 		// ETWThreatIntel enables Microsoft-Windows-Threat-Intelligence probing (requires PPL/signing pipeline for production; default off).
 		ETWThreatIntel bool `yaml:"etw_threat_intel" env:"EDR_MONITORING_ETW_TI"`
+		// ETWSecurityProviders enables AMSI, Code Integrity, AppLocker, and Windows Defender ETW sessions (optional; may fail without rights).
+		ETWSecurityProviders bool `yaml:"etw_security_providers" env:"EDR_MONITORING_ETW_SECURITY"`
 		// WindowsMinifilterPort is the FilterConnectCommunicationPort name (e.g. "\\EdrPort"); empty skips minifilter control-plane attach.
 		WindowsMinifilterPort string `yaml:"windows_minifilter_port" env:"EDR_MONITORING_WIN_MINIFILTER_PORT"`
 		// WindowsWFPCtlProbe opens the local WFP engine handle for monitoring health (elevated agents).
@@ -451,6 +459,10 @@ type Config struct {
 		KafkaTopic        string   `yaml:"kafka_topic"`
 		RetryMax          int      `yaml:"retry_max"`
 		SpoolPath         string   `yaml:"spool_path"`
+		// SealEnvelopes wraps alert JSON in AES-GCM (see internal/transport/sealed_envelope.go).
+		SealEnvelopes bool   `yaml:"seal_envelopes"`
+		SealKeyPath   string `yaml:"seal_key_path"`
+		SealKeyID     string `yaml:"seal_key_id"`
 	} `yaml:"forwarder"`
 
 	RulesFile             string `yaml:"rules_file"`
@@ -528,11 +540,12 @@ func Defaults() Config {
 	cfg.Monitoring.InventoryIntervalSec = 120
 	cfg.Monitoring.InventoryPersistSnapshots = true
 	cfg.Monitoring.ETWKernelFileObjectCache = true
+	cfg.Monitoring.ETWSecurityProviders = true
 	cfg.Monitoring.WindowsWFPCtlProbe = true
 	cfg.Monitoring.WindowsControlPlaneRequired = false
 	cfg.Monitoring.WindowsServiceHardening = false
-		cfg.Monitoring.WindowsServiceHardeningACL = false
-		cfg.Monitoring.WindowsServiceLaunchProtected = false
+	cfg.Monitoring.WindowsServiceHardeningACL = false
+	cfg.Monitoring.WindowsServiceLaunchProtected = false
 
 	cfg.Service.TickInterval = time.Second
 	cfg.LegacyResponse.MinKillScore = 90
