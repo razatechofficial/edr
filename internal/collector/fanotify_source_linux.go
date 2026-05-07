@@ -55,6 +55,7 @@ type FanotifySource struct {
 	mountFID        *mountFIDCache
 	fidResolveOK    atomic.Uint64
 	fidResolveFail  atomic.Uint64
+	fidResolveByName atomic.Uint64
 
 	livenessMu   sync.Mutex
 	livenessRan  bool
@@ -295,6 +296,9 @@ func (f *FanotifySource) ExportMonitoringHealth() map[string]any {
 		if n := f.fidResolveFail.Load(); n > 0 {
 			src.Notes += fmt.Sprintf("; fan_report_fid_resolve_fail=%d", n)
 		}
+		if n := f.fidResolveByName.Load(); n > 0 {
+			src.Notes += fmt.Sprintf("; fan_report_fid_resolve_namepath=%d", n)
+		}
 	} else {
 		if src.Notes != "" {
 			src.Notes += "; "
@@ -302,6 +306,8 @@ func (f *FanotifySource) ExportMonitoringHealth() map[string]any {
 		src.Notes += "fan_report_fid_cap=false"
 	}
 	m := src.ToMap()
+	m["fan_report_fid_resolved"] = f.fidResolveOK.Load() > 0
+	m["fan_fid_resolve_namepath"] = f.fidResolveByName.Load()
 	f.livenessMu.Lock()
 	ran, ok, note := f.livenessRan, f.livenessOK, f.livenessNote
 	f.livenessMu.Unlock()
