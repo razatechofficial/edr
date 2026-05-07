@@ -118,6 +118,8 @@ type NetworkEvent struct {
 	DestIP   string `json:"dest_ip"`
 	DestPt   int    `json:"dest_port"`
 	Domain   string `json:"domain,omitempty"`
+	// SNI is observed from TLS client hello (userland/kernel stub), distinct from DNS-derived Domain.
+	SNI      string `json:"sni,omitempty"`
 	JA3      string `json:"ja3,omitempty"`
 	// Transport is a coarse label (tcp, udp, icmp) for SIEM join with Zeek conn logs.
 	Transport string `json:"transport,omitempty"`
