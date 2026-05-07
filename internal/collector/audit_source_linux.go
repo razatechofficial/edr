@@ -5,6 +5,7 @@ package collector
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/razatechofficial/edr/internal/schema"
 	"golang.org/x/sys/unix"
@@ -325,15 +327,21 @@ func (a *AuditSource) rememberSyscall(serial string, sc *auditSyscallScratch) {
 	a.pending[serial] = sc
 }
 
-func (a *AuditSource) takeSyscall(serial string) *auditSyscallScratch {
+// peekSyscall returns a copy of the pending SYSCALL scratch for this audit
+// message serial without removing it, so multiple PATH records sharing the same
+// serial (one syscall, many path components) all correlate correctly.
+func (a *AuditSource) peekSyscall(serial string) *auditSyscallScratch {
 	if serial == "" {
 		return nil
 	}
 	a.pendingMu.Lock()
 	defer a.pendingMu.Unlock()
 	sc := a.pending[serial]
-	delete(a.pending, serial)
-	return sc
+	if sc == nil {
+		return nil
+	}
+	cp := *sc
+	return &cp
 }
 
 func (a *AuditSource) telemetryFromAuditPATH(fields map[string]string, serial string) *Telemetry {
@@ -346,7 +354,7 @@ func (a *AuditSource) telemetryFromAuditPATH(fields map[string]string, serial st
 	if nametype != "" {
 		op = "audit_path_" + nametype
 	}
-	sc := a.takeSyscall(serial)
+	sc := a.peekSyscall(serial)
 	p := 0
 	subjUID := ""
 	if sc != nil {
@@ -399,21 +407,122 @@ func auditTypeName(t uint16) string {
 	return "audit"
 }
 
+// parseAuditKV parses auditd's space-separated key=value stream. Values may be
+// double-quoted with embedded spaces; backslash escapes inside quotes are
+// honored. For selected keys, all-hex payloads are decoded to UTF-8 strings
+// (audit's encoding for paths and comm when non-printable).
 func parseAuditKV(body string) map[string]string {
-	out := make(map[string]string, 8)
-	for _, tok := range strings.Fields(body) {
-		eq := strings.IndexByte(tok, '=')
-		if eq <= 0 {
+	out := make(map[string]string, 16)
+	i, n := 0, len(body)
+	for i < n {
+		for i < n && body[i] <= ' ' {
+			i++
+		}
+		if i >= n {
+			break
+		}
+		keyStart := i
+		for i < n && body[i] != '=' {
+			i++
+		}
+		if i >= n {
+			break
+		}
+		key := strings.TrimSpace(body[keyStart:i])
+		i++ // skip '='
+		if i > n || key == "" {
+			break
+		}
+		var val string
+		if i < n && body[i] == '"' {
+			i++
+			var b strings.Builder
+			for i < n {
+				switch body[i] {
+				case '"':
+					i++
+					goto doneQuoted
+				case '\\':
+					if i+1 >= n {
+						i++
+						goto doneQuoted
+					}
+					i++
+					switch body[i] {
+					case 'n':
+						b.WriteByte('\n')
+					case 't':
+						b.WriteByte('\t')
+					case 'r':
+						b.WriteByte('\r')
+					case '"', '\\':
+						b.WriteByte(body[i])
+					default:
+						b.WriteByte(body[i])
+					}
+					i++
+				default:
+					b.WriteByte(body[i])
+					i++
+				}
+			}
+		doneQuoted:
+			val = b.String()
+		} else {
+			vStart := i
+			for i < n && body[i] != ' ' {
+				i++
+			}
+			val = body[vStart:i]
+		}
+		if val == "" {
 			continue
 		}
-		k := tok[:eq]
-		v := strings.Trim(tok[eq+1:], `"`)
-		if v == "" {
-			continue
-		}
-		out[k] = v
+		out[key] = maybeDecodeAuditHexKey(key, val)
 	}
 	return out
+}
+
+// Keys where auditd may emit a hexadecimal-encoded string payload.
+var auditHexDecodeKeys = map[string]struct{}{
+	"name":      {},
+	"exe":       {},
+	"comm":      {},
+	"proctitle": {},
+	"cwd":       {},
+}
+
+func maybeDecodeAuditHexKey(key, val string) string {
+	if _, ok := auditHexDecodeKeys[key]; !ok {
+		return val
+	}
+	if !isAllHex(val) || len(val) < 4 || len(val)%2 != 0 {
+		return val
+	}
+	raw, err := hex.DecodeString(val)
+	if err != nil || len(raw) == 0 {
+		return val
+	}
+	// Trim trailing NULs often present in comm/proctitle hex blobs.
+	for len(raw) > 0 && raw[len(raw)-1] == 0 {
+		raw = raw[:len(raw)-1]
+	}
+	if len(raw) == 0 {
+		return val
+	}
+	if utf8.Valid(raw) {
+		return string(raw)
+	}
+	return val
+}
+
+func isAllHex(s string) bool {
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // ExportMonitoringHealth implements the per-source health interface.
