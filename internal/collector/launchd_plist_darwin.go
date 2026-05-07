@@ -4,6 +4,8 @@ package collector
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"io/fs"
@@ -45,6 +47,16 @@ type LaunchdPlistSource struct {
 type plistFingerprint struct {
 	modtime time.Time
 	size    int64
+	sha256  string
+}
+
+func plistContentSHA256(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // NewLaunchdPlistSource builds a source that scans the standard plist roots:
@@ -113,7 +125,11 @@ func (l *LaunchdPlistSource) Snapshot(ctx context.Context) ([]Telemetry, error) 
 			if err != nil {
 				continue
 			}
-			fp := plistFingerprint{modtime: info.ModTime(), size: info.Size()}
+			fp := plistFingerprint{
+				modtime: info.ModTime(),
+				size:    info.Size(),
+				sha256:  plistContentSHA256(path),
+			}
 			current[path] = fp
 
 			l.mu.Lock()
@@ -135,6 +151,7 @@ func (l *LaunchdPlistSource) Snapshot(ctx context.Context) ([]Telemetry, error) 
 				ProcessName: "launchd_persistence",
 				ProcessPath: program,
 				CommandLine: label,
+				ImageSHA256: fp.sha256,
 			}
 			out = append(out, Telemetry{Process: pe})
 			l.emitted.Add(1)
