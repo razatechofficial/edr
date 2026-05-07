@@ -23,6 +23,8 @@ const (
 	EventBITS       EventType = "bits"
 	EventTask       EventType = "task"
 	EventNamespace  EventType = "namespace"
+	// EventSecurity groups AMSI, Code Integrity, AppLocker, and Defender ETW streams.
+	EventSecurity EventType = "security"
 )
 
 // Severity represents the severity level of a detection alert.
