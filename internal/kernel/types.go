@@ -38,6 +38,10 @@ type EventPolicy struct {
 	ETWTaskScheduler    bool
 	// ETWThreatIntel enables probing Microsoft-Windows-Threat-Intelligence ETW (gated by product config).
 	ETWThreatIntel bool
+	// ETWSecurityProviders enables AMSI, Code Integrity, AppLocker, and Windows Defender ETW (optional sessions).
+	ETWSecurityProviders bool
+	// ESFAuthDenyBudgetMs (macOS): when >0, deny ESF AUTH if remaining deadline ms is below this threshold.
+	ESFAuthDenyBudgetMs int
 	// KernelFileObjectCache correlates Kernel-File events to paths via FileObject handle (WHIDS-class).
 	KernelFileObjectCache bool
 }
@@ -56,6 +60,8 @@ func DefaultPolicy() EventPolicy {
 		MountEvents:    true,
 		PtraceEvents:   true,
 		SignalEvents:   true,
+		// Windows: broad security ETW (AMSI / CI / AppLocker / Defender); ignored on other OSes.
+		ETWSecurityProviders: true,
 	}
 }
 
