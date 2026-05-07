@@ -19,6 +19,14 @@ const (
 	fanEventInfoTypeDFID = 2
 )
 
+const fanHandleFIDFlag = 0
+
+var (
+	openByHandleAtFn = unix.OpenByHandleAt
+	nameToHandleAtFn = unix.NameToHandleAt
+	readlinkFn       = os.Readlink
+)
+
 type mountFIDEntry struct {
 	fd   int
 	path string
@@ -165,13 +173,42 @@ func (f *FanotifySource) openPathByHandle(fsid []byte, handle unix.FileHandle) (
 	if err != nil || mfd < 0 {
 		return "", err
 	}
-	hfd, err := unix.OpenByHandleAt(mfd, handle, unix.O_PATH)
+	hfd, err := openByHandleAtFn(mfd, handle, unix.O_PATH)
 	if err != nil {
+		// Best-effort fallback for kernels/filesystems that deny handle-open:
+		// try NameToHandleAt probe and then surface mount-root path.
+		if err == unix.EINVAL || err == unix.EPERM || err == unix.ESTALE {
+			if mp, merr := f.mountRootPathByFID(fsid); merr == nil && mp != "" {
+				if _, _, herr := nameToHandleAtFn(unix.AT_FDCWD, mp, fanHandleFIDFlag); herr == nil {
+					f.fidResolveByName.Add(1)
+				}
+				return mp, nil
+			}
+			return readlinkFn("/proc/self/fd/" + strconv.Itoa(mfd))
+		}
 		return "", err
 	}
 	defer unix.Close(hfd)
 	proc := "/proc/self/fd/" + strconv.Itoa(hfd)
-	return os.Readlink(proc)
+	return readlinkFn(proc)
+}
+
+func (f *FanotifySource) mountRootPathByFID(fsid []byte) (string, error) {
+	key := fsidKey(fsid)
+	if key == "" {
+		return "", fmt.Errorf("bad fsid")
+	}
+	if f.mountFID != nil {
+		f.mountFID.mu.Lock()
+		if e, ok := f.mountFID.lru[key]; ok && e.path != "" {
+			f.mountFID.touchLocked(key)
+			path := e.path
+			f.mountFID.mu.Unlock()
+			return path, nil
+		}
+		f.mountFID.mu.Unlock()
+	}
+	return findMountPointForFSID(fsid)
 }
 
 func (f *FanotifySource) mountFDForFSID(fsid []byte) (int, error) {

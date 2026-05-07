@@ -4,6 +4,7 @@ package collector
 
 import (
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -37,5 +38,50 @@ func TestUnescapeMountinfoPath(t *testing.T) {
 	t.Parallel()
 	if got := unescapeMountinfoPath(`foo\040bar`); got != "foo bar" {
 		t.Fatal(got)
+	}
+}
+
+func TestOpenPathByHandleFallsBackToNameToHandleAt(t *testing.T) {
+	f := NewFanotifySource("e", "h", nil, nil, nil)
+	fsid := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	key := fsidKey(fsid)
+	f.mountFID.put(key, 9, "/mnt/test")
+
+	oldOpen := openByHandleAtFn
+	oldName := nameToHandleAtFn
+	oldReadlink := readlinkFn
+	defer func() {
+		openByHandleAtFn = oldOpen
+		nameToHandleAtFn = oldName
+		readlinkFn = oldReadlink
+	}()
+
+	openByHandleAtFn = func(_ int, _ unix.FileHandle, _ int) (int, error) {
+		return -1, unix.EINVAL
+	}
+	nameCalled := false
+	nameToHandleAtFn = func(_ int, path string, _ int) (unix.FileHandle, int, error) {
+		nameCalled = true
+		if path != "/mnt/test" {
+			t.Fatalf("unexpected path: %s", path)
+		}
+		return unix.NewFileHandle(1, []byte{1}), 1, nil
+	}
+	readlinkFn = func(_ string) (string, error) {
+		return "", errors.New("should not use readlink fallback")
+	}
+
+	got, err := f.openPathByHandle(fsid, unix.NewFileHandle(1, []byte{1}))
+	if err != nil {
+		t.Fatalf("openPathByHandle error: %v", err)
+	}
+	if !nameCalled {
+		t.Fatal("expected NameToHandleAt fallback path to be called")
+	}
+	if got != "/mnt/test" {
+		t.Fatalf("path=%q want /mnt/test", got)
+	}
+	if n := f.fidResolveByName.Load(); n != 1 {
+		t.Fatalf("fidResolveByName=%d want 1", n)
 	}
 }
