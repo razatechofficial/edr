@@ -39,6 +39,7 @@ import (
 	"github.com/razatechofficial/edr/internal/telemetry"
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/threatintel"
+	"github.com/razatechofficial/edr/internal/transport"
 	"github.com/razatechofficial/edr/pkg/events"
 )
 
@@ -165,6 +166,15 @@ func NewWithFiles(configPath string) (*Agent, error) {
 			a.logger.Warn("telemetry disk queue init failed", "error", qerr)
 		} else {
 			a.telemetryRelay = forwarder.NewTelemetryRelay(telEP, qm, a.logger)
+			if cfg.Forwarder.SealEnvelopes && strings.TrimSpace(cfg.Forwarder.SealKeyPath) != "" {
+				sealFn, serr := transport.AESGCMSealer(cfg.Forwarder.SealKeyPath, cfg.Forwarder.SealKeyID)
+				if serr != nil {
+					a.logger.Error("telemetry sealer init failed", "error", serr)
+				} else {
+					a.telemetryRelay.SetSealer(sealFn)
+					a.logger.Info("telemetry relay envelope sealing enabled", "key_id", cfg.Forwarder.SealKeyID)
+				}
+			}
 			a.logger.Info("telemetry relay configured", "endpoint", telEP, "queue_dir", qdir)
 		}
 	}
