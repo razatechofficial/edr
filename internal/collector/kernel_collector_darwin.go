@@ -38,6 +38,8 @@ type KernelCollector struct {
 	priorityDrop atomic.Uint64
 	fallbackFile *FSEventsFallbackSource
 	fallbackMode bool
+
+	jsonMapOpts KernelJSONOpts
 }
 
 // NewKernelCollector starts the ESF driver when running as root.
@@ -60,6 +62,10 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 			users:        users,
 			fallbackFile: NewFSEventsFallbackSource(endpointID, host, cfg.Monitoring.FIMPaths),
 			fallbackMode: true,
+			jsonMapOpts: KernelJSONOpts{
+				TLSFingerprintLocal: cfg.Monitoring.TLSFingerprintLocal,
+				CommunityIDLocal:    cfg.Monitoring.CommunityIDLocal,
+			},
 		}
 	}
 	host, _ := os.Hostname()
@@ -73,6 +79,10 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		neCtl:      kernel.NewNetworkExtensionCtl(strings.TrimSpace(cfg.Monitoring.DarwinNEBundleID)),
 		neReader:   NewDarwinNEReader(endpointID, host, "/var/run/edr/ne.sock"),
 		revProbe:   kernel.NewESFRevocationProbe(),
+		jsonMapOpts: KernelJSONOpts{
+			TLSFingerprintLocal: cfg.Monitoring.TLSFingerprintLocal,
+			CommunityIDLocal:    cfg.Monitoring.CommunityIDLocal,
+		},
 	}
 	kc.prio = newKernelRingPriority(cfg)
 	return kc
@@ -178,6 +188,13 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 		defer kc.wg.Done()
 		kc.controlPlaneLoop(ctx)
 	}()
+	if kc.neReader != nil {
+		kc.wg.Add(1)
+		go func() {
+			defer kc.wg.Done()
+			kc.neIPCLoop(ctx)
+		}()
+	}
 	return nil
 }
 
@@ -217,6 +234,37 @@ func (kc *KernelCollector) controlPlaneLoop(ctx context.Context) {
 	}
 }
 
+func (kc *KernelCollector) neIPCLoop(ctx context.Context) {
+	if kc == nil || kc.neReader == nil {
+		return
+	}
+	ch := make(chan Telemetry, 256)
+	sink := &StreamingSink{ch: ch}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case t := <-ch:
+				kc.mu.Lock()
+				kc.events = append(kc.events, t)
+				kc.mu.Unlock()
+			}
+		}
+	}()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		_ = kc.neReader.Run(ctx, sink)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
 const maxDarwinExecImageHashBytes = 32 << 20
 
 func (kc *KernelCollector) maybeEnrichProcessImageHash(tel *Telemetry) {
@@ -244,7 +292,7 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 			time.Sleep(time.Millisecond)
 			continue
 		}
-		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
+		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users, &kc.jsonMapOpts)
 		if tel != nil {
 			kc.prio.observeRing(kc.buf)
 			if kc.prio != nil && !kc.prio.allowSample(tel) {

@@ -10,13 +10,36 @@ import (
 	"github.com/razatechofficial/edr/internal/schema"
 )
 
+// KernelJSONOpts toggles cheap local enrichers in the JSON mapper (TLS fingerprints,
+// community-id). A nil opts pointer enables community-id by default and disables
+// TLS local parsing (backward compatible with older unit tests).
+type KernelJSONOpts struct {
+	TLSFingerprintLocal bool
+	CommunityIDLocal    bool
+}
+
+func effectiveCommunityIDLocal(o *KernelJSONOpts) bool {
+	if o == nil {
+		return true
+	}
+	return o.CommunityIDLocal
+}
+
+func effectiveTLSFingerprintLocal(o *KernelJSONOpts) bool {
+	return o != nil && o.TLSFingerprintLocal
+}
+
 // MapKernelJSONToTelemetry maps kernel driver JSON (Linux eBPF JSON path, ESF,
 // ETW envelopes) into schema telemetry. Returns nil if the payload is not recognized.
 // users resolves numeric UIDs in JSON to usernames for ProcessEvent.User when non-nil.
-func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, users *UsernameCache) *Telemetry {
+func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, users *UsernameCache, opts ...*KernelJSONOpts) *Telemetry {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil
+	}
+	var mapOpts *KernelJSONOpts
+	if len(opts) > 0 {
+		mapOpts = opts[0]
 	}
 
 	evType, _ := raw["type"].(string)
@@ -126,6 +149,7 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		pe.ImageSHA256 = jsonString(raw, "image_sha256")
 		pe.SigningStatus = jsonString(raw, "signing_status")
 		pe.TLSClientJA3 = firstNonEmpty(jsonString(raw, "tls_client_ja3"), jsonString(raw, "ja3"))
+		applyLocalTLSFromRawHello(pe, raw, mapOpts)
 		pe.CloneFlags = jsonUint64(raw, "clone_flags")
 		pe.UnshareFlags = jsonUint64(raw, "unshare_flags")
 		pe.MadviseAdvice = int32(jsonInt(raw, "madvise_advice"))
@@ -268,6 +292,13 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		fe.OpenFlags = jsonUint32(raw, "open_flags")
 		fe.ChmodMode = jsonUint32(raw, "chmod_mode")
 		fe.FchmodatFlags = jsonUint32(raw, "fchmodat_flags")
+		if arr, ok := raw["tags"].([]interface{}); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok && s != "" {
+					fe.Tags = append(fe.Tags, s)
+				}
+			}
+		}
 		return &Telemetry{File: fe}
 
 	case "network":
@@ -281,6 +312,7 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		ne.SourcePt = jsonInt(raw, "source_port", "src_port")
 		ne.DestPt = jsonInt(raw, "dest_port", "dst_port")
 		ne.JA3 = firstNonEmpty(jsonString(raw, "tls_client_ja3"), jsonString(raw, "ja3"))
+		applyLocalKernelNetworkMaps(ne, raw, mapOpts)
 		return &Telemetry{Network: ne}
 
 	case "dns":
@@ -374,6 +406,69 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 
 	default:
 		return nil
+	}
+}
+
+func applyLocalTLSFromRawHello(pe *schema.ProcessEvent, raw map[string]interface{}, opts *KernelJSONOpts) {
+	if pe == nil || !effectiveTLSFingerprintLocal(opts) {
+		return
+	}
+	helloStr := firstNonEmpty(jsonString(raw, "tls_client_hello_b64"), jsonString(raw, "tls_client_hello"))
+	if helloStr == "" {
+		return
+	}
+	b, err := DecodeTLSClientHelloPayload(helloStr)
+	if err != nil || len(b) == 0 {
+		return
+	}
+	ja3, ja4 := ClientHelloFingerprints(b)
+	if ja3 != "" && pe.TLSClientJA3 == "" {
+		pe.TLSClientJA3 = ja3
+	}
+	if ja4 != "" {
+		pe.TLSClientJA4 = ja4
+	}
+}
+
+func applyLocalKernelNetworkMaps(ne *schema.NetworkEvent, raw map[string]interface{}, opts *KernelJSONOpts) {
+	if ne == nil {
+		return
+	}
+	if effectiveTLSFingerprintLocal(opts) {
+		helloStr := firstNonEmpty(jsonString(raw, "tls_client_hello_b64"), jsonString(raw, "tls_client_hello"))
+		if helloStr != "" {
+			if b, err := DecodeTLSClientHelloPayload(helloStr); err == nil && len(b) > 0 {
+				if ja3, ja4 := ClientHelloFingerprints(b); ja3 != "" {
+					if ne.JA3 == "" {
+						ne.JA3 = ja3
+					}
+					ne.JA4 = ja4
+				}
+			}
+		}
+	}
+	if !effectiveCommunityIDLocal(opts) || strings.TrimSpace(ne.CommunityID) != "" {
+		return
+	}
+	proto := uint8(jsonInt(raw, "ip_proto", "protocol_number"))
+	if proto == 0 {
+		var ok bool
+		proto, ok = ProtoNumber(ne.Transport, ne.Protocol)
+		if !ok {
+			return
+		}
+	}
+	sip := ParseIPString(ne.SourceIP)
+	dip := ParseIPString(ne.DestIP)
+	if sip == nil || dip == nil {
+		return
+	}
+	if ne.SourcePt <= 0 || ne.DestPt <= 0 {
+		return
+	}
+	id := CommunityIDv1(proto, sip, dip, uint16(ne.SourcePt), uint16(ne.DestPt))
+	if id != "" {
+		ne.CommunityID = id
 	}
 }
 
