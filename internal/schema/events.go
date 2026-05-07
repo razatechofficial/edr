@@ -45,6 +45,7 @@ type ProcessEvent struct {
 	ImageSHA256   string `json:"image_sha256,omitempty"`
 	SigningStatus string `json:"signing_status,omitempty"`
 	TLSClientJA3  string `json:"tls_client_ja3,omitempty"`
+	TLSClientJA4  string `json:"tls_client_ja4,omitempty"`
 	CloneFlags    uint64 `json:"clone_flags,omitempty"`
 	UnshareFlags  uint64 `json:"unshare_flags,omitempty"`
 	MadviseAdvice int32  `json:"madvise_advice,omitempty"`
@@ -77,6 +78,9 @@ type FileEvent struct {
 	FchmodatFlags uint32 `json:"fchmodat_flags,omitempty"`
 	SUID          bool   `json:"suid,omitempty"`
 	ImpHash       string `json:"imp_hash,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+	// FIMDiffUnified is a base64-encoded unified diff vs prior capped snapshot (optional FIM diff).
+	FIMDiffUnified string `json:"fim_diff_unified,omitempty"`
 }
 
 // ProcessInjectionEvent describes cross-process code injection indicators (e.g. ETW-TI).
@@ -121,6 +125,8 @@ type NetworkEvent struct {
 	// SNI is observed from TLS client hello (userland/kernel stub), distinct from DNS-derived Domain.
 	SNI      string `json:"sni,omitempty"`
 	JA3      string `json:"ja3,omitempty"`
+	// JA4 is a compact TLS ClientHello fingerprint (local computation when raw hello bytes exist).
+	JA4 string `json:"ja4,omitempty"`
 	// Transport is a coarse label (tcp, udp, icmp) for SIEM join with Zeek conn logs.
 	Transport string `json:"transport,omitempty"`
 	// CommunityID is an optional RFC-style flow hash shared with Zeek when both endpoints compute it.
