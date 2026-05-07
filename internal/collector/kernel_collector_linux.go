@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
@@ -51,6 +52,9 @@ type KernelCollector struct {
 	users      *UsernameCache
 	fileDedupe *LinuxFileDeduper
 	lineage    *LineageTracker
+
+	prio         *kernelRingPriority
+	priorityDrop atomic.Uint64
 
 	mu     sync.Mutex
 	events []Telemetry
@@ -103,7 +107,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		return nil
 	}
 	hostname, _ := os.Hostname()
-	return &KernelCollector{
+	kc := &KernelCollector{
 		driver:     driver,
 		buf:        kernel.NewRingBuffer(65536),
 		endpointID: endpointID,
@@ -111,6 +115,8 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		cfg:        cfg,
 		users:      users,
 	}
+	kc.prio = newKernelRingPriority(cfg)
+	return kc
 }
 
 // ExportMonitoringHealth implements ExportMonitoringHealth for monitoring doctor snapshots.
@@ -135,6 +141,9 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	extras["ring_bytes_used"] = rs.BytesUsed
 	extras["ring_capacity_bytes"] = rs.Capacity
 	extras["ring_backlog_pct"] = rs.BacklogPct
+	if pd := kc.priorityDrop.Load(); pd > 0 {
+		extras["priority_sampling_kernel_drops"] = pd
+	}
 	tamperSignals := map[string]any{}
 	for k, v := range kc.driver.TamperMetrics() {
 		extras[k] = v
@@ -190,6 +199,11 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 
 		tel := kc.parseEvent(data)
 		if tel != nil {
+			kc.prio.observeRing(kc.buf)
+			if kc.prio != nil && !kc.prio.allowSample(tel) {
+				kc.priorityDrop.Add(1)
+				continue
+			}
 			kc.maybeEnrichProcessImageHash(tel)
 			kc.mu.Lock()
 			kc.events = append(kc.events, *tel)
