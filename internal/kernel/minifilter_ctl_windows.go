@@ -27,7 +27,22 @@ func classifyFilterPortHR(hr uint32) (causeClass string, err error) {
 var (
 	modFltLib                          = windows.NewLazySystemDLL("fltlib.dll")
 	procFilterConnectCommunicationPort = modFltLib.NewProc("FilterConnectCommunicationPort")
+	procFilterSendMessage              = modFltLib.NewProc("FilterSendMessage")
 )
+
+// filterSendMessageFn is swappable in unit tests.
+var filterSendMessageFn = func(hPort windows.Handle, inBuf uintptr, inLen uintptr, outBuf uintptr, outLen uintptr, bytesReturned uintptr) uintptr {
+	modFltLib.Load()
+	r0, _, _ := procFilterSendMessage.Call(
+		uintptr(hPort),
+		inBuf,
+		inLen,
+		outBuf,
+		outLen,
+		bytesReturned,
+	)
+	return r0
+}
 
 // MinifilterCtl maintains a user-mode handle to a minifilter communication port.
 // When no port name is configured, Start is a no-op and Health reports skipped.
@@ -46,6 +61,11 @@ type MinifilterCtl struct {
 
 	causeClass         string
 	lastRecoverOutcome string
+
+	lastSendUnix    int64
+	lastSendBytes   uint64
+	lastSendOutcome string
+	lastSendErr     string
 }
 
 // NewMinifilterCtl prepares a control handle for the given port name (e.g. "\\EdrPort").
@@ -144,15 +164,49 @@ func (m *MinifilterCtl) Stop() {
 	}
 }
 
-// Send is a control-plane skeleton until a signed minifilter driver is shipped.
+func (m *MinifilterCtl) recordSendHealth(n int, outcome string, sendErr error) {
+	m.lastSendUnix = time.Now().Unix()
+	m.lastSendBytes = uint64(n)
+	m.lastSendOutcome = outcome
+	m.lastSendErr = ""
+	if sendErr != nil {
+		m.lastSendErr = sendErr.Error()
+	}
+}
+
+// Send frames a typed control message and delivers it via FilterSendMessage.
 func (m *MinifilterCtl) Send(cmd ControlPlaneCommand, payload []byte) error {
-	_ = payload
 	if m == nil || m.portUTF16 == nil {
 		return ErrMinifilterDriverNotPresent
 	}
-	_ = cmd
-	_ = ControlPlaneHeader{Version: ControlPlaneProtocolVersion, Command: uint32(cmd)}
-	return ErrMinifilterDriverNotPresent
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.h == 0 {
+		m.recordSendHealth(0, "not_connected", ErrMinifilterDriverNotPresent)
+		return ErrMinifilterDriverNotPresent
+	}
+	wire, err := BuildControlPlaneWire(cmd, payload)
+	if err != nil {
+		m.recordSendHealth(0, "encode_error", err)
+		return err
+	}
+	var bytesReturned uint32
+	r0 := filterSendMessageFn(
+		m.h,
+		uintptr(unsafe.Pointer(&wire[0])),
+		uintptr(len(wire)),
+		0,
+		0,
+		uintptr(unsafe.Pointer(&bytesReturned)),
+	)
+	if r0 != 0 {
+		hr := uint32(r0)
+		_, werr := classifyFilterPortHR(hr)
+		m.recordSendHealth(len(wire), "send_failed", werr)
+		return werr
+	}
+	m.recordSendHealth(len(wire), "ok", nil)
+	return nil
 }
 
 // Health returns attachment status for monitoring_health.json.
@@ -187,6 +241,14 @@ func (m *MinifilterCtl) Health() map[string]any {
 	}
 	if m.lastRecoverOutcome != "" {
 		out["last_recover_outcome"] = m.lastRecoverOutcome
+	}
+	if m.lastSendUnix > 0 {
+		out["last_send_unix"] = m.lastSendUnix
+		out["last_send_bytes"] = m.lastSendBytes
+		out["last_send_outcome"] = m.lastSendOutcome
+		if m.lastSendErr != "" {
+			out["last_send_error"] = m.lastSendErr
+		}
 	}
 	return out
 }
