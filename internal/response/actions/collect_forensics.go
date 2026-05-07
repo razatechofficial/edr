@@ -15,12 +15,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/razatechofficial/edr/internal/forensics"
 )
 
 // ForensicCollector writes diagnostic bundles under ForensicsDir.
 type ForensicCollector struct {
 	ForensicsDir string
 	DetectionID  string
+	Deep         forensics.ForensicsDeepConfig
 }
 
 // ForensicBundle is a JSON-serialized snapshot of host state.
@@ -111,6 +114,11 @@ func (c *ForensicCollector) Collect(ctx context.Context, items []string) (bundle
 	outDir := filepath.Join(abs, c.DetectionID)
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return nil, err
+	}
+	if c.Deep.AnyEnabled() {
+		files := forensics.CollectDeepToWorkdir(outDir, c.Deep)
+		raw, _ := json.MarshalIndent(files, "", "  ")
+		_ = os.WriteFile(filepath.Join(outDir, "deep_collected.json"), raw, 0o600)
 	}
 	data, _ := json.MarshalIndent(bundle, "", "  ")
 	jpath := filepath.Join(outDir, "bundle.json")
