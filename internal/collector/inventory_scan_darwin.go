@@ -56,6 +56,10 @@ func scanHostInventory(ctx context.Context) (map[string]any, error) {
 		}
 	}
 
+	if b, err := exec.CommandContext(ctx, "dscl", ".", "list", "/Users").Output(); err == nil {
+		out["dscl_users_lines_est"] = countNonEmptyLines(string(b))
+	}
+
 	return out, nil
 }
 
