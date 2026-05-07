@@ -28,6 +28,14 @@ func (d *ETWDriver) decodeStructuredETW(record *etwEventRecord, env map[string]i
 	eid := record.EventHeader.EventDescriptor.Id
 
 	switch pid {
+	case amsiGUID:
+		decodeAMSIETW(eid, ud, env)
+	case codeIntegrityGUID:
+		decodeCodeIntegrityETW(eid, ud, env)
+	case appLockerGUID:
+		decodeAppLockerETW(eid, ud, env)
+	case defenderETWGUID:
+		decodeDefenderETW(eid, ud, env)
 	case threatIntelGUID:
 		d.decodeThreatIntelETW(record, env)
 	case wmiActivityGUID:
@@ -114,6 +122,53 @@ func decodeBITSEtw(eventID uint16, ud []byte, env map[string]interface{}) {
 		if s2 := extractUTF16String(ud[4:]); s2 != "" && s2 != first {
 			env["url"] = s2
 		}
+	}
+}
+
+func decodeAMSIETW(eventID uint16, ud []byte, env map[string]interface{}) {
+	env["etw_security_subprovider"] = "amsi"
+	env["amsi_event_id"] = eventID
+	first := extractUTF16String(ud)
+	if first != "" {
+		env["message"] = first
+		env["content"] = first
+	}
+	if s2 := extractUTF16StringAfter(ud, first); s2 != "" {
+		env["app_name"] = s2
+	}
+}
+
+func decodeCodeIntegrityETW(eventID uint16, ud []byte, env map[string]interface{}) {
+	env["etw_security_subprovider"] = "code_integrity"
+	env["ci_event_id"] = eventID
+	if s := extractUTF16String(ud); s != "" {
+		env["message"] = s
+		env["path"] = s
+	}
+}
+
+func decodeAppLockerETW(eventID uint16, ud []byte, env map[string]interface{}) {
+	env["etw_security_subprovider"] = "applocker"
+	env["applocker_event_id"] = eventID
+	first := extractUTF16String(ud)
+	if first != "" {
+		env["path"] = first
+		env["message"] = first
+	}
+	if s2 := extractUTF16StringAfter(ud, first); s2 != "" {
+		env["rule_id"] = s2
+	}
+}
+
+func decodeDefenderETW(eventID uint16, ud []byte, env map[string]interface{}) {
+	env["etw_security_subprovider"] = "defender"
+	env["defender_event_id"] = eventID
+	first := extractUTF16String(ud)
+	if first != "" {
+		env["message"] = first
+	}
+	if s2 := extractUTF16StringAfter(ud, first); s2 != "" {
+		env["threat_name"] = s2
 	}
 }
 
