@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -158,6 +159,8 @@ type EBPFDriver struct {
 	coll       *ebpf.Collection
 	links      []link.Link
 	ownProgIDs []uint32
+	linkByProg map[uint32]link.Link
+	specByProg map[uint32]tracepointAttachSpec
 	reader     *ringbuf.Reader
 	readers    []*ringbuf.Reader
 
@@ -191,6 +194,12 @@ type EBPFDriver struct {
 	tamperByProg   map[uint32]uint64 // per-program missing detections
 }
 
+type tracepointAttachSpec struct {
+	progName string
+	group    string
+	tp       string
+}
+
 type linuxFeatureSet struct {
 	HasBTF       bool
 	HasBPFLSM    bool
@@ -209,6 +218,8 @@ func NewEBPFDriver(agentID string, objectPathOverride string) (*EBPFDriver, erro
 		agentID:       agentID,
 		policy:        DefaultPolicy(),
 		bpfObjectPath: objectPathOverride,
+		linkByProg:    make(map[uint32]link.Link),
+		specByProg:    make(map[uint32]tracepointAttachSpec),
 	}, nil
 }
 
@@ -502,6 +513,8 @@ func (d *EBPFDriver) cleanup() {
 		l.Close()
 	}
 	d.links = nil
+	d.linkByProg = make(map[uint32]link.Link)
+	d.specByProg = make(map[uint32]tracepointAttachSpec)
 	if d.reader != nil {
 		d.reader.Close()
 		d.reader = nil
@@ -603,11 +616,35 @@ func (d *EBPFDriver) attachTracepoints() error {
 			return fmt.Errorf("attaching %s (%s/%s): %w", name, group, tp, err)
 		}
 		d.links = append(d.links, l)
+		if info, ierr := prog.Info(); ierr == nil {
+			if id, ok := info.ID(); ok {
+				pid := uint32(id)
+				d.linkByProg[pid] = l
+				d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp}
+				d.tryPinTraceLink(name, l)
+			}
+		}
 	}
 	if len(d.links) == 0 {
 		return fmt.Errorf("no tracepoints attached; verify ebpf programs are present")
 	}
 	return nil
+}
+
+func (d *EBPFDriver) tryPinTraceLink(progName string, l link.Link) {
+	if d == nil || l == nil {
+		return
+	}
+	d.mu.RLock()
+	base := strings.TrimSpace(d.bpfPinPath)
+	d.mu.RUnlock()
+	if base == "" {
+		return
+	}
+	_ = os.MkdirAll(base, 0o755)
+	safe := strings.ReplaceAll(progName, "/", "_")
+	safe = strings.ReplaceAll(safe, ":", "_")
+	_ = l.Pin(filepath.Join(base, "link_"+safe))
 }
 
 func isOptionalTracepointAttachFailure(group, tp string, err error) bool {
@@ -838,6 +875,10 @@ func (d *EBPFDriver) decodeNetworkEvent(data []byte) error {
 		payload = append(payload, ipv4Bytes(evt.DstAddr)...)
 	}
 	payload = appendUint16(payload, evt.DstPort)
+	if q := strings.TrimSpace(nullTerminated(evt.DNSQuery[:])); q != "" {
+		// Optional tail: bounded textual hint (DNS/SNI stub) for userland enrichment.
+		payload = appendString(payload, q)
+	}
 	return d.writeRawEvent(uint16(evt.Type), evt, payload)
 }
 
