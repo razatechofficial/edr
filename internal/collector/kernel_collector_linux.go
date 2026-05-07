@@ -32,6 +32,9 @@ const (
 	bpfEvtFileDel   = 8
 	bpfEvtFileRen   = 9
 	bpfEvtFileChmod = 28
+	bpfEvtLSMFimUnlink  = 39
+	bpfEvtLSMFimRename  = 40
+	bpfEvtLSMFimSetattr = 41
 	bpfEvtNetConn   = 11
 	bpfEvtNetAccept = 12
 	bpfEvtNetBind   = 13
@@ -55,6 +58,8 @@ type KernelCollector struct {
 
 	prio         *kernelRingPriority
 	priorityDrop atomic.Uint64
+
+	jsonMapOpts KernelJSONOpts
 
 	mu     sync.Mutex
 	events []Telemetry
@@ -114,6 +119,10 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		hostname:   hostname,
 		cfg:        cfg,
 		users:      users,
+		jsonMapOpts: KernelJSONOpts{
+			TLSFingerprintLocal: cfg.Monitoring.TLSFingerprintLocal,
+			CommunityIDLocal:    cfg.Monitoring.CommunityIDLocal,
+		},
 	}
 	kc.prio = newKernelRingPriority(cfg)
 	return kc
@@ -142,6 +151,7 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	extras["ring_capacity_bytes"] = rs.Capacity
 	extras["ring_backlog_pct"] = rs.BacklogPct
 	extras["sched_hooks_enabled"] = kc.cfg.Monitoring.SchedHooksEnabled
+	extras["linux_lsm_fim_enabled"] = kc.cfg.Monitoring.LinuxLSMFimEnabled
 	if pd := kc.priorityDrop.Load(); pd > 0 {
 		extras["priority_sampling_kernel_drops"] = pd
 	}
@@ -166,6 +176,7 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	}
 	pol := kernel.DefaultPolicy()
 	pol.SchedEvents = kc.cfg.Monitoring.SchedHooksEnabled
+	pol.LSMFimEvents = kc.cfg.Monitoring.LinuxLSMFimEnabled
 	_ = kc.driver.SetPolicy(pol)
 	go kc.readLoop(ctx)
 	return nil
@@ -222,7 +233,7 @@ func (kc *KernelCollector) parseEvent(data []byte) *Telemetry {
 			return tel
 		}
 	}
-	tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
+	tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users, &kc.jsonMapOpts)
 	if tel != nil && tel.File != nil {
 		kc.enrichFileLineage(tel.File)
 	}
@@ -282,7 +293,8 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 		}
 		return &Telemetry{Process: pe}
 
-	case bpfEvtFileOpen, bpfEvtFileWrite, bpfEvtFileDel, bpfEvtFileRen, bpfEvtFileChmod:
+	case bpfEvtFileOpen, bpfEvtFileWrite, bpfEvtFileDel, bpfEvtFileRen, bpfEvtFileChmod,
+		bpfEvtLSMFimUnlink, bpfEvtLSMFimRename, bpfEvtLSMFimSetattr:
 		base.EventType = schema.EventFile
 		fe := &schema.FileEvent{BaseEvent: base, ActorPID: int(pid)}
 		switch typ {
@@ -333,6 +345,37 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 				fe.FchmodatFlags = binary.LittleEndian.Uint32(rest[:4])
 			}
 			fe.SUID = fe.ChmodMode&04000 != 0
+		case bpfEvtLSMFimUnlink:
+			fe.Operation = "lsm_unlink"
+			fe.Tags = []string{"lsm-fim"}
+			if fname, _ := readLenStr(payload); fname != "" {
+				fe.Path = fname
+			}
+		case bpfEvtLSMFimRename:
+			fe.Operation = "lsm_rename"
+			fe.Tags = []string{"lsm-fim"}
+			oldp, rest := readLenStr(payload)
+			newp, _ := readLenStr(rest)
+			switch {
+			case oldp != "" && newp != "":
+				fe.Path = oldp + " -> " + newp
+			case oldp != "":
+				fe.Path = oldp
+			default:
+				fe.Path = newp
+			}
+		case bpfEvtLSMFimSetattr:
+			fe.Operation = "lsm_setattr"
+			fe.Tags = []string{"lsm-fim"}
+			fname, rest := readLenStr(payload)
+			fe.Path = fname
+			if len(rest) >= 4 {
+				fe.ChmodMode = binary.LittleEndian.Uint32(rest[:4])
+				rest = rest[4:]
+			}
+			if len(rest) >= 4 {
+				fe.FchmodatFlags = binary.LittleEndian.Uint32(rest[:4])
+			}
 		}
 		kc.enrichFileLineage(fe)
 		return &Telemetry{File: fe}
