@@ -81,6 +81,26 @@ var (
 		Data1: 0x48E5B3B2, Data2: 0xED82, Data3: 0x4617,
 		Data4: [8]byte{0x8E, 0x1F, 0xA6, 0x37, 0xCA, 0x2B, 0x30, 0x91},
 	}
+	// Microsoft-Antimalware-Scan-Interface (AMSI) — public provider GUID.
+	amsiGUID = windows.GUID{
+		Data1: 0x2A576B87, Data2: 0x09A7, Data3: 0x520E,
+		Data4: [8]byte{0xC2, 0x1A, 0x49, 0x42, 0xF0, 0x27, 0x1D, 0x67},
+	}
+	// Microsoft-Windows-CodeIntegrity
+	codeIntegrityGUID = windows.GUID{
+		Data1: 0x4EE76BD8, Data2: 0x3CF4, Data3: 0x44A0,
+		Data4: [8]byte{0xA0, 0xAC, 0x39, 0x37, 0x64, 0x3E, 0x37, 0xA3},
+	}
+	// Microsoft-Windows-AppLocker
+	appLockerGUID = windows.GUID{
+		Data1: 0xCBDA4DBF, Data2: 0x8D5D, Data3: 0x4F69,
+		Data4: [8]byte{0x95, 0x78, 0xBE, 0x14, 0xAA, 0x54, 0x0D, 0x22},
+	}
+	// Microsoft-Windows-Windows Defender (ETW operational stream)
+	defenderETWGUID = windows.GUID{
+		Data1: 0x11CD958A, Data2: 0xC507, Data3: 0x4EF3,
+		Data4: [8]byte{0xB3, 0xF2, 0x5F, 0xD9, 0xDF, 0xBD, 0x2C, 0x78},
+	}
 )
 
 var (
@@ -256,6 +276,12 @@ type providerConfig struct {
 	eventType events.EventType
 }
 
+// etwProcSnap is a lightweight process table row for ETW file-event who-data.
+type etwProcSnap struct {
+	ppid uint32
+	exe  string
+}
+
 var etwCoreProviders = []providerConfig{
 	{"Process", kernelProcessGUID, events.EventProcess},
 	{"File", kernelFileGUID, events.EventFile},
@@ -290,12 +316,21 @@ func (d *ETWDriver) providersToStart() []providerConfig {
 	if p.ETWTaskScheduler {
 		out = append(out, providerConfig{"TaskScheduler", taskSchedulerGUID, events.EventTask})
 	}
+	if p.ETWSecurityProviders {
+		out = append(out,
+			providerConfig{"AMSI", amsiGUID, events.EventSecurity},
+			providerConfig{"CodeIntegrity", codeIntegrityGUID, events.EventSecurity},
+			providerConfig{"AppLocker", appLockerGUID, events.EventSecurity},
+			providerConfig{"Defender", defenderETWGUID, events.EventSecurity},
+		)
+	}
 	return out
 }
 
 func isOptionalETWProvider(name string) bool {
 	switch name {
-	case "WMI", "PowerShell", "KernelObject", "BitsClient", "TaskScheduler":
+	case "WMI", "PowerShell", "KernelObject", "BitsClient", "TaskScheduler",
+		"AMSI", "CodeIntegrity", "AppLocker", "Defender":
 		return true
 	default:
 		return false
@@ -341,6 +376,12 @@ type ETWDriver struct {
 	fileObjFIFO []uint64
 	fileObjCap  int
 
+	// etwProcByPID attributes Kernel-File events (subject = ProcessId in header).
+	etwProcMu    sync.RWMutex
+	etwProcByPID map[uint32]etwProcSnap
+	etwProcFIFO  []uint32
+	etwProcCap   int
+
 	// Callback → worker handoff (non-blocking enqueue).
 	ingestCh      chan etwRecordCopy
 	ingestWg      sync.WaitGroup
@@ -360,10 +401,12 @@ var etwCallbackPtr = windows.NewCallback(etwEventRecordCallback)
 // NewETWDriver creates a new ETW-based kernel driver for Windows.
 func NewETWDriver(agentID string) (*ETWDriver, error) {
 	d := &ETWDriver{
-		agentID:     agentID,
-		policy:      DefaultPolicy(),
-		fileObjPath: make(map[uint64]string),
-		fileObjCap:  65536,
+		agentID:      agentID,
+		policy:       DefaultPolicy(),
+		fileObjPath:  make(map[uint64]string),
+		fileObjCap:   65536,
+		etwProcByPID: make(map[uint32]etwProcSnap),
+		etwProcCap:   16384,
 	}
 	s := "active"
 	d.etwRecoverState.Store(&s)
@@ -386,6 +429,7 @@ func (d *ETWDriver) Capabilities() []events.EventType {
 		events.EventPipe,
 		events.EventBITS,
 		events.EventTask,
+		events.EventSecurity,
 	}
 }
 
@@ -654,6 +698,8 @@ func (d *ETWDriver) policyAllows(et events.EventType) bool {
 		return d.policy.ETWBitsClient
 	case events.EventTask:
 		return d.policy.ETWTaskScheduler
+	case events.EventSecurity:
+		return d.policy.ETWSecurityProviders
 	default:
 		return true
 	}
@@ -942,6 +988,9 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 	case taskSchedulerGUID:
 		envelope["type"] = events.EventTask
 		d.decodeOpaqueETW(record, envelope)
+	case amsiGUID, codeIntegrityGUID, appLockerGUID, defenderETWGUID:
+		envelope["type"] = events.EventSecurity
+		d.decodeOpaqueETW(record, envelope)
 	case threatIntelGUID:
 		envelope["type"] = "injection"
 		d.decodeOpaqueETW(record, envelope)
@@ -981,9 +1030,22 @@ func (d *ETWDriver) decodeProcessUserData(record *etwEventRecord, env map[string
 		if len(ud) > 24 {
 			env["image_name"] = extractUTF16String(ud[24:])
 		}
+		if len(ud) >= 20 {
+			child := binary.LittleEndian.Uint32(ud[0:4])
+			if child != 0 {
+				parent := binary.LittleEndian.Uint32(ud[12:16])
+				img := ""
+				if len(ud) > 24 {
+					img = extractUTF16String(ud[24:])
+				}
+				d.etwProcRemember(child, parent, img)
+			}
+		}
 	case 2: // ProcessStop
 		if len(ud) >= 4 {
-			env["exit_pid"] = binary.LittleEndian.Uint32(ud[0:4])
+			ep := binary.LittleEndian.Uint32(ud[0:4])
+			env["exit_pid"] = ep
+			d.etwProcForget(ep)
 		}
 	case 5: // ImageLoad
 		// Microsoft-Windows-Kernel-Process ImageLoad payload (x64):
@@ -997,6 +1059,11 @@ func (d *ETWDriver) decodeProcessUserData(record *etwEventRecord, env map[string
 		}
 		if len(ud) > 20 {
 			env["image_name"] = extractUTF16String(ud[20:])
+		}
+		if len(ud) >= 4 && len(ud) > 20 {
+			loadPID := binary.LittleEndian.Uint32(ud[0:4])
+			img := extractUTF16String(ud[20:])
+			d.etwProcAugmentExe(loadPID, img)
 		}
 		env["type"] = events.EventModule
 		env["op"] = "image_load"
@@ -1045,6 +1112,61 @@ func (d *ETWDriver) kernelFileLookup(fo uint64) string {
 	return d.fileObjPath[fo]
 }
 
+func (d *ETWDriver) etwProcRemember(pid, ppid uint32, exe string) {
+	if pid == 0 {
+		return
+	}
+	d.etwProcMu.Lock()
+	defer d.etwProcMu.Unlock()
+	if d.etwProcByPID == nil {
+		d.etwProcByPID = make(map[uint32]etwProcSnap)
+	}
+	capN := d.etwProcCap
+	if capN <= 0 {
+		capN = 16384
+	}
+	if _, exists := d.etwProcByPID[pid]; !exists {
+		d.etwProcFIFO = append(d.etwProcFIFO, pid)
+		for len(d.etwProcFIFO) > capN {
+			old := d.etwProcFIFO[0]
+			d.etwProcFIFO = d.etwProcFIFO[1:]
+			delete(d.etwProcByPID, old)
+		}
+	}
+	prev := d.etwProcByPID[pid]
+	if exe == "" {
+		exe = prev.exe
+	}
+	pp := ppid
+	if pp == 0 {
+		pp = prev.ppid
+	}
+	d.etwProcByPID[pid] = etwProcSnap{ppid: pp, exe: exe}
+}
+
+func (d *ETWDriver) etwProcForget(pid uint32) {
+	d.etwProcMu.Lock()
+	defer d.etwProcMu.Unlock()
+	delete(d.etwProcByPID, pid)
+}
+
+func (d *ETWDriver) etwProcAugmentExe(pid uint32, exe string) {
+	if pid == 0 || exe == "" {
+		return
+	}
+	d.etwProcMu.Lock()
+	defer d.etwProcMu.Unlock()
+	if d.etwProcByPID == nil {
+		d.etwProcByPID = make(map[uint32]etwProcSnap)
+	}
+	if snap, ok := d.etwProcByPID[pid]; ok {
+		snap.exe = exe
+		d.etwProcByPID[pid] = snap
+		return
+	}
+	d.etwProcByPID[pid] = etwProcSnap{exe: exe}
+}
+
 func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]interface{}) {
 	ud := userDataSlice(record)
 	if ud == nil || len(ud) < 8 {
@@ -1068,6 +1190,17 @@ func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]in
 				env["file_name"] = lp
 			}
 		}
+	}
+	pid := record.EventHeader.ProcessId
+	if pid != 0 {
+		d.etwProcMu.RLock()
+		snap, ok := d.etwProcByPID[pid]
+		d.etwProcMu.RUnlock()
+		if ok {
+			env["actor_ppid"] = snap.ppid
+			env["actor_exe"] = snap.exe
+		}
+		env["syscall"] = "etw_kernel_file"
 	}
 }
 
