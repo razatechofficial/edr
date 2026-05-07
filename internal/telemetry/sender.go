@@ -42,10 +42,13 @@ type Sender struct {
 	spool     *Spool
 	cfg       SenderConfig
 	logger    *zap.Logger
+	sealer    func([]byte) ([]byte, error)
 
 	seq       atomic.Uint64
 	drainOnce sync.Once
 	drainStop chan struct{}
+	sealedOK  atomic.Uint64
+	sealedErr atomic.Uint64
 }
 
 // NewSender creates a Sender. If spool is nil, events that cannot be
@@ -64,14 +67,27 @@ func NewSender(transport Transport, spool *Spool, cfg SenderConfig, logger *zap.
 	return s
 }
 
+// SetSealer installs optional envelope sealing before transport/spool.
+func (s *Sender) SetSealer(sealer func([]byte) ([]byte, error)) { s.sealer = sealer }
+
 // Send delivers data with retry and exponential backoff. On persistent
 // failure the payload is written to the offline spool.
 func (s *Sender) Send(ctx context.Context, data []byte) error {
 	s.seq.Add(1)
+	payload := data
+	if s.sealer != nil {
+		sealed, err := s.sealer(data)
+		if err != nil {
+			s.sealedErr.Add(1)
+			return err
+		}
+		s.sealedOK.Add(1)
+		payload = sealed
+	}
 
 	var lastErr error
 	for attempt := 0; attempt <= s.cfg.MaxRetries; attempt++ {
-		if err := s.transport.Send(ctx, data); err != nil {
+		if err := s.transport.Send(ctx, payload); err != nil {
 			lastErr = err
 			if ctx.Err() != nil {
 				break
@@ -94,7 +110,7 @@ func (s *Sender) Send(ctx context.Context, data []byte) error {
 
 	if s.spool != nil {
 		s.logger.Warn("send failed after retries, spooling", zap.Error(lastErr))
-		return s.spool.Write(data)
+		return s.spool.Write(payload)
 	}
 	return lastErr
 }
