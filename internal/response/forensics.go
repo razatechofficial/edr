@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/razatechofficial/edr/internal/forensics"
 )
 
 // ForensicsManifest describes the contents and chain of custody for a
@@ -52,6 +54,7 @@ type ForensicsHandler struct {
 	logger    *zap.Logger
 	outputDir string
 	encKey    []byte
+	Deep      forensics.ForensicsDeepConfig
 }
 
 // NewForensicsHandler creates a handler that writes DFIR packages to outputDir.
@@ -103,6 +106,22 @@ func (h *ForensicsHandler) Execute(ctx context.Context, params map[string]interf
 
 	// Collect recent logs.
 	artifacts = append(artifacts, h.collectLogs(ctx, workDir)...)
+
+	if h.Deep.AnyEnabled() {
+		for _, f := range forensics.CollectDeepToWorkdir(workDir, h.Deep) {
+			rec := ArtifactRecord{Type: f.Type, Path: f.DstPath, SHA256: f.SHA256, Size: f.Size}
+			if f.SrcPath != "" && rec.Path == "" {
+				rec.Path = f.SrcPath
+			}
+			if f.Err != "" {
+				rec.Collected = false
+				rec.Error = f.Err
+			} else {
+				rec.Collected = true
+			}
+			artifacts = append(artifacts, rec)
+		}
+	}
 
 	// Package into tarball.
 	tarPath := filepath.Join(h.outputDir, packageID+".tar.gz")

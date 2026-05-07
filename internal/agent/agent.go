@@ -29,6 +29,7 @@ import (
 	"github.com/razatechofficial/edr/internal/detection/llm/providers"
 	mlpkg "github.com/razatechofficial/edr/internal/detection/ml"
 	"github.com/razatechofficial/edr/internal/forwarder"
+	"github.com/razatechofficial/edr/internal/forensics"
 	"github.com/razatechofficial/edr/internal/pidfile"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/rules"
@@ -1501,6 +1502,12 @@ func (a *Agent) initResponseLayer() error {
 		AgentIP:       agentIP,
 		HostID:        a.cfg.Service.EndpointID,
 		Logger:        a.zapLogger,
+		ForensicsDeep: forensics.ForensicsDeepConfig{
+			WindowsPrefetchEnabled:    a.cfg.Response.Forensics.WindowsPrefetchEnabled,
+			WindowsAmcacheEnabled:     a.cfg.Response.Forensics.WindowsAmcacheEnabled,
+			SelectedPageMemoryEnabled: a.cfg.Response.Forensics.SelectedPageMemoryEnabled,
+			MacosTCCEnabled:           a.cfg.Response.Forensics.MacosTCCEnabled,
+		},
 		Approval: response.ApprovalConfig{
 			Mode:               a.cfg.Response.Approval.Mode,
 			WebhookURL:         a.cfg.Response.Approval.WebhookURL,
