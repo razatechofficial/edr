@@ -19,6 +19,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var fanotifyInitFn = unix.FanotifyInit
+
 // FanotifySource watches whole mount points for file modify/close-write/open
 // activity. fanotify is the kernel-side equivalent of inotify but, when
 // configured with FAN_MARK_MOUNT, it covers an entire filesystem with one
@@ -45,6 +47,10 @@ type FanotifySource struct {
 
 	// lastMountFP is a sha256 hex of /proc/self/mountinfo; when it changes we re-mark mounts.
 	lastMountFP string
+	// fanReportFIDCap records whether kernel headers expose FAN_REPORT_FID.
+	fanReportFIDCap bool
+	// fanReportFIDEnabled tracks whether FAN_REPORT_FID was successfully enabled at init.
+	fanReportFIDEnabled bool
 
 	livenessMu   sync.Mutex
 	livenessRan  bool
@@ -72,6 +78,7 @@ func NewFanotifySource(endpointID, hostname string, tracker *LineageTracker, mou
 		mounts:     mounts,
 		fd:         -1,
 		fileDedupe: dedupe,
+		fanReportFIDCap: probeFanReportFIDCapability(),
 	}
 }
 
@@ -84,14 +91,25 @@ func (f *FanotifySource) Start() error {
 	if f.started {
 		return nil
 	}
-	fd, err := unix.FanotifyInit(
-		uint(unix.FAN_CLASS_NOTIF|unix.FAN_CLOEXEC|unix.FAN_NONBLOCK),
-		uint(unix.O_RDONLY),
-	)
+	flags := uint(unix.FAN_CLASS_NOTIF | unix.FAN_CLOEXEC | unix.FAN_NONBLOCK)
+	usedFID := false
+	if f.fanReportFIDCap {
+		flags |= uint(unix.FAN_REPORT_FID | unix.FAN_REPORT_DIR_FID)
+		usedFID = true
+	}
+	fd, err := fanotifyInitFn(flags, uint(unix.O_RDONLY))
+	if err != nil && f.fanReportFIDCap {
+		// Kernel doesn't support report-fid despite headers; retry without FID mode.
+		fd, err = fanotifyInitFn(uint(unix.FAN_CLASS_NOTIF|unix.FAN_CLOEXEC|unix.FAN_NONBLOCK), uint(unix.O_RDONLY))
+		if err == nil {
+			usedFID = false
+		}
+	}
 	if err != nil {
 		f.recordError(err)
 		return fmt.Errorf("fanotify_init: %w", err)
 	}
+	f.fanReportFIDEnabled = usedFID
 	mask := uint64(unix.FAN_MODIFY | unix.FAN_CLOSE_WRITE | unix.FAN_OPEN_EXEC)
 	for _, m := range f.mounts {
 		if err := unix.FanotifyMark(fd, unix.FAN_MARK_ADD|unix.FAN_MARK_MOUNT, mask, unix.AT_FDCWD, m); err != nil {
@@ -222,6 +240,11 @@ func fanotifyOpName(mask uint64) string {
 	}
 }
 
+func probeFanReportFIDCapability() bool {
+	// Build/runtime probe: available in recent kernels and x/sys headers.
+	return unix.FAN_REPORT_FID != 0
+}
+
 // ExportMonitoringHealth implements the per-source health interface.
 func (f *FanotifySource) ExportMonitoringHealth() map[string]any {
 	src := MonitoringSource{
@@ -240,6 +263,22 @@ func (f *FanotifySource) ExportMonitoringHealth() map[string]any {
 	}
 	if f.fileDedupe != nil {
 		src.Notes = fmt.Sprintf("file_dedupe_skipped=%d", f.fileDedupe.Skipped())
+	}
+	if f.fanReportFIDCap {
+		if src.Notes != "" {
+			src.Notes += "; "
+		}
+		src.Notes += "fan_report_fid_cap=true"
+		if f.fanReportFIDEnabled {
+			src.Notes += "; fan_report_fid_enabled=true"
+		} else {
+			src.Notes += "; fan_report_fid_enabled=false"
+		}
+	} else {
+		if src.Notes != "" {
+			src.Notes += "; "
+		}
+		src.Notes += "fan_report_fid_cap=false"
 	}
 	m := src.ToMap()
 	f.livenessMu.Lock()
