@@ -308,6 +308,36 @@ static int esf_subscribe_all(void) {
 #ifdef ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_REMOVE
         ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_REMOVE,
 #endif
+#ifdef ES_EVENT_TYPE_NOTIFY_LOGIN_LOGIN
+        ES_EVENT_TYPE_NOTIFY_LOGIN_LOGIN,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_LOGIN_LOGOUT
+        ES_EVENT_TYPE_NOTIFY_LOGIN_LOGOUT,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_LW_SESSION_LOCK
+        ES_EVENT_TYPE_NOTIFY_LW_SESSION_LOCK,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_LW_SESSION_UNLOCK
+        ES_EVENT_TYPE_NOTIFY_LW_SESSION_UNLOCK,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_XPC_CONNECT
+        ES_EVENT_TYPE_NOTIFY_XPC_CONNECT,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_AUTHENTICATION
+        ES_EVENT_TYPE_NOTIFY_AUTHENTICATION,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_PROFILE_ADD
+        ES_EVENT_TYPE_NOTIFY_PROFILE_ADD,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_PROFILE_REMOVE
+        ES_EVENT_TYPE_NOTIFY_PROFILE_REMOVE,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_OD_GROUP_ADD
+        ES_EVENT_TYPE_NOTIFY_OD_GROUP_ADD,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_CS_INVALIDATED
+        ES_EVENT_TYPE_NOTIFY_CS_INVALIDATED,
+#endif
     };
     es_return_t ret = es_subscribe(_esf_client, evts, sizeof(evts)/sizeof(evts[0]));
     return (ret == ES_RETURN_SUCCESS) ? 0 : -1;
@@ -476,6 +506,7 @@ type ESFDriver struct {
 	authBudgetSumMs        atomic.Uint64
 	authBudgetCount        atomic.Uint64
 	authDeadlineViolations atomic.Uint64
+	authBudgetDenyLow      atomic.Uint64
 
 	authSampleMu   sync.Mutex
 	authSamples    []uint32
@@ -749,7 +780,9 @@ func (d *ESFDriver) AuthHealth() map[string]any {
 	if len(samples) > 0 {
 		sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 		m["auth_deadline_p50_ms"] = int(samples[len(samples)/2])
+		m["auth_deadline_p95_ms"] = sortedUint32Percentile(samples, 95)
 	}
+	m["auth_budget_deny_low_deadline"] = d.authBudgetDenyLow.Load()
 	return m
 }
 
