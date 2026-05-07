@@ -226,13 +226,16 @@ func NewWithFiles(configPath string) (*Agent, error) {
 
 	if cfg.Forwarder.Enabled {
 		fw, dr, err := forwarder.New(forwarder.Config{
-			Mode:         cfg.Forwarder.Mode,
-			HTTPEndpoint: cfg.Forwarder.Endpoint,
-			SyslogAddr:   cfg.Forwarder.SyslogAddr,
-			KafkaBrokers: cfg.Forwarder.KafkaBrokers,
-			KafkaTopic:   cfg.Forwarder.KafkaTopic,
-			RetryMax:     cfg.Forwarder.RetryMax,
-			SpoolPath:    cfg.Forwarder.SpoolPath,
+			Mode:           cfg.Forwarder.Mode,
+			HTTPEndpoint:   cfg.Forwarder.Endpoint,
+			SyslogAddr:     cfg.Forwarder.SyslogAddr,
+			KafkaBrokers:   cfg.Forwarder.KafkaBrokers,
+			KafkaTopic:     cfg.Forwarder.KafkaTopic,
+			RetryMax:       cfg.Forwarder.RetryMax,
+			SpoolPath:      cfg.Forwarder.SpoolPath,
+			SealEnvelopes:  cfg.Forwarder.SealEnvelopes,
+			SealKeyPath:    cfg.Forwarder.SealKeyPath,
+			SealKeyID:      cfg.Forwarder.SealKeyID,
 		}, a.logger)
 		if err != nil {
 			return nil, err
