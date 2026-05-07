@@ -21,5 +21,8 @@ func extendLinuxMonitoringCollectors(cols []Collector, cfg config.Config, endpoi
 		u := NewUSBCollector(endpointID, "")
 		cols = append(cols, newStreamingRunCollector("usb", 64, cfg.Monitoring.StreamMaxEPS, u.Run, u.ExportMonitoringHealth))
 	}
+	if cfg.Monitoring.LinuxRootcheckEnabled {
+		cols = append(cols, NewRootcheckCollector(endpointID, cfg))
+	}
 	return cols
 }
