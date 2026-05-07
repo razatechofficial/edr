@@ -75,8 +75,40 @@ func (p *PostureCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 	p.mu.Lock()
 	p.lastNote = ""
 	p.mu.Unlock()
-	p.runOptionalPostureProbes(ctx)
+	p.runOptionalWindowsPostureProbes(ctx)
 	return nil, nil
+}
+
+func (p *PostureCollector) runOptionalWindowsPostureProbes(ctx context.Context) {
+	if p == nil || len(p.cfg.Monitoring.PostureProbes) == 0 {
+		return
+	}
+	out := map[string]any{}
+	for _, raw := range p.cfg.Monitoring.PostureProbes {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if ctx.Err() != nil {
+			break
+		}
+		switch name {
+		case "posture_win_amsi":
+			out[name] = PostureWindowsAMSIProviders()
+		case "posture_win_sigverif":
+			out[name] = PostureWindowsSigverifHint()
+		case "posture_win_defender_excl":
+			out[name] = PostureWindowsDefenderExclusionCount()
+		case "posture_win_tasks":
+			out[name] = PostureWindowsScheduledTasksCount()
+		case "posture_win_bcd":
+			out[name] = PostureWindowsBcdSecureBoot()
+		case "posture_win_wmi":
+			out[name] = WMIPersistenceSnapshot()
+		default:
+			out[name] = map[string]any{"status": "unknown_probe"}
+		}
+	}
+	p.mu.Lock()
+	p.probeOut = out
+	p.mu.Unlock()
 }
 
 func (p *PostureCollector) ExportMonitoringHealth() map[string]any {
