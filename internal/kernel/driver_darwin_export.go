@@ -164,6 +164,14 @@ func goESFAuthCallback(eventType C.int, pid C.int, comm *C.char, pathStr *C.char
 	if budget >= 0 {
 		d.observeAuthBudgetMs(budget)
 	}
+	d.mu.RLock()
+	denyTh := d.policy.ESFAuthDenyBudgetMs
+	d.mu.RUnlock()
+	if denyTh > 0 && budget >= 0 && budget < denyTh {
+		d.authBudgetDenyLow.Add(1)
+		d.authDenials.Add(1)
+		return 1
+	}
 	wait := d.authTimeout
 	if budget >= 0 {
 		if budget == 0 {
