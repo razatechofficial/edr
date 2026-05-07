@@ -16,7 +16,7 @@ import (
 
 func TestForensicsCollectionE2E(t *testing.T) {
 	logger := zap.NewNop()
-	collector := forensics.NewArtifactCollector(logger)
+	collector := forensics.NewArtifactCollector(logger, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
