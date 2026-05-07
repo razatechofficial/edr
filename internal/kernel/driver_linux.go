@@ -46,6 +46,9 @@ const (
 	bpfEvtSeccomp      = 33
 	bpfEvtProcMemWrite = 34
 	bpfEvtDNSQuery     = 35
+	bpfEvtSchedSwitch  = 36
+	bpfEvtSchedWakeup  = 37
+	bpfEvtSchedMigrate = 38
 	bpfEvtNetConn      = 11
 	bpfEvtNetAccept    = 12
 	bpfEvtNetBind      = 13
@@ -109,6 +112,16 @@ type bpfEventHeader struct {
 	GID  uint32
 	TS   uint64
 	Comm [bpfCommLen]byte
+}
+
+// bpfSchedEvent mirrors struct sched_event in platform/linux/ebpf/common.h.
+type bpfSchedEvent struct {
+	Hdr       bpfEventHeader
+	PrevPID   uint32
+	NextPID   uint32
+	CPU       uint32
+	TargetCPU uint32
+	RuntimeNs uint64
 }
 
 // bpfSecurityEvent mirrors struct security_event (with padding before arg0).
@@ -510,7 +523,10 @@ func (d *EBPFDriver) Stats() DriverStats {
 
 func (d *EBPFDriver) cleanup() {
 	for _, l := range d.links {
-		l.Close()
+		if l != nil {
+			_ = l.Unpin()
+			l.Close()
+		}
 	}
 	d.links = nil
 	d.linkByProg = make(map[uint32]link.Link)
@@ -582,6 +598,17 @@ func (d *EBPFDriver) verifyBPFObjectVersionFile(objectPath string) error {
 	return nil
 }
 
+// linkLoadPinnedFn loads a tracepoint link from bpffs (swappable in tests).
+var linkLoadPinnedFn = func(path string) (link.Link, error) {
+	return link.LoadPinnedLink(path, nil)
+}
+
+func ebpfPinnedTraceLinkPath(base, progName string) string {
+	safe := strings.ReplaceAll(progName, "/", "_")
+	safe = strings.ReplaceAll(safe, ":", "_")
+	return filepath.Join(base, "link_"+safe)
+}
+
 func (d *EBPFDriver) attachTracepoints() error {
 	for name, prog := range d.coll.Programs {
 		if prog == nil {
@@ -606,6 +633,21 @@ func (d *EBPFDriver) attachTracepoints() error {
 		tp := rest[sep+2:]
 		if !d.features.HasCgroupBPF && group == "cgroup" {
 			continue
+		}
+		pinBase := strings.TrimSpace(d.bpfPinPath)
+		if pinBase != "" {
+			pp := ebpfPinnedTraceLinkPath(pinBase, name)
+			if pl, err := linkLoadPinnedFn(pp); err == nil && pl != nil {
+				d.links = append(d.links, pl)
+				if info, ierr := prog.Info(); ierr == nil {
+					if id, ok := info.ID(); ok {
+						pid := uint32(id)
+						d.linkByProg[pid] = pl
+						d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp}
+					}
+				}
+				continue
+			}
 		}
 		l, err := link.Tracepoint(group, tp, prog, nil)
 		if err != nil {
@@ -785,6 +827,11 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 		return d.decodeAdvancedSecurityEvent(raw)
 	case bpfEvtProcMemWrite:
 		return d.decodeProcMemWriteEvent(raw)
+	case bpfEvtSchedSwitch, bpfEvtSchedWakeup, bpfEvtSchedMigrate:
+		if !p.SchedEvents {
+			return nil
+		}
+		return d.decodeSchedEvent(raw)
 	default:
 		return fmt.Errorf("unknown bpf event type %d", typ)
 	}
@@ -1011,6 +1058,35 @@ func (d *EBPFDriver) decodeDNSQueryEvent(data []byte) error {
 	return d.writeJSONEvent(env)
 }
 
+func (d *EBPFDriver) decodeSchedEvent(data []byte) error {
+	const sz = unsafe.Sizeof(bpfSchedEvent{})
+	if uintptr(len(data)) < sz {
+		return fmt.Errorf("sched event truncated: got %d, want >= %d", len(data), sz)
+	}
+	se := (*bpfSchedEvent)(unsafe.Pointer(&data[0]))
+	op := "sched_switch"
+	switch se.Hdr.Type {
+	case bpfEvtSchedWakeup:
+		op = "sched_wakeup"
+	case bpfEvtSchedMigrate:
+		op = "sched_migrate_task"
+	}
+	env := map[string]interface{}{
+		"type":         "process",
+		"timestamp":    time.Now().UTC(),
+		"agent_id":     d.agentID,
+		"pid":          se.Hdr.PID,
+		"operation":    op,
+		"process_name": nullTerminated(se.Hdr.Comm[:]),
+		"sched_prev_pid": se.PrevPID,
+		"sched_next_pid": se.NextPID,
+		"sched_cpu":      se.CPU,
+		"sched_target_cpu": se.TargetCPU,
+		"sched_runtime_ns": se.RuntimeNs,
+	}
+	return d.writeJSONEvent(env)
+}
+
 func (d *EBPFDriver) writeRawEvent(typ uint16, hdr interface{}, payload []byte) error {
 	var pid, uid, gid, tid uint32
 	var ts uint64
@@ -1146,7 +1222,7 @@ func appendUint64(dst []byte, v uint64) []byte {
 }
 
 func (d *EBPFDriver) openReaders() error {
-	readerMaps := []string{"events", "file_events", "net_events", "sec_events", "lsm_events"}
+	readerMaps := []string{"events", "file_events", "net_events", "sec_events", "lsm_events", "sched_events", "tls_events"}
 	for _, name := range readerMaps {
 		m, ok := d.coll.Maps[name]
 		if !ok {
