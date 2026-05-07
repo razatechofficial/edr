@@ -70,7 +70,7 @@ jobs:
         run: |
           go test -tags nosec ./cmd/agent -run 'TestMonitoringHealthGolden_Fixtures|TestMonitoringValidation_PlatformKernelContracts' -count=1
           go test -tags nosec ./cmd/agent -run 'TestRunMonitoringValidation_.*|TestAssertStrictNoPlaceholderSources_.*' -count=1
-          go test -tags nosec ./internal/kernel/... ./internal/collector/... -run 'TestReattach|TestWatchdog|TestNetworkExtension|TestESFRevocation|TestLinuxFileDeduper|TestEffectiveLogTargets|TestLogTargetsCollectorHealthRows|TestPersistInventoryRecordsAndMaybeDelta' -count=1
+          go test -tags nosec ./internal/kernel/... ./internal/collector/... -run 'TestReattach|TestWatchdog|TestNetworkExtension|TestESFRevocation|TestLinuxFileDeduper|TestEffectiveLogTargets|TestLogTargetsCollectorHealthRows|TestPersistInventoryRecordsAndMaybeDelta|TestPrioritySampler_bias|TestClassifyTelemetryPriority|Test_sortedUint32Percentile' -count=1
           go test -tags nosec ./internal/response/... -run 'TestDefaultExecutorCollectArtifacts' -count=1
 
       - name: Windows driver stub (compile-test)
