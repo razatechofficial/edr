@@ -141,6 +141,7 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	extras["ring_bytes_used"] = rs.BytesUsed
 	extras["ring_capacity_bytes"] = rs.Capacity
 	extras["ring_backlog_pct"] = rs.BacklogPct
+	extras["sched_hooks_enabled"] = kc.cfg.Monitoring.SchedHooksEnabled
 	if pd := kc.priorityDrop.Load(); pd > 0 {
 		extras["priority_sampling_kernel_drops"] = pd
 	}
@@ -163,6 +164,9 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	if err := kc.driver.Start(ctx, kc.buf); err != nil {
 		return err
 	}
+	pol := kernel.DefaultPolicy()
+	pol.SchedEvents = kc.cfg.Monitoring.SchedHooksEnabled
+	_ = kc.driver.SetPolicy(pol)
 	go kc.readLoop(ctx)
 	return nil
 }
@@ -403,7 +407,12 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 		}
 		// Optional payload tail from kernel decode path (e.g. TLS/SNI stub hint).
 		if dom, _ := readLenStr(rest); strings.TrimSpace(dom) != "" {
-			ne.Domain = strings.TrimSpace(dom)
+			dom = strings.TrimSpace(dom)
+			if typ == bpfEvtDNSQuery {
+				ne.Domain = dom
+			} else {
+				ne.SNI = dom
+			}
 		}
 		return &Telemetry{Network: ne}
 	}

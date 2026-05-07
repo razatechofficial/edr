@@ -58,6 +58,23 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 			}
 			return &Telemetry{SecPolicy: sp}
 		}
+		if op := strings.ToLower(jsonString(raw, "operation")); strings.HasPrefix(op, "sched_") {
+			base.EventType = schema.EventProcess
+			pe := &schema.ProcessEvent{BaseEvent: base}
+			pe.PID = jsonInt(raw, "pid")
+			pe.ProcessName = firstNonEmpty(jsonString(raw, "process_name"), jsonString(raw, "comm"))
+			pe.CommandLine = strings.TrimSpace(strings.Join([]string{
+				op,
+				"prev_pid=" + strconv.FormatInt(int64(jsonInt(raw, "sched_prev_pid")), 10),
+				"next_pid=" + strconv.FormatInt(int64(jsonInt(raw, "sched_next_pid")), 10),
+				"cpu=" + strconv.FormatInt(int64(jsonInt(raw, "sched_cpu")), 10),
+				"target_cpu=" + strconv.FormatInt(int64(jsonInt(raw, "sched_target_cpu")), 10),
+				"runtime_ns=" + strconv.FormatUint(jsonUint64(raw, "sched_runtime_ns"), 10),
+			}, " "))
+			pe.Tags = []string{"kernel_sched", op}
+			applyProcessUserFromJSON(pe, raw, users)
+			return &Telemetry{Process: pe}
+		}
 		if op := strings.ToLower(jsonString(raw, "operation")); strings.Contains(op, "ebpf_program_missing") {
 			base.EventType = schema.EventProcess
 			te := &schema.TamperEvent{
