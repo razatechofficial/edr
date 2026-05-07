@@ -128,6 +128,17 @@ func TestMapKernelJSON_ContainerSecurityTamperMappings(t *testing.T) {
 	}
 }
 
+func TestMapKernelJSON_NetworkCommunityIDAndTLS(t *testing.T) {
+	raw := `{"type":"network","transport":"tcp","protocol":"tcp","source_ip":"192.0.2.1","dest_ip":"192.0.2.2","source_port":12345,"dest_port":443}`
+	tel := MapKernelJSONToTelemetry([]byte(raw), "e", "h", "linux", nil)
+	if tel == nil || tel.Network == nil {
+		t.Fatalf("expected network: %+v", tel)
+	}
+	if tel.Network.CommunityID == "" {
+		t.Fatal("expected community id")
+	}
+}
+
 func TestMapKernelJSON_MacExtendedMappings(t *testing.T) {
 	pRaw := `{"type":"persistence","technique":"btm_launch_item","executable_path":"/tmp/a","item_type":"user_agent","uid":501,"pid":12}`
 	if tel := MapKernelJSONToTelemetry([]byte(pRaw), "e", "h", "darwin", nil); tel == nil || tel.Persistence == nil {
