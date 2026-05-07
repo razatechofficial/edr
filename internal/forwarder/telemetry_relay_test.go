@@ -3,7 +3,10 @@ package forwarder
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
@@ -59,5 +62,25 @@ func TestTelemetryRelayTrySendEnqueue(t *testing.T) {
 	}, 10_000)
 	if len(drained) != 1 || drained[0] != `{"k":"v"}` {
 		t.Fatalf("drained: %#v", drained)
+	}
+}
+
+func TestTelemetryRelayTrySendAppliesSealer(t *testing.T) {
+	var got []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		got = b
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := NewTelemetryRelay(srv.URL, nil, slog.Default())
+	r.SetSealer(func(b []byte) ([]byte, error) { return append([]byte("sealed:"), b...), nil })
+	if err := r.TrySend(context.Background(), []byte(`{"x":1}`)); err != nil {
+		t.Fatalf("TrySend failed: %v", err)
+	}
+	if string(got) != `sealed:{"x":1}` {
+		t.Fatalf("got payload %q", string(got))
 	}
 }
