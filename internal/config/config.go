@@ -238,6 +238,12 @@ type Config struct {
 			SelectedPageMemoryEnabled bool `yaml:"selected_page_memory_enabled" env:"EDR_FORENSICS_PAGE_MEMORY"`
 			// MacosTCCEnabled copies TCC.db from system and user locations when permitted.
 			MacosTCCEnabled bool `yaml:"macos_tcc_enabled" env:"EDR_FORENSICS_MACOS_TCC"`
+			// FIMDiffEnabled emits capped unified diffs on fsnotify modify for matched globs.
+			FIMDiffEnabled bool `yaml:"fim_diff_enabled" env:"EDR_FORENSICS_FIM_DIFF"`
+			// FIMDiffMaxFileBytes caps bytes read per file for diff (default 65536).
+			FIMDiffMaxFileBytes int `yaml:"fim_diff_max_file_bytes"`
+			// FIMDiffPathGlobs selects paths (filepath.Match) for diff-on-modify.
+			FIMDiffPathGlobs []string `yaml:"fim_diff_path_globs"`
 		} `yaml:"forensics"`
 
 		// PlaybooksPath is the full path to the YAML file (takes precedence over PlaybooksDir).
@@ -330,7 +336,8 @@ type Config struct {
 		LogTailTelemetryMode string `yaml:"log_tail_telemetry_mode"`
 		// PostureEnabled opts into lightweight read-only posture probes (G-POSTURE); off by default.
 		PostureEnabled bool `yaml:"posture_enabled" env:"EDR_MONITORING_POSTURE"`
-		// PostureProbes selects optional rootcheck-lite probes (posture_suid_sweep, posture_hidden_pid, posture_hidden_port, posture_dev_walker).
+		// PostureProbes selects optional rootcheck-lite probes (posture_suid_sweep, posture_hidden_pid, posture_hidden_port, posture_dev_walker,
+		// ld_so_preload_hash, dev_anomaly, rootkit_iocs).
 		PostureProbes []string `yaml:"posture_probes"`
 		// ETWKernelFileObjectCache (Windows) LRU cache FileObject→path for kernel file telemetry.
 		ETWKernelFileObjectCache bool `yaml:"etw_kernel_file_object_cache"`
@@ -364,6 +371,8 @@ type Config struct {
 		WindowsMinifilterPort string `yaml:"windows_minifilter_port" env:"EDR_MONITORING_WIN_MINIFILTER_PORT"`
 		// WindowsWFPCtlProbe opens the local WFP engine handle for monitoring health (elevated agents).
 		WindowsWFPCtlProbe bool `yaml:"windows_wfp_ctl_probe"`
+		// WindowsWFPMirrorDiagOnly: when true (default), WFP SendMirror only frames for diagnostics (no kernel IO).
+		WindowsWFPMirrorDiagOnly bool `yaml:"windows_wfp_mirror_diag_only" env:"EDR_MONITORING_WIN_WFP_MIRROR_DIAG_ONLY"`
 		// WindowsControlPlaneRequired makes startup fail when requested WFP/minifilter control planes are unavailable.
 		WindowsControlPlaneRequired bool `yaml:"windows_control_plane_required"`
 		// WindowsServiceHardening applies SCM failure/recovery actions during service install (see service_hardening_posture.json).
@@ -400,6 +409,14 @@ type Config struct {
 		LinuxFileEventDedupeMs int `yaml:"linux_file_event_dedupe_ms"`
 		// Linux: sysfs USB attach/detach watcher.
 		LinuxUSBBridge bool `yaml:"linux_usb_hotplug"`
+		// LinuxRootcheckEnabled runs periodic rootcheck-style probes (hidden pid/port, suid drift).
+		LinuxRootcheckEnabled bool `yaml:"linux_rootcheck_enabled" env:"EDR_MONITORING_LINUX_ROOTCHECK"`
+		// LinuxRootcheckIntervalSec controls rootcheck cadence (seconds, default 300).
+		LinuxRootcheckIntervalSec int `yaml:"linux_rootcheck_interval_sec"`
+		// LinuxRootcheckSUIDPrefixes controls prefixes scanned for suid/sgid drift.
+		LinuxRootcheckSUIDPrefixes []string `yaml:"linux_rootcheck_suid_prefixes"`
+		// LinuxLSMFimEnabled emits observe-only LSM FIM events (requires CONFIG_BPF_LSM; high volume).
+		LinuxLSMFimEnabled bool `yaml:"linux_lsm_fim_enabled" env:"EDR_MONITORING_LINUX_LSM_FIM"`
 
 		// DarwinNEBundleID filters systemextensionsctl health parsing for this extension id (optional).
 		DarwinNEBundleID string `yaml:"darwin_ne_bundle_id"`
@@ -435,6 +452,39 @@ type Config struct {
 		DnsClientETWWindows bool `yaml:"dns_client_etw_windows"`
 		// DarwinDNSExtraLogPaths append file paths attempted before default /var/log/system.log.
 		DarwinDNSExtraLogPaths []string `yaml:"darwin_dns_extra_log_paths"`
+
+		// TLSFingerprintLocal computes JA3/JA4 when raw ClientHello bytes are present in kernel JSON.
+		TLSFingerprintLocal bool `yaml:"tls_fingerprint_local" env:"EDR_MONITORING_TLS_FP_LOCAL"`
+		// CommunityIDLocal fills community-id v1 when a 5-tuple is complete (default true via Defaults()).
+		CommunityIDLocal bool `yaml:"community_id_local" env:"EDR_MONITORING_COMMUNITY_ID_LOCAL"`
+
+		// WindowsAmsiTamperEnabled checks AMSI exports for unexpected prologues (best-effort).
+		WindowsAmsiTamperEnabled bool `yaml:"windows_amsi_tamper_enabled"`
+		// WindowsEtwTamperEnabled checks ntdll ETW export prologues (best-effort).
+		WindowsEtwTamperEnabled bool `yaml:"windows_etw_tamper_enabled"`
+		// WindowsTamperIntervalSec recheck cadence for AMSI/ETW tamper probes (default 60).
+		WindowsTamperIntervalSec int `yaml:"windows_tamper_interval_sec"`
+		// WindowsPPIDSpoofDetector compares ETW parent PID vs NtQueryInformationProcess inherited PID on process-create JSON.
+		WindowsPPIDSpoofDetector bool `yaml:"windows_ppid_spoof_detector"`
+		// WindowsADSEnumerator walks prefixes for non-default NTFS streams.
+		WindowsADSEnumerator bool `yaml:"windows_ads_enumerator"`
+		// WindowsADSPathGlobs optional path filters (filepath.Match) under search roots.
+		WindowsADSPathGlobs []string `yaml:"windows_ads_path_globs"`
+		// WindowsSACLWhodata maps Security 4663 events from log_targets into FileEvent rows.
+		WindowsSACLWhodata bool `yaml:"windows_sacl_whodata"`
+		// WindowsAutorunsLite enumerates common Run/IFEO/AppInit/LSA/Winlogon/task persistence keys.
+		WindowsAutorunsLite bool `yaml:"windows_autoruns_lite"`
+		// WindowsAutorunsIntervalSec cadence for autoruns-lite (default 300).
+		WindowsAutorunsIntervalSec int `yaml:"windows_autoruns_interval_sec"`
+
+		// MacosTCCWatch watches TCC.db for row-level changes (best-effort; SIP may block).
+		MacosTCCWatch bool `yaml:"macos_tcc_watch"`
+		// MacosAutostartEnumerator scans LaunchAgents/Daemons, login items, cron paths.
+		MacosAutostartEnumerator bool `yaml:"macos_autostart_enumerator"`
+		// MacosCodesignSweep verifies codesign for running process images periodically.
+		MacosCodesignSweep bool `yaml:"macos_codesign_sweep"`
+		// MacosCodesignIntervalSec cadence for codesign sweep (default 600).
+		MacosCodesignIntervalSec int `yaml:"macos_codesign_interval_sec"`
 	} `yaml:"monitoring"`
 
 	// Legacy fields for backward compatibility with existing agent.example.yaml.
@@ -554,11 +604,19 @@ func Defaults() Config {
 	cfg.Monitoring.ETWKernelFileObjectCache = true
 	cfg.Monitoring.ETWSecurityProviders = true
 	cfg.Monitoring.WindowsWFPCtlProbe = true
+	cfg.Monitoring.WindowsWFPMirrorDiagOnly = true
 	cfg.Monitoring.WindowsControlPlaneRequired = false
 	cfg.Monitoring.WindowsServiceHardening = false
 	cfg.Monitoring.WindowsServiceHardeningACL = false
 	cfg.Monitoring.WindowsServiceDaclHardened = false
 	cfg.Monitoring.WindowsServiceLaunchProtected = false
+	cfg.Monitoring.LinuxRootcheckEnabled = false
+	cfg.Monitoring.LinuxRootcheckIntervalSec = 300
+	cfg.Monitoring.LinuxRootcheckSUIDPrefixes = []string{"/usr", "/bin", "/sbin", "/opt"}
+	cfg.Monitoring.CommunityIDLocal = true
+	cfg.Monitoring.WindowsTamperIntervalSec = 60
+	cfg.Monitoring.WindowsAutorunsIntervalSec = 300
+	cfg.Monitoring.MacosCodesignIntervalSec = 600
 
 	cfg.Service.TickInterval = time.Second
 	cfg.LegacyResponse.MinKillScore = 90
