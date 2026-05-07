@@ -282,6 +282,11 @@ type etwProcSnap struct {
 	exe  string
 }
 
+const (
+	kernelFileEvtReadID  uint16 = 67
+	kernelFileEvtWriteID uint16 = 68
+)
+
 var etwCoreProviders = []providerConfig{
 	{"Process", kernelProcessGUID, events.EventProcess},
 	{"File", kernelFileGUID, events.EventFile},
@@ -376,6 +381,12 @@ type ETWDriver struct {
 	fileObjFIFO []uint64
 	fileObjCap  int
 
+	fileRWMu   sync.RWMutex
+	fileRWSeen map[uint64]uint8
+	fileRWFIFO []uint64
+	fileRWCap  int
+	fileRWDrop atomic.Uint64
+
 	// etwProcByPID attributes Kernel-File events (subject = ProcessId in header).
 	etwProcMu    sync.RWMutex
 	etwProcByPID map[uint32]etwProcSnap
@@ -405,6 +416,8 @@ func NewETWDriver(agentID string) (*ETWDriver, error) {
 		policy:       DefaultPolicy(),
 		fileObjPath:  make(map[uint64]string),
 		fileObjCap:   65536,
+		fileRWSeen:   make(map[uint64]uint8),
+		fileRWCap:    65536,
 		etwProcByPID: make(map[uint32]etwProcSnap),
 		etwProcCap:   16384,
 	}
@@ -637,6 +650,7 @@ func (d *ETWDriver) IngestMetrics() map[string]any {
 		"ingest_queue_depth": len(d.ingestCh),
 		"ingest_queue_cap":   cap(d.ingestCh),
 		"ingest_dropped":     d.ingestDropped.Load(),
+		"file_first_rw_dropped_duplicates": d.fileRWDrop.Load(),
 	}
 }
 
@@ -964,6 +978,11 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 	case kernelFileGUID:
 		envelope["type"] = events.EventFile
 		d.decodeFileUserData(record, envelope)
+		if d.shouldDropDuplicateKernelFileRW(record) {
+			d.dropped.Add(1)
+			d.fileRWDrop.Add(1)
+			return
+		}
 	case kernelNetworkGUID:
 		envelope["type"] = events.EventNetwork
 		d.decodeNetworkUserData(record, envelope)
@@ -1169,7 +1188,7 @@ func (d *ETWDriver) etwProcAugmentExe(pid uint32, exe string) {
 
 func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]interface{}) {
 	ud := userDataSlice(record)
-	if ud == nil || len(ud) < 8 {
+	if len(ud) < 8 {
 		return
 	}
 	env["file_object"] = binary.LittleEndian.Uint64(ud[0:8])
@@ -1202,6 +1221,54 @@ func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]in
 		}
 		env["syscall"] = "etw_kernel_file"
 	}
+}
+
+func (d *ETWDriver) shouldDropDuplicateKernelFileRW(record *etwEventRecord) bool {
+	if record == nil {
+		return false
+	}
+	evID := record.EventHeader.EventDescriptor.Id
+	var mask uint8
+	switch evID {
+	case kernelFileEvtReadID:
+		mask = 1 << 0
+	case kernelFileEvtWriteID:
+		mask = 1 << 1
+	default:
+		return false
+	}
+	ud := userDataSlice(record)
+	if len(ud) < 8 {
+		return false
+	}
+	fo := binary.LittleEndian.Uint64(ud[:8])
+	if fo == 0 {
+		return false
+	}
+
+	d.fileRWMu.Lock()
+	defer d.fileRWMu.Unlock()
+	if d.fileRWSeen == nil {
+		d.fileRWSeen = make(map[uint64]uint8)
+	}
+	capN := d.fileRWCap
+	if capN <= 0 {
+		capN = 65536
+	}
+	seen := d.fileRWSeen[fo]
+	if seen&mask != 0 {
+		return true
+	}
+	if seen == 0 {
+		d.fileRWFIFO = append(d.fileRWFIFO, fo)
+		for len(d.fileRWFIFO) > capN {
+			old := d.fileRWFIFO[0]
+			d.fileRWFIFO = d.fileRWFIFO[1:]
+			delete(d.fileRWSeen, old)
+		}
+	}
+	d.fileRWSeen[fo] = seen | mask
+	return false
 }
 
 func ip4FromDWordLE(v uint32) string {

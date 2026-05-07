@@ -3,7 +3,9 @@
 package kernel
 
 import (
+	"encoding/binary"
 	"testing"
+	"unsafe"
 
 	"github.com/razatechofficial/edr/pkg/events"
 	"golang.org/x/sys/windows"
@@ -82,5 +84,32 @@ func TestDecodeAMSIETW_setsSubprovider(t *testing.T) {
 	}
 	if env["message"] != "Hello" {
 		t.Fatalf("message: %v", env["message"])
+	}
+}
+
+func TestShouldDropDuplicateKernelFileRW(t *testing.T) {
+	d, err := NewETWDriver("agent-test-12345678")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ud := make([]byte, 8)
+	binary.LittleEndian.PutUint64(ud, 0xAABBCCDD)
+	rec := &etwEventRecord{}
+	rec.EventHeader.EventDescriptor.Id = kernelFileEvtReadID
+	rec.UserDataLength = uint16(len(ud))
+	rec.UserData = uintptr(unsafe.Pointer(&ud[0]))
+
+	if drop := d.shouldDropDuplicateKernelFileRW(rec); drop {
+		t.Fatal("first read event should not be dropped")
+	}
+	if drop := d.shouldDropDuplicateKernelFileRW(rec); !drop {
+		t.Fatal("second read event should be dropped")
+	}
+	rec.EventHeader.EventDescriptor.Id = kernelFileEvtWriteID
+	if drop := d.shouldDropDuplicateKernelFileRW(rec); drop {
+		t.Fatal("first write event should not be dropped")
+	}
+	if drop := d.shouldDropDuplicateKernelFileRW(rec); !drop {
+		t.Fatal("second write event should be dropped")
 	}
 }
