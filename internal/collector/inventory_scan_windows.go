@@ -43,6 +43,9 @@ func scanHostInventory(ctx context.Context) (map[string]any, error) {
 	if svcRun != "" {
 		out["windows_services_running"] = atoiTrim(svcRun)
 	}
+	if s := ps("(Get-LocalUser -ErrorAction SilentlyContinue | Measure-Object).Count"); s != "" {
+		out["local_user_count_est"] = atoiTrim(s)
+	}
 
 	lr, pidOwn := windowsListenMIBRowCounts()
 	out["listening_socket_rows_est"] = lr
