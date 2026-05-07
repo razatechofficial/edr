@@ -70,7 +70,7 @@ func (p *PostureCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 	p.mu.Lock()
 	p.lastNote = ""
 	p.mu.Unlock()
-	p.runOptionalPostureProbes(ctx)
+	p.runOptionalDarwinPostureProbes(ctx)
 	return nil, nil
 }
 
