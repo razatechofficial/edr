@@ -54,6 +54,19 @@ func TestWFPCtlRecoverOutcomeClassification(t *testing.T) {
 	}
 }
 
+func TestWFPCtl_SendMirrorFramedNoChannel(t *testing.T) {
+	t.Parallel()
+	w := NewWFPCtl()
+	err := w.SendMirror(CmdUpdateRules, []byte{1})
+	if err == nil {
+		t.Fatal("expected error when engine closed")
+	}
+	h := w.Health()
+	if h["last_mirror_send_outcome"] != "framed-no-channel" {
+		t.Fatalf("health: %#v", h)
+	}
+}
+
 func TestWFPCtl_SendMirrorFraming(t *testing.T) {
 	t.Parallel()
 	w := NewWFPCtl()
@@ -65,7 +78,7 @@ func TestWFPCtl_SendMirrorFraming(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := w.Health()
-	if h["last_mirror_send_outcome"] != "framed" {
+	if h["last_mirror_send_outcome"] != "framed-only" {
 		t.Fatalf("health: %#v", h)
 	}
 	want, err := BuildControlPlaneWire(CmdUpdateRules, payload)
