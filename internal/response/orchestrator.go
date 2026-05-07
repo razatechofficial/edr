@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/razatechofficial/edr/internal/detection"
+	"github.com/razatechofficial/edr/internal/forensics"
 	"go.uber.org/zap"
 )
 
@@ -23,6 +24,7 @@ type EngineConfig struct {
 	Logger        *zap.Logger
 	Approval      ApprovalConfig
 	ActionEng     *ActionEngine
+	ForensicsDeep forensics.ForensicsDeepConfig
 }
 
 // ApprovalConfig mirrors agent YAML.
@@ -80,6 +82,7 @@ func NewEngine(cfg EngineConfig) (ResponseEngine, error) {
 		QuarantineDir:       cfg.QuarantineDir,
 		HostID:              cfg.HostID,
 		AgentIP:             cfg.AgentIP,
+		ForensicsDeep:       cfg.ForensicsDeep,
 		RegisterContainment: sl.RegisterContainment,
 	}
 	gw := buildApprovalGateway(cfg.Approval, cfg.Logger)
