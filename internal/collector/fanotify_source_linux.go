@@ -43,6 +43,9 @@ type FanotifySource struct {
 
 	fileDedupe *LinuxFileDeduper
 
+	// lastMountFP is a sha256 hex of /proc/self/mountinfo; when it changes we re-mark mounts.
+	lastMountFP string
+
 	livenessMu   sync.Mutex
 	livenessRan  bool
 	livenessOK   bool
@@ -97,6 +100,9 @@ func (f *FanotifySource) Start() error {
 			return fmt.Errorf("fanotify_mark %s: %w", m, err)
 		}
 	}
+	if fp, err := readMountinfoFingerprint(); err == nil {
+		f.lastMountFP = fp
+	}
 	f.fd = fd
 	f.started = true
 	return nil
@@ -123,6 +129,10 @@ func (f *FanotifySource) Run(ctx context.Context, sink *StreamingSink) error {
 	defer f.Stop()
 
 	f.runPostStartLivenessProbe(ctx)
+
+	watchCtx, watchCancel := context.WithCancel(ctx)
+	defer watchCancel()
+	go f.runMountTableWatch(watchCtx)
 
 	const evSize = 24 // sizeof(fanotify_event_metadata) on Linux for the variant we use
 	buf := make([]byte, 4096)
