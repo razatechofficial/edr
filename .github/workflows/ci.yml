@@ -231,6 +231,128 @@ jobs:
       - run: go mod download
       - run: go test -tags nosec ./internal/collector -run 'Test.*SCDynamic.*|Test.*scutil.*' -count=1
 
+  # Phase 2 monitoring modules (named compile/unit smoke lanes)
+  linux-rootcheck-suid-baseline:
+    name: linux-rootcheck-suid-baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=linux GOARCH=amd64 go test -c -o /dev/null ./internal/collector
+
+  linux-fim-content-diff:
+    name: linux-fim-content-diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: go test ./internal/forensics -run 'TestFIMDiff' -count=1
+
+  linux-lsm-fim-cross-compile:
+    name: linux-lsm-fim-cross-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=linux GOARCH=amd64 go test -c -o /dev/null ./internal/kernel -run 'TestProcessRecordLSMFim'
+
+  windows-amsi-etw-tamper-cross:
+    name: windows-amsi-etw-tamper-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/collector
+
+  windows-autoruns-lite-cross:
+    name: windows-autoruns-lite-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/collector
+
+  windows-ppid-spoof-cross:
+    name: windows-ppid-spoof-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/collector
+
+  darwin-tcc-watch-cross:
+    name: darwin-tcc-watch-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=darwin GOARCH=amd64 go test -tags nosec -c -o /dev/null ./internal/collector
+
+  darwin-autostart-cross:
+    name: darwin-autostart-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=darwin GOARCH=amd64 go test -tags nosec -c -o /dev/null ./internal/collector
+
+  darwin-codesign-sweep-cross:
+    name: darwin-codesign-sweep-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=darwin GOARCH=amd64 go test -tags nosec -c -o /dev/null ./internal/collector
+
+  cross-os-ja3-ja4-unit:
+    name: cross-os-ja3-ja4-unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: go test ./internal/collector -run 'TestClientHelloFingerprints' -count=1
+
+  cross-os-community-id-unit:
+    name: cross-os-community-id-unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: go test ./internal/collector -run 'TestCommunityIDv1Stable' -count=1
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
