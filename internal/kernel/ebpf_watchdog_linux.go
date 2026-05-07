@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -83,7 +84,18 @@ func (d *EBPFDriver) reattachMissingLinks(missing []uint32) error {
 			continue
 		}
 		if old, ok := d.linkByProg[id]; ok && old != nil {
+			_ = old.Unpin()
 			_ = old.Close()
+		}
+		pinBase := strings.TrimSpace(d.bpfPinPath)
+		if pinBase != "" {
+			pp := ebpfPinnedTraceLinkPath(pinBase, spec.progName)
+			if pl, err := linkLoadPinnedFn(pp); err == nil && pl != nil {
+				d.linkByProg[id] = pl
+				d.links = append(d.links, pl)
+				d.tryPinTraceLink(spec.progName, pl)
+				continue
+			}
 		}
 		nl, err := link.Tracepoint(spec.group, spec.tp, prog, nil)
 		if err != nil {
