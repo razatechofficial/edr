@@ -9,7 +9,7 @@ import (
 
 func TestCollectArtifactsForAlertBounded(t *testing.T) {
 	ctx := context.Background()
-	bundle, err := CollectArtifactsForAlert(ctx, zap.NewNop(), AlertTriggerMeta{AlertID: "a1", RuleID: "r1", Severity: "high"})
+	bundle, err := CollectArtifactsForAlert(ctx, zap.NewNop(), AlertTriggerMeta{AlertID: "a1", RuleID: "r1", Severity: "high"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
