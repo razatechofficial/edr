@@ -109,7 +109,7 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 	if len(fimPaths) == 0 {
 		fimPaths = nil
 	}
-	fc, fcErr := NewFileCollector(endpointID, fimPaths)
+	fc, fcErr := NewFileCollector(endpointID, fimPaths, cfgEff)
 	if fcErr == nil {
 		fileCol = fc
 	} else {
