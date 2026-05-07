@@ -10,6 +10,8 @@
 
 #define AF_INET  2
 #define AF_INET6 10
+#define TCP_ESTABLISHED 1
+#define TCP_CLOSE       7
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -247,6 +249,41 @@ int kp_tcp_v4_connect(struct pt_regs *ctx)
 }
 
 /*
+ * tcp_v6_connect enriches outbound IPv6 connects. We capture the assigned
+ * source port and remote port from kernel socket state; address extraction is
+ * intentionally deferred for broad kernel compatibility in the fallback lane.
+ */
+SEC("kprobe/tcp_v6_connect")
+int kp_tcp_v6_connect(struct pt_regs *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk)
+		return 0;
+
+	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_NET_CONNECT);
+	evt->direction = 0;
+	evt->protocol  = AF_INET6;
+	evt->is_ipv6   = 1;
+
+	__u16 sport = 0, dport = 0;
+	BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+	BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+	evt->src_port = sport;
+	evt->dst_port = __builtin_bswap16(dport);
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+/*
  * udp_sendmsg is the single kernel entry-point for both sendto(2) and
  * sendmsg(2) on UDP sockets. Hooking it gives DNS query visibility even
  * when an application uses sendmsg with iov (which the syscall tracepoint
@@ -324,6 +361,56 @@ int kp_tcp_close(struct pt_regs *ctx)
 	evt->src_port = sport;
 	evt->dst_port = __builtin_bswap16(dport);
 
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+/*
+ * inet_sock_set_state gives L4 state transition visibility for both IPv4/IPv6.
+ * We emit connect-like events on ESTABLISHED and close events on CLOSE.
+ */
+SEC("kprobe/inet_sock_set_state")
+int kp_inet_sock_set_state(struct pt_regs *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk)
+		return 0;
+
+	int oldstate = (int)PT_REGS_PARM2(ctx);
+	int newstate = (int)PT_REGS_PARM3(ctx);
+	if (oldstate == newstate)
+		return 0;
+	if (newstate != TCP_ESTABLISHED && newstate != TCP_CLOSE)
+		return 0;
+
+	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, newstate == TCP_CLOSE ? EVENT_NET_CLOSE : EVENT_NET_CONNECT);
+	evt->direction = 0;
+
+	__u16 family = 0;
+	__u16 sport = 0, dport = 0;
+	BPF_CORE_READ_INTO(&family, sk, __sk_common.skc_family);
+	BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+	BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
+	evt->src_port = sport;
+	evt->dst_port = __builtin_bswap16(dport);
+	if (family == AF_INET6) {
+		evt->protocol = AF_INET6;
+		evt->is_ipv6 = 1;
+	} else {
+		evt->protocol = AF_INET;
+		evt->is_ipv6 = 0;
+		__u32 saddr = 0, daddr = 0;
+		BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_rcv_saddr);
+		BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
+		evt->src_addr = saddr;
+		evt->dst_addr = daddr;
+	}
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
