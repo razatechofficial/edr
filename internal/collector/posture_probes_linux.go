@@ -29,7 +29,13 @@ func (p *PostureCollector) runOptionalPostureProbes(ctx context.Context) {
 		case "posture_hidden_pid":
 			out[name] = postureHiddenPIDLinux(ctx)
 		case "posture_hidden_port":
-			out[name] = map[string]any{"status": "skipped", "reason": "bind_crosscheck_not_implemented"}
+			out[name] = postureHiddenPortLinux(ctx)
+		case "posture_promisc_if":
+			out[name] = posturePromiscInterfacesLinux(ctx)
+		case "posture_pkg_integrity":
+			out[name] = posturePkgIntegrityLinux(ctx)
+		case "posture_kmod_summary":
+			out[name] = postureKmodSummaryLinux()
 		case "posture_dev_walker":
 			out[name] = postureDevWalkerLinux(ctx)
 		default:
