@@ -23,6 +23,8 @@ type EventPolicy struct {
 	MountEvents    bool
 	PtraceEvents   bool
 	SignalEvents   bool
+	// SchedEvents enables Linux eBPF scheduler tracepoint telemetry (high volume).
+	SchedEvents bool
 
 	// MutePaths lists process paths that should be silently ignored.
 	MutePaths []string
@@ -60,6 +62,7 @@ func DefaultPolicy() EventPolicy {
 		MountEvents:    true,
 		PtraceEvents:   true,
 		SignalEvents:   true,
+		SchedEvents:    false,
 		// Windows: broad security ETW (AMSI / CI / AppLocker / Defender); ignored on other OSes.
 		ETWSecurityProviders: true,
 	}
