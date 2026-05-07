@@ -28,7 +28,7 @@ type LogTargetsCollector struct {
 
 	mu      sync.Mutex
 	states  []logTargetRuntime
-	offsets map[string]int64
+	offsets map[string]persistedLogOffset
 
 	readBytes atomic.Uint64
 	dropped   atomic.Uint64
@@ -70,7 +70,7 @@ func NewLogTargetsCollector(cfg config.Config) *LogTargetsCollector {
 		targets:    tg,
 		endpointID: ep,
 		hostname:   host,
-		offsets:    make(map[string]int64),
+		offsets:    make(map[string]persistedLogOffset),
 	}
 	lt.loadOffsets()
 	for i := range lt.targets {
@@ -106,7 +106,11 @@ func (l *LogTargetsCollector) loadOffsets() {
 	if err != nil {
 		return
 	}
-	_ = json.Unmarshal(data, &l.offsets)
+	if m := loadPersistedLogOffsets(data); m != nil {
+		for k, v := range m {
+			l.offsets[k] = v
+		}
+	}
 }
 
 func (l *LogTargetsCollector) persistOffsets() {
@@ -273,13 +277,11 @@ func (l *LogTargetsCollector) drainPathFileEvents(ctx context.Context, idx int, 
 	if fi.IsDir() {
 		return nil, 0, fmt.Errorf("is directory")
 	}
+	dev, ino := fileTailIdentity(fi)
 	l.mu.Lock()
-	off := l.offsets[key]
-	if off > fi.Size() {
-		off = 0
-		l.offsets[key] = 0
-	}
+	pos := l.offsets[key]
 	l.mu.Unlock()
+	off := pickLogReadOffset(pos, dev, ino, fi.Size())
 
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -338,7 +340,7 @@ func (l *LogTargetsCollector) drainPathFileEvents(ctx context.Context, idx int, 
 	}
 	newOff := off + bytesRead
 	l.mu.Lock()
-	l.offsets[key] = newOff
+	l.offsets[key] = persistedLogOffset{Dev: dev, Ino: ino, Off: newOff}
 	l.mu.Unlock()
 	return out, uint64(bytesRead), nil
 }
