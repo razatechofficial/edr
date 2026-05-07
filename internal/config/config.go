@@ -230,6 +230,14 @@ type Config struct {
 			IncludeMemory  bool   `yaml:"include_memory_dump"`
 			OutputDir      string `yaml:"output_dir"`
 			ChainOfCustody bool   `yaml:"chain_of_custody"`
+			// WindowsPrefetchEnabled copies bounded Prefetch (*.pf) files into artifact manifests.
+			WindowsPrefetchEnabled bool `yaml:"windows_prefetch_enabled" env:"EDR_FORENSICS_WIN_PREFETCH"`
+			// WindowsAmcacheEnabled snapshots Amcache.hve with shared read (best-effort).
+			WindowsAmcacheEnabled bool `yaml:"windows_amcache_enabled" env:"EDR_FORENSICS_WIN_AMCACHE"`
+			// SelectedPageMemoryEnabled samples a bounded byte budget from process address spaces (Windows).
+			SelectedPageMemoryEnabled bool `yaml:"selected_page_memory_enabled" env:"EDR_FORENSICS_PAGE_MEMORY"`
+			// MacosTCCEnabled copies TCC.db from system and user locations when permitted.
+			MacosTCCEnabled bool `yaml:"macos_tcc_enabled" env:"EDR_FORENSICS_MACOS_TCC"`
 		} `yaml:"forensics"`
 
 		// PlaybooksPath is the full path to the YAML file (takes precedence over PlaybooksDir).
@@ -386,6 +394,8 @@ type Config struct {
 		LinuxAuditManagedRules bool `yaml:"linux_audit_managed_rules"`
 		// LinuxBPFPinPath pins eBPF maps under this bpffs path (empty = no pinning). Recommended: /sys/fs/bpf/edr_<agent> namespaced dir.
 		LinuxBPFPinPath string `yaml:"linux_bpf_pin_path" env:"EDR_MONITORING_BPF_PIN_PATH"`
+		// SchedHooksEnabled attaches sched tracepoints and emits scheduler telemetry (Linux eBPF; very high volume).
+		SchedHooksEnabled bool `yaml:"sched_hooks_enabled" env:"EDR_MONITORING_SCHED_HOOKS"`
 		// LinuxFileEventDedupeMs drops duplicate file telemetry paths across fanotify vs audit within this window (0 = disabled).
 		LinuxFileEventDedupeMs int `yaml:"linux_file_event_dedupe_ms"`
 		// Linux: sysfs USB attach/detach watcher.

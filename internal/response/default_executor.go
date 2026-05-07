@@ -26,6 +26,7 @@ type DefaultActionExecutor struct {
 	QuarantineDir string
 	HostID        string
 	AgentIP       string
+	ForensicsDeep forensics.ForensicsDeepConfig
 	OnForensic    func() // optional: called after successful collect_forensics
 	// RegisterContainment, when set by [NewEngine], records isolations/quarantines/blocks in [RollbackManager].
 	RegisterContainment func(Containment)
@@ -116,7 +117,12 @@ func (e *DefaultActionExecutor) runCollectArtifacts(ctx context.Context, params 
 		Severity:   fmt.Sprint(d.Severity),
 		EndpointID: e.HostID,
 	}
-	_, err := forensics.CollectArtifactsForAlert(ctx, log, meta)
+	var deep *forensics.ForensicsDeepConfig
+	if e.ForensicsDeep.AnyEnabled() {
+		d := e.ForensicsDeep
+		deep = &d
+	}
+	_, err := forensics.CollectArtifactsForAlert(ctx, log, meta, deep)
 	return err
 }
 
@@ -138,7 +144,7 @@ func (e *DefaultActionExecutor) runForensics(ctx context.Context, params map[str
 	} else if c, ok := params["collect"].([]string); ok {
 		items = append(items, c...)
 	}
-	coll := &actions.ForensicCollector{ForensicsDir: e.ForensicsDir, DetectionID: d.ID}
+	coll := &actions.ForensicCollector{ForensicsDir: e.ForensicsDir, DetectionID: d.ID, Deep: e.ForensicsDeep}
 	if coll.DetectionID == "" {
 		coll.DetectionID = "unknown"
 	}
