@@ -138,10 +138,15 @@ func (w *WFPCtl) Stop() {
 	w.state = "stopped"
 }
 
-// SendMirror builds the same length-prefixed control frame as the minifilter path.
-// User-mode WFP engine session does not accept arbitrary IOCTL payloads; this API
-// records the framed message for health/diagnostics and for a future companion
-// device or callout path. Requires an open engine handle.
+// SendMirror is diagnostics-only: it builds the same length-prefixed control frame
+// as the minifilter path (see BuildControlPlaneWire) and records health metrics.
+// It does not send bytes to a kernel driver or WFP callout; the user-mode Fwpm
+// engine session does not accept arbitrary IOCTL-style payloads.
+//
+// Health outcomes:
+//   - "framed-only" — frame built successfully while the engine handle was open.
+//   - "framed-no-channel" — engine handle was not open (no framing performed).
+//   - "encode_error" — wire framing failed.
 func (w *WFPCtl) SendMirror(cmd ControlPlaneCommand, payload []byte) error {
 	if w == nil {
 		return ErrWFPNotAvailable
@@ -149,7 +154,7 @@ func (w *WFPCtl) SendMirror(cmd ControlPlaneCommand, payload []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.h == 0 {
-		w.recordMirrorSend(0, "", "engine_closed", ErrWFPNotAvailable)
+		w.recordMirrorSend(0, "", "framed-no-channel", ErrWFPNotAvailable)
 		return ErrWFPNotAvailable
 	}
 	wire, err := BuildControlPlaneWire(cmd, payload)
@@ -165,7 +170,7 @@ func (w *WFPCtl) SendMirror(cmd ControlPlaneCommand, payload []byte) error {
 		}
 		prefix = hex.EncodeToString(wire[:n])
 	}
-	w.recordMirrorSend(uint64(len(wire)), prefix, "framed", nil)
+	w.recordMirrorSend(uint64(len(wire)), prefix, "framed-only", nil)
 	return nil
 }
 
