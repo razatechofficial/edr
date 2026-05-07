@@ -13,5 +13,17 @@ func extendDarwinMonitoringCollectors(cols []Collector, cfg config.Config, endpo
 		l := NewLogStreamDNSSource(endpointID, "")
 		cols = append(cols, newStreamingRunCollector("dns_log_stream_alt", 128, cfg.Monitoring.StreamMaxEPS, l.Run, l.ExportMonitoringHealth))
 	}
+	if cfg.Monitoring.MacosTCCWatch {
+		tw := NewTCCWatchSource(endpointID, "", cfg)
+		cols = append(cols, newStreamingRunCollector("tcc_watch", 64, cfg.Monitoring.StreamMaxEPS, tw.Run, tw.ExportMonitoringHealth))
+	}
+	if cfg.Monitoring.MacosAutostartEnumerator {
+		as := NewAutostartDarwinSource(endpointID, "", cfg)
+		cols = append(cols, newStreamingRunCollector("autostart_darwin", 128, cfg.Monitoring.StreamMaxEPS, as.Run, as.ExportMonitoringHealth))
+	}
+	if cfg.Monitoring.MacosCodesignSweep {
+		cs := NewCodesignSweepDarwinSource(endpointID, "", cfg)
+		cols = append(cols, newStreamingRunCollector("codesign_sweep", 32, cfg.Monitoring.StreamMaxEPS, cs.Run, cs.ExportMonitoringHealth))
+	}
 	return cols
 }
