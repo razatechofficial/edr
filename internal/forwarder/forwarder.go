@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
+	"github.com/razatechofficial/edr/internal/transport"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -25,6 +26,9 @@ type Config struct {
 	KafkaTopic   string
 	RetryMax     int
 	SpoolPath    string
+	SealEnvelopes bool
+	SealKeyPath   string
+	SealKeyID     string
 }
 
 // Forwarder delivers alerts upstream.
@@ -46,19 +50,28 @@ func New(cfg Config, logger *slog.Logger) (Forwarder, Drainer, error) {
 		cfg.SpoolPath = "./alerts/forward_spool.jsonl"
 	}
 
+	var sealFn func([]byte) ([]byte, error)
+	if cfg.SealEnvelopes && strings.TrimSpace(cfg.SealKeyPath) != "" {
+		fn, err := transport.AESGCMSealer(cfg.SealKeyPath, cfg.SealKeyID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("forwarder seal: %w", err)
+		}
+		sealFn = fn
+	}
+
 	var inner Forwarder
 	switch strings.ToLower(strings.TrimSpace(cfg.Mode)) {
 	case "http", "":
 		if cfg.HTTPEndpoint == "" {
 			return nil, nil, errors.New("http forwarder: endpoint required")
 		}
-		inner = &httpForwarder{endpoint: cfg.HTTPEndpoint, cli: &http.Client{Timeout: 15 * time.Second}}
+		inner = &httpForwarder{endpoint: cfg.HTTPEndpoint, cli: &http.Client{Timeout: 15 * time.Second}, seal: sealFn}
 	case "syslog":
 		addr := cfg.SyslogAddr
 		if addr == "" {
 			return nil, nil, errors.New("syslog forwarder: syslog_addr required")
 		}
-		inner = &syslogForwarder{addr: addr, logger: logger}
+		inner = &syslogForwarder{addr: addr, logger: logger, seal: sealFn}
 	case "kafka":
 		if len(cfg.KafkaBrokers) == 0 || cfg.KafkaTopic == "" {
 			return nil, nil, errors.New("kafka forwarder: kafka_brokers and kafka_topic required")
@@ -68,7 +81,7 @@ func New(cfg Config, logger *slog.Logger) (Forwarder, Drainer, error) {
 			Topic:    cfg.KafkaTopic,
 			Balancer: &kafka.LeastBytes{},
 		}
-		inner = &kafkaForwarder{w: w}
+		inner = &kafkaForwarder{w: w, seal: sealFn}
 	default:
 		return nil, nil, fmt.Errorf("unsupported forwarder mode: %s", cfg.Mode)
 	}
@@ -84,12 +97,19 @@ func New(cfg Config, logger *slog.Logger) (Forwarder, Drainer, error) {
 type httpForwarder struct {
 	endpoint string
 	cli      *http.Client
+	seal     func([]byte) ([]byte, error)
 }
 
 func (h *httpForwarder) Send(alert schema.Alert) error {
 	body, err := json.Marshal(alert)
 	if err != nil {
 		return err
+	}
+	if h.seal != nil {
+		body, err = h.seal(body)
+		if err != nil {
+			return err
+		}
 	}
 	req, err := http.NewRequest(http.MethodPost, h.endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -110,12 +130,19 @@ func (h *httpForwarder) Send(alert schema.Alert) error {
 type syslogForwarder struct {
 	addr   string
 	logger *slog.Logger
+	seal   func([]byte) ([]byte, error)
 }
 
 func (s *syslogForwarder) Send(alert schema.Alert) error {
 	b, err := json.Marshal(alert)
 	if err != nil {
 		return err
+	}
+	if s.seal != nil {
+		b, err = s.seal(b)
+		if err != nil {
+			return err
+		}
 	}
 	conn, err := net.Dial("udp", s.addr)
 	if err != nil {
@@ -129,13 +156,20 @@ func (s *syslogForwarder) Send(alert schema.Alert) error {
 }
 
 type kafkaForwarder struct {
-	w *kafka.Writer
+	w    *kafka.Writer
+	seal func([]byte) ([]byte, error)
 }
 
 func (k *kafkaForwarder) Send(alert schema.Alert) error {
 	b, err := json.Marshal(alert)
 	if err != nil {
 		return err
+	}
+	if k.seal != nil {
+		b, err = k.seal(b)
+		if err != nil {
+			return err
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
