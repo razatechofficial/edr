@@ -38,7 +38,7 @@ type LogTailCollector struct {
 	pathStatus map[string]string
 	dropped    atomic.Uint64 // rate-limited line drops (file_events mode)
 
-	offsets   map[string]int64
+	offsets   map[string]persistedLogOffset
 	offsetsMu sync.Mutex
 
 	rateWindow int64
@@ -63,7 +63,7 @@ func NewLogTailCollector(cfg config.Config) *LogTailCollector {
 		endpointID: ep,
 		hostname:   host,
 		pathStatus: make(map[string]string, len(paths)),
-		offsets:    make(map[string]int64),
+		offsets:    make(map[string]persistedLogOffset),
 	}
 	lt.loadOffsets()
 	return lt
@@ -115,8 +115,8 @@ func (l *LogTailCollector) loadOffsets() {
 	if err != nil {
 		return
 	}
-	var m map[string]int64
-	if err := json.Unmarshal(data, &m); err != nil {
+	m := loadPersistedLogOffsets(data)
+	if m == nil {
 		return
 	}
 	l.offsetsMu.Lock()
@@ -219,13 +219,11 @@ func (l *LogTailCollector) drainPathFileEvents(ctx context.Context, path string)
 	if fi.IsDir() {
 		return nil, 0, fmt.Errorf("is directory")
 	}
+	dev, ino := fileTailIdentity(fi)
 	l.offsetsMu.Lock()
-	off := l.offsets[path]
-	if off > fi.Size() {
-		off = 0
-		l.offsets[path] = 0
-	}
+	pos := l.offsets[path]
 	l.offsetsMu.Unlock()
+	off := pickLogReadOffset(pos, dev, ino, fi.Size())
 
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -284,7 +282,7 @@ func (l *LogTailCollector) drainPathFileEvents(ctx context.Context, path string)
 	}
 	newOff := off + bytesRead
 	l.offsetsMu.Lock()
-	l.offsets[path] = newOff
+	l.offsets[path] = persistedLogOffset{Dev: dev, Ino: ino, Off: newOff}
 	l.offsetsMu.Unlock()
 	return out, uint64(bytesRead), nil
 }
