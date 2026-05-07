@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/forensics"
 	"github.com/razatechofficial/edr/internal/schema"
 )
 
@@ -25,6 +27,7 @@ type FileCollector struct {
 	watchPaths []string
 	watcher    *fsnotify.Watcher
 	hostname   string
+	fimDiff    *forensics.FIMDiffCache
 
 	mu     sync.Mutex
 	events []schema.FileEvent
@@ -80,7 +83,7 @@ func DefaultFIMPaths() []string {
 
 // NewFileCollector creates a file integrity monitor watching the given paths.
 // If paths is empty, DefaultFIMPaths() are used.
-func NewFileCollector(endpointID string, paths []string) (*FileCollector, error) {
+func NewFileCollector(endpointID string, paths []string, cfg config.Config) (*FileCollector, error) {
 	if len(paths) == 0 {
 		paths = DefaultFIMPaths()
 	}
@@ -98,6 +101,11 @@ func NewFileCollector(endpointID string, paths []string) (*FileCollector, error)
 		watcher:    watcher,
 		hostname:   hostname,
 		done:       make(chan struct{}),
+		fimDiff: forensics.NewFIMDiffCache(forensics.FIMDiffConfig{
+			Enabled:      cfg.Response.Forensics.FIMDiffEnabled,
+			MaxFileBytes: cfg.Response.Forensics.FIMDiffMaxFileBytes,
+			PathGlobs:    cfg.Response.Forensics.FIMDiffPathGlobs,
+		}),
 	}
 
 	for _, p := range paths {
@@ -144,7 +152,12 @@ func (fc *FileCollector) ExportMonitoringHealth() map[string]any {
 		src.Status = "unavailable"
 		src.LastError = "fsnotify watcher not initialized"
 	}
-	return src.ToMap()
+	out := src.ToMap()
+	if fc.fimDiff != nil {
+		out["fim_diff_files_tracked"] = fc.fimDiff.TrackedFiles()
+		out["fim_diff_emits_total"] = fc.fimDiff.EmitsTotal()
+	}
+	return out
 }
 
 func (fc *FileCollector) Close() error {
@@ -192,6 +205,14 @@ func (fc *FileCollector) handleFSEvent(event fsnotify.Event) {
 	if event.Op.Has(fsnotify.Create) || event.Op.Has(fsnotify.Write) {
 		if h, err := quickHash(event.Name); err == nil {
 			fe.Hash = h
+		}
+	}
+	if fc.fimDiff != nil && event.Op.Has(fsnotify.Write) {
+		path := event.Name
+		if b64, err := fc.fimDiff.DiffOnModify(path, func() ([]byte, error) {
+			return os.ReadFile(path)
+		}); err == nil && b64 != "" {
+			fe.FIMDiffUnified = b64
 		}
 	}
 
