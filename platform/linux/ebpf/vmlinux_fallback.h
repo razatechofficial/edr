@@ -104,6 +104,11 @@ struct dentry {
 	struct qstr d_name;
 };
 
+struct iattr {
+	unsigned int ia_valid;
+	unsigned int ia_mode;
+};
+
 struct path {
 	struct dentry *dentry;
 };
