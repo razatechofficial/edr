@@ -24,10 +24,10 @@ import (
 // AuthCollector. Each channel carries its own bookmark so a problem in one
 // (channel disabled, ACL change) does not stall the others.
 type pwshDefenderChannel struct {
-	name      string
-	query     string
-	bookmark  string // bookmark filename suffix
-	mapEvent  func(endpointID, hostname, xmlText string) *Telemetry
+	name     string
+	query    string
+	bookmark string // bookmark filename suffix
+	mapEvent func(endpointID, hostname, xmlText string) *Telemetry
 }
 
 var pwshDefenderChannels = []pwshDefenderChannel{
@@ -392,11 +392,33 @@ func mapDefenderEventXML(endpointID, hostname, xmlText string) *Telemetry {
 	case 5001, 5004, 5007, 5010, 5012:
 		tags = append(tags, "config_change")
 	}
+	threat := pickEventField(fields, "Threat Name", "ThreatName")
+	threatID := pickEventField(fields, "Threat ID", "ThreatID")
+	action := pickEventField(fields, "Action Name", "Action ID", "ActionName", "ActionID")
+	detSrc := pickEventField(fields, "Detection Source", "DetectionSource", "Source Name", "SourceName")
+	path := pickEventField(fields, "Path", "Path Name", "Full Path", "Original Path", "Clean Path")
+	proc := pickEventField(fields, "Process Name", "ProcessName")
+	user := pickEventField(fields, "User", "Detection User", "Domain User", "Domain\\Account")
+	cat := pickEventField(fields, "Category Name", "Category ID", "Severity Name", "Severity ID")
+	scan := pickEventField(fields, "Scan Type", "Scan ID", "Current Threats Count")
+	cmd := joinNonEmpty("; ",
+		fmt.Sprintf("eid=%d", ev.System.EventID),
+		joinKV("threat", threat),
+		joinKV("threat_id", threatID),
+		joinKV("action", action),
+		joinKV("detection_source", detSrc),
+		joinKV("path", path),
+		joinKV("process", proc),
+		joinKV("user", user),
+		joinKV("category", cat),
+		joinKV("scan", scan),
+	)
 	pe := &schema.ProcessEvent{
 		BaseEvent:   base,
 		ProcessName: "defender",
-		ProcessPath: firstNonEmpty(fields["Path"], fields["Process Name"]),
-		CommandLine: firstNonEmpty(fields["Threat Name"], fields["Action Name"], fields["Detection User"]),
+		ProcessPath: firstNonEmpty(path, proc, fields["Path"], fields["Process Name"]),
+		CommandLine: firstNonEmpty(cmd, threat, action, detSrc),
+		User:        user,
 		Tags:        tags,
 		Severity:    severity,
 	}
@@ -438,15 +460,63 @@ func mapAppLockerEventXML(endpointID, hostname, xmlText string) *Telemetry {
 	if ev.System.EventID == 8003 || ev.System.EventID == 8006 {
 		tag = "applocker_audit"
 	}
+	path := pickEventField(fields, "FullFilePath", "FilePath", "Path", "TargetPath")
+	rule := pickEventField(fields, "RuleName", "Rule Id", "RuleId", "Id")
+	policy := pickEventField(fields, "PolicyName", "Policy")
+	hash := pickEventField(fields, "FileHash", "SHA256 Hash", "SHA256", "Hash")
+	fqbn := pickEventField(fields, "Fqbn", "Binary", "PublisherName", "Publisher")
+	user := pickEventField(fields, "TargetUser", "User", "UserName", "SubjectUserName")
+	cmd := joinNonEmpty("; ",
+		fmt.Sprintf("eid=%d", ev.System.EventID),
+		joinKV("policy", policy),
+		joinKV("rule", rule),
+		joinKV("path", path),
+		joinKV("fqbn", fqbn),
+		joinKV("hash", hash),
+		joinKV("user", user),
+	)
 	pe := &schema.ProcessEvent{
 		BaseEvent:   base,
 		ProcessName: "applocker",
-		ProcessPath: firstNonEmpty(fields["TargetUser"], fields["FullFilePath"]),
-		CommandLine: fields["FullFilePath"],
+		ProcessPath: firstNonEmpty(path, user),
+		CommandLine: firstNonEmpty(cmd, path, rule),
 		PID:         atoiSafe(fields["TargetProcessId"]),
+		User:        user,
 		Tags:        []string{tag},
 	}
 	return &Telemetry{Process: pe}
+}
+
+func pickEventField(fields map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(fields[k]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func joinKV(label, val string) string {
+	val = strings.TrimSpace(val)
+	if val == "" || label == "" {
+		return ""
+	}
+	return label + "=" + val
+}
+
+func joinNonEmpty(sep string, parts ...string) string {
+	var b strings.Builder
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString(sep)
+		}
+		b.WriteString(p)
+	}
+	return b.String()
 }
 
 func evtFields(ev winEventXML) map[string]string {
