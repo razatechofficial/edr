@@ -48,6 +48,9 @@ enum event_type {
 	EVENT_SECCOMP       = 33,
 	EVENT_PROC_MEM_WRITE = 34,
 	EVENT_DNS_QUERY     = 35,
+	EVENT_SCHED_SWITCH  = 36,
+	EVENT_SCHED_WAKEUP  = 37,
+	EVENT_SCHED_MIGRATE = 38,
 };
 
 struct event_header {
@@ -110,6 +113,16 @@ struct security_event {
 	__u32 mode;
 	char  path[MAX_PATH_LEN];
 	char  map_name[64];
+};
+
+/* Scheduler tracepoint samples (high volume; userspace gated by policy). */
+struct sched_event {
+	struct event_header hdr;
+	__u32 prev_pid;
+	__u32 next_pid;
+	__u32 cpu;
+	__u32 target_cpu;
+	__u64 runtime_ns;
 };
 
 #endif /* __EDR_COMMON_H__ */
