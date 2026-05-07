@@ -136,6 +136,7 @@ edrctl:
 
 # ============================================================================
 # eBPF targets (Linux only)
+# Sources include lsm_fim.c (LSM hooks); requires CONFIG_BPF_LSM for attach.
 # ============================================================================
 
 EBPF_SRC     := $(wildcard platform/linux/ebpf/*.c)
