@@ -19,7 +19,7 @@ func TestMapLogTargetEventXML_ProcessShape(t *testing.T) {
     <Data Name="ServiceName">BadSvc</Data>
   </EventData>
 </Event>`
-	tel := mapLogTargetEventXML("ep1", "host1", "System", xmlText)
+	tel := mapLogTargetEventXML("ep1", "host1", "System", xmlText, false)
 	if tel == nil || tel.Process == nil {
 		t.Fatalf("expected process telemetry, got %#v", tel)
 	}

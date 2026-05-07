@@ -57,7 +57,7 @@ func (l *LogTargetsCollector) collectWindowsEventChannel(ctx context.Context, st
 	if !ok || s == nil {
 		return nil, fmt.Errorf("evtx state missing")
 	}
-	return s.collect(l.endpointID, l.hostname, st.target.Path)
+	return s.collect(l.endpointID, l.hostname, st.target.Path, l.cfg.Monitoring.WindowsSACLWhodata)
 }
 
 func (s *evtxLogTargetState) closeAll() {
@@ -121,7 +121,7 @@ func (s *evtxLogTargetState) saveBookmarkAtomic() error {
 	return writeBookmarkFile(s.bookmarkPath, b)
 }
 
-func (s *evtxLogTargetState) collect(endpointID, hostname, channel string) ([]Telemetry, error) {
+func (s *evtxLogTargetState) collect(endpointID, hostname, channel string, map4663 bool) ([]Telemetry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.result == 0 {
@@ -158,7 +158,7 @@ func (s *evtxLogTargetState) collect(endpointID, hostname, channel string) ([]Te
 			if !s.primed {
 				continue
 			}
-			if tel := mapLogTargetEventXML(endpointID, hostname, channel, xmlText); tel != nil {
+			if tel := mapLogTargetEventXML(endpointID, hostname, channel, xmlText, map4663); tel != nil {
 				out = append(out, *tel)
 			} else {
 				ts := time.Now().UTC()
@@ -194,10 +194,26 @@ func (s *evtxLogTargetState) collect(endpointID, hostname, channel string) ([]Te
 	return out, nil
 }
 
-func mapLogTargetEventXML(endpointID, hostname, channel, xmlText string) *Telemetry {
+func mapLogTargetEventXML(endpointID, hostname, channel, xmlText string, sacl4663 bool) *Telemetry {
 	var ev winEventXML
 	if err := xml.Unmarshal([]byte(xmlText), &ev); err != nil {
 		return nil
+	}
+	if sacl4663 && ev.System.EventID == 4663 {
+		fields := evtFields(ev)
+		base := evtBase(endpointID, hostname, ev)
+		base.EventType = schema.EventFile
+		fe := &schema.FileEvent{
+			BaseEvent: base,
+			Path:      firstNonEmpty(fields["ObjectName"], fields["Object Name"]),
+			Operation: "whodata_sacl_4663",
+			ActorPID:  atoiSafe(firstNonEmpty(fields["ProcessId"], fields["Process ID"])),
+			AuditUID:  fields["SubjectUserName"],
+			SubjectUID: firstNonEmpty(fields["SubjectUserSid"], fields["SubjectLogonId"]),
+			Syscall:   firstNonEmpty(fields["AccessMask"], fields["Accesses"], fields["AccessList"]),
+			Tags:      []string{"whodata", "sacl", "windows-security"},
+		}
+		return &Telemetry{File: fe}
 	}
 	fields := evtFields(ev)
 	base := evtBase(endpointID, hostname, ev)
