@@ -44,6 +44,9 @@ type KernelCollector struct {
 	fileDropped uint64 // events filtered out because path is not under FIM set
 
 	controlPlaneDegraded atomic.Uint64
+
+	prio         *kernelRingPriority
+	priorityDrop atomic.Uint64
 }
 
 func isWindowsElevated() bool {
@@ -74,7 +77,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		}
 		prefixes = append(prefixes, strings.ToLower(p))
 	}
-	return &KernelCollector{
+	kc := &KernelCollector{
 		driver:      d,
 		buf:         kernel.NewRingBuffer(65536),
 		endpointID:  endpointID,
@@ -86,6 +89,8 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		mfCtl:       kernel.NewMinifilterCtl(strings.TrimSpace(cfg.Monitoring.WindowsMinifilterPort)),
 		wfpCtl:      kernel.NewWFPCtl(),
 	}
+	kc.prio = newKernelRingPriority(cfg)
+	return kc
 }
 
 // ExportMonitoringHealth implements ExportMonitoringHealth for monitoring doctor snapshots.
@@ -97,6 +102,9 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 		"file_dropped":   atomic.LoadUint64(&kc.fileDropped),
 		"fim_prefix_set": len(kc.fimPrefixes),
 		"etw_providers":  kc.driver.ProviderHealthSnapshot(),
+	}
+	if pd := kc.priorityDrop.Load(); pd > 0 {
+		extras["priority_sampling_kernel_drops"] = pd
 	}
 	extras["etw_threat_intel_requested"] = kc.cfg.Monitoring.ETWThreatIntel
 	tih := kc.driver.ThreatIntelHealthSnapshot()
@@ -171,6 +179,7 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 	pol.ETWBitsClient = m.ETWBitsClient
 	pol.ETWTaskScheduler = m.ETWTaskScheduler
 	pol.ETWThreatIntel = m.ETWThreatIntel
+	pol.ETWSecurityProviders = m.ETWSecurityProviders
 	pol.KernelFileObjectCache = m.ETWKernelFileObjectCache
 	_ = kc.driver.SetPolicy(pol)
 	if !kc.ensureWindowsControlPlane(false) && kc.cfg.Monitoring.WindowsControlPlaneRequired {
@@ -336,6 +345,11 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 		}
 		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
 		if tel == nil {
+			continue
+		}
+		kc.prio.observeRing(kc.buf)
+		if kc.prio != nil && !kc.prio.allowSample(tel) {
+			kc.priorityDrop.Add(1)
 			continue
 		}
 		if !kc.acceptFileTelemetry(tel) {
