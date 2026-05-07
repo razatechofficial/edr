@@ -3,6 +3,7 @@
 package kernel
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -52,6 +53,12 @@ type WFPCtl struct {
 
 	causeClass         string
 	lastRecoverOutcome string
+
+	lastMirrorSendUnix    int64
+	lastMirrorSendBytes   uint64
+	lastMirrorSendOutcome string
+	lastMirrorSendErr     string
+	lastMirrorFramePrefix string // hex of first 16 bytes for diagnostics
 }
 
 // NewWFPCtl constructs an empty WFP control handle.
@@ -131,6 +138,48 @@ func (w *WFPCtl) Stop() {
 	w.state = "stopped"
 }
 
+// SendMirror builds the same length-prefixed control frame as the minifilter path.
+// User-mode WFP engine session does not accept arbitrary IOCTL payloads; this API
+// records the framed message for health/diagnostics and for a future companion
+// device or callout path. Requires an open engine handle.
+func (w *WFPCtl) SendMirror(cmd ControlPlaneCommand, payload []byte) error {
+	if w == nil {
+		return ErrWFPNotAvailable
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.h == 0 {
+		w.recordMirrorSend(0, "", "engine_closed", ErrWFPNotAvailable)
+		return ErrWFPNotAvailable
+	}
+	wire, err := BuildControlPlaneWire(cmd, payload)
+	if err != nil {
+		w.recordMirrorSend(0, "", "encode_error", err)
+		return err
+	}
+	prefix := ""
+	if len(wire) > 0 {
+		n := 16
+		if len(wire) < n {
+			n = len(wire)
+		}
+		prefix = hex.EncodeToString(wire[:n])
+	}
+	w.recordMirrorSend(uint64(len(wire)), prefix, "framed", nil)
+	return nil
+}
+
+func (w *WFPCtl) recordMirrorSend(n uint64, framePrefix, outcome string, sendErr error) {
+	w.lastMirrorSendUnix = time.Now().Unix()
+	w.lastMirrorSendBytes = n
+	w.lastMirrorSendOutcome = outcome
+	w.lastMirrorSendErr = ""
+	if sendErr != nil {
+		w.lastMirrorSendErr = sendErr.Error()
+	}
+	w.lastMirrorFramePrefix = framePrefix
+}
+
 // Health reports whether the WFP engine handle is active.
 func (w *WFPCtl) Health() map[string]any {
 	if w == nil {
@@ -156,6 +205,17 @@ func (w *WFPCtl) Health() map[string]any {
 	}
 	if w.lastRecoverOutcome != "" {
 		out["last_recover_outcome"] = w.lastRecoverOutcome
+	}
+	if w.lastMirrorSendUnix > 0 {
+		out["last_mirror_send_unix"] = w.lastMirrorSendUnix
+		out["last_mirror_send_bytes"] = w.lastMirrorSendBytes
+		out["last_mirror_send_outcome"] = w.lastMirrorSendOutcome
+		if w.lastMirrorSendErr != "" {
+			out["last_mirror_send_error"] = w.lastMirrorSendErr
+		}
+		if w.lastMirrorFramePrefix != "" {
+			out["last_mirror_frame_prefix_hex"] = w.lastMirrorFramePrefix
+		}
 	}
 	return out
 }

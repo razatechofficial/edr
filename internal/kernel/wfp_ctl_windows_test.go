@@ -3,9 +3,13 @@
 package kernel
 
 import (
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestClassifyWFPEngineErr(t *testing.T) {
@@ -47,5 +51,43 @@ func TestWFPCtlRecoverOutcomeClassification(t *testing.T) {
 	}
 	if _, ok := h["recoveries"]; !ok {
 		t.Fatalf("expected recoveries counter: %#v", h)
+	}
+}
+
+func TestWFPCtl_SendMirrorFraming(t *testing.T) {
+	t.Parallel()
+	w := NewWFPCtl()
+	w.h = windows.Handle(1)
+	w.state = "running"
+	payload := []byte{0x01, 0x02}
+	err := w.SendMirror(CmdUpdateRules, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := w.Health()
+	if h["last_mirror_send_outcome"] != "framed" {
+		t.Fatalf("health: %#v", h)
+	}
+	want, err := BuildControlPlaneWire(CmdUpdateRules, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefixHex, _ := h["last_mirror_frame_prefix_hex"].(string)
+	got, err := hex.DecodeString(prefixHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 16
+	if len(want) < n {
+		n = len(want)
+	}
+	if len(got) != n {
+		t.Fatalf("prefix len %d want %d", len(got), n)
+	}
+	if !strings.EqualFold(hex.EncodeToString(want[:n]), prefixHex) {
+		t.Fatalf("prefix mismatch got %s want %s", prefixHex, hex.EncodeToString(want[:n]))
+	}
+	if binary.LittleEndian.Uint16(got[0:2]) != ControlPlaneFramingMagic {
+		t.Fatalf("magic")
 	}
 }
