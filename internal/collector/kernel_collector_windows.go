@@ -47,6 +47,11 @@ type KernelCollector struct {
 
 	prio         *kernelRingPriority
 	priorityDrop atomic.Uint64
+
+	jsonMapOpts KernelJSONOpts
+
+	ppidChecks    atomic.Uint64
+	ppidMismatch  atomic.Uint64
 }
 
 func isWindowsElevated() bool {
@@ -88,6 +93,10 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		selfPID:     uint32(os.Getpid()),
 		mfCtl:       kernel.NewMinifilterCtl(strings.TrimSpace(cfg.Monitoring.WindowsMinifilterPort)),
 		wfpCtl:      kernel.NewWFPCtl(),
+		jsonMapOpts: KernelJSONOpts{
+			TLSFingerprintLocal: cfg.Monitoring.TLSFingerprintLocal,
+			CommunityIDLocal:    cfg.Monitoring.CommunityIDLocal,
+		},
 	}
 	kc.prio = newKernelRingPriority(cfg)
 	return kc
@@ -126,8 +135,11 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 		}
 	}
 	if kc.wfpCtl != nil {
-		extras["wfp_ctl"] = kc.wfpCtl.Health()
+		wh := kc.wfpCtl.Health()
+		wh["wfp_mirror_diag_only"] = kc.cfg.Monitoring.WindowsWFPMirrorDiagOnly
+		extras["wfp_ctl"] = wh
 	}
+	extras["wfp_mirror_diag_only"] = kc.cfg.Monitoring.WindowsWFPMirrorDiagOnly
 	if kc.mfCtl != nil {
 		extras["minifilter_ctl"] = kc.mfCtl.Health()
 	}
@@ -143,6 +155,8 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	extras["control_plane_degraded_count"] = kc.controlPlaneDegraded.Load()
 	posture := kernel.WindowsCollectionPosture()
 	extras["windows_collection_posture"] = posture
+	extras["ppid_spoof_checks"] = kc.ppidChecks.Load()
+	extras["ppid_spoof_mismatches"] = kc.ppidMismatch.Load()
 	tamperSignals := map[string]any{}
 	for k, v := range kc.driver.TamperMetrics() {
 		extras[k] = v
@@ -343,10 +357,11 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 			time.Sleep(time.Millisecond)
 			continue
 		}
-		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users)
+		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users, &kc.jsonMapOpts)
 		if tel == nil {
 			continue
 		}
+		kc.maybeDetectPPIDSpoof(tel)
 		kc.prio.observeRing(kc.buf)
 		if kc.prio != nil && !kc.prio.allowSample(tel) {
 			kc.priorityDrop.Add(1)
