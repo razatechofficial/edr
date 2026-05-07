@@ -88,5 +88,21 @@ func scanHostInventory(ctx context.Context) (map[string]any, error) {
 	out["listening_sockets_process_hint_rows_est"] = pidHintRows
 	out["inventory_listener_attribution"] = attrib
 
+	passwdLines := 0
+	if b, err := exec.CommandContext(ctx, "getent", "passwd").Output(); err == nil {
+		passwdLines = countNonEmptyLines(string(b))
+	}
+	out["passwd_entries_est"] = passwdLines
+
+	if b, err := exec.CommandContext(ctx, "who").Output(); err == nil {
+		out["who_sessions_lines_est"] = countNonEmptyLines(string(b))
+	}
+
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		if b, err := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--state=running", "--no-legend", "--no-pager").Output(); err == nil {
+			out["systemd_running_services_est"] = countNonEmptyLines(string(b))
+		}
+	}
+
 	return out, nil
 }
