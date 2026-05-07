@@ -5,9 +5,11 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 )
 
 func (d *EBPFDriver) collectOwnProgramIDs() {
@@ -57,10 +59,48 @@ func (d *EBPFDriver) watchdogLoop(ctx context.Context) {
 			for _, id := range missing {
 				d.emitTamperEvent(id)
 			}
-			_ = d.reattachWithBoundedRetry(3)
+			if err := d.reattachMissingLinks(missing); err != nil {
+				_ = d.reattachWithBoundedRetry(3)
+			}
 		}
 	}
 }
+
+func (d *EBPFDriver) reattachMissingLinks(missing []uint32) error {
+	if d == nil || len(missing) == 0 || d.coll == nil {
+		return nil
+	}
+	var hadErr bool
+	for _, id := range missing {
+		spec, ok := d.specByProg[id]
+		if !ok {
+			hadErr = true
+			continue
+		}
+		prog := d.coll.Programs[spec.progName]
+		if prog == nil {
+			hadErr = true
+			continue
+		}
+		if old, ok := d.linkByProg[id]; ok && old != nil {
+			_ = old.Close()
+		}
+		nl, err := link.Tracepoint(spec.group, spec.tp, prog, nil)
+		if err != nil {
+			hadErr = true
+			continue
+		}
+		d.linkByProg[id] = nl
+		d.links = append(d.links, nl)
+		d.tryPinTraceLink(spec.progName, nl)
+	}
+	if hadErr {
+		return errLinkReattachPartial
+	}
+	return nil
+}
+
+var errLinkReattachPartial = errors.New("partial link reattach failure")
 
 func (d *EBPFDriver) emitTamperEvent(progID uint32) {
 	d.tamperEvents.Add(1)
