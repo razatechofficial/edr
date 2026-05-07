@@ -390,6 +390,7 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 				ne.SourcePt = int(binary.LittleEndian.Uint16(rest[16:18]))
 				ne.DestIP = net.IP(rest[18:34]).String()
 				ne.DestPt = int(binary.LittleEndian.Uint16(rest[34:36]))
+				rest = rest[36:]
 			}
 		} else { // IPv4
 			if len(rest) >= 12 {
@@ -397,7 +398,12 @@ func (kc *KernelCollector) parseBinaryEvent(data []byte) *Telemetry {
 				ne.SourcePt = int(binary.LittleEndian.Uint16(rest[4:6]))
 				ne.DestIP = net.IP(rest[6:10]).String()
 				ne.DestPt = int(binary.LittleEndian.Uint16(rest[10:12]))
+				rest = rest[12:]
 			}
+		}
+		// Optional payload tail from kernel decode path (e.g. TLS/SNI stub hint).
+		if dom, _ := readLenStr(rest); strings.TrimSpace(dom) != "" {
+			ne.Domain = strings.TrimSpace(dom)
 		}
 		return &Telemetry{Network: ne}
 	}
