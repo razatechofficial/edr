@@ -39,7 +39,6 @@ import (
 	"github.com/razatechofficial/edr/internal/telemetry"
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/threatintel"
-	"github.com/razatechofficial/edr/internal/transport"
 	"github.com/razatechofficial/edr/pkg/events"
 )
 
@@ -83,6 +82,8 @@ type Agent struct {
 	fileDedup      *collector.FileDeduper
 	fileHashPool   *fileHashPool
 	telemetryRelay *forwarder.TelemetryRelay
+	// telemetrySealSender mirrors forwarder seal settings for diagnostics (no live transport).
+	telemetrySealSender *telemetry.Sender
 
 	healthMu           sync.Mutex
 	lastHealthSnapshot time.Time
@@ -166,14 +167,12 @@ func NewWithFiles(configPath string) (*Agent, error) {
 			a.logger.Warn("telemetry disk queue init failed", "error", qerr)
 		} else {
 			a.telemetryRelay = forwarder.NewTelemetryRelay(telEP, qm, a.logger)
-			if cfg.Forwarder.SealEnvelopes && strings.TrimSpace(cfg.Forwarder.SealKeyPath) != "" {
-				sealFn, serr := transport.AESGCMSealer(cfg.Forwarder.SealKeyPath, cfg.Forwarder.SealKeyID)
-				if serr != nil {
-					a.logger.Error("telemetry sealer init failed", "error", serr)
-				} else {
-					a.telemetryRelay.SetSealer(sealFn)
-					a.logger.Info("telemetry relay envelope sealing enabled", "key_id", cfg.Forwarder.SealKeyID)
-				}
+			sealFn, _, serr := buildTelemetryEnvelopeSealer(cfg)
+			if serr != nil {
+				a.logger.Error("telemetry sealer init failed", "error", serr, "telemetry_sealer_init_failed", true)
+			} else if sealFn != nil {
+				a.telemetryRelay.SetSealer(sealFn)
+				a.logger.Info("telemetry relay envelope sealing enabled", "key_id", cfg.Forwarder.SealKeyID)
 			}
 			a.logger.Info("telemetry relay configured", "endpoint", telEP, "queue_dir", qdir)
 		}
@@ -201,6 +200,14 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	} else {
 		a.durableSpool = ds
 		a.logger.Info("durable alert spool enabled", "path", spoolDir)
+	}
+
+	if cfg.Forwarder.SealEnvelopes {
+		sealS := telemetry.NewSender(telemetry.NoopTransport{}, nil, telemetry.DefaultSenderConfig(), zapLogger)
+		if err := applyEnvelopeSealerToSender(sealS, cfg); err != nil {
+			a.logger.Warn("telemetry.Sender envelope sealer unavailable", "error", err)
+		}
+		a.telemetrySealSender = sealS
 	}
 
 	if err := a.initSelfProtect(); err != nil {
