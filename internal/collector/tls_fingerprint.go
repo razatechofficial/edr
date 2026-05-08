@@ -12,6 +12,85 @@ import (
 
 // ClientHelloFingerprints parses a TLS ClientHello record (starting at the TLS
 // record layer) and returns JA3 (MD5 hex) and a compact JA4-style string.
+func extractServerHello(record []byte) []byte {
+	if len(record) < 5 || record[0] != 0x16 {
+		return nil
+	}
+	recLen := int(binary.BigEndian.Uint16(record[3:5]))
+	if 5+recLen > len(record) {
+		return nil
+	}
+	body := record[5 : 5+recLen]
+	if len(body) < 4 || body[0] != 0x02 { // server_hello
+		return nil
+	}
+	hslen := int(body[1])<<16 | int(body[2])<<8 | int(body[3])
+	if 4+hslen > len(body) {
+		return nil
+	}
+	return body[4 : 4+hslen]
+}
+
+// ServerHelloFingerprints parses a TLS ServerHello record (starting at TLS record layer).
+func ServerHelloFingerprints(record []byte) (ja3 string, ja4 string) {
+	sh := extractServerHello(record)
+	if len(sh) < 38 {
+		return "", ""
+	}
+	off := 0
+	if len(sh) < off+34 {
+		return "", ""
+	}
+	vers := binary.BigEndian.Uint16(sh[off : off+2])
+	off += 2 + 32
+	if off >= len(sh) {
+		return "", ""
+	}
+	sessLen := int(sh[off])
+	off++
+	if off+sessLen > len(sh) {
+		return "", ""
+	}
+	off += sessLen
+	if off+2 > len(sh) {
+		return "", ""
+	}
+	cipher := binary.BigEndian.Uint16(sh[off : off+2])
+	off += 2
+	if off+1 > len(sh) {
+		return "", ""
+	}
+	compLen := int(sh[off])
+	off++
+	if off+compLen > len(sh) {
+		return "", ""
+	}
+	off += compLen
+
+	var extTypes []uint16
+	if off+2 <= len(sh) {
+		extLen := int(binary.BigEndian.Uint16(sh[off : off+2]))
+		off += 2
+		extEnd := off + extLen
+		for off < extEnd && off+4 <= len(sh) {
+			if off+4 > len(sh) {
+				break
+			}
+			typ := binary.BigEndian.Uint16(sh[off : off+2])
+			elen := int(binary.BigEndian.Uint16(sh[off+2 : off+4]))
+			off += 4
+			if off+elen > len(sh) || elen < 0 {
+				break
+			}
+			extTypes = append(extTypes, typ)
+			off += elen
+		}
+	}
+	ja3 = buildJA3S(vers, cipher, extTypes)
+	ja4 = buildJA4S(vers, cipher, extTypes)
+	return ja3, ja4
+}
+
 func ClientHelloFingerprints(record []byte) (ja3 string, ja4 string) {
 	ch := extractClientHello(record)
 	if len(ch) < 42 {
@@ -147,6 +226,40 @@ func extractClientHello(record []byte) []byte {
 		return nil
 	}
 	return body[4 : 4+hslen]
+}
+
+func buildJA3S(tlsVers uint16, cipher uint16, exts []uint16) string {
+	var extStr []string
+	for _, e := range exts {
+		if isGREASE16(e) {
+			continue
+		}
+		extStr = append(extStr, strconv.Itoa(int(e)))
+	}
+	if isGREASE16(cipher) {
+		cipher = 0
+	}
+	s := fmt.Sprintf("%d,%d,%s,,",
+		tlsVers,
+		int(cipher),
+		strings.Join(extStr, "-"),
+	)
+	sum := md5.Sum([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+func buildJA4S(tlsVers uint16, cipher uint16, exts []uint16) string {
+	en := 0
+	for _, e := range exts {
+		if !isGREASE16(e) {
+			en++
+		}
+	}
+	cn := 1
+	if isGREASE16(cipher) {
+		cn = 0
+	}
+	return fmt.Sprintf("s%04x_%02d_%02d_na_na", int(tlsVers), cn, en)
 }
 
 func buildJA3(tlsVers uint16, ciphers []uint16, exts []uint16) string {
