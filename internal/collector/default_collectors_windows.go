@@ -46,5 +46,17 @@ func extendWindowsEvtCollectors(cols []Collector, cfg config.Config, endpointID 
 		ar := NewAutorunsLiteSource(endpointID, host, cfg)
 		cols = append(cols, newStreamingRunCollector("autoruns_lite", 128, cfg.Monitoring.StreamMaxEPS, ar.Run, ar.ExportMonitoringHealth))
 	}
+	if cfg.Monitoring.WindowsCOMHijackHunt {
+		ch := NewCOMHijackWatchSource(endpointID, cfg)
+		cols = append(cols, newStreamingRunCollector("com_hijack", 64, cfg.Monitoring.StreamMaxEPS, ch.Run, ch.ExportMonitoringHealth))
+	}
+	if cfg.Monitoring.WindowsDLLSearchPosture {
+		ds := NewDLLSearchPostureSource(endpointID, cfg)
+		cols = append(cols, newStreamingRunCollector("dll_search_posture", 32, cfg.Monitoring.StreamMaxEPS, ds.Run, ds.ExportMonitoringHealth))
+	}
+	if cfg.Monitoring.WindowsWMIPersistenceHunt {
+		w := NewWMIPersistenceWatchSource(endpointID, cfg)
+		cols = append(cols, newStreamingRunCollector("wmi_persistence", 96, cfg.Monitoring.StreamMaxEPS, w.Run, w.ExportMonitoringHealth))
+	}
 	return cols
 }

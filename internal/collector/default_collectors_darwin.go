@@ -25,5 +25,9 @@ func extendDarwinMonitoringCollectors(cols []Collector, cfg config.Config, endpo
 		cs := NewCodesignSweepDarwinSource(endpointID, "", cfg)
 		cols = append(cols, newStreamingRunCollector("codesign_sweep", 32, cfg.Monitoring.StreamMaxEPS, cs.Run, cs.ExportMonitoringHealth))
 	}
+	if cfg.Monitoring.MacosNotarizationPosture {
+		np := NewMacosNotarizationPostureSource(endpointID, cfg)
+		cols = append(cols, newStreamingRunCollector("macos_notarization_posture", 32, cfg.Monitoring.StreamMaxEPS, np.Run, np.ExportMonitoringHealth))
+	}
 	return cols
 }
