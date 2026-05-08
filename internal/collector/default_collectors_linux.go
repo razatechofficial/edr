@@ -24,5 +24,13 @@ func extendLinuxMonitoringCollectors(cols []Collector, cfg config.Config, endpoi
 	if cfg.Monitoring.LinuxRootcheckEnabled {
 		cols = append(cols, NewRootcheckCollector(endpointID, cfg))
 	}
+	if cfg.Monitoring.LinuxHiddenModule {
+		hm := NewHiddenModuleSource(endpointID, cfg)
+		cols = append(cols, newStreamingRunCollector("hidden_module", 32, cfg.Monitoring.StreamMaxEPS, hm.Run, hm.ExportMonitoringHealth))
+	}
+	if cfg.Monitoring.LinuxInetDiagHiddenSocket {
+		id := NewInetDiagHiddenSocketSource(endpointID, cfg)
+		cols = append(cols, newStreamingRunCollector("inet_diag_hidden_socket", 64, cfg.Monitoring.StreamMaxEPS, id.Run, id.ExportMonitoringHealth))
+	}
 	return cols
 }
