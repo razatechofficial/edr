@@ -34,3 +34,26 @@ func TestClientHelloFingerprints(t *testing.T) {
 		t.Fatal("expected ja4")
 	}
 }
+
+func TestServerHelloFingerprints(t *testing.T) {
+	var sh []byte
+	sh = append(sh, 0x03, 0x03)
+	sh = append(sh, bytes.Repeat([]byte{0}, 32)...)
+	sh = append(sh, 0)
+	sh = append(sh, 0, 0x2f)
+	sh = append(sh, 1, 0)
+	sh = append(sh, 0, 0)
+
+	hs := append([]byte{0x02}, u24(len(sh))...)
+	hs = append(hs, sh...)
+	rec := []byte{0x16, 0x03, 0x01, byte(len(hs) >> 8), byte(len(hs) & 0xff)}
+	rec = append(rec, hs...)
+
+	ja3s, ja4s := ServerHelloFingerprints(rec)
+	if ja3s == "" || len(ja3s) != 32 {
+		t.Fatalf("ja3s: %q", ja3s)
+	}
+	if ja4s == "" {
+		t.Fatal("expected ja4s")
+	}
+}
