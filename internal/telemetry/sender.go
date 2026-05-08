@@ -17,6 +17,11 @@ type Transport interface {
 	Send(ctx context.Context, data []byte) error
 }
 
+// NoopTransport discards payloads (used for diagnostics-only senders).
+type NoopTransport struct{}
+
+func (NoopTransport) Send(context.Context, []byte) error { return nil }
+
 // SenderConfig tunes retry and fallback behaviour.
 type SenderConfig struct {
 	MaxRetries     int
@@ -44,6 +49,8 @@ type Sender struct {
 	logger    *zap.Logger
 	sealer    func([]byte) ([]byte, error)
 
+	sealRequired atomic.Bool
+
 	seq       atomic.Uint64
 	drainOnce sync.Once
 	drainStop chan struct{}
@@ -69,6 +76,14 @@ func NewSender(transport Transport, spool *Spool, cfg SenderConfig, logger *zap.
 
 // SetSealer installs optional envelope sealing before transport/spool.
 func (s *Sender) SetSealer(sealer func([]byte) ([]byte, error)) { s.sealer = sealer }
+
+// SetSealRequired marks whether an envelope sealer is mandatory (e.g. SealEnvelopes + key path).
+func (s *Sender) SetSealRequired(required bool) {
+	if s == nil {
+		return
+	}
+	s.sealRequired.Store(required)
+}
 
 // Send delivers data with retry and exponential backoff. On persistent
 // failure the payload is written to the offline spool.
@@ -133,10 +148,14 @@ func (s *Sender) Health() map[string]any {
 	if s == nil {
 		return map[string]any{"sealer_active": false}
 	}
+	required := s.sealRequired.Load()
+	ready := !required || s.sealer != nil
 	return map[string]any{
-		"sealer_active": s.sealer != nil,
-		"sealed_ok":     s.sealedOK.Load(),
-		"sealed_err":    s.sealedErr.Load(),
+		"sealer_active":    s.sealer != nil,
+		"sealer_required":    required,
+		"sealer_ready":       ready,
+		"sealed_ok":          s.sealedOK.Load(),
+		"sealed_err":         s.sealedErr.Load(),
 	}
 }
 
