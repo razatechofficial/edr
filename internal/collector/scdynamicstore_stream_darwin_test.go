@@ -8,12 +8,9 @@ import (
 )
 
 func TestRunSCDynamicStoreRouteProbe_UsesCGOStreamResult(t *testing.T) {
-	old := scdsWatchOnceFn
-	defer func() { scdsWatchOnceFn = old }()
-	scdsWatchOnceFn = func(seconds float64) (string, int, int) {
-		if seconds <= 0 {
-			t.Fatalf("expected positive watch duration")
-		}
+	old := scdsRunLoopFn
+	defer func() { scdsRunLoopFn = old }()
+	scdsRunLoopFn = func() (string, int, int) {
 		return "State:/Network/Global/IPv4", 3, 0
 	}
 	var got map[string]any
