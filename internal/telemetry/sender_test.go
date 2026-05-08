@@ -19,12 +19,27 @@ func (t *testTransport) Send(_ context.Context, data []byte) error {
 func TestSenderSealerAppliedBeforeTransport(t *testing.T) {
 	tr := &testTransport{}
 	s := NewSender(tr, nil, DefaultSenderConfig(), nil)
+	s.SetSealRequired(false)
 	s.SetSealer(func(b []byte) ([]byte, error) { return append([]byte("sealed:"), b...), nil })
 	if err := s.Send(context.Background(), []byte("abc")); err != nil {
 		t.Fatal(err)
 	}
 	if string(tr.last) != "sealed:abc" {
 		t.Fatalf("got %q", string(tr.last))
+	}
+	h := s.Health()
+	if h["sealer_ready"] != true {
+		t.Fatalf("sealer_ready: %#v", h)
+	}
+}
+
+func TestSenderSealRequiredHealthReadyFalse(t *testing.T) {
+	tr := &testTransport{}
+	s := NewSender(tr, nil, DefaultSenderConfig(), nil)
+	s.SetSealRequired(true)
+	h := s.Health()
+	if h["sealer_ready"] != false || h["sealer_required"] != true {
+		t.Fatalf("unexpected health: %#v", h)
 	}
 }
 
