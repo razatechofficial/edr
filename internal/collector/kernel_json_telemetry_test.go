@@ -1,10 +1,16 @@
 package collector
 
 import (
+	"bytes"
+	"encoding/base64"
 	"runtime"
 	"testing"
 	"time"
 )
+
+func u24kern(n int) []byte {
+	return []byte{byte(n >> 16), byte(n >> 8), byte(n)}
+}
 
 func TestMapKernelJSONToTelemetry_ProcessESFStyle(t *testing.T) {
 	raw := `{"type":"process","pid":4242,"ppid":1,"path":"/bin/bash","comm":"/bin/bash","args":"-c id","timestamp":"2020-01-02T15:04:05Z"}`
@@ -136,6 +142,35 @@ func TestMapKernelJSON_NetworkCommunityIDAndTLS(t *testing.T) {
 	}
 	if tel.Network.CommunityID == "" {
 		t.Fatal("expected community id")
+	}
+}
+
+func TestMapKernelJSON_NetworkJA3SFromServerHello(t *testing.T) {
+	var sh []byte
+	sh = append(sh, 0x03, 0x03)
+	sh = append(sh, bytes.Repeat([]byte{0}, 32)...)
+	sh = append(sh, 0)
+	sh = append(sh, 0, 0x2f)
+	sh = append(sh, 1, 0)
+	sh = append(sh, 0, 0)
+	hs := append([]byte{0x02}, u24kern(len(sh))...)
+	hs = append(hs, sh...)
+	rec := []byte{0x16, 0x03, 0x01, byte(len(hs) >> 8), byte(len(hs) & 0xff)}
+	rec = append(rec, hs...)
+	b64 := base64.StdEncoding.EncodeToString(rec)
+
+	wantJA3s, wantJA4s := ServerHelloFingerprints(rec)
+	raw := `{"type":"network","transport":"tcp","protocol":"tcp","source_ip":"10.0.0.1","dest_ip":"10.0.0.2","source_port":1111,"dest_port":443,"tls_server_hello_b64":"` + b64 + `"}`
+	opts := &KernelJSONOpts{TLSFingerprintServerLocal: true, CommunityIDLocal: false}
+	tel := MapKernelJSONToTelemetry([]byte(raw), "e", "h", "linux", nil, opts)
+	if tel == nil || tel.Network == nil {
+		t.Fatalf("expected network: %+v", tel)
+	}
+	if tel.Network.JA3S != wantJA3s || tel.Network.JA3S == "" {
+		t.Fatalf("JA3S: got %q want %q", tel.Network.JA3S, wantJA3s)
+	}
+	if tel.Network.JA4S != wantJA4s || tel.Network.JA4S == "" {
+		t.Fatalf("JA4S: got %q want %q", tel.Network.JA4S, wantJA4s)
 	}
 }
 

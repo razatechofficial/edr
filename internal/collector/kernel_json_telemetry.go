@@ -14,8 +14,9 @@ import (
 // community-id). A nil opts pointer enables community-id by default and disables
 // TLS local parsing (backward compatible with older unit tests).
 type KernelJSONOpts struct {
-	TLSFingerprintLocal bool
-	CommunityIDLocal    bool
+	TLSFingerprintLocal       bool
+	TLSFingerprintServerLocal bool
+	CommunityIDLocal          bool
 }
 
 func effectiveCommunityIDLocal(o *KernelJSONOpts) bool {
@@ -27,6 +28,10 @@ func effectiveCommunityIDLocal(o *KernelJSONOpts) bool {
 
 func effectiveTLSFingerprintLocal(o *KernelJSONOpts) bool {
 	return o != nil && o.TLSFingerprintLocal
+}
+
+func effectiveTLSFingerprintServerLocal(o *KernelJSONOpts) bool {
+	return o != nil && o.TLSFingerprintServerLocal
 }
 
 // MapKernelJSONToTelemetry maps kernel driver JSON (Linux eBPF JSON path, ESF,
@@ -312,6 +317,8 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		ne.SourcePt = jsonInt(raw, "source_port", "src_port")
 		ne.DestPt = jsonInt(raw, "dest_port", "dst_port")
 		ne.JA3 = firstNonEmpty(jsonString(raw, "tls_client_ja3"), jsonString(raw, "ja3"))
+		ne.JA3S = firstNonEmpty(jsonString(raw, "tls_server_ja3s"), jsonString(raw, "ja3s"))
+		ne.JA4S = jsonString(raw, "ja4s")
 		applyLocalKernelNetworkMaps(ne, raw, mapOpts)
 		return &Telemetry{Network: ne}
 
@@ -443,6 +450,20 @@ func applyLocalKernelNetworkMaps(ne *schema.NetworkEvent, raw map[string]interfa
 						ne.JA3 = ja3
 					}
 					ne.JA4 = ja4
+				}
+			}
+		}
+	}
+	if effectiveTLSFingerprintServerLocal(opts) {
+		shStr := firstNonEmpty(jsonString(raw, "tls_server_hello_b64"), jsonString(raw, "tls_server_hello"))
+		if shStr != "" {
+			if b, err := DecodeTLSClientHelloPayload(shStr); err == nil && len(b) > 0 {
+				ja3sx, ja4sx := ServerHelloFingerprints(b)
+				if ja3sx != "" && ne.JA3S == "" {
+					ne.JA3S = ja3sx
+				}
+				if ja4sx != "" {
+					ne.JA4S = ja4sx
 				}
 			}
 		}
