@@ -340,7 +340,7 @@ jobs:
         with:
           go-version: '1.24'
       - run: go mod download
-      - run: go test ./internal/collector -run 'TestClientHelloFingerprints' -count=1
+      - run: go test ./internal/collector -run 'TestClientHelloFingerprints|TestServerHelloFingerprints' -count=1
 
   cross-os-community-id-unit:
     name: cross-os-community-id-unit
@@ -352,6 +352,161 @@ jobs:
           go-version: '1.24'
       - run: go mod download
       - run: go test ./internal/collector -run 'TestCommunityIDv1Stable' -count=1
+
+  cross-os-ja3s-ja4s-unit:
+    name: cross-os-ja3s-ja4s-unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: go test ./internal/collector -run 'TestServerHelloFingerprints|TestMapKernelJSON_NetworkJA3SFromServerHello' -count=1
+
+  agent-sender-sealer-wire-test:
+    name: agent-sender-sealer-wire-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: go test ./internal/agent -run 'TestBuildTelemetryEnvelopeSealer|TestApplyEnvelopeSealerToSender' -count=1
+      - run: go test ./internal/telemetry -run 'TestSenderSealRequiredHealthReadyFalse|TestSenderSealerAppliedBeforeTransport' -count=1
+
+  linux-rootcheck-hidden-port-cross:
+    name: linux-rootcheck-hidden-port-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: go test ./internal/collector -run 'TestParseProcNetLineLocalPort|TestIPv4ListenPortBusy_WithListener' -count=1
+
+  linux-hidden-module-cross:
+    name: linux-hidden-module-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: go test ./internal/collector -run 'TestReadProcModuleNamesFromReader' -count=1
+
+  linux-inet-diag-cross:
+    name: linux-inet-diag-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: go test ./internal/collector -run 'TestDecodeProcNetAddr|TestTCPQuintKey|TestParseHexUint16' -count=1
+
+  windows-autoruns-breadth-cross:
+    name: windows-autoruns-breadth-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/collector
+
+  windows-com-hijack-cross:
+    name: windows-com-hijack-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/collector
+
+  windows-dll-search-posture-cross:
+    name: windows-dll-search-posture-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/collector
+
+  windows-wmi-persistence-cross:
+    name: windows-wmi-persistence-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/collector
+
+  darwin-tcc-depth-cross:
+    name: darwin-tcc-depth-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=darwin GOARCH=amd64 go test -tags nosec -c -o /dev/null ./internal/collector
+
+  darwin-autostart-breadth-cross:
+    name: darwin-autostart-breadth-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=darwin GOARCH=amd64 go test -tags nosec -c -o /dev/null ./internal/collector
+
+  darwin-codesign-depth-cross:
+    name: darwin-codesign-depth-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=darwin GOARCH=amd64 go test -tags nosec -c -o /dev/null ./internal/collector
+
+  darwin-scds-lifecycle-cross:
+    name: darwin-scds-lifecycle-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=darwin GOARCH=amd64 go test -tags nosec -c -o /dev/null ./internal/collector
+
+  darwin-notarization-posture-cross:
+    name: darwin-notarization-posture-cross
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go mod download
+      - run: GOOS=darwin GOARCH=amd64 go test -tags nosec -c -o /dev/null ./internal/collector
 
   lint:
     name: Lint
