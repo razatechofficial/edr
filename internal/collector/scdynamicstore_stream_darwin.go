@@ -12,6 +12,7 @@ package collector
 
 static int g_scds_event_count = 0;
 static char* g_scds_last_key = NULL;
+static CFRunLoopRef g_scds_rl = NULL;
 
 static void scds_reset_globals(void) {
 	g_scds_event_count = 0;
@@ -41,9 +42,7 @@ static void scds_callback(SCDynamicStoreRef store, CFArrayRef changedKeys, void 
 	}
 }
 
-static int scds_watch_once(double seconds, char** out_key, int* out_count) {
-	*out_key = NULL;
-	*out_count = 0;
+static int scds_run_loop_blocking(void) {
 	scds_reset_globals();
 	SCDynamicStoreContext ctx = {0, NULL, NULL, NULL, NULL};
 	SCDynamicStoreRef store = SCDynamicStoreCreate(NULL, CFSTR("edr.scdynamicstore.stream"), scds_callback, &ctx);
@@ -68,17 +67,28 @@ static int scds_watch_once(double seconds, char** out_key, int* out_count) {
 		CFRelease(store);
 		return -3;
 	}
-	CFRunLoopRef rl = CFRunLoopGetCurrent();
-	CFRunLoopAddSource(rl, src, kCFRunLoopDefaultMode);
-	CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
-	CFRunLoopRemoveSource(rl, src, kCFRunLoopDefaultMode);
+	g_scds_rl = CFRunLoopGetCurrent();
+	CFRunLoopAddSource(g_scds_rl, src, kCFRunLoopDefaultMode);
+	CFRunLoopRun();
+	CFRunLoopRemoveSource(g_scds_rl, src, kCFRunLoopDefaultMode);
 	CFRelease(src);
 	CFRelease(store);
-	*out_count = g_scds_event_count;
-	if (g_scds_last_key != NULL) {
-		*out_key = strdup(g_scds_last_key);
-	}
+	g_scds_rl = NULL;
 	return 0;
+}
+
+static void scds_request_stop(void) {
+	CFRunLoopRef rl = g_scds_rl;
+	if (rl != NULL) {
+		CFRunLoopStop(rl);
+	}
+}
+
+static int scds_get_event_count(void) { return g_scds_event_count; }
+
+static char* scds_dup_last_key(void) {
+	if (g_scds_last_key == NULL) return NULL;
+	return strdup(g_scds_last_key);
 }
 */
 import "C"
@@ -86,15 +96,21 @@ import "C"
 import (
 	"context"
 	"os/exec"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
 
-var scdsWatchOnceFn = func(seconds float64) (lastKey string, count int, errCode int) {
+// scdsRunLoopFn is swappable in tests (must run with runtime.LockOSThread in the caller).
+var scdsRunLoopFn = func() (lastKey string, events int, errCode int) {
+	code := int(C.scds_run_loop_blocking())
+	ev := int(C.scds_get_event_count())
 	var key *C.char
-	var ccount C.int
-	code := int(C.scds_watch_once(C.double(seconds), &key, &ccount))
+	if ev > 0 {
+		key = C.scds_dup_last_key()
+	}
 	defer func() {
 		if key != nil {
 			C.free(unsafe.Pointer(key))
@@ -103,8 +119,10 @@ var scdsWatchOnceFn = func(seconds float64) (lastKey string, count int, errCode 
 	if key != nil {
 		lastKey = C.GoString(key)
 	}
-	return lastKey, int(ccount), code
+	return lastKey, ev, code
 }
+
+var scdynamicstoreStopsTotal atomic.Uint64
 
 func scutilFallbackProbe(ctx context.Context, emit func(map[string]any), code int) {
 	c := exec.CommandContext(ctx, "scutil", "--nc", "list")
@@ -126,31 +144,52 @@ func scutilFallbackProbe(ctx context.Context, emit func(map[string]any), code in
 	})
 }
 
-// RunSCDynamicStoreRouteProbe runs a bounded cgo-backed SCDynamicStore callback watch.
-// On callback setup/runtime failures, it gracefully falls back to scutil probing.
+// RunSCDynamicStoreRouteProbe runs a cgo-backed SCDynamicStore run loop until ctx is canceled
+// or a bounded internal timeout triggers CFRunLoopStop.
 func RunSCDynamicStoreRouteProbe(ctx context.Context, emit func(map[string]any)) {
 	if emit == nil {
 		return
 	}
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return
-	default:
 	}
-	lastKey, events, code := scdsWatchOnceFn(0.75)
-	if code != 0 {
-		scutilFallbackProbe(ctx, emit, code)
+	subCtx, subCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer subCancel()
+
+	type res struct {
+		lk  string
+		ev  int
+		cod int
+	}
+	ch := make(chan res, 1)
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		go func() {
+			<-subCtx.Done()
+			C.scds_request_stop()
+		}()
+		lk, ev, code := scdsRunLoopFn()
+		scdynamicstoreStopsTotal.Add(1)
+		ch <- res{lk: lk, ev: ev, cod: code}
+	}()
+	r := <-ch
+
+	if r.cod != 0 {
+		scutilFallbackProbe(ctx, emit, r.cod)
 		return
 	}
 	out := map[string]any{
 		"scdynamicstore_probe":         "cgo_stream",
 		"scdynamicstore_stream_active": true,
-		"scdynamicstore_events_total":  events,
+		"scdynamicstore_events_total":  r.ev,
 		"scdynamicstore_last_unix":     time.Now().Unix(),
+		"scdynamicstore_thread_locked": true,
+		"scdynamicstore_runloop_active": true,
+		"scdynamicstore_stops_total":    scdynamicstoreStopsTotal.Load(),
 	}
-	if lastKey != "" {
-		out["scdynamicstore_last_key"] = lastKey
+	if r.lk != "" {
+		out["scdynamicstore_last_key"] = r.lk
 	}
 	emit(out)
 }
-
