@@ -127,6 +127,9 @@ type NetworkEvent struct {
 	JA3      string `json:"ja3,omitempty"`
 	// JA4 is a compact TLS ClientHello fingerprint (local computation when raw hello bytes exist).
 	JA4 string `json:"ja4,omitempty"`
+	// JA3S is an MD5 fingerprint of the observed TLS ServerHello when bytes are available locally.
+	JA3S string `json:"ja3s,omitempty"`
+	JA4S string `json:"ja4s,omitempty"`
 	// Transport is a coarse label (tcp, udp, icmp) for SIEM join with Zeek conn logs.
 	Transport string `json:"transport,omitempty"`
 	// CommunityID is an optional RFC-style flow hash shared with Zeek when both endpoints compute it.
