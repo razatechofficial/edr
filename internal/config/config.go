@@ -415,6 +415,14 @@ type Config struct {
 		LinuxRootcheckIntervalSec int `yaml:"linux_rootcheck_interval_sec"`
 		// LinuxRootcheckSUIDPrefixes controls prefixes scanned for suid/sgid drift.
 		LinuxRootcheckSUIDPrefixes []string `yaml:"linux_rootcheck_suid_prefixes"`
+		// LinuxRootcheckPortScan attempts bind-vs-/proc-net hidden-port probes (intrusive).
+		LinuxRootcheckPortScan bool `yaml:"linux_rootcheck_port_scan" env:"EDR_MONITORING_LINUX_ROOTCHECK_PORTS"`
+		// LinuxRootcheckPortList TCP/UDP ports to probe when LinuxRootcheckPortScan is true.
+		LinuxRootcheckPortList []int `yaml:"linux_rootcheck_port_list"`
+		// LinuxHiddenModule compares /proc/modules vs /sys/module (intrusive heuristic).
+		LinuxHiddenModule bool `yaml:"linux_hidden_module"`
+		// LinuxInetDiagHiddenSocket cross-checks netlink SOCK_DIAG vs /proc/net (requires CAP_NET_ADMIN best-effort).
+		LinuxInetDiagHiddenSocket bool `yaml:"linux_inet_diag_hidden_socket"`
 		// LinuxLSMFimEnabled emits observe-only LSM FIM events (requires CONFIG_BPF_LSM; high volume).
 		LinuxLSMFimEnabled bool `yaml:"linux_lsm_fim_enabled" env:"EDR_MONITORING_LINUX_LSM_FIM"`
 
@@ -476,15 +484,36 @@ type Config struct {
 		WindowsAutorunsLite bool `yaml:"windows_autoruns_lite"`
 		// WindowsAutorunsIntervalSec cadence for autoruns-lite (default 300).
 		WindowsAutorunsIntervalSec int `yaml:"windows_autoruns_interval_sec"`
+		// WindowsCOMHijackHunt scans HKCU/HKLM CLSID hijack divergence (heavy).
+		WindowsCOMHijackHunt bool `yaml:"windows_com_hijack_hunt"`
+		// WindowsCOMHijackIntervalSec cadence for COM hijack hunt (seconds; default 600).
+		WindowsCOMHijackIntervalSec int `yaml:"windows_com_hijack_interval_sec"`
+		// WindowsDLLSearchPosture emits events when DLL search hardening knobs are weakened.
+		WindowsDLLSearchPosture bool `yaml:"windows_dll_search_posture"`
+		// WindowsWMIPersistenceHunt dumps WMI subscription classes (elevated WMI).
+		WindowsWMIPersistenceHunt bool `yaml:"windows_wmi_persistence_hunt"`
+		// WindowsWMIIntervalSec cadence for WMI persistence hunt (seconds; default 3600).
+		WindowsWMIIntervalSec int `yaml:"windows_wmi_interval_sec"`
 
 		// MacosTCCWatch watches TCC.db for row-level changes (best-effort; SIP may block).
 		MacosTCCWatch bool `yaml:"macos_tcc_watch"`
+		// MacosTCCMaxRows caps sqlite row reads per poll (0 = unbounded).
+		MacosTCCMaxRows int `yaml:"macos_tcc_max_rows"`
 		// MacosAutostartEnumerator scans LaunchAgents/Daemons, login items, cron paths.
 		MacosAutostartEnumerator bool `yaml:"macos_autostart_enumerator"`
 		// MacosCodesignSweep verifies codesign for running process images periodically.
 		MacosCodesignSweep bool `yaml:"macos_codesign_sweep"`
 		// MacosCodesignIntervalSec cadence for codesign sweep (default 600).
 		MacosCodesignIntervalSec int `yaml:"macos_codesign_interval_sec"`
+		// MacosCodesignMaxProcs caps binaries verified per sweep (0 = unlimited; dedupe by path applies).
+		MacosCodesignMaxProcs int `yaml:"macos_codesign_max_procs"`
+		// MacosNotarizationPosture polls XProtect/MRT/Gatekeeper/SIP posture (cheap).
+		MacosNotarizationPosture bool `yaml:"macos_notarization_posture"`
+		// MacosNotarizationIntervalSec posture poll cadence for notarization checks (seconds; default 3600).
+		MacosNotarizationIntervalSec int `yaml:"macos_notarization_interval_sec"`
+
+		// TLSFingerprintServerLocal computes JA3S/JA4S when ServerHello payload is present in JSON.
+		TLSFingerprintServerLocal bool `yaml:"tls_fingerprint_server_local"`
 	} `yaml:"monitoring"`
 
 	// Legacy fields for backward compatibility with existing agent.example.yaml.
@@ -613,10 +642,22 @@ func Defaults() Config {
 	cfg.Monitoring.LinuxRootcheckEnabled = false
 	cfg.Monitoring.LinuxRootcheckIntervalSec = 300
 	cfg.Monitoring.LinuxRootcheckSUIDPrefixes = []string{"/usr", "/bin", "/sbin", "/opt"}
+	cfg.Monitoring.LinuxRootcheckPortScan = false
+	cfg.Monitoring.LinuxRootcheckPortList = []int{22, 80, 443, 53, 3306, 5432, 6379, 8080, 8443}
+	cfg.Monitoring.LinuxHiddenModule = false
+	cfg.Monitoring.LinuxInetDiagHiddenSocket = false
 	cfg.Monitoring.CommunityIDLocal = true
+	cfg.Monitoring.TLSFingerprintServerLocal = true
 	cfg.Monitoring.WindowsTamperIntervalSec = 60
 	cfg.Monitoring.WindowsAutorunsIntervalSec = 300
+	cfg.Monitoring.WindowsCOMHijackIntervalSec = 600
+	cfg.Monitoring.WindowsDLLSearchPosture = true
+	cfg.Monitoring.WindowsWMIIntervalSec = 3600
 	cfg.Monitoring.MacosCodesignIntervalSec = 600
+	cfg.Monitoring.MacosTCCMaxRows = 0
+	cfg.Monitoring.MacosCodesignMaxProcs = 0
+	cfg.Monitoring.MacosNotarizationPosture = true
+	cfg.Monitoring.MacosNotarizationIntervalSec = 3600
 
 	cfg.Service.TickInterval = time.Second
 	cfg.LegacyResponse.MinKillScore = 90
