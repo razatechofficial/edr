@@ -63,8 +63,9 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 			fallbackFile: NewFSEventsFallbackSource(endpointID, host, cfg.Monitoring.FIMPaths),
 			fallbackMode: true,
 			jsonMapOpts: KernelJSONOpts{
-				TLSFingerprintLocal: cfg.Monitoring.TLSFingerprintLocal,
-				CommunityIDLocal:    cfg.Monitoring.CommunityIDLocal,
+				TLSFingerprintLocal:       cfg.Monitoring.TLSFingerprintLocal,
+				TLSFingerprintServerLocal: cfg.Monitoring.TLSFingerprintServerLocal,
+				CommunityIDLocal:          cfg.Monitoring.CommunityIDLocal,
 			},
 		}
 	}
@@ -80,8 +81,9 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		neReader:   NewDarwinNEReader(endpointID, host, "/var/run/edr/ne.sock"),
 		revProbe:   kernel.NewESFRevocationProbe(),
 		jsonMapOpts: KernelJSONOpts{
-			TLSFingerprintLocal: cfg.Monitoring.TLSFingerprintLocal,
-			CommunityIDLocal:    cfg.Monitoring.CommunityIDLocal,
+			TLSFingerprintLocal:       cfg.Monitoring.TLSFingerprintLocal,
+			TLSFingerprintServerLocal: cfg.Monitoring.TLSFingerprintServerLocal,
+			CommunityIDLocal:          cfg.Monitoring.CommunityIDLocal,
 		},
 	}
 	kc.prio = newKernelRingPriority(cfg)

@@ -94,8 +94,9 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		mfCtl:       kernel.NewMinifilterCtl(strings.TrimSpace(cfg.Monitoring.WindowsMinifilterPort)),
 		wfpCtl:      kernel.NewWFPCtl(),
 		jsonMapOpts: KernelJSONOpts{
-			TLSFingerprintLocal: cfg.Monitoring.TLSFingerprintLocal,
-			CommunityIDLocal:    cfg.Monitoring.CommunityIDLocal,
+			TLSFingerprintLocal:       cfg.Monitoring.TLSFingerprintLocal,
+			TLSFingerprintServerLocal: cfg.Monitoring.TLSFingerprintServerLocal,
+			CommunityIDLocal:          cfg.Monitoring.CommunityIDLocal,
 		},
 	}
 	kc.prio = newKernelRingPriority(cfg)

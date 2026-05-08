@@ -120,8 +120,9 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		cfg:        cfg,
 		users:      users,
 		jsonMapOpts: KernelJSONOpts{
-			TLSFingerprintLocal: cfg.Monitoring.TLSFingerprintLocal,
-			CommunityIDLocal:    cfg.Monitoring.CommunityIDLocal,
+			TLSFingerprintLocal:       cfg.Monitoring.TLSFingerprintLocal,
+			TLSFingerprintServerLocal: cfg.Monitoring.TLSFingerprintServerLocal,
+			CommunityIDLocal:          cfg.Monitoring.CommunityIDLocal,
 		},
 	}
 	kc.prio = newKernelRingPriority(cfg)
