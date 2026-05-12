@@ -15,9 +15,7 @@ jobs:
           cache: true
       - name: Install deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev libyara-dev pkg-config
-          EDR_VMLINUX_FALLBACK=1 bash scripts/gen_vmlinux.sh
+          bash scripts/ci/setup_linux_ebpf.sh
           make ebpf
           make ebpf-link
       - name: Build linux
@@ -43,10 +41,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build darwin
-        run: make build-darwin
+      - name: Build production macOS agent
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+        run: bash scripts/ci/build_macos_production.sh
       - name: Package pkg
-        run: bash build/macos/package.sh ${{ github.ref_name }} arm64
+        run: bash build/macos/package.sh ${{ github.ref_name }} $(go env GOARCH)
       - uses: actions/upload-artifact@v4
         with:
           name: macos-packages
