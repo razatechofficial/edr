@@ -198,10 +198,45 @@ int tp_dns_sendto(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 	}
 	const unsigned char *buf = (const unsigned char *)ctx->args[1];
-	unsigned char qname[MAX_DNS_QNAME_LEN + 1] = {};
-	bpf_probe_read_user(qname, sizeof(qname), buf + 12);
-	bpf_probe_read_kernel_str(evt->dns_query, sizeof(evt->dns_query), qname);
-	evt->dns_qtype = 1;
+	/*
+	 * Preserve the raw DNS wire bytes of the Question section so the
+	 * Go-side decoder can parse the label-length-prefixed QNAME and the
+	 * QTYPE that follows it. Using bpf_probe_read_user_str / kernel_str
+	 * here would truncate the wire bytes at the first non-printable byte
+	 * (each label-length prefix is non-printable and the root label is
+	 * a NUL terminator). Use raw bytes via bpf_probe_read_user instead.
+	 */
+	bpf_probe_read_user(evt->dns_query, sizeof(evt->dns_query), buf + 12);
+	/*
+	 * Best-effort kernel-side QTYPE extraction: walk the label chain in
+	 * a bounded loop until we hit the root NUL or a compression pointer.
+	 * Userspace re-derives QTYPE from the raw bytes and treats this as
+	 * an authoritative hint; this saves a re-walk for the common case.
+	 */
+	__u16 qtype = 0;
+	int off = 0;
+	#pragma unroll
+	for (int step = 0; step < 32; step++) {
+		if (off >= (int)sizeof(evt->dns_query))
+			break;
+		unsigned char b = evt->dns_query[off];
+		if (b == 0) {
+			if (off + 2 < (int)sizeof(evt->dns_query))
+				qtype = ((__u16)evt->dns_query[off + 1] << 8) |
+				        (__u16)evt->dns_query[off + 2];
+			break;
+		}
+		if ((b & 0xC0) == 0xC0) {
+			/* Compression pointer: 2 bytes total; treat as end. */
+			off += 2;
+			if (off + 1 < (int)sizeof(evt->dns_query))
+				qtype = ((__u16)evt->dns_query[off] << 8) |
+				        (__u16)evt->dns_query[off + 1];
+			break;
+		}
+		off += (int)b + 1;
+	}
+	evt->dns_qtype = qtype != 0 ? qtype : 1;
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
@@ -249,9 +284,13 @@ int kp_tcp_v4_connect(struct pt_regs *ctx)
 }
 
 /*
- * tcp_v6_connect enriches outbound IPv6 connects. We capture the assigned
- * source port and remote port from kernel socket state; address extraction is
- * intentionally deferred for broad kernel compatibility in the fallback lane.
+ * tcp_v6_connect captures the full 16-byte IPv6 source/destination
+ * addresses and ports from the kernel sock state (P1-5). The previous
+ * implementation only captured ports; addresses were left zero which
+ * produced "::" for every IPv6 connect on the userspace side. We read
+ * dst from sin6_addr (passed in as PARM2) and src from
+ * sk->__sk_common.skc_v6_rcv_saddr, both via BPF CORE so the program
+ * remains portable across kernel versions.
  */
 SEC("kprobe/tcp_v6_connect")
 int kp_tcp_v6_connect(struct pt_regs *ctx)
@@ -278,6 +317,23 @@ int kp_tcp_v6_connect(struct pt_regs *ctx)
 	BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
 	evt->src_port = sport;
 	evt->dst_port = __builtin_bswap16(dport);
+
+	/* Source: connected socket carries the local IPv6 in
+	 * __sk_common.skc_v6_rcv_saddr. */
+	BPF_CORE_READ_INTO(&evt->src_addr6, sk, __sk_common.skc_v6_rcv_saddr);
+
+	/* Destination: tcp_v6_connect(struct sock *, struct sockaddr *uaddr, int)
+	 * - PARM2 is a kernel pointer to struct sockaddr_in6 holding the dest. */
+	struct sockaddr_in6 *uaddr = (struct sockaddr_in6 *)PT_REGS_PARM2(ctx);
+	if (uaddr) {
+		struct in6_addr dst6 = {};
+		bpf_probe_read_kernel(&dst6, sizeof(dst6), &uaddr->sin6_addr);
+		__builtin_memcpy(evt->dst_addr6, &dst6, 16);
+		__u16 ndport = 0;
+		bpf_probe_read_kernel(&ndport, sizeof(ndport), &uaddr->sin6_port);
+		if (ndport != 0)
+			evt->dst_port = __builtin_bswap16(ndport);
+	}
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
@@ -320,6 +376,76 @@ int kp_udp_sendmsg(struct pt_regs *ctx)
 	__u32 daddr = 0;
 	BPF_CORE_READ_INTO(&daddr, sk, __sk_common.skc_daddr);
 	evt->dst_addr = daddr;
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+/*
+ * P2-4: DNS response visibility. udp_recvmsg is the kernel entry point
+ * that fills the userspace buffer with the DNS reply. We hook it as a
+ * kprobe AND a kretprobe — the kprobe stashes the sk pointer so the
+ * kretprobe can examine source port (53 for DNS) and emit an
+ * EVENT_DNS_QUERY with direction=1 (inbound). The reply body itself
+ * lives in the application buffer which we cannot reliably read from
+ * udp_recvmsg's kernel-side path; userspace correlates with the
+ * preceding query by 4-tuple. This is enough to detect cases where a
+ * DNS answer arrives without a matching query (e.g. cache poisoning
+ * probes, off-path DNS NXDOMAIN reflection).
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, __u64); /* pid_tgid */
+	__type(value, __u64); /* sock pointer */
+} udp_recv_pending SEC(".maps");
+
+SEC("kprobe/udp_recvmsg")
+int kp_udp_recvmsg(struct pt_regs *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+	struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+	if (!sk)
+		return 0;
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u64 skp = (__u64)sk;
+	bpf_map_update_elem(&udp_recv_pending, &pid_tgid, &skp, BPF_ANY);
+	return 0;
+}
+
+SEC("kretprobe/udp_recvmsg")
+int kretp_udp_recvmsg(struct pt_regs *ctx)
+{
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u64 *skp = bpf_map_lookup_elem(&udp_recv_pending, &pid_tgid);
+	if (!skp)
+		return 0;
+	bpf_map_delete_elem(&udp_recv_pending, &pid_tgid);
+
+	long ret = PT_REGS_RC(ctx);
+	if (ret <= 0)
+		return 0;
+
+	struct sock *sk = (struct sock *)(*skp);
+	__u16 sport_be = 0;
+	BPF_CORE_READ_INTO(&sport_be, sk, __sk_common.skc_dport);
+	__u16 sport = __builtin_bswap16(sport_be);
+	if (sport != 53)
+		return 0;
+
+	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_DNS_QUERY);
+	evt->direction = 1; /* inbound DNS reply */
+	evt->protocol  = AF_INET;
+	evt->src_port  = sport;
+
+	__u32 saddr = 0;
+	BPF_CORE_READ_INTO(&saddr, sk, __sk_common.skc_daddr);
+	evt->src_addr = saddr;
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
