@@ -68,7 +68,7 @@ LIBBPF_VENDOR := -Iplatform/linux/ebpf/libbpf
 LIBBPF_DEFAULT := -I/usr/include
 BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/linux/ebpf
 
-.PHONY: build-linux build-darwin build-windows build-darwin-nosec build-all
+.PHONY: build-linux build-darwin build-darwin-production build-windows build-darwin-nosec build-all
 .PHONY: bundle-enterprise build-installer-embedded
 .PHONY: ebpf ebpf-link ebpf-install bpf-version-check proto
 .PHONY: test test-collector test-detection test-response test-race test-ci test-ci-race monitoring-soak test-coverage local-validate-monitoring diagnose-esf
@@ -112,6 +112,9 @@ build-windows:
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-windows-amd64.exe ./cmd/cli
 	@mkdir -p dist/windows-amd64
 	CGO_ENABLED=$(WINDOWS_CGO) GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
+
+build-darwin-production:
+	@bash scripts/ci/build_macos_production.sh
 
 build-darwin-nosec:
 	@echo "==> Building macOS arm64 nosec variant"
@@ -218,17 +221,17 @@ proto:
 # Test targets
 # ============================================================================
 
-GO_TEST_PKGS := $(shell go list ./... | grep -v '/temp/')
+GO_TEST_PKGS := $(shell go list ./... 2>/dev/null | grep -v '/temp/' || true)
 
 test:
 	@echo "==> Running all tests"
-	go test $(GO_TEST_PKGS) -count=1 -timeout 120s
+	go test $$(go list ./... | grep -v '/temp/') -count=1 -timeout 120s
 
 test-ci: test
 
 test-ci-race:
 	@echo "==> Running CI race tests"
-	go test $(GO_TEST_PKGS) -race -count=1 -timeout 300s
+	go test $$(go list ./... | grep -v '/temp/') -race -count=1 -timeout 300s
 
 # Collector package without CGO (avoids macOS EndpointSecurity link in CI/dev).
 test-collector:
@@ -246,7 +249,7 @@ test-response:
 
 test-race:
 	@echo "==> Running tests with race detector"
-	go test $(GO_TEST_PKGS) -race -count=1 -timeout 300s
+	go test $$(go list ./... | grep -v '/temp/') -race -count=1 -timeout 300s
 
 # Longer race pass on the monitoring stack (avoids `go test ./...` which may include non-repo trees).
 monitoring-soak:
