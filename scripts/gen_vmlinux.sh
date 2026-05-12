@@ -36,18 +36,36 @@ if ! pkg-config --exists libbpf 2>/dev/null && [ ! -f "$VENDOR_BPF" ]; then
 	exit 1
 fi
 
+write_vmlinux_from_btf() {
+	if ! command -v bpftool >/dev/null 2>&1 || [ ! -f /sys/kernel/btf/vmlinux ]; then
+		return 1
+	fi
+	bpftool btf dump file /sys/kernel/btf/vmlinux format c >"$OUT"
+}
+
+write_vmlinux_fallback() {
+	if [ ! -f "$FALLBACK" ]; then
+		echo "ERROR: fallback vmlinux header missing: $FALLBACK" >&2
+		return 1
+	fi
+	cp "$FALLBACK" "$OUT"
+}
+
 if [ -f "$OUT" ]; then
 	echo "vmlinux.h already exists, skipping"
 	exit 0
 fi
 
-if command -v bpftool >/dev/null 2>&1 && [ -f /sys/kernel/btf/vmlinux ]; then
-	echo "Generating vmlinux.h from running kernel BTF..."
-	bpftool btf dump file /sys/kernel/btf/vmlinux format c > "$OUT"
-elif [ -f "$FALLBACK" ]; then
-	echo "Using fallback vmlinux.h (CI mode)"
-	cp "$FALLBACK" "$OUT"
-else
-	echo "ERROR: cannot generate vmlinux.h" >&2
-	exit 1
+if [ "${EDR_VMLINUX_FALLBACK:-0}" = "1" ]; then
+	echo "Using fallback vmlinux.h (EDR_VMLINUX_FALLBACK=1)"
+	write_vmlinux_fallback
+	exit 0
 fi
+
+if write_vmlinux_from_btf; then
+	echo "Generated vmlinux.h from running kernel BTF"
+	exit 0
+fi
+
+echo "Using fallback vmlinux.h (CI mode)"
+write_vmlinux_fallback

@@ -71,7 +71,7 @@ BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/l
 .PHONY: build-linux build-darwin build-windows build-darwin-nosec build-all
 .PHONY: bundle-enterprise build-installer-embedded
 .PHONY: ebpf ebpf-link ebpf-install bpf-version-check proto
-.PHONY: test test-collector test-detection test-response test-race monitoring-soak test-coverage local-validate-monitoring diagnose-esf
+.PHONY: test test-collector test-detection test-response test-race test-ci test-ci-race monitoring-soak test-coverage local-validate-monitoring diagnose-esf
 .PHONY: run-agent run-agent-ml test-edr-macos-lab
 .PHONY: test-bench
 .PHONY: vulncheck
@@ -150,14 +150,16 @@ LLVM_LINK    ?= llvm-link
 BPFTOOL      ?= bpftool
 
 $(VMLINUX_H):
-	@if command -v $(BPFTOOL) >/dev/null 2>&1 && [ -f /sys/kernel/btf/vmlinux ]; then \
+	@if command -v $(BPFTOOL) >/dev/null 2>&1 && [ -f /sys/kernel/btf/vmlinux ] && [ "$${EDR_VMLINUX_FALLBACK:-0}" != "1" ]; then \
 		echo "==> Generating vmlinux.h from kernel BTF"; \
-		$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > $(VMLINUX_H); \
-	elif [ -f /sys/kernel/btf/vmlinux ]; then \
-		echo "bpftool not found; install bpftool to generate vmlinux.h" >&2; \
-		exit 1; \
+		if $(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > $(VMLINUX_H); then \
+			:; \
+		else \
+			echo "bpftool dump failed; using fallback vmlinux.h"; \
+			cp $(VMLINUX_FALLBACK) $(VMLINUX_H); \
+		fi; \
 	else \
-		echo "BTF not available on this kernel; using fallback vmlinux.h"; \
+		echo "BTF not available or fallback forced; using fallback vmlinux.h"; \
 		cp $(VMLINUX_FALLBACK) $(VMLINUX_H); \
 	fi
 
@@ -216,9 +218,17 @@ proto:
 # Test targets
 # ============================================================================
 
+GO_TEST_PKGS := $(shell go list ./... | grep -v '/temp/')
+
 test:
 	@echo "==> Running all tests"
-	go test ./... -count=1 -timeout 120s
+	go test $(GO_TEST_PKGS) -count=1 -timeout 120s
+
+test-ci: test
+
+test-ci-race:
+	@echo "==> Running CI race tests"
+	go test $(GO_TEST_PKGS) -race -count=1 -timeout 300s
 
 # Collector package without CGO (avoids macOS EndpointSecurity link in CI/dev).
 test-collector:
@@ -236,7 +246,7 @@ test-response:
 
 test-race:
 	@echo "==> Running tests with race detector"
-	go test ./... -race -count=1 -timeout 300s
+	go test $(GO_TEST_PKGS) -race -count=1 -timeout 300s
 
 # Longer race pass on the monitoring stack (avoids `go test ./...` which may include non-repo trees).
 monitoring-soak:
