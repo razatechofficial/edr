@@ -215,7 +215,6 @@ int tp_dns_sendto(struct trace_event_raw_sys_enter *ctx)
 	 */
 	__u16 qtype = 0;
 	int off = 0;
-	#pragma unroll
 	for (int step = 0; step < 32; step++) {
 		if (off >= (int)sizeof(evt->dns_query))
 			break;
