@@ -223,7 +223,9 @@ func (f *FanotifySource) mountFDForFSID(fsid []byte) (int, error) {
 	if err != nil || mp == "" {
 		return -1, err
 	}
-	fd, err := unix.Open(mp, unix.O_RDONLY|unix.O_PATH, 0)
+	// P2-16: O_CLOEXEC prevents this mount-point fd from leaking into
+	// any forked child (e.g. user-triggered remediation actions).
+	fd, err := unix.Open(mp, unix.O_RDONLY|unix.O_PATH|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return -1, err
 	}
