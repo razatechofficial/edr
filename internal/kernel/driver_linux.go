@@ -793,11 +793,22 @@ func (d *EBPFDriver) tryPinTraceLink(progName string, l link.Link) {
 }
 
 func isOptionalTracepointAttachFailure(group, tp string, err error) bool {
-	// Some hardened kernels can deny this tracepoint perf link despite root + capabilities.
-	if group == "syscalls" && tp == "sys_enter_fchmodat" {
-		return true
+	if group != "syscalls" {
+		return false
 	}
-	return false
+	// Some hardened kernels can deny this tracepoint perf link despite root + capabilities.
+	switch tp {
+	case "sys_enter_fchmodat",
+		"sys_enter_setuid",
+		"sys_enter_setgid",
+		"sys_enter_setreuid",
+		"sys_enter_setregid",
+		"sys_enter_setresuid",
+		"sys_enter_setresgid":
+		return true
+	default:
+		return false
+	}
 }
 
 func (d *EBPFDriver) syncPolicyToMaps() error {
