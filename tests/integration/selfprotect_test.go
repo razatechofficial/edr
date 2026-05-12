@@ -18,7 +18,7 @@ func TestIntegrityCheckerDetectsTampering(t *testing.T) {
 	tracked := testutil.MustCreateTempFile(t, dir, "binary-*.exe", "original binary content")
 
 	logger := zap.NewNop()
-	checker, err := selfprotect.NewIntegrityChecker([]string{tracked}, backupDir, logger)
+	checker, err := selfprotect.NewIntegrityChecker([]string{tracked}, backupDir, t.TempDir(), logger)
 	if err != nil {
 		t.Fatalf("NewIntegrityChecker: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestIntegrityCheckerRestore(t *testing.T) {
 	tracked := testutil.MustCreateTempFile(t, dir, "restore-*.bin", originalContent)
 
 	logger := zap.NewNop()
-	checker, err := selfprotect.NewIntegrityChecker([]string{tracked}, backupDir, logger)
+	checker, err := selfprotect.NewIntegrityChecker([]string{tracked}, backupDir, t.TempDir(), logger)
 	if err != nil {
 		t.Fatalf("NewIntegrityChecker: %v", err)
 	}
