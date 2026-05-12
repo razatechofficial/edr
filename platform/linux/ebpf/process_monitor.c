@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
+//
+// P2-1: per-pid metadata scratch map. Process exec / exit handlers
+// populate pid_meta with the originating cgroup id so downstream
+// network / file handlers can attribute by container without parsing
+// task_struct each time. Userspace can also poke entries here to mark
+// the agent's own pid so we never self-alert.
 // Process execution and lifecycle monitoring for EDR agent.
 // Compiled with: clang -O2 -target bpf -D__TARGET_ARCH_x86 -c process_monitor.c -o process_monitor.o
 
@@ -26,6 +32,32 @@ struct {
 	__type(key, char[TASK_COMM_LEN]);
 	__type(value, __u8);
 } comm_filter SEC(".maps");
+
+/* P2-1: per-pid metadata. See common.h for the struct definition. */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 16384);
+	__type(key, __u32);
+	__type(value, struct pid_meta);
+} pid_meta SEC(".maps");
+
+/* pid_meta_update writes the current cgroup id and timestamp for the
+ * calling task. Called from exec/fork/exit handlers so the map stays
+ * roughly synchronized with live processes. */
+static __always_inline void pid_meta_update(__u32 pid)
+{
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	struct pid_meta meta = {};
+	meta.cgroup_id = bpf_get_current_cgroup_id();
+	meta.last_seen_ns = bpf_ktime_get_ns();
+	/* Preserve flags set by userspace (e.g. agent self-tag) on update. */
+	struct pid_meta *existing = bpf_map_lookup_elem(&pid_meta, &pid);
+	if (existing) {
+		meta.flags = existing->flags;
+	}
+	(void)task;
+	bpf_map_update_elem(&pid_meta, &pid, &meta, BPF_ANY);
+}
 
 static __always_inline void fill_header(struct event_header *hdr, __u32 type)
 {
@@ -57,6 +89,56 @@ static __always_inline bool is_filtered(void)
 	return false;
 }
 
+/*
+ * capture_argv reads up to 16 argv strings into evt->args, separated by
+ * single spaces. The trailing NUL written by bpf_probe_read_user_str is
+ * overwritten with a space; the very last space is replaced with a NUL
+ * before returning so the buffer is a valid C string. Stops early on
+ * NULL argv slot, read failure, or buffer exhaustion. evt->args_size is
+ * set to the number of bytes used (excluding the terminating NUL).
+ *
+ * The args buffer length MAX_ARGS_LEN must be a power of two so the
+ * masked offset proves bounded to the BPF verifier.
+ */
+static __always_inline void capture_argv(struct process_event *evt,
+                                         const char *const *argv)
+{
+	__u32 off = 0;
+
+	if (!argv)
+		return;
+
+	#pragma unroll
+	for (int i = 0; i < 16; i++) {
+		const char *argp = NULL;
+		if (bpf_probe_read_user(&argp, sizeof(argp), &argv[i]) < 0)
+			break;
+		if (!argp)
+			break;
+		if (off >= MAX_ARGS_LEN - 1)
+			break;
+		/* Mask to keep the verifier convinced about bounds. */
+		__u32 idx = off & (MAX_ARGS_LEN - 1);
+		__u32 remaining = MAX_ARGS_LEN - 1 - idx;
+		if (remaining < 2)
+			break;
+		int written = bpf_probe_read_user_str(&evt->args[idx],
+		                                      remaining, argp);
+		if (written <= 0)
+			break;
+		off = idx + (__u32)(written - 1);
+		if (off >= MAX_ARGS_LEN - 1)
+			break;
+		evt->args[off & (MAX_ARGS_LEN - 1)] = ' ';
+		off++;
+	}
+	if (off > 0) {
+		__u32 last = (off - 1) & (MAX_ARGS_LEN - 1);
+		evt->args[last] = '\0';
+		evt->args_size = off - 1;
+	}
+}
+
 SEC("tracepoint/syscalls/sys_enter_execve")
 int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter *ctx)
 {
@@ -70,18 +152,14 @@ int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter *ctx
 
 	__builtin_memset(evt, 0, sizeof(*evt));
 	fill_header(&evt->hdr, EVENT_PROCESS_EXEC);
+	pid_meta_update(evt->hdr.pid);
 
 	const char *filename = (const char *)ctx->args[0];
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), filename);
 
-	/* Verifier-safe argv capture: read only argv[0] into fixed buffer. */
-	const char *const *argv = (const char *const *)ctx->args[1];
-	const char *arg0 = NULL;
-	if (argv && bpf_probe_read_user(&arg0, sizeof(arg0), &argv[0]) == 0 && arg0) {
-		int ret = bpf_probe_read_user_str(evt->args, sizeof(evt->args), arg0);
-		if (ret > 0)
-			evt->args_size = ret - 1;
-	}
+	/* Full argv capture (up to 16 args), verifier-safe. */
+	capture_argv(evt, (const char *const *)ctx->args[1]);
+
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
@@ -104,14 +182,9 @@ int tracepoint__syscalls__sys_enter_execveat(struct trace_event_raw_sys_enter *c
 	const char *filename = (const char *)ctx->args[1];
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), filename);
 
-	/* Verifier-safe argv capture: read only argv[0] into fixed buffer. */
-	const char *const *argv = (const char *const *)ctx->args[3];
-	const char *arg0 = NULL;
-	if (argv && bpf_probe_read_user(&arg0, sizeof(arg0), &argv[0]) == 0 && arg0) {
-		int ret = bpf_probe_read_user_str(evt->args, sizeof(evt->args), arg0);
-		if (ret > 0)
-			evt->args_size = ret - 1;
-	}
+	/* Full argv capture (up to 16 args), verifier-safe. */
+	capture_argv(evt, (const char *const *)ctx->args[3]);
+
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
@@ -152,6 +225,9 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_t
 
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	evt->exit_code = BPF_CORE_READ(task, exit_code) >> 8;
+
+	/* Free the per-pid scratch entry so the map does not bloat. */
+	bpf_map_delete_elem(&pid_meta, &evt->hdr.pid);
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
