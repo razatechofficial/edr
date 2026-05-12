@@ -17,6 +17,12 @@ import (
 // auth logs. On Linux it reads /var/log/auth.log (or /var/log/secure), on
 // macOS it reads /var/log/system.log when present, and on Windows it queries
 // the Security event log via the Windows Event API (evtsubscribe path in Collect).
+//
+// P2-14: the Windows-only EVT_HANDLE state used to live in a
+// package-global map keyed by *AuthCollector. We now embed an opaque
+// any-typed pointer (winState) so the per-collector lifetime is
+// explicit and the global map can be retired. Non-Windows builds
+// ignore winState.
 type AuthCollector struct {
 	endpointID string
 	hostname   string
@@ -29,6 +35,10 @@ type AuthCollector struct {
 
 	scans   atomic.Uint64
 	emitted atomic.Uint64
+
+	// winState holds *winAuthState on Windows; nil and unused elsewhere.
+	winStateMu sync.Mutex
+	winState   any
 }
 
 func NewAuthCollector(endpointID, dataDir string) *AuthCollector {
@@ -55,6 +65,17 @@ func NewAuthCollectorWithLogPath(endpointID, dataDir, logPath string) *AuthColle
 }
 
 func (ac *AuthCollector) Name() string { return "auth" }
+
+// Stop releases platform-specific resources held by the collector. On
+// Windows it closes the EvtSubscribe/EvtQuery and bookmark handles that
+// would otherwise leak across collector lifecycle (EVT_HANDLE leak,
+// P1-12). On all other platforms Stop is a no-op — file-tail readers
+// have no long-lived OS resources.
+func (ac *AuthCollector) Stop() {
+	if runtime.GOOS == "windows" {
+		authWindowsStop(ac)
+	}
+}
 
 func (ac *AuthCollector) Collect(_ context.Context) ([]Telemetry, error) {
 	ac.scans.Add(1)
