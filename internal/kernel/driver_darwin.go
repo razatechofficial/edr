@@ -48,6 +48,7 @@ static es_client_t *_esf_client = NULL;
 #define ESF_ARG_SEP ((char)0x1e)
 
 static char *esf_join_exec_args(const es_message_t *msg) {
+    if (msg == NULL) return strdup("");
     if (msg->event_type != ES_EVENT_TYPE_AUTH_EXEC && msg->event_type != ES_EVENT_TYPE_NOTIFY_EXEC) {
         return strdup("");
     }
@@ -88,6 +89,7 @@ static char *esf_join_exec_args(const es_message_t *msg) {
 }
 
 static char *esf_join_exec_env(const es_message_t *msg) {
+    if (msg == NULL) return strdup("");
     if (msg->event_type != ES_EVENT_TYPE_AUTH_EXEC && msg->event_type != ES_EVENT_TYPE_NOTIFY_EXEC) {
         return strdup("");
     }
@@ -138,76 +140,121 @@ static char* esf_copy_string(es_string_token_t tok) {
     return s;
 }
 
+// NULL-safe ESF accessors (P0-7).
+//
+// EndpointSecurity guarantees msg is non-NULL inside the handler, but every
+// nested pointer (msg->process, msg->process->executable, msg->event.*) can
+// be NULL in practice on certain event types or transient states. Direct
+// dereferences here previously crashed the agent under load. Every accessor
+// below tolerates a NULL chain and returns a heap-allocated empty string
+// (or 0 for numeric IDs) so callers do not need to NULL-check.
+
+// Returns the file path as a malloc'd C-string ("" if any link is NULL).
+static char* safe_file_path_copy(const es_file_t *f) {
+    if (f == NULL) return strdup("");
+    return esf_copy_string(f->path);
+}
+
+// Returns the process executable path as a malloc'd C-string.
+static char* safe_proc_exec_path_copy(const es_process_t *p) {
+    if (p == NULL) return strdup("");
+    if (p->executable == NULL) return strdup("");
+    return esf_copy_string(p->executable->path);
+}
+
+// Returns the process pid (0 if process is NULL).
+static pid_t safe_pid(const es_process_t *p) {
+    if (p == NULL) return 0;
+    return audit_token_to_pid(p->audit_token);
+}
+
+// Returns the parent pid (0 if process is NULL).
+static pid_t safe_ppid(const es_process_t *p) {
+    if (p == NULL) return 0;
+    return p->ppid;
+}
+
+// Returns the euid of the process (0 if process is NULL).
+static uid_t safe_euid(const es_process_t *p) {
+    if (p == NULL) return 0;
+    return audit_token_to_euid(p->audit_token);
+}
+
+// Returns the egid of the process (0 if process is NULL).
+static gid_t safe_egid(const es_process_t *p) {
+    if (p == NULL) return 0;
+    return audit_token_to_egid(p->audit_token);
+}
+
 static char* esf_event_path(const es_message_t *msg) {
+    if (msg == NULL) return strdup("");
     switch (msg->event_type) {
     case ES_EVENT_TYPE_AUTH_EXEC:
-        return esf_copy_string(msg->event.exec.target->executable->path);
+        return safe_proc_exec_path_copy(msg->event.exec.target);
     case ES_EVENT_TYPE_AUTH_OPEN:
-        return esf_copy_string(msg->event.open.file->path);
+        return safe_file_path_copy(msg->event.open.file);
     case ES_EVENT_TYPE_AUTH_CREATE:
         if (msg->event.create.destination_type == ES_DESTINATION_TYPE_EXISTING_FILE) {
-            return esf_copy_string(msg->event.create.destination.existing_file->path);
+            return safe_file_path_copy(msg->event.create.destination.existing_file);
         }
-        return esf_copy_string(msg->event.create.destination.new_path.dir->path);
+        return safe_file_path_copy(msg->event.create.destination.new_path.dir);
     case ES_EVENT_TYPE_AUTH_RENAME:
-        return esf_copy_string(msg->event.rename.source->path);
+        return safe_file_path_copy(msg->event.rename.source);
     case ES_EVENT_TYPE_AUTH_UNLINK:
-        return esf_copy_string(msg->event.unlink.target->path);
+        return safe_file_path_copy(msg->event.unlink.target);
     case ES_EVENT_TYPE_AUTH_KEXTLOAD:
         return esf_copy_string(msg->event.kextload.identifier);
     case ES_EVENT_TYPE_AUTH_MOUNT:
+        if (msg->event.mount.statfs == NULL) return strdup("");
         return strdup(msg->event.mount.statfs->f_mntonname);
     case ES_EVENT_TYPE_AUTH_SIGNAL:
-        return esf_copy_string(msg->event.signal.target->executable->path);
+        return safe_proc_exec_path_copy(msg->event.signal.target);
     case ES_EVENT_TYPE_NOTIFY_WRITE:
-        return esf_copy_string(msg->event.write.target->path);
+        return safe_file_path_copy(msg->event.write.target);
     case ES_EVENT_TYPE_NOTIFY_MMAP:
     case ES_EVENT_TYPE_AUTH_MMAP:
-        return esf_copy_string(msg->event.mmap.source->path);
+        return safe_file_path_copy(msg->event.mmap.source);
     case ES_EVENT_TYPE_NOTIFY_MPROTECT:
-        return esf_copy_string(msg->process->executable->path);
+        return safe_proc_exec_path_copy(msg->process);
     case ES_EVENT_TYPE_NOTIFY_EXEC:
-        return esf_copy_string(msg->event.exec.target->executable->path);
+        return safe_proc_exec_path_copy(msg->event.exec.target);
     case ES_EVENT_TYPE_NOTIFY_UNLINK:
-        return esf_copy_string(msg->event.unlink.target->path);
+        return safe_file_path_copy(msg->event.unlink.target);
     case ES_EVENT_TYPE_NOTIFY_TRUNCATE:
-        return esf_copy_string(msg->event.truncate.target->path);
+        return safe_file_path_copy(msg->event.truncate.target);
     case ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA:
-        if (msg->event.exchangedata.file1 != NULL) {
-            return esf_copy_string(msg->event.exchangedata.file1->path);
-        }
-        return strdup("");
+        return safe_file_path_copy(msg->event.exchangedata.file1);
     case ES_EVENT_TYPE_NOTIFY_FCNTL:
-        return esf_copy_string(msg->event.fcntl.target->path);
+        return safe_file_path_copy(msg->event.fcntl.target);
     case ES_EVENT_TYPE_NOTIFY_RENAME:
-        return esf_copy_string(msg->event.rename.source->path);
+        return safe_file_path_copy(msg->event.rename.source);
     case ES_EVENT_TYPE_AUTH_COPYFILE:
-        return esf_copy_string(msg->event.copyfile.source->path);
+        return safe_file_path_copy(msg->event.copyfile.source);
     case ES_EVENT_TYPE_AUTH_GET_TASK:
-        return esf_copy_string(msg->event.get_task.target->executable->path);
+        return safe_proc_exec_path_copy(msg->event.get_task.target);
     case ES_EVENT_TYPE_NOTIFY_SIGNAL:
-        return esf_copy_string(msg->event.signal.target->executable->path);
+        return safe_proc_exec_path_copy(msg->event.signal.target);
     case ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE:
-        return esf_copy_string(msg->event.remote_thread_create.target->executable->path);
+        return safe_proc_exec_path_copy(msg->event.remote_thread_create.target);
 #ifdef ES_EVENT_TYPE_NOTIFY_BIND
     case ES_EVENT_TYPE_NOTIFY_BIND:
-        return esf_copy_string(msg->process->executable->path);
+        return safe_proc_exec_path_copy(msg->process);
 #endif
 #ifdef ES_EVENT_TYPE_NOTIFY_CONNECT
     case ES_EVENT_TYPE_NOTIFY_CONNECT:
-        return esf_copy_string(msg->process->executable->path);
+        return safe_proc_exec_path_copy(msg->process);
 #endif
 #ifdef ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR
     case ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR:
-        return esf_copy_string(msg->event.deleteextattr.target->path);
+        return safe_file_path_copy(msg->event.deleteextattr.target);
 #endif
 #ifdef ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_ADD
     case ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_ADD:
-        return esf_copy_string(msg->process->executable->path);
+        return safe_proc_exec_path_copy(msg->process);
 #endif
 #ifdef ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_REMOVE
     case ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_REMOVE:
-        return esf_copy_string(msg->process->executable->path);
+        return safe_proc_exec_path_copy(msg->process);
 #endif
     default:
         return strdup("");
@@ -215,21 +262,29 @@ static char* esf_event_path(const es_message_t *msg) {
 }
 
 static void esf_handle_message(es_client_t *client, const es_message_t *msg) {
-    audit_token_t tok = msg->process->audit_token;
-    pid_t pid = audit_token_to_pid(tok);
-    pid_t ppid = msg->process->ppid;
-    uid_t uid = audit_token_to_euid(tok);
-    gid_t gid = audit_token_to_egid(tok);
+    // msg is guaranteed non-NULL by EndpointSecurity but we defend anyway —
+    // a crash here would unsubscribe the agent. msg->process *can* be NULL
+    // for certain notify-only event paths; every nested chain below goes
+    // through the safe_* helpers above.
+    if (msg == NULL) return;
 
-    char *comm = esf_copy_string(msg->process->executable->path);
+    pid_t pid = safe_pid(msg->process);
+    pid_t ppid = safe_ppid(msg->process);
+    uid_t uid = safe_euid(msg->process);
+    gid_t gid = safe_egid(msg->process);
+
+    char *comm = safe_proc_exec_path_copy(msg->process);
     char *path = esf_event_path(msg);
 
     if (msg->action_type == ES_ACTION_TYPE_AUTH) {
-        int decision = goESFAuthCallback((int)msg->event_type, (int)pid, comm, path, esf_auth_budget_ms(msg));
-        if (decision == 0) {
-            es_respond_auth_result(client, msg, ES_AUTH_RESULT_ALLOW, false);
-        } else {
-            es_respond_auth_result(client, msg, ES_AUTH_RESULT_DENY, false);
+        int decision = goESFAuthCallback((int)msg->event_type, (int)pid,
+            comm ? comm : "",
+            path ? path : "",
+            esf_auth_budget_ms(msg));
+        if (client != NULL) {
+            es_auth_result_t r = (decision == 0) ? ES_AUTH_RESULT_ALLOW
+                                                 : ES_AUTH_RESULT_DENY;
+            es_respond_auth_result(client, msg, r, false);
         }
     }
 
@@ -242,7 +297,10 @@ static void esf_handle_message(es_client_t *client, const es_message_t *msg) {
         exec_env = strdup("");
     }
     goESFEventCallback((int)msg->event_type, (int)pid, (int)ppid,
-        (int)uid, (int)gid, comm, path, exec_args, exec_env);
+        (int)uid, (int)gid,
+        comm ? comm : "",
+        path ? path : "",
+        exec_args, exec_env);
     free(exec_args);
     free(exec_env);
 
@@ -349,10 +407,41 @@ static int esf_unsubscribe_all(void) {
     return (ret == ES_RETURN_SUCCESS) ? 0 : -1;
 }
 
-static int esf_mute_path_prefix(const char *path) {
+// esf_mute_path_notify mutes the given path prefix only for NOTIFY-shaped
+// event types. AUTH events from the same paths still flow through to the
+// handler so the agent retains policy-relevant visibility (e.g. it sees an
+// exec auth request from /usr/libexec even when it skips emitting the
+// associated NOTIFY_EXEC telemetry). On macOS 12+ this is enforced in the
+// kernel via es_mute_path_events; on older releases the kernel-side fast
+// path is unavailable and Go-side gating in shouldMuteNotify() is the only
+// suppressor (the mute call below will simply return -1 there).
+static int esf_mute_path_notify(const char *path) {
     if (_esf_client == NULL) return -1;
-    es_return_t ret = es_mute_path(_esf_client, path, ES_MUTE_PATH_TYPE_PREFIX);
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && \
+    __MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
+    es_event_type_t notify_only[] = {
+        ES_EVENT_TYPE_NOTIFY_EXEC,
+        ES_EVENT_TYPE_NOTIFY_FORK,
+        ES_EVENT_TYPE_NOTIFY_EXIT,
+        ES_EVENT_TYPE_NOTIFY_WRITE,
+        ES_EVENT_TYPE_NOTIFY_UNLINK,
+        ES_EVENT_TYPE_NOTIFY_TRUNCATE,
+        ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA,
+        ES_EVENT_TYPE_NOTIFY_FCNTL,
+        ES_EVENT_TYPE_NOTIFY_RENAME,
+        ES_EVENT_TYPE_NOTIFY_SIGNAL,
+        ES_EVENT_TYPE_NOTIFY_MMAP,
+        ES_EVENT_TYPE_NOTIFY_MPROTECT,
+        ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE,
+    };
+    es_return_t ret = es_mute_path_events(_esf_client, path,
+        ES_MUTE_PATH_TYPE_PREFIX, notify_only,
+        sizeof(notify_only)/sizeof(notify_only[0]));
     return (ret == ES_RETURN_SUCCESS) ? 0 : -1;
+#else
+    (void)path;
+    return -1;
+#endif
 }
 
 static int esf_clear_cache(void) {
@@ -455,6 +544,80 @@ func (c *authCache) set(key string, decision AuthDecision) {
 	c.mu.Unlock()
 }
 
+// trustedTeamEntry caches a path → "is this signed by a trusted team
+// id?" verdict for a bounded TTL. Stored positive (trusted=true) and
+// negative (trusted=false) so an unsigned binary is not re-evaluated on
+// every AUTH event in a fork-bomb.
+type trustedTeamEntry struct {
+	trusted   bool
+	expiresAt time.Time
+}
+
+const trustedTeamCacheTTL = 60 * time.Second
+const trustedTeamCacheMax = 4096
+
+// isTrustedTeamPath returns true when the binary at execPath is signed
+// by one of the team identifiers in d.policy.TrustedTeamIDs. The
+// verdict is cached for trustedTeamCacheTTL to avoid invoking the
+// signing-info pipeline on every AUTH event for hot paths (e.g.
+// /System/Library/Frameworks/...). Returns false for unsigned, ad-hoc
+// signed, or unknown-team binaries — those flow through full analysis.
+func (d *ESFDriver) isTrustedTeamPath(execPath string) bool {
+	d.mu.RLock()
+	trusted := d.policy.TrustedTeamIDs
+	d.mu.RUnlock()
+	if len(trusted) == 0 || execPath == "" {
+		return false
+	}
+
+	now := time.Now()
+	d.trustedTeamMu.RLock()
+	e, ok := d.trustedTeamCache[execPath]
+	d.trustedTeamMu.RUnlock()
+	if ok && now.Before(e.expiresAt) {
+		return e.trusted
+	}
+
+	teamID, _, _, valid := esfExecSigningInfoFull(execPath)
+	verdict := false
+	// P1-11 hardening: only auto-allow when the signature actually
+	// verifies. A tampered binary that retains the embedded team
+	// identifier must not be silently fast-pathed.
+	if teamID != "" && valid {
+		for _, t := range trusted {
+			if teamID == t {
+				verdict = true
+				break
+			}
+		}
+	}
+
+	d.trustedTeamMu.Lock()
+	if d.trustedTeamCache == nil {
+		d.trustedTeamCache = make(map[string]trustedTeamEntry)
+	}
+	if len(d.trustedTeamCache) >= trustedTeamCacheMax {
+		// Evict ~1/4 of expired/old entries to bound memory. Simple
+		// linear scan is fine at 4 KiB-class map sizes.
+		evicted := 0
+		for k, v := range d.trustedTeamCache {
+			if now.After(v.expiresAt) || evicted < trustedTeamCacheMax/4 {
+				delete(d.trustedTeamCache, k)
+				evicted++
+				if evicted >= trustedTeamCacheMax/4 {
+					break
+				}
+			}
+		}
+	}
+	d.trustedTeamCache[execPath] = trustedTeamEntry{
+		trusted:   verdict,
+		expiresAt: now.Add(trustedTeamCacheTTL),
+	}
+	d.trustedTeamMu.Unlock()
+	return verdict
+}
+
 func (c *authCache) cleanupLoop(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 	ticker := time.NewTicker(c.ttl / 2)
@@ -501,6 +664,13 @@ type ESFDriver struct {
 	authTimeouts  atomic.Uint64
 	authDenials   atomic.Uint64
 
+	// trustedTeamCache stores positive AND negative results of a
+	// path's team-id lookup. We cap entries so a fork-bombing
+	// adversary cannot blow the map up, and TTL them so a binary
+	// that gets re-signed eventually re-evaluates.
+	trustedTeamMu     sync.RWMutex
+	trustedTeamCache  map[string]trustedTeamEntry
+
 	notifyCh               chan ESFNotifyPayload
 	notifyDropped          atomic.Uint64
 	authBudgetSumMs        atomic.Uint64
@@ -511,6 +681,12 @@ type ESFDriver struct {
 	authSampleMu   sync.Mutex
 	authSamples    []uint32
 	authSampleRing int // next slot when ring is full (1024)
+
+	// mutePrefixes is the userspace mirror of the ESF NOTIFY-event mute
+	// list. AUTH callbacks always run; only NOTIFY emission is suppressed
+	// for matching paths. See applyMutePaths and shouldMuteNotify.
+	mutePrefixMu sync.RWMutex
+	mutePrefixes []string
 }
 
 // NewESFDriver creates a new Endpoint Security Framework driver.
@@ -592,11 +768,7 @@ func (d *ESFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	}
 	d.mu.RUnlock()
 
-	for _, p := range mutePaths {
-		cs := C.CString(p)
-		C.esf_mute_path_prefix(cs)
-		C.free(unsafe.Pointer(cs))
-	}
+	d.applyMutePaths(mutePaths)
 
 	d.startTime = time.Now()
 	d.running.Store(true)
@@ -613,15 +785,31 @@ func (d *ESFDriver) notifyWorker(ctx context.Context) {
 			for {
 				select {
 				case p := <-d.notifyCh:
-					processESFNotifyPayload(d, &p)
+					d.dispatchNotify(&p)
 				default:
 					return
 				}
 			}
 		case p := <-d.notifyCh:
-			processESFNotifyPayload(d, &p)
+			d.dispatchNotify(&p)
 		}
 	}
+}
+
+// dispatchNotify gates NOTIFY telemetry emission on the per-event-type mute
+// list. On macOS 12+ the same prefixes are also muted kernel-side via
+// es_mute_path_events so this is a fast no-op; on older releases this is
+// the only path that suppresses NOTIFY telemetry for trusted system
+// prefixes. AUTH messages are not routed through notifyCh and are never
+// affected by this gate.
+func (d *ESFDriver) dispatchNotify(p *ESFNotifyPayload) {
+	if d.shouldMuteNotify(p.Path) {
+		// Mark drop in telemetry counters so muted-noise volume is
+		// observable in monitoring_health.json.
+		d.notifyDropped.Add(1)
+		return
+	}
+	processESFNotifyPayload(d, p)
 }
 
 func (d *ESFDriver) observeAuthBudgetMs(ms int) {
@@ -703,6 +891,14 @@ func detectMacVersion() (int, int) {
 }
 
 // Stop unsubscribes from all events, deletes the ESF client, and releases resources.
+//
+// P1-10: es_delete_client is known to deadlock on macOS 14 when the
+// client has in-flight AUTH messages without a response. We bound the
+// teardown with a 5s timeout — if cleanup does not return in time we
+// surface an error to the caller, mark the driver stopped, and let the
+// abandoned C-side resources leak rather than hang the process forever.
+// The follow-on agent restart path closes the file descriptor on exit
+// which forces ESF to drop the dangling client.
 func (d *ESFDriver) Stop() error {
 	if !d.running.CompareAndSwap(true, false) {
 		return nil
@@ -711,11 +907,36 @@ func (d *ESFDriver) Stop() error {
 	d.cancel()
 
 	C.esf_unsubscribe_all()
-	C.esf_delete_client()
 
-	d.wg.Wait()
+	deleteDone := make(chan struct{})
+	go func() {
+		C.esf_delete_client()
+		close(deleteDone)
+	}()
+
+	const esfStopTimeout = 5 * time.Second
+	var deleteErr error
+	select {
+	case <-deleteDone:
+	case <-time.After(esfStopTimeout):
+		deleteErr = fmt.Errorf("ESF stop timeout after %s (es_delete_client deadlock)", esfStopTimeout)
+	}
+
+	waitDone := make(chan struct{})
+	go func() {
+		d.wg.Wait()
+		close(waitDone)
+	}()
+	select {
+	case <-waitDone:
+	case <-time.After(esfStopTimeout):
+		if deleteErr == nil {
+			deleteErr = fmt.Errorf("ESF stop timeout after %s waiting for goroutines", esfStopTimeout)
+		}
+	}
+
 	d.notifyCh = nil
-	return nil
+	return deleteErr
 }
 
 // SetPolicy updates the event collection policy. Mute paths are applied to the ESF client.
@@ -725,14 +946,55 @@ func (d *ESFDriver) SetPolicy(policy EventPolicy) error {
 	d.mu.Unlock()
 
 	if d.running.Load() {
-		for _, p := range policy.MutePaths {
-			cs := C.CString(p)
-			C.esf_mute_path_prefix(cs)
-			C.free(unsafe.Pointer(cs))
-		}
+		d.applyMutePaths(policy.MutePaths)
 		C.esf_clear_cache()
 	}
 	return nil
+}
+
+// applyMutePaths registers each prefix with ESF using NOTIFY-only muting
+// (P0-8). Both the kernel-side mute (when available) and the Go-side cache
+// of mutePrefixes are updated; AUTH events for these prefixes continue to
+// be processed so the agent retains the ability to deny known-bad behavior
+// even within otherwise-trusted system directories.
+func (d *ESFDriver) applyMutePaths(paths []string) {
+	for _, p := range paths {
+		cs := C.CString(p)
+		C.esf_mute_path_notify(cs)
+		C.free(unsafe.Pointer(cs))
+	}
+	d.mutePrefixMu.Lock()
+	d.mutePrefixes = append(d.mutePrefixes[:0], paths...)
+	d.mutePrefixMu.Unlock()
+}
+
+// shouldMuteNotify reports whether NOTIFY-shaped telemetry for the given
+// path should be suppressed. Used as a userspace fallback on macOS <12
+// (where the kernel-side per-event mute is unavailable) and as defense in
+// depth on newer releases.
+//
+// P2-5: also mute NOTIFY emission for processes signed by a trusted
+// team identifier. This complements the P1-9 AUTH fast path — AUTH
+// auto-allows, NOTIFY suppresses telemetry — so trusted Apple/EDR
+// binaries do not generate noise in the event stream while
+// adhoc-signed / unsigned / unverifiable binaries continue to emit
+// for security visibility.
+func (d *ESFDriver) shouldMuteNotify(path string) bool {
+	if path == "" {
+		return false
+	}
+	d.mutePrefixMu.RLock()
+	for _, prefix := range d.mutePrefixes {
+		if strings.HasPrefix(path, prefix) {
+			d.mutePrefixMu.RUnlock()
+			return true
+		}
+	}
+	d.mutePrefixMu.RUnlock()
+	if d.isTrustedTeamPath(path) {
+		return true
+	}
+	return false
 }
 
 // SetAuthHandler registers a handler for authorization events. The handler is
