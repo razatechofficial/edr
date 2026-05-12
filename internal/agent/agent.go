@@ -1369,7 +1369,7 @@ func (a *Agent) initSelfProtect() error {
 		}
 		if len(paths) > 0 {
 			backupDir := filepath.Join(a.cfg.Agent.DataDir, "integrity-backups")
-			ic, err := selfprotect.NewIntegrityChecker(paths, backupDir, a.zapLogger)
+			ic, err := selfprotect.NewIntegrityChecker(paths, backupDir, a.cfg.Agent.DataDir, a.zapLogger)
 			if err != nil {
 				a.logger.Warn("integrity checker init failed", "error", err)
 			} else {
