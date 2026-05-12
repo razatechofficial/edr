@@ -36,6 +36,8 @@ func (d *ETWDriver) decodeStructuredETW(record *etwEventRecord, env map[string]i
 		decodeAppLockerETW(eid, ud, env)
 	case defenderETWGUID:
 		decodeDefenderETW(eid, ud, env)
+	case securityAuditingGUID:
+		decodeSecurityAuditingEtw(eid, ud, env)
 	case threatIntelGUID:
 		d.decodeThreatIntelETW(record, env)
 	case wmiActivityGUID:
@@ -169,6 +171,22 @@ func decodeDefenderETW(eventID uint16, ud []byte, env map[string]interface{}) {
 	}
 	if s2 := extractUTF16StringAfter(ud, first); s2 != "" {
 		env["threat_name"] = s2
+	}
+}
+
+// decodeSecurityAuditingEtw maps the realtime Security-Auditing provider into
+// the same shape produced by the EvtSubscribe Security-log path. Templates vary
+// per event ID; we surface the event ID plus best-effort UTF-16 strings so that
+// downstream telemetry mapping (events.MapWindowsSecurity) can correlate.
+func decodeSecurityAuditingEtw(eventID uint16, ud []byte, env map[string]interface{}) {
+	env["etw_security_subprovider"] = "security_auditing"
+	env["security_event_id"] = eventID
+	first := extractUTF16String(ud)
+	if first != "" {
+		env["message"] = first
+	}
+	if s2 := extractUTF16StringAfter(ud, first); s2 != "" {
+		env["target_user"] = s2
 	}
 }
 
