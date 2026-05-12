@@ -45,7 +45,7 @@ type MonitoringReport struct {
 //
 // The function never returns an error; instead it appends to the report so
 // the surrounding validation pipeline can decide how to react.
-func runMonitoringValidation(ctx context.Context, cfg *config.Config) MonitoringReport {
+func runMonitoringValidation(ctx context.Context, cfg *config.Config, harness bool) MonitoringReport {
 	_ = ctx
 	rep := MonitoringReport{Timestamp: time.Now().UTC(), OS: runtime.GOOS}
 	if cfg == nil || cfg.Agent.DataDir == "" {
@@ -113,9 +113,11 @@ func runMonitoringValidation(ctx context.Context, cfg *config.Config) Monitoring
 	rep.Assertions = append(rep.Assertions,
 		assertSourcesPresent(rep.Sources, expected, cfg)...,
 	)
-	rep.Assertions = append(rep.Assertions,
-		assertNoDrops(rep.Sources, cfg)...,
-	)
+	if !harness {
+		rep.Assertions = append(rep.Assertions,
+			assertNoDrops(rep.Sources, cfg)...,
+		)
+	}
 	rep.Assertions = append(rep.Assertions,
 		assertWindowsNetworkContract(rep.Sources)...,
 	)

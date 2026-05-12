@@ -14,7 +14,7 @@ import (
 )
 
 func TestRunMonitoringValidation_NilConfig(t *testing.T) {
-	rep := runMonitoringValidation(context.Background(), nil)
+	rep := runMonitoringValidation(context.Background(), nil, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected failure when cfg is nil")
 	}
@@ -23,7 +23,7 @@ func TestRunMonitoringValidation_NilConfig(t *testing.T) {
 
 func TestRunMonitoringValidation_EmptyDataDir(t *testing.T) {
 	cfg := &config.Config{}
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected failure when data_dir empty")
 	}
@@ -34,7 +34,7 @@ func TestRunMonitoringValidation_MissingHealthFile(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{}
 	cfg.Agent.DataDir = dir
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected failure when monitoring_health.json missing")
 	}
@@ -48,7 +48,7 @@ func TestRunMonitoringValidation_InvalidJSON(t *testing.T) {
 	}
 	cfg := &config.Config{}
 	cfg.Agent.DataDir = dir
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected failure on invalid JSON")
 	}
@@ -67,7 +67,7 @@ func TestRunMonitoringValidation_SchemaVersionMismatch(t *testing.T) {
 		sources = append(sources, map[string]any{"name": name, "status": "healthy"})
 	}
 	writeMonitoringHealthFixtureWithSchema(t, dir, 10, sources, 999)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected schema failure")
 	}
@@ -95,7 +95,7 @@ func TestRunMonitoringValidation_RegulatedExpectsInventoryRow(t *testing.T) {
 		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
 	}
 	writeMonitoringHealthFixture(t, dir, 42, sources)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected missing inventory row to fail")
 	}
@@ -122,7 +122,7 @@ func TestRunMonitoringValidation_AllExpectedSourcesHealthy(t *testing.T) {
 		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
 	}
 	writeMonitoringHealthFixture(t, dir, 42, sources)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed != 0 {
 		t.Fatalf("unexpected failures Failed=%d details=%v", rep.Failed, rep.Assertions)
 	}
@@ -144,7 +144,7 @@ func TestRunMonitoringValidation_HeapExceedsBudget(t *testing.T) {
 		sources = append(sources, map[string]any{"name": name, "status": "healthy"})
 	}
 	writeMonitoringHealthFixture(t, dir, float64(budget+80), sources)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected heap budget failure")
 	}
@@ -166,7 +166,7 @@ func TestRunMonitoringValidation_MissingSource(t *testing.T) {
 		rows = append(rows, map[string]any{"name": name, "status": "healthy"})
 	}
 	writeMonitoringHealthFixture(t, dir, 10, rows)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected missing source failure")
 	}
@@ -267,7 +267,7 @@ func TestRunMonitoringValidation_KernelAbsentPassesWhenRequireKernelFalse(t *tes
 		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
 	}
 	writeMonitoringHealthFixture(t, dir, 42, sources)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed != 0 {
 		t.Fatalf("kernel absent must not fail validation when require_kernel=false: %#v", rep.Assertions)
 	}
@@ -292,7 +292,7 @@ func TestRunMonitoringValidation_KernelAbsentFailsWhenRequireKernelTrue(t *testi
 		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
 	}
 	writeMonitoringHealthFixture(t, dir, 42, sources)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected failure when kernel absent and require_kernel=true")
 	}
@@ -315,7 +315,7 @@ func TestRunMonitoringValidation_StrictCompleteDropsFail(t *testing.T) {
 	}
 	sources[0]["dropped"] = float64(1)
 	writeMonitoringHealthFixture(t, dir, 42, sources)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected strict_complete to fail on dropped events")
 	}
@@ -340,7 +340,7 @@ func TestRunMonitoringValidation_StrictCompleteRejectsPlaceholderSources(t *test
 		})
 	}
 	writeMonitoringHealthFixture(t, dir, 42, sources)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed == 0 {
 		t.Fatal("expected strict_complete to fail on placeholder source backends")
 	}
@@ -364,7 +364,7 @@ func TestMonitoringValidation_SoakSmoke(t *testing.T) {
 		sources = append(sources, map[string]any{"name": name, "status": "healthy", "dropped": float64(0)})
 	}
 	writeMonitoringHealthFixture(t, dir, 42, sources)
-	rep := runMonitoringValidation(context.Background(), cfg)
+	rep := runMonitoringValidation(context.Background(), cfg, false)
 	if rep.Failed != 0 {
 		t.Fatalf("soak smoke validation failed: %#v", rep.Assertions)
 	}

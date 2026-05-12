@@ -7,7 +7,7 @@ type journalAuthPillar struct {
 }
 
 func newJournalAuthPillarCollector(j *JournaldSource, streamMaxEPS int) *journalAuthPillar {
-	raw := newStreamingRunCollector("__auth_journal", 256, streamMaxEPS, j.Run, func() map[string]any {
+	raw := newStreamingRunCollector("auth", 256, streamMaxEPS, j.Run, func() map[string]any {
 		return journalAuthPillarHealth(j)
 	})
 	return &journalAuthPillar{streamingRunCollector: raw}
