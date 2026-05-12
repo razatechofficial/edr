@@ -5,10 +5,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
 sudo apt-get update -qq
-sudo apt-get install -y clang-16 llvm-16 libbpf-dev libyara-dev pkg-config bpftool \
-	linux-headers-"$(uname -r)" \
-	linux-tools-"$(uname -r)" linux-tools-generic \
-	|| sudo apt-get install -y clang llvm libbpf-dev libyara-dev pkg-config bpftool
+
+if ! sudo apt-get install -y clang-16 llvm-16 libbpf-dev libyara-dev pkg-config linux-tools-common linux-tools-generic; then
+	sudo apt-get install -y clang llvm libbpf-dev libyara-dev pkg-config linux-tools-common linux-tools-generic
+fi
+
+for opt in "linux-tools-$(uname -r)" "linux-headers-$(uname -r)"; do
+	sudo apt-get install -y "${opt}" || true
+done
 
 if ! pkg-config --exists libbpf 2>/dev/null; then
 	bash scripts/install_libbpf_headers.sh
@@ -39,3 +43,8 @@ fi
 rm -f platform/linux/ebpf/vmlinux.h platform/linux/ebpf/edr.bpf.o
 find platform/linux/ebpf -maxdepth 1 -name '*.o' -delete
 bash scripts/gen_vmlinux.sh
+
+if [ ! -s platform/linux/ebpf/vmlinux.h ]; then
+	echo "ERROR: vmlinux.h was not generated" >&2
+	exit 1
+fi
