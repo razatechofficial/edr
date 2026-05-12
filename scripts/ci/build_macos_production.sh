@@ -10,27 +10,52 @@ VERSION="${EDR_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || ec
 ARCH="$(go env GOARCH)"
 AGENT_OUT="dist/darwin-${ARCH}/edr-agent"
 CTL_OUT="bin/edrctl-darwin-${ARCH}"
-LDFLAGS="-s -w -X main.Version=${VERSION}"
+LDFLAGS="-s -w -X main.version=${VERSION} -X main.Version=${VERSION}"
 
 mkdir -p "dist/darwin-${ARCH}" bin
-CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
-	-ldflags "${LDFLAGS}" -o "${AGENT_OUT}" ./cmd/agent
-CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
-	-ldflags "${LDFLAGS}" -o "${CTL_OUT}" ./cmd/cli
+if ! CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
+	-ldflags "${LDFLAGS}" -o "${AGENT_OUT}" ./cmd/agent; then
+	echo "macOS agent build failed" >&2
+	exit 1
+fi
+if ! CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
+	-ldflags "${LDFLAGS}" -o "${CTL_OUT}" ./cmd/cli; then
+	echo "macOS edrctl build failed" >&2
+	exit 1
+fi
 
-otool -L "${AGENT_OUT}" | grep -E 'EndpointSecurity|Security|SystemConfiguration'
+if ! otool -L "${AGENT_OUT}" | grep -E 'EndpointSecurity|Security|SystemConfiguration' >/dev/null; then
+	echo "expected macOS security frameworks are not linked into ${AGENT_OUT}" >&2
+	otool -L "${AGENT_OUT}" >&2 || true
+	exit 1
+fi
 
 ENTITLEMENTS="build/macos/edr-agent.entitlements.plist"
 if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
-	codesign --force --options runtime --timestamp \
+	if ! codesign --force --options runtime --timestamp \
 		--entitlements "${ENTITLEMENTS}" \
-		--sign "${APPLE_SIGN_IDENTITY}" "${AGENT_OUT}"
-	codesign --force --options runtime --timestamp \
-		--sign "${APPLE_SIGN_IDENTITY}" "${CTL_OUT}"
-	codesign -d --entitlements :- "${AGENT_OUT}" | grep -q 'com.apple.developer.endpoint-security.client'
+		--sign "${APPLE_SIGN_IDENTITY}" "${AGENT_OUT}"; then
+		echo "codesign with APPLE_SIGN_IDENTITY failed" >&2
+		exit 1
+	fi
+	if ! codesign --force --options runtime --timestamp \
+		--sign "${APPLE_SIGN_IDENTITY}" "${CTL_OUT}"; then
+		echo "codesign for edrctl failed" >&2
+		exit 1
+	fi
+	if ! codesign -d --entitlements :- "${AGENT_OUT}" | grep -q 'com.apple.developer.endpoint-security.client'; then
+		echo "endpoint-security entitlement missing after signing" >&2
+		exit 1
+	fi
 else
-	codesign --force --sign - "${AGENT_OUT}"
-	codesign --force --sign - "${CTL_OUT}"
+	if ! codesign --force --sign - "${AGENT_OUT}"; then
+		echo "ad-hoc codesign failed for ${AGENT_OUT}" >&2
+		exit 1
+	fi
+	if ! codesign --force --sign - "${CTL_OUT}"; then
+		echo "ad-hoc codesign failed for ${CTL_OUT}" >&2
+		exit 1
+	fi
 	echo "Ad-hoc signed; set APPLE_SIGN_IDENTITY for release entitlements"
 fi
 

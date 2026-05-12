@@ -22,6 +22,12 @@ struct trace_event_raw_sys_enter {
 	__u64 args[6];
 };
 
+struct trace_event_raw_sys_exit {
+	__u64 unused;
+	__s64 id;
+	long ret;
+};
+
 struct trace_event_raw_sched_process_fork {
 	char _pad0[8];
 	pid_t parent_pid;

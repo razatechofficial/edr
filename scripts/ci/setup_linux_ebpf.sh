@@ -5,10 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
 sudo apt-get update -qq
-sudo apt-get install -y clang-16 llvm-16 libbpf-dev libyara-dev pkg-config \
+sudo apt-get install -y clang-16 llvm-16 libbpf-dev libyara-dev pkg-config bpftool \
 	linux-headers-"$(uname -r)" \
 	linux-tools-"$(uname -r)" linux-tools-generic \
-	|| sudo apt-get install -y clang llvm libbpf-dev libyara-dev pkg-config
+	|| sudo apt-get install -y clang llvm libbpf-dev libyara-dev pkg-config bpftool
 
 if ! pkg-config --exists libbpf 2>/dev/null; then
 	bash scripts/install_libbpf_headers.sh
@@ -36,5 +36,6 @@ if [ -n "${GITHUB_ENV:-}" ]; then
 	} >>"${GITHUB_ENV}"
 fi
 
-rm -f platform/linux/ebpf/vmlinux.h platform/linux/ebpf/*.o platform/linux/ebpf/edr.bpf.o
-EDR_VMLINUX_FALLBACK=1 bash scripts/gen_vmlinux.sh
+rm -f platform/linux/ebpf/vmlinux.h platform/linux/ebpf/edr.bpf.o
+find platform/linux/ebpf -maxdepth 1 -name '*.o' -delete
+bash scripts/gen_vmlinux.sh

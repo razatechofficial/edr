@@ -7,7 +7,12 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 brew update
-brew install yara pkg-config
+brew install yara pkg-config || brew upgrade yara pkg-config || true
+
+if ! pkg-config --exists yara; then
+	echo "ERROR: yara pkg-config metadata not found after brew install" >&2
+	exit 1
+fi
 
 if [ -n "${GITHUB_ENV:-}" ]; then
 	{
