@@ -15,12 +15,16 @@ fi
 if ! brew list pkg-config >/dev/null 2>&1; then
 	brew install pkg-config
 fi
+if ! brew list openssl@3 >/dev/null 2>&1; then
+	brew install openssl@3
+fi
 
 yara_prefix="$(brew --prefix yara)"
-export PKG_CONFIG_PATH="${yara_prefix}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+openssl_prefix="$(brew --prefix openssl@3)"
+export PKG_CONFIG_PATH="${yara_prefix}/lib/pkgconfig:${openssl_prefix}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 export CGO_ENABLED=1
 export CGO_CFLAGS="${CGO_CFLAGS:-} $(pkg-config --cflags yara 2>/dev/null || true)"
-export CGO_LDFLAGS="${CGO_LDFLAGS:-} $(pkg-config --libs yara 2>/dev/null || true)"
+export CGO_LDFLAGS="${CGO_LDFLAGS:-} $(pkg-config --libs yara 2>/dev/null || true) -L${openssl_prefix}/lib"
 
 if ! pkg-config --exists yara; then
 	echo "ERROR: yara pkg-config metadata not found after brew install" >&2

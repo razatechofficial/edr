@@ -12,7 +12,7 @@ struct {
 	__uint(max_entries, 1 << 22);
 } sched_events SEC(".maps");
 
-static __always_inline void fill_sched_hdr(struct event_header *hdr, __u32 ev_type)
+static __always_inline void fill_sched_hdr(struct edr_event_hdr *hdr, __u32 ev_type)
 {
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
 	__u64 uid_gid = bpf_get_current_uid_gid();

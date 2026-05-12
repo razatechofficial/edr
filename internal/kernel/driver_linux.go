@@ -108,7 +108,7 @@ type bpfFileEvent struct {
 	NewName       [bpfFilenameLen]byte
 }
 
-// bpfEventHeader mirrors event_header in platform/linux/ebpf/common.h.
+// bpfEventHeader mirrors edr_event_hdr in platform/linux/ebpf/common.h.
 type bpfEventHeader struct {
 	Type uint32
 	PID  uint32

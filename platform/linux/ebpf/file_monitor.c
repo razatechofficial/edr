@@ -65,7 +65,7 @@ static __always_inline __u64 fd_key(__u32 pid, __u32 fd)
 	return ((__u64)pid << 32) | (__u64)fd;
 }
 
-static __always_inline void fill_header(struct event_header *hdr, __u32 type)
+static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 {
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	__u64 pid_tgid = bpf_get_current_pid_tgid();

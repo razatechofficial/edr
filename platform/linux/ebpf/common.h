@@ -72,7 +72,7 @@ enum event_type {
 	EVENT_PRIVILEGE       = 42,
 };
 
-struct event_header {
+struct edr_event_hdr {
 	__u32 type;
 	__u32 pid;
 	__u32 ppid;
@@ -83,7 +83,7 @@ struct event_header {
 };
 
 struct process_event {
-	struct event_header hdr;
+	struct edr_event_hdr hdr;
 	char   filename[MAX_FILENAME_LEN];
 	__u32  args_size;
 	char   args[MAX_ARGS_LEN];
@@ -93,7 +93,7 @@ struct process_event {
 };
 
 struct file_event {
-	struct event_header hdr;
+	struct edr_event_hdr hdr;
 	char   filename[MAX_FILENAME_LEN];
 	__u32  flags;          /* openat: O_*; unlinkat/renameat2: AT_* / rename flags */
 	__u32  write_fd;       /* write/pwrite64: fd; otherwise 0 */
@@ -106,7 +106,7 @@ struct file_event {
 };
 
 struct network_event {
-	struct event_header hdr;
+	struct edr_event_hdr hdr;
 	__u32 protocol;
 	__u32 src_addr;
 	__u16 src_port;
@@ -121,7 +121,7 @@ struct network_event {
 };
 
 struct security_event {
-	struct event_header hdr;
+	struct edr_event_hdr hdr;
 	__u32 syscall_nr;
 	__u64 arg0;
 	__u64 arg1;
@@ -136,7 +136,7 @@ struct security_event {
 
 /* Scheduler tracepoint samples (high volume; userspace gated by policy). */
 struct sched_event {
-	struct event_header hdr;
+	struct edr_event_hdr hdr;
 	__u32 prev_pid;
 	__u32 next_pid;
 	__u32 cpu;
