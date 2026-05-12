@@ -40,7 +40,7 @@ struct {
 	__type(value, __u8);
 } connect_deny_list SEC(".maps");
 
-static __always_inline void fill_header(struct event_header *hdr, __u32 type)
+static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 {
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	__u64 pid_tgid = bpf_get_current_pid_tgid();

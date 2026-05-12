@@ -59,7 +59,7 @@ static __always_inline void pid_meta_update(__u32 pid)
 	bpf_map_update_elem(&pid_meta, &pid, &meta, BPF_ANY);
 }
 
-static __always_inline void fill_header(struct event_header *hdr, __u32 type)
+static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 {
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	__u64 pid_tgid = bpf_get_current_pid_tgid();

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OUT="platform/linux/ebpf/vmlinux.h"
-FALLBACK="platform/linux/ebpf/vmlinux_fallback.h"
-VENDOR_BPF="platform/linux/ebpf/libbpf/bpf/bpf_helpers.h"
-MIN_VMLINUX_LINES="${EDR_MIN_VMLINUX_LINES:-500}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${ROOT}"
+
+# shellcheck source=scripts/ci/resolve_bpftool.sh
+source "${ROOT}/scripts/ci/resolve_bpftool.sh"
 
 find_clang_bpf() {
 	for candidate in \
@@ -24,32 +25,7 @@ find_clang_bpf() {
 }
 
 resolve_bpftool() {
-	local kernel tools_dir tool
-
-	if command -v bpftool >/dev/null 2>&1; then
-		if bpftool version >/dev/null 2>&1; then
-			command -v bpftool
-			return 0
-		fi
-	fi
-
-	kernel="$(uname -r)"
-	tool="/usr/lib/linux-tools/${kernel}/bpftool"
-	if [ -x "${tool}" ]; then
-		echo "${tool}"
-		return 0
-	fi
-
-	for tools_dir in /usr/lib/linux-tools/* /usr/lib/linux-tools-*; do
-		[ -d "${tools_dir}" ] || continue
-		tool="${tools_dir}/bpftool"
-		if [ -x "${tool}" ]; then
-			echo "${tool}"
-			return 0
-		fi
-	done
-
-	return 1
+	resolve_bpftool_bin
 }
 
 validate_vmlinux_header() {
@@ -68,6 +44,11 @@ validate_vmlinux_header() {
 
 	return 0
 }
+
+OUT="platform/linux/ebpf/vmlinux.h"
+FALLBACK="platform/linux/ebpf/vmlinux_fallback.h"
+VENDOR_BPF="platform/linux/ebpf/libbpf/bpf/bpf_helpers.h"
+MIN_VMLINUX_LINES="${EDR_MIN_VMLINUX_LINES:-500}"
 
 CLANG_BPF=$(find_clang_bpf)
 if [ -z "$CLANG_BPF" ]; then

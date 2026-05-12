@@ -31,26 +31,11 @@ if [ -z "${clang_bpf}" ]; then
 	exit 1
 fi
 
-if command -v bpftool >/dev/null 2>&1 && ! bpftool version >/dev/null 2>&1; then
-	sudo rm -f /usr/local/bin/bpftool
-fi
-
-kernel="$(uname -r)"
-if [ -x "/usr/lib/linux-tools/${kernel}/bpftool" ]; then
-	sudo ln -sf "/usr/lib/linux-tools/${kernel}/bpftool" /usr/local/bin/bpftool
-else
-	for tools_dir in /usr/lib/linux-tools/* /usr/lib/linux-tools-*; do
-		[ -d "${tools_dir}" ] || continue
-		if [ -x "${tools_dir}/bpftool" ]; then
-			sudo ln -sf "${tools_dir}/bpftool" /usr/local/bin/bpftool
-			break
-		fi
-	done
-fi
-
-if ! command -v bpftool >/dev/null 2>&1 || ! bpftool version >/dev/null 2>&1; then
-	echo "ERROR: bpftool is not available for kernel ${kernel}" >&2
-	exit 1
+# shellcheck source=scripts/ci/resolve_bpftool.sh
+source "${ROOT}/scripts/ci/resolve_bpftool.sh"
+install_bpftool_path
+if [ -n "${GITHUB_ENV:-}" ]; then
+	echo "PATH=${PATH}" >>"${GITHUB_ENV}"
 fi
 
 export CLANG="${clang_bpf}"

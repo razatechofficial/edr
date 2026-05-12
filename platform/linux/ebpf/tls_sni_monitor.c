@@ -19,7 +19,7 @@ struct {
 // Bound parser budget to keep verifier/runtime costs predictable.
 #define TLS_PARSE_BUDGET 256
 
-static __always_inline void fill_header_tls(struct event_header *hdr, __u32 type)
+static __always_inline void fill_header_tls(struct edr_event_hdr *hdr, __u32 type)
 {
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	__u64 pid_tgid = bpf_get_current_pid_tgid();

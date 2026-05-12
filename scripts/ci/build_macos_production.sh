@@ -15,7 +15,7 @@ CTL_OUT="bin/edrctl-darwin-${ARCH}"
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.Version=${VERSION}"
 
 mkdir -p "dist/darwin-${ARCH}" bin
-if ! CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
+if ! CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath -v \
 	-ldflags "${LDFLAGS}" -o "${AGENT_OUT}" ./cmd/agent; then
 	echo "macOS agent build failed" >&2
 	exit 1
