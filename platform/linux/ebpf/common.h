@@ -55,6 +55,13 @@ enum event_type {
 	EVENT_LSM_FIM_UNLINK  = 39,
 	EVENT_LSM_FIM_RENAME  = 40,
 	EVENT_LSM_FIM_SETATTR = 41,
+	/*
+	 * Privilege-change syscalls (setuid/setgid family). Previously these
+	 * tracepoints emitted EVENT_SIGNAL which is reserved for kill(2) and
+	 * obscured downstream rules. EVENT_PRIVILEGE carries the new UID/GID
+	 * in security_event.arg0 and the syscall number in syscall_nr.
+	 */
+	EVENT_PRIVILEGE       = 42,
 };
 
 struct event_header {
@@ -127,6 +134,22 @@ struct sched_event {
 	__u32 cpu;
 	__u32 target_cpu;
 	__u64 runtime_ns;
+};
+
+/*
+ * pid_meta is short-lived per-pid scratch used to enrich events with
+ * data computed in handlers that run earlier in the pipeline. We index
+ * by pid (32-bit) and store a small fixed struct with the cgroup id and
+ * a "last seen" timestamp. Userspace can also write entries here to
+ * tag specific pids (e.g. "this is the agent" so we never alert on
+ * ourselves). The map is sized to a generous 16k pids and uses
+ * BPF_F_NO_PREALLOC so cold cores do not pin memory.
+ */
+struct pid_meta {
+	__u64 cgroup_id;
+	__u64 last_seen_ns;
+	__u32 flags;      /* bit 0: this is the EDR agent */
+	__u32 _pad;
 };
 
 #endif /* __EDR_COMMON_H__ */

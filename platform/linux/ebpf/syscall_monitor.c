@@ -117,48 +117,64 @@ int tracepoint__syscalls__sys_enter_finit_module(struct trace_event_raw_sys_ente
 	return 0;
 }
 
+/*
+ * Privilege-change syscalls emit EVENT_PRIVILEGE (was EVENT_SIGNAL). The
+ * helper macro keeps the body identical across all six entry points; each
+ * concrete tracepoint records the canonical x86_64 __NR_* and forwards
+ * args[0] (and args[1..2] where meaningful) as the requested IDs.
+ */
+#define EMIT_PRIVILEGE_EVENT(NR)                                              \
+	do {                                                                  \
+		if (pid_is_filtered())                                        \
+			return 0;                                             \
+		struct security_event *evt =                                  \
+			bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);    \
+		if (!evt)                                                     \
+			return 0;                                             \
+		__builtin_memset(evt, 0, sizeof(*evt));                       \
+		fill_header(&evt->hdr, EVENT_PRIVILEGE);                      \
+		evt->syscall_nr = (NR);                                       \
+		evt->arg0 = ctx->args[0];                                     \
+		evt->arg1 = ctx->args[1];                                     \
+		evt->arg2 = ctx->args[2];                                     \
+		bpf_ringbuf_submit(evt, 0);                                   \
+		return 0;                                                     \
+	} while (0)
+
 SEC("tracepoint/syscalls/sys_enter_setuid")
 int tracepoint__syscalls__sys_enter_setuid(struct trace_event_raw_sys_enter *ctx)
 {
-	if (pid_is_filtered())
-		return 0;
-
-	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
-	if (!evt)
-		return 0;
-
-	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header(&evt->hdr, EVENT_SIGNAL);
-
-	/* setuid(2): args[0]=uid */
-	evt->syscall_nr = 105; /* __NR_setuid on x86_64 */
-	evt->arg0 = ctx->args[0];
-
-	bpf_ringbuf_submit(evt, 0);
-	return 0;
+	EMIT_PRIVILEGE_EVENT(105); /* __NR_setuid */
 }
 
 SEC("tracepoint/syscalls/sys_enter_setgid")
 int tracepoint__syscalls__sys_enter_setgid(struct trace_event_raw_sys_enter *ctx)
 {
-	if (pid_is_filtered())
-		return 0;
+	EMIT_PRIVILEGE_EVENT(106); /* __NR_setgid */
+}
 
-	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
-	if (!evt)
-		return 0;
+SEC("tracepoint/syscalls/sys_enter_setreuid")
+int tracepoint__syscalls__sys_enter_setreuid(struct trace_event_raw_sys_enter *ctx)
+{
+	EMIT_PRIVILEGE_EVENT(113); /* __NR_setreuid */
+}
 
-	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header(&evt->hdr, EVENT_SIGNAL);
+SEC("tracepoint/syscalls/sys_enter_setregid")
+int tracepoint__syscalls__sys_enter_setregid(struct trace_event_raw_sys_enter *ctx)
+{
+	EMIT_PRIVILEGE_EVENT(114); /* __NR_setregid */
+}
 
-	/* setgid(2): args[0]=gid */
-	evt->syscall_nr = 106; /* __NR_setgid on x86_64 */
-	evt->arg0 = ctx->args[0];
+SEC("tracepoint/syscalls/sys_enter_setresuid")
+int tracepoint__syscalls__sys_enter_setresuid(struct trace_event_raw_sys_enter *ctx)
+{
+	EMIT_PRIVILEGE_EVENT(117); /* __NR_setresuid */
+}
 
-	bpf_ringbuf_submit(evt, 0);
-	return 0;
+SEC("tracepoint/syscalls/sys_enter_setresgid")
+int tracepoint__syscalls__sys_enter_setresgid(struct trace_event_raw_sys_enter *ctx)
+{
+	EMIT_PRIVILEGE_EVENT(119); /* __NR_setresgid */
 }
 
 SEC("tracepoint/syscalls/sys_enter_mount")
@@ -211,7 +227,18 @@ int tracepoint__syscalls__sys_enter_clone3(struct trace_event_raw_sys_enter *ctx
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
 	fill_header(&evt->hdr, EVENT_PROCESS_FORK);
-	evt->clone_flags = 0;
+
+	/* P1-7: clone3 receives a userspace pointer to struct clone_args
+	 * in args[0] instead of inlining flags as the legacy clone(2) does.
+	 * Read just the flags field (first u64 of clone_args) so we don't
+	 * fault on truncated structs from older glibc. If the user pointer
+	 * is bad we fall back to 0 — matches the legacy zero-flag fallback. */
+	void *uargs = (void *)ctx->args[0];
+	__u64 flags = 0;
+	if (uargs)
+		bpf_probe_read_user(&flags, sizeof(flags), uargs);
+	evt->clone_flags = flags;
+
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
