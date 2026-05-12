@@ -85,10 +85,18 @@ func (r *TelemetryRelay) Enqueue(line []byte) {
 }
 
 // Run drains queued segments with backpressure and emits periodic health logs.
+// Also starts the queue's background fsync loop (P0-11) so writes survive an
+// unclean shutdown bounded by ~1 s.
 func (r *TelemetryRelay) Run(ctx context.Context) {
 	if r == nil || r.q == nil {
 		return
 	}
+	r.q.Start(ctx)
+	defer func() {
+		if err := r.q.Close(); err != nil {
+			r.log.Debug("telemetry queue close error", "error", err)
+		}
+	}()
 	drainTick := time.NewTicker(2 * time.Second)
 	healthTick := time.NewTicker(60 * time.Second)
 	defer drainTick.Stop()
