@@ -1,0 +1,2 @@
+#!/bin/bash
+launchctl unload /Library/LaunchDaemons/com.razatech.edr-agent.plist 2>/dev/null || true
