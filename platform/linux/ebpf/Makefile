@@ -25,7 +25,7 @@ ifeq ($(CLANG_BPF),)
 $(error No clang with BPF backend found. On macOS: brew install llvm; On Ubuntu: apt-get install clang llvm; Or set CLANG=/path/to/bpf-capable-clang)
 endif
 BPF_ARCH   := $(shell uname -m 2>/dev/null | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' || echo "x86")
-BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror
+BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror -Wno-missing-declarations
 BPFTOOL    ?= bpftool
 LIBBPF_SYSTEM := $(shell pkg-config --cflags libbpf 2>/dev/null)
 VENDOR_INCLUDE := -I$(dir $(lastword $(MAKEFILE_LIST)))libbpf

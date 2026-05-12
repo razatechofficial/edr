@@ -62,7 +62,7 @@ $(shell \
 endef
 CLANG_BPF := $(call find_clang)
 BPF_ARCH   := $(shell uname -m 2>/dev/null | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' || echo "x86")
-BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror
+BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror -Wno-missing-declarations
 LIBBPF_SYSTEM := $(shell pkg-config --cflags libbpf 2>/dev/null)
 LIBBPF_VENDOR := -Iplatform/linux/ebpf/libbpf
 LIBBPF_DEFAULT := -I/usr/include
