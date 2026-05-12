@@ -736,6 +736,24 @@ func (a *Agent) ScanValidationYARA(ctx context.Context, path string) {
 	}
 }
 
+// ProbeValidationFilePaths evaluates baseline file rules for validation harnesses.
+func (a *Agent) ProbeValidationFilePaths(paths []string) {
+	if a == nil || a.detector == nil {
+		return
+	}
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		ev := schema.FileEvent{
+			Path:      path,
+			Operation: "open",
+		}
+		ev.EndpointID = a.cfg.Service.EndpointID
+		_ = a.handleAlerts(a.detector.EvaluateFile(ev))
+	}
+}
+
 func (a *Agent) emitValidationDetection(d detection.Detection) {
 	if a == nil {
 		return

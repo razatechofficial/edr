@@ -107,7 +107,7 @@ func TestMonitoringHealthGolden_Fixtures(t *testing.T) {
 				cfg.Agent.DataDir = dir
 			}
 
-			rep := runMonitoringValidation(context.Background(), cfg)
+			rep := runMonitoringValidation(context.Background(), cfg, false)
 
 			gotFailed := int(rep.Failed)
 			if gotFailed != tc.wantFailures {

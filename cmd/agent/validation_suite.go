@@ -179,7 +179,7 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 		}
 		fmt.Printf("  [%s] %-40s %s latency=%dms\n", status, r.TestName, r.MITRE, r.DetectionLatencyMs)
 	}
-	monRep := runMonitoringValidation(ctx, cfg)
+	monRep := runMonitoringValidation(ctx, cfg, true)
 	writeMonitoringReport(cfg, monRep)
 	if monRep.Failed > 0 {
 		failed += monRep.Failed
@@ -383,6 +383,16 @@ func buildValidationTests() []ValidationTest {
 			MITRE:       "T1552",
 			TimeoutSec:  10,
 			Simulate:    func(_ context.Context) error { return attemptSensitiveFileRead() },
+			AfterSimulate: func(_ context.Context, a *agent.Agent) {
+				switch runtime.GOOS {
+				case "windows":
+					a.ProbeValidationFilePaths([]string{`C:\Windows\System32\config\SAM`})
+				case "darwin":
+					a.ProbeValidationFilePaths([]string{"/Library/Application Support/com.apple.TCC/TCC.db"})
+				default:
+					a.ProbeValidationFilePaths([]string{"/etc/passwd", "/etc/shadow"})
+				}
+			},
 			Verify: func(_ context.Context, detections []detection.Detection) bool {
 				for _, d := range detections {
 					if strings.Contains(d.TechniqueID, "T1003.008") ||
