@@ -59,6 +59,26 @@ func NewRegistryCollector(endpointID string) *RegistryCollector {
 			`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows`,
 			`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options`,
 			`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper Objects`,
+			// P0-9 — persistence locations missing from the original list.
+			// COM object hijack (CLSID InProcServer32/LocalServer32).
+			`HKLM\SOFTWARE\Classes\CLSID`,
+			`HKCU\SOFTWARE\Classes\CLSID`,
+			// Credential providers and Lsa packages (LSA notification packages,
+			// authentication packages, security packages, etc).
+			`HKLM\SYSTEM\CurrentControlSet\Control\Lsa`,
+			// AppCertDlls — loaded into every process that calls CreateProcess.
+			`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\AppCertDlls`,
+			// Shim database persistence.
+			`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\InstalledSDB`,
+			`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Custom`,
+			// UserInitMprLogonScript (logon script persistence).
+			`HKCU\Environment`,
+			// Policies-Run / Policies-Explorer\Run.
+			`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run`,
+			`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run`,
+			// Terminal Server install hive (sysWOW64-style 32-bit nested Run).
+			`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Terminal Server\Install\Software\Microsoft\Windows\CurrentVersion\Run`,
+			`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Terminal Server\Install\Software\Microsoft\Windows\CurrentVersion\RunOnce`,
 		},
 		prev:        make(map[string]map[string]string),
 		initialized: make(map[string]bool),
