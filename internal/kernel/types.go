@@ -34,6 +34,13 @@ type EventPolicy struct {
 	// MutePIDs lists PIDs whose events should be dropped.
 	MutePIDs []uint32
 
+	// FIMPaths lists path prefixes the kernel-side file-monitor should
+	// emit events for. On Linux this is pushed into the eBPF path_filter
+	// map so the verifier-bounded prefix match runs in-kernel, dropping
+	// the vast majority of unrelated file events before they reach the
+	// ringbuf. Empty list disables filtering (capture everything).
+	FIMPaths []string
+
 	// Windows-only optional ETW providers (high volume; default off).
 	ETWWMIActivity      bool
 	ETWPowerShellScript bool
@@ -48,6 +55,15 @@ type EventPolicy struct {
 	ESFAuthDenyBudgetMs int
 	// KernelFileObjectCache correlates Kernel-File events to paths via FileObject handle (WHIDS-class).
 	KernelFileObjectCache bool
+
+	// TrustedTeamIDs (macOS, P1-9): Apple-developer team identifiers
+	// whose signed binaries are auto-allowed on ESF AUTH events with a
+	// short-lived cache. Default: empty (no team-id allowlist; every
+	// AUTH still flows through the handler). Use to whitelist e.g.
+	// Apple's "D6PSC4G3J7" and the EDR's own team id so trusted
+	// software does not pay the AUTH roundtrip cost. Unknown or
+	// adhoc-signed binaries always go through the full path.
+	TrustedTeamIDs []string
 }
 
 // DefaultPolicy returns an EventPolicy with all event types enabled.
