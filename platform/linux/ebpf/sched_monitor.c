@@ -2,7 +2,6 @@
 // Scheduler tracepoint probes (sched_switch / sched_wakeup / sched_migrate_task).
 
 #include "vmlinux.h"
-#include "tracepoint_sched_layout.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
@@ -45,18 +44,27 @@ int edr_tp_sched_switch(struct trace_event_raw_sched_switch *ctx)
 	return 0;
 }
 
+/* sched_wakeup_template fields after struct trace_entry (8 bytes). */
+#define EDR_SCHED_WAKEUP_OFF_PID	24
+#define EDR_SCHED_WAKEUP_OFF_TARGET_CPU	32
+
 SEC("tracepoint/sched/sched_wakeup")
-int edr_tp_sched_wakeup(struct trace_event_raw_sched_wakeup *ctx)
+int edr_tp_sched_wakeup(void *ctx)
 {
 	struct sched_event *e;
+	__u32 pid = 0;
+	__u32 target_cpu = 0;
 
 	e = bpf_ringbuf_reserve(&sched_events, sizeof(*e), 0);
 	if (!e)
 		return 0;
 	__builtin_memset(e, 0, sizeof(*e));
 	fill_sched_hdr(&e->hdr, EVENT_SCHED_WAKEUP);
-	e->next_pid = BPF_CORE_READ(ctx, pid);
-	e->target_cpu = (__u32)BPF_CORE_READ(ctx, target_cpu);
+	bpf_probe_read_kernel(&pid, sizeof(pid), ctx + EDR_SCHED_WAKEUP_OFF_PID);
+	bpf_probe_read_kernel(&target_cpu, sizeof(target_cpu),
+			      ctx + EDR_SCHED_WAKEUP_OFF_TARGET_CPU);
+	e->next_pid = pid;
+	e->target_cpu = target_cpu;
 	e->cpu = bpf_get_smp_processor_id();
 	e->runtime_ns = bpf_ktime_get_ns();
 	bpf_ringbuf_submit(e, 0);
