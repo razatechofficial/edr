@@ -34,6 +34,7 @@ required_paths=(
   "etc/edr-agent/rules/baseline.yaml"
   "etc/edr-agent/rules/playbooks/playbooks.yml"
   "var/lib/edr/bpf/edr.bpf.o"
+  "var/lib/edr/bpf/edr.bpf.version"
 )
 for p in "${required_paths[@]}"; do
   if [ ! -e "${tmpdir}/${p}" ]; then
