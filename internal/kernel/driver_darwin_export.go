@@ -86,26 +86,27 @@ func processESFNotifyPayload(d *ESFDriver, p *ESFNotifyPayload) {
 	argTok := p.Args
 	envTok := p.Env
 	argsDisplay := strings.ReplaceAll(argTok, "\x1e", " ")
-	envelope := map[string]interface{}{
-		"type":      evtType,
-		"timestamp": time.Now().UTC(),
-		"agent_id":  d.agentID,
-		"esf_type":  p.EventType,
-		"esf_op":    esfOperationName(p.EventType),
-		"seq":       d.esfSeq.Add(1),
-		"pid":       p.PID,
-		"ppid":      p.PPID,
-		"uid":       p.UID,
-		"gid":       p.GID,
-		"comm":      p.Comm,
-		"path":      pathGo,
-		"args":      argsDisplay,
-		"exec_env":  envTok,
-	}
+	// P2-9: reuse envelope maps across events to amortize allocation cost.
+	envelope := getEnvelope()
+	defer putEnvelope(envelope)
+	envelope["type"] = evtType
+	envelope["timestamp"] = time.Now().UTC()
+	envelope["agent_id"] = d.agentID
+	envelope["esf_type"] = p.EventType
+	envelope["esf_op"] = esfOperationName(p.EventType)
+	envelope["seq"] = d.esfSeq.Add(1)
+	envelope["pid"] = p.PID
+	envelope["ppid"] = p.PPID
+	envelope["uid"] = p.UID
+	envelope["gid"] = p.GID
+	envelope["comm"] = p.Comm
+	envelope["path"] = pathGo
+	envelope["args"] = argsDisplay
+	envelope["exec_env"] = envTok
 	classifyAppleScriptEnvelope(envelope, pathGo, argsDisplay)
 	if esfIsExecEvent(p.EventType) {
 		if pathGo != "" {
-			tid, cdh, flg := esfExecSigningInfo(pathGo)
+			tid, cdh, flg, valid := esfExecSigningInfoFull(pathGo)
 			if tid != "" {
 				envelope["signing_team_id"] = tid
 			}
@@ -113,7 +114,12 @@ func processESFNotifyPayload(d *ESFDriver, p *ESFNotifyPayload) {
 				envelope["image_cdhash"] = cdh
 			}
 			envelope["signing_flags"] = flg
-			envelope["signing_status"] = esfSigningStatus(flg)
+			// P1-11: surface signature validity. A non-empty teamID with
+			// valid_signature=false means the binary advertises signing
+			// metadata that does not verify — typical for tampered
+			// binaries and a high-signal detection input.
+			envelope["valid_signature"] = valid
+			envelope["signing_status"] = esfSigningStatusValidated(flg, tid, valid)
 		}
 	}
 
@@ -196,6 +202,21 @@ func goESFAuthCallback(eventType C.int, pid C.int, comm *C.char, pathStr *C.char
 		return 0
 	}
 
+	// P1-9: trusted-team-id fast path. Apple, Microsoft and the EDR's
+	// own developer team identifiers can be allowlisted via policy so
+	// signed binaries skip the goroutine-bound handler dispatch and
+	// respond immediately. Only signed binaries with a matching team id
+	// qualify — unsigned and adhoc-signed binaries always fall through
+	// to full analysis.
+	if pathKey != "" && d.isTrustedTeamPath(pathKey) {
+		d.authCacheHits.Add(1)
+		// Cache the allow decision so subsequent invocations short-
+		// circuit at the per-path cache (cheaper than re-evaluating
+		// signing on every AUTH event).
+		d.cache.set(pathKey, AuthAllow)
+		return 0
+	}
+
 	d.authMu.RLock()
 	handler := d.authHandler
 	d.authMu.RUnlock()
@@ -246,6 +267,22 @@ func esfSigningStatus(flags uint32) string {
 		return "adhoc"
 	}
 	return "signed"
+}
+
+// esfSigningStatusValidated extends esfSigningStatus with a
+// SecStaticCodeCheckValidity result (P1-11). A binary that advertises a
+// non-empty teamID but fails the integrity check is labeled
+// "invalid_signature" to distinguish it from genuine "unsigned" so
+// detection rules can fire on tampered binaries specifically.
+func esfSigningStatusValidated(flags uint32, teamID string, valid bool) string {
+	base := esfSigningStatus(flags)
+	if base == "signed" && !valid {
+		return "invalid_signature"
+	}
+	if teamID != "" && !valid {
+		return "invalid_signature"
+	}
+	return base
 }
 
 func safeGoString(s *C.char) string {
