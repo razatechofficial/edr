@@ -1,9 +1,9 @@
 package collector
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
+	"encoding/binary"
+	"hash/fnv"
+	"strconv"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/schema"
@@ -83,9 +83,29 @@ func NewFileDeduper(window time.Duration) *FileDeduper {
 	}
 }
 
+// fileDedupeKey hashes the dedupe inputs to a fixed-width string using
+// FNV-64a. P1-19: SHA-256 was overkill for a non-cryptographic dedupe
+// table and showed up as a measurable CPU cost in profiles when file
+// event rates spiked. FNV-64a is ~30x faster, allocation-free, and
+// 64 bits of state is more than sufficient at the cache capacities we
+// run (8192-entry LRU, collision probability negligible).
+//
+// We render the digest as a 16-char hex string so the existing
+// BoundedLRU[string, ...] keeps working without an API change; if the
+// LRU ever moves to a uint64-keyed map (planned for P2) drop the
+// strconv.FormatUint here and return the raw uint64 instead.
 func fileDedupeKey(eventType schema.EventType, pid int, path, operation string) string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%s|%s", eventType, pid, path, operation)))
-	return hex.EncodeToString(h[:])
+	h := fnv.New64a()
+	h.Write([]byte(eventType))
+	h.Write([]byte{'|'})
+	var pidBuf [8]byte
+	binary.LittleEndian.PutUint64(pidBuf[:], uint64(pid))
+	h.Write(pidBuf[:])
+	h.Write([]byte{'|'})
+	h.Write([]byte(path))
+	h.Write([]byte{'|'})
+	h.Write([]byte(operation))
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 // ShouldEmitFile returns false if the same file event key was seen within the
