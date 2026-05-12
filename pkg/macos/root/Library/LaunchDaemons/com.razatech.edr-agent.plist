@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.razatech.edr-agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/edr-agent</string>
+        <string>--config</string>
+        <string>/etc/edr-agent/config.yml</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/edr-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/edr-agent.error.log</string>
+</dict>
+</plist>
