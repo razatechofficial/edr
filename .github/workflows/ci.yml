@@ -29,7 +29,7 @@ jobs:
         run: bash scripts/ci/setup_linux_ebpf.sh
 
       - name: Build eBPF objects
-        run: make ebpf
+        run: make ebpf CLANG=clang-16
 
       - name: Link eBPF + BPF version check
         run: make ebpf-link bpf-version-check
