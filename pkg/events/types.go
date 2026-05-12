@@ -17,6 +17,10 @@ const (
 	EventMount      EventType = "mount"
 	EventPtrace     EventType = "ptrace"
 	EventSignal     EventType = "signal"
+	// EventPrivilege covers privilege-change syscalls (setuid family) on
+	// Linux. Previously emitted under EventSignal which obscured downstream
+	// detections; see audit P0-6.
+	EventPrivilege  EventType = "privilege"
 	EventWMI        EventType = "wmi"
 	EventPowerShell EventType = "powershell"
 	EventPipe       EventType = "pipe"
