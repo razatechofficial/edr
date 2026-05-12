@@ -54,6 +54,21 @@ type ProcessEvent struct {
 	Tags      []string       `json:"tags,omitempty"`
 	Severity  string         `json:"severity,omitempty"`
 	Ancestors []AncestorInfo `json:"ancestors,omitempty"`
+
+	// P2-6 enrichment fields.
+	// IntegrityLevel reflects the Windows token integrity level (Low,
+	// Medium, High, System). Empty on non-Windows.
+	IntegrityLevel string `json:"integrity_level,omitempty"`
+	// TokenElevationType is the Windows TOKEN_ELEVATION_TYPE
+	// (1=Default, 2=Full, 3=Limited). Zero on non-Windows.
+	TokenElevationType uint32 `json:"token_elevation_type,omitempty"`
+	// LogonID ties a process create event back to the originating
+	// Security log 4624 by Subject Logon ID.
+	LogonID string `json:"logon_id,omitempty"`
+	// CommandLineHash is SHA-256 hex of CommandLine (lower-case, no
+	// truncation) so detection rules can match on a stable hash even
+	// when raw CommandLine is truncated by ETW.
+	CommandLineHash string `json:"command_line_hash,omitempty"`
 }
 
 type FileEvent struct {
@@ -134,6 +149,14 @@ type NetworkEvent struct {
 	Transport string `json:"transport,omitempty"`
 	// CommunityID is an optional RFC-style flow hash shared with Zeek when both endpoints compute it.
 	CommunityID string `json:"community_id,omitempty"`
+
+	// P2-6 connection-level metrics. BytesIn / BytesOut are the
+	// kernel-counted byte totals on connection close (TCP) or
+	// per-packet totals (UDP). DurationMs is the lifetime of the flow
+	// in milliseconds, computed from connect to close.
+	BytesIn    uint64 `json:"bytes_in,omitempty"`
+	BytesOut   uint64 `json:"bytes_out,omitempty"`
+	DurationMs uint64 `json:"duration_ms,omitempty"`
 }
 
 type AuthEvent struct {
@@ -281,4 +304,23 @@ type FeatureStatusEvent struct {
 	BaseEvent
 	Features map[string]bool `json:"features,omitempty"`
 	Degraded []string        `json:"degraded,omitempty"`
+}
+
+// PrivilegeEvent is emitted when a process invokes a privilege-change
+// syscall (setuid/setgid family). Distinct from SignalEvent so SIEM
+// queries can scope on identity-elevation activity directly. The Linux
+// eBPF emitter populates Operation and NewUID/NewGID; ETW/ESF paths can
+// reuse the same shape for cross-platform parity.
+type PrivilegeEvent struct {
+	BaseEvent
+	PID        uint32 `json:"pid"`
+	PPID       uint32 `json:"ppid,omitempty"`
+	Comm       string `json:"comm,omitempty"`
+	Operation  string `json:"operation,omitempty"`
+	SyscallNr  uint32 `json:"syscall_nr,omitempty"`
+	NewUID     uint32 `json:"new_uid,omitempty"`
+	NewGID     uint32 `json:"new_gid,omitempty"`
+	EffectiveID uint32 `json:"effective_id,omitempty"`
+	SavedID    uint32 `json:"saved_id,omitempty"`
+	CallerUID  uint32 `json:"caller_uid,omitempty"`
 }
