@@ -16,6 +16,14 @@
 #define BPF_MAP_TYPE_RINGBUF 27
 #endif
 
+#ifndef BPF_MAP_TYPE_LRU_HASH
+#define BPF_MAP_TYPE_LRU_HASH 9
+#endif
+
+#ifndef BPF_ANY
+#define BPF_ANY 0
+#endif
+
 #define TASK_COMM_LEN    16
 #define MAX_FILENAME_LEN 256
 #define MAX_ARGS_LEN     512
