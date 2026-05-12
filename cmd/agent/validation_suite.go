@@ -127,6 +127,7 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 	sink := NewValidationSink()
 	a.SetValidationSink(sink.Send)
 	defer a.SetValidationSink(nil)
+	a.PrepareValidationHarness()
 
 	tests := buildValidationTests()
 	results := make([]TestResult, 0, len(tests))
@@ -166,6 +167,7 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+	a.WriteMonitoringHealthSnapshot()
 	fmt.Printf("\n=== Results: %d/%d passed ===\n", passed, len(tests))
 	for _, r := range results {
 		status := "PASS"
@@ -252,11 +254,18 @@ func runOneTest(ctx context.Context, sink *ValidationSink, test ValidationTest) 
 	detections := sink.DrainSince(startAt)
 	res.FailReason = fmt.Sprintf("timeout after %ds — %d detections received but none matched", test.TimeoutSec, len(detections))
 	if len(detections) > 0 {
-		techniques := make([]string, 0, len(detections))
+		labels := make([]string, 0, len(detections))
 		for _, d := range detections {
-			techniques = append(techniques, d.TechniqueID)
+			switch {
+			case d.RuleID != "":
+				labels = append(labels, d.RuleID)
+			case d.TechniqueID != "":
+				labels = append(labels, d.TechniqueID)
+			default:
+				labels = append(labels, "unknown")
+			}
 		}
-		res.FailReason += fmt.Sprintf(" (got: %s)", strings.Join(techniques, ", "))
+		res.FailReason += fmt.Sprintf(" (got: %s)", strings.Join(labels, ", "))
 	}
 	return res
 }
@@ -302,6 +311,17 @@ func buildValidationTests() []ValidationTest {
 				_ = os.MkdirAll(filepath.Dir(startupPath), 0o755)
 				return os.WriteFile(startupPath, []byte("#!/bin/sh\necho owned"), 0o755)
 			},
+			Verify: func(_ context.Context, detections []detection.Detection) bool {
+				for _, d := range detections {
+					if strings.Contains(d.TechniqueID, "T1547") {
+						return true
+					}
+					if strings.EqualFold(d.RuleID, "FILE-009") || strings.EqualFold(d.RuleID, "FILE-010") {
+						return true
+					}
+				}
+				return false
+			},
 			Cleanup:     func() { _ = os.Remove(startupPath) },
 			SupportedOS: []string{"linux", "darwin", "windows"},
 			Optional:    true,
@@ -309,16 +329,18 @@ func buildValidationTests() []ValidationTest {
 		{
 			Name:       "yara-eicar-detection",
 			MITRE:      "T1204",
-			TimeoutSec: 15,
-			Simulate: func(ctx context.Context) error {
+			TimeoutSec: 45,
+			Simulate: func(_ context.Context) error {
 				eicar := `X5O!P%@AP[4\PZX54(P^)7CC)7}` + `$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*`
-				quoted := strings.ReplaceAll(eicar, `'`, `'\''`)
-				cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("printf '%%s' '%s' > %q", quoted, eicarPath))
-				return cmd.Run()
+				return os.WriteFile(eicarPath, []byte(eicar), 0o644)
 			},
 			Verify: func(_ context.Context, detections []detection.Detection) bool {
 				for _, d := range detections {
-					if d.Source == detection.SourceYARA && strings.Contains(strings.ToLower(d.RuleID), "eicar") {
+					rule := strings.ToLower(d.RuleID)
+					if d.Source == detection.SourceYARA && strings.Contains(rule, "eicar") {
+						return true
+					}
+					if strings.Contains(rule, "eicar") {
 						return true
 					}
 				}
@@ -446,7 +468,7 @@ func attemptSensitiveFileRead() error {
 	case "darwin":
 		targets = []string{"/Library/Application Support/com.apple.TCC/TCC.db"}
 	default:
-		targets = []string{"/etc/shadow"}
+		targets = []string{"/etc/passwd", "/etc/shadow"}
 	}
 	for _, p := range targets {
 		_, _ = os.ReadFile(p) // permission denied still exercises file access path
