@@ -17,8 +17,12 @@ static int esf_is_exec_event(int t) {
 }
 
 // Fills teamBuf (NUL-terminated) and cdhexBuf (lowercase hex of first CD hash).
+// outValid is set to 1 when the signature is structurally valid per
+// SecStaticCodeCheckValidity, 0 otherwise. A non-zero teamID without
+// outValid=1 means the binary advertises a team identifier but the
+// signature is corrupt or mismatched and should be treated as untrusted.
 static void esf_signing_info(const char *utf8Path, char *teamBuf, size_t teamLen,
-	char *cdhexBuf, size_t cdhexLen, uint32_t *outFlags) {
+	char *cdhexBuf, size_t cdhexLen, uint32_t *outFlags, uint8_t *outValid) {
 	if (!utf8Path || utf8Path[0] == '\0') {
 		return;
 	}
@@ -30,6 +34,9 @@ static void esf_signing_info(const char *utf8Path, char *teamBuf, size_t teamLen
 	}
 	if (outFlags) {
 		*outFlags = 0;
+	}
+	if (outValid) {
+		*outValid = 0;
 	}
 
 	CFURLRef url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault,
@@ -43,6 +50,19 @@ static void esf_signing_info(const char *utf8Path, char *teamBuf, size_t teamLen
 	CFRelease(url);
 	if (st != errSecSuccess || code == NULL) {
 		return;
+	}
+
+	// P1-11: SecCodeCopySigningInformation only reads metadata. A binary
+	// with a tampered code directory or stale CMS blob still returns
+	// success here. SecStaticCodeCheckValidity actually verifies the
+	// signature against the on-disk content and the embedded designated
+	// requirement. Check across all architectures so a fat binary that
+	// is signed on x86 but tampered on arm64 (or vice-versa) is caught.
+	OSStatus vst = SecStaticCodeCheckValidity(code,
+		kSecCSDefaultFlags | kSecCSCheckAllArchitectures,
+		NULL);
+	if (outValid) {
+		*outValid = (vst == errSecSuccess) ? 1 : 0;
 	}
 
 	CFDictionaryRef info = NULL;
@@ -95,8 +115,18 @@ func esfIsExecEvent(eventType int) bool {
 }
 
 func esfExecSigningInfo(path string) (teamID, cdHash string, flags uint32) {
+	teamID, cdHash, flags, _ = esfExecSigningInfoFull(path)
+	return teamID, cdHash, flags
+}
+
+// esfExecSigningInfoFull returns the same data as esfExecSigningInfo
+// plus a validSignature bool (P1-11) populated from
+// SecStaticCodeCheckValidity. When validSignature is false but teamID
+// is non-empty the binary is presenting metadata for a signature that
+// fails verification and should be treated as untrusted.
+func esfExecSigningInfoFull(path string) (teamID, cdHash string, flags uint32, validSignature bool) {
 	if path == "" {
-		return "", "", 0
+		return "", "", 0, false
 	}
 	cpath := C.CString(path)
 	defer C.free(unsafe.Pointer(cpath))
@@ -104,6 +134,7 @@ func esfExecSigningInfo(path string) (teamID, cdHash string, flags uint32) {
 	var team [256]C.char
 	var cdh [128]C.char
 	var fl C.uint32_t
-	C.esf_signing_info(cpath, &team[0], C.size_t(len(team)), &cdh[0], C.size_t(len(cdh)), &fl)
-	return C.GoString(&team[0]), C.GoString(&cdh[0]), uint32(fl)
+	var valid C.uint8_t
+	C.esf_signing_info(cpath, &team[0], C.size_t(len(team)), &cdh[0], C.size_t(len(cdh)), &fl, &valid)
+	return C.GoString(&team[0]), C.GoString(&cdh[0]), uint32(fl), valid != 0
 }
