@@ -96,9 +96,6 @@ static __always_inline bool is_filtered(void)
  * before returning so the buffer is a valid C string. Stops early on
  * NULL argv slot, read failure, or buffer exhaustion. evt->args_size is
  * set to the number of bytes used (excluding the terminating NUL).
- *
- * The args buffer length MAX_ARGS_LEN must be a power of two so the
- * masked offset proves bounded to the BPF verifier.
  */
 static __always_inline void capture_argv(struct process_event *evt,
                                          const char *const *argv)
@@ -108,33 +105,34 @@ static __always_inline void capture_argv(struct process_event *evt,
 	if (!argv)
 		return;
 
-	#pragma unroll
 	for (int i = 0; i < 16; i++) {
 		const char *argp = NULL;
+
+		if (off >= MAX_ARGS_LEN - 1)
+			break;
 		if (bpf_probe_read_user(&argp, sizeof(argp), &argv[i]) < 0)
 			break;
 		if (!argp)
 			break;
-		if (off >= MAX_ARGS_LEN - 1)
-			break;
-		/* Mask to keep the verifier convinced about bounds. */
-		__u32 idx = off & (MAX_ARGS_LEN - 1);
-		__u32 remaining = MAX_ARGS_LEN - 1 - idx;
+
+		__u32 remaining = MAX_ARGS_LEN - 1 - off;
 		if (remaining < 2)
 			break;
-		int written = bpf_probe_read_user_str(&evt->args[idx],
-		                                      remaining, argp);
+
+		int written = bpf_probe_read_user_str(&evt->args[off], remaining, argp);
 		if (written <= 0)
 			break;
-		off = idx + (__u32)(written - 1);
+		if (written > (__s32)remaining)
+			written = (__s32)remaining;
+
+		off += (__u32)written - 1;
 		if (off >= MAX_ARGS_LEN - 1)
 			break;
-		evt->args[off & (MAX_ARGS_LEN - 1)] = ' ';
+		evt->args[off] = ' ';
 		off++;
 	}
 	if (off > 0) {
-		__u32 last = (off - 1) & (MAX_ARGS_LEN - 1);
-		evt->args[last] = '\0';
+		evt->args[off - 1] = '\0';
 		evt->args_size = off - 1;
 	}
 }
