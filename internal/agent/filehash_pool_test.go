@@ -36,12 +36,11 @@ func TestFileHashPoolKnownFileAndCache(t *testing.T) {
 	}
 	pool := newFileHashPool()
 	pool.Submit(fe)
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if fe.Hash == wantHex {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	// WaitForIdle's atomic load pairs with the worker's atomic add to
+	// give a race-free view of fe.Hash without the polling loop's
+	// data race against the worker goroutine.
+	if !pool.WaitForIdle(3 * time.Second) {
+		t.Fatal("pool did not drain within 3s")
 	}
 	if fe.Hash != wantHex {
 		t.Fatalf("hash got %q want %q", fe.Hash, wantHex)
@@ -54,12 +53,8 @@ func TestFileHashPoolKnownFileAndCache(t *testing.T) {
 		ActorPID:  1,
 	}
 	pool.Submit(fe2)
-	deadline = time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if fe2.Hash == wantHex {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	if !pool.WaitForIdle(3 * time.Second) {
+		t.Fatal("pool did not drain second submit within 3s")
 	}
 	if fe2.Hash != wantHex {
 		t.Fatalf("second hash got %q want %q (cache)", fe2.Hash, wantHex)
