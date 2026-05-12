@@ -709,6 +709,23 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
+func (a *Agent) WriteMonitoringHealthSnapshot() {
+	if a == nil {
+		return
+	}
+	collector.WriteMonitoringHealth(a.cfg, a.collectors, a.logger)
+}
+
+// PrepareValidationHarness tunes agent behavior for cmd/agent --test-mode.
+func (a *Agent) PrepareValidationHarness() {
+	if a == nil {
+		return
+	}
+	if a.cfg.Monitoring.HealthSnapshotSec <= 0 {
+		a.cfg.Monitoring.HealthSnapshotSec = 5
+	}
+}
+
 func (a *Agent) emitValidationDetection(d detection.Detection) {
 	if a == nil {
 		return
@@ -1139,6 +1156,7 @@ func (a *Agent) checkDriftAlerts() error {
 
 func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 	for _, al := range alerts {
+		a.emitValidationDetection(detection.FromSchemaAlert(al))
 		if a.shouldSuppressNoisyAlert(al) {
 			continue
 		}
@@ -1147,7 +1165,6 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 			correlationID = uuid.NewString()
 			al.AlertID = correlationID
 		}
-		a.emitValidationDetection(detection.FromSchemaAlert(al))
 		a.logger.Info("detection event",
 			"event_type", "detection",
 			"rule", al.RuleID,
