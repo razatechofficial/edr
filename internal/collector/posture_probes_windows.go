@@ -33,6 +33,40 @@ func PostureWindowsAMSIProviders() map[string]any {
 	return map[string]any{"provider_guids": names, "count": len(names)}
 }
 
+// WMIPersistenceSnapshot returns a best-effort snapshot of the four
+// common WMI persistence artefacts that adversaries co-opt for
+// long-term implants (Event{Filter,Consumer,Binding}, plus the
+// __FilterToConsumerBinding link). The probe shells out to wmic and
+// returns a map suitable for shipping in the posture envelope; it is
+// expensive (~300 ms) so the caller throttles it via the posture
+// scheduler. P2 — close the Windows build by adding the symbol the
+// posture switch already references.
+func WMIPersistenceSnapshot() map[string]any {
+	out := map[string]any{}
+	q := func(label, root, query string) {
+		cmd := exec.Command("wmic", "/namespace:\\\\"+root, "path", query, "get", "/format:list")
+		b, err := cmd.CombinedOutput()
+		if err != nil {
+			out[label+"_error"] = err.Error()
+			return
+		}
+		txt := strings.TrimSpace(string(b))
+		// Each row in /format:list is separated by a blank line.
+		count := 0
+		for _, block := range strings.Split(txt, "\r\n\r\n") {
+			if strings.TrimSpace(block) != "" {
+				count++
+			}
+		}
+		out[label] = count
+	}
+	q("event_filters", "root\\subscription", "__EventFilter")
+	q("event_consumers", "root\\subscription", "__EventConsumer")
+	q("filter_bindings", "root\\subscription", "__FilterToConsumerBinding")
+	out["status"] = "ok"
+	return out
+}
+
 // PostureWindowsBcdSecureBoot runs bcdedit /enum {current} (best-effort).
 func PostureWindowsBcdSecureBoot() map[string]any {
 	out, err := exec.Command("bcdedit", "/enum", "{current}").CombinedOutput()
