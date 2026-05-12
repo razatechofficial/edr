@@ -282,30 +282,30 @@ func (kc *KernelCollector) maybeEnrichProcessImageHash(tel *Telemetry) {
 	}
 }
 
+// readLoop: see Linux variant for rationale (P2-7 / P2-8).
 func (kc *KernelCollector) readLoop(ctx context.Context) {
+	go func() {
+		<-ctx.Done()
+		kc.buf.Close()
+	}()
 	for {
-		select {
-		case <-ctx.Done():
+		data, err := kc.buf.Read()
+		if err != nil {
 			return
-		default:
-		}
-		data, err := kc.buf.TryRead()
-		if err != nil || data == nil {
-			time.Sleep(time.Millisecond)
-			continue
 		}
 		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users, &kc.jsonMapOpts)
-		if tel != nil {
-			kc.prio.observeRing(kc.buf)
-			if kc.prio != nil && !kc.prio.allowSample(tel) {
-				kc.priorityDrop.Add(1)
-				continue
-			}
-			kc.maybeEnrichProcessImageHash(tel)
-			kc.mu.Lock()
-			kc.events = append(kc.events, *tel)
-			kc.mu.Unlock()
+		if tel == nil {
+			continue
 		}
+		kc.prio.observeRing(kc.buf)
+		if kc.prio != nil && !kc.prio.allowSample(tel) {
+			kc.priorityDrop.Add(1)
+			continue
+		}
+		kc.maybeEnrichProcessImageHash(tel)
+		kc.mu.Lock()
+		kc.events = append(kc.events, *tel)
+		kc.mu.Unlock()
 	}
 }
 

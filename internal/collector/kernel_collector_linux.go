@@ -199,32 +199,41 @@ func (kc *KernelCollector) Stop() {
 	kc.driver.Stop()
 }
 
+// readLoop drains the in-memory ring buffer that the kernel driver
+// writes to. P2-7 / P2-8: previously this busy-spun with a 1 ms sleep,
+// which woke the goroutine every millisecond even on idle hosts and
+// inflated CPU usage on the EDR agent itself. The loop now uses the
+// RingBuffer.Read() blocking primitive and parses on the calling
+// goroutine; a context-cancel goroutine kicks the buffer's notify
+// channel so Read() unblocks on shutdown. We process events one at a
+// time to keep the parsing path simple, but RingBuffer.Read() drains
+// the entire queue in a single syscall-free wakeup so the throughput
+// is bounded by parse cost, not by the read interval.
 func (kc *KernelCollector) readLoop(ctx context.Context) {
+	// Watcher closes the ring buffer when ctx is cancelled so Read()
+	// returns ErrBufferClosed and the loop exits cleanly.
+	go func() {
+		<-ctx.Done()
+		kc.buf.Close()
+	}()
 	for {
-		select {
-		case <-ctx.Done():
+		data, err := kc.buf.Read()
+		if err != nil {
 			return
-		default:
 		}
-
-		data, err := kc.buf.TryRead()
-		if err != nil || data == nil {
-			time.Sleep(time.Millisecond)
+		tel := kc.parseEvent(data)
+		if tel == nil {
 			continue
 		}
-
-		tel := kc.parseEvent(data)
-		if tel != nil {
-			kc.prio.observeRing(kc.buf)
-			if kc.prio != nil && !kc.prio.allowSample(tel) {
-				kc.priorityDrop.Add(1)
-				continue
-			}
-			kc.maybeEnrichProcessImageHash(tel)
-			kc.mu.Lock()
-			kc.events = append(kc.events, *tel)
-			kc.mu.Unlock()
+		kc.prio.observeRing(kc.buf)
+		if kc.prio != nil && !kc.prio.allowSample(tel) {
+			kc.priorityDrop.Add(1)
+			continue
 		}
+		kc.maybeEnrichProcessImageHash(tel)
+		kc.mu.Lock()
+		kc.events = append(kc.events, *tel)
+		kc.mu.Unlock()
 	}
 }
 

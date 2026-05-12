@@ -346,17 +346,16 @@ func (kc *KernelCollector) controlPlaneReady(extras map[string]any) bool {
 	return wfpReady && mfReady
 }
 
+// readLoop: see Linux variant for rationale (P2-7 / P2-8).
 func (kc *KernelCollector) readLoop(ctx context.Context) {
+	go func() {
+		<-ctx.Done()
+		kc.buf.Close()
+	}()
 	for {
-		select {
-		case <-ctx.Done():
+		data, err := kc.buf.Read()
+		if err != nil {
 			return
-		default:
-		}
-		data, err := kc.buf.TryRead()
-		if err != nil || data == nil {
-			time.Sleep(time.Millisecond)
-			continue
 		}
 		tel := MapKernelJSONToTelemetry(data, kc.endpointID, kc.hostname, runtime.GOOS, kc.users, &kc.jsonMapOpts)
 		if tel == nil {
