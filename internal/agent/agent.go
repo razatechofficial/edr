@@ -93,7 +93,7 @@ type Agent struct {
 	noisyAlertLastSeen map[string]time.Time
 }
 
-// SetValidationSink registers a callback invoked for each advanced detection alert.
+// SetValidationSink registers a callback invoked for each detection surfaced by the agent.
 // It is used by cmd/agent --test-mode to verify detections in real time.
 func (a *Agent) SetValidationSink(sink func(detection.Detection)) {
 	if a == nil {
@@ -709,6 +709,18 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
+func (a *Agent) emitValidationDetection(d detection.Detection) {
+	if a == nil {
+		return
+	}
+	a.validationMu.RLock()
+	sink := a.validationSink
+	a.validationMu.RUnlock()
+	if sink != nil {
+		sink(d)
+	}
+}
+
 func (a *Agent) drainAdvancedAlerts(ctx context.Context) {
 	for {
 		select {
@@ -718,14 +730,12 @@ func (a *Agent) drainAdvancedAlerts(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if a.responseLayer != nil && advAlert != nil {
-				d := detection.FromAlert(advAlert)
-				a.validationMu.RLock()
-				vsink := a.validationSink
-				a.validationMu.RUnlock()
-				if vsink != nil {
-					vsink(d)
-				}
+			if advAlert == nil {
+				continue
+			}
+			d := detection.FromAlert(advAlert)
+			a.emitValidationDetection(d)
+			if a.responseLayer != nil {
 				go func(det detection.Detection) {
 					if err := a.responseLayer.Handle(ctx, det); err != nil {
 						a.logger.Error("response layer handle failed", "error", err)
@@ -1137,6 +1147,7 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 			correlationID = uuid.NewString()
 			al.AlertID = correlationID
 		}
+		a.emitValidationDetection(detection.FromSchemaAlert(al))
 		a.logger.Info("detection event",
 			"event_type", "detection",
 			"rule", al.RuleID,

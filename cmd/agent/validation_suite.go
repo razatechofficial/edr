@@ -283,7 +283,9 @@ func buildValidationTests() []ValidationTest {
 			},
 			Verify: func(_ context.Context, detections []detection.Detection) bool {
 				for _, d := range detections {
-					if strings.Contains(d.TechniqueID, "T1059") {
+					if strings.Contains(d.TechniqueID, "T1059") ||
+						strings.EqualFold(d.RuleID, "PROC-010") ||
+						strings.EqualFold(d.RuleID, "PROC-009") {
 						return true
 					}
 				}
@@ -354,7 +356,10 @@ func buildValidationTests() []ValidationTest {
 			Simulate:    func(_ context.Context) error { return attemptSensitiveFileRead() },
 			Verify: func(_ context.Context, detections []detection.Detection) bool {
 				for _, d := range detections {
-					if strings.Contains(d.TechniqueID, "T1003.008") || strings.Contains(strings.ToLower(d.RuleID), "cred-001") {
+					if strings.Contains(d.TechniqueID, "T1003.008") ||
+						strings.Contains(d.TechniqueID, "T1552") ||
+						strings.EqualFold(d.RuleID, "CRED-001") ||
+						strings.EqualFold(d.RuleID, "FILE-007") {
 						return true
 					}
 				}

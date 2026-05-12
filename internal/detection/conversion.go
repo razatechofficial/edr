@@ -3,12 +3,63 @@ package detection
 import (
 	"time"
 
+	"github.com/razatechofficial/edr/internal/schema"
 	"github.com/razatechofficial/edr/pkg/events"
 )
 
 // FromAlert converts a pipeline alert to a [Detection] for the response layer and other consumers.
 func FromAlert(a *events.Alert) Detection {
 	return alertToDetection(a)
+}
+
+// FromSchemaAlert converts a baseline-rule alert into a [Detection] for validation and response consumers.
+func FromSchemaAlert(al schema.Alert) Detection {
+	d := Detection{
+		ID:          al.AlertID,
+		Timestamp:   al.Timestamp,
+		RuleID:      al.RuleID,
+		RuleName:    al.Title,
+		Severity:    schemaSeverityToP(al.Severity),
+		Description: al.Description,
+		Source:      sourceFromRule(al.RuleID),
+	}
+	if d.ID == "" {
+		d.ID = al.RuleID + "-" + time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	if al.ProcessPID != 0 || al.ProcessPath != "" || al.CommandLine != "" {
+		d.Event = &EventPayload{
+			Process: &schema.ProcessEvent{
+				PID:         al.ProcessPID,
+				ProcessName: al.ProcessName,
+				ProcessPath: al.ProcessPath,
+				CommandLine: al.CommandLine,
+			},
+		}
+	}
+	if al.FilePath != "" {
+		d.Event = &EventPayload{
+			File: &schema.FileEvent{
+				Path:      al.FilePath,
+				Hash:      al.FileSHA256,
+				Operation: al.FileOperation,
+				ActorPID:  al.ProcessPID,
+			},
+		}
+	}
+	return d
+}
+
+func schemaSeverityToP(s schema.Severity) Severity {
+	switch s {
+	case schema.SeverityCritical:
+		return P0
+	case schema.SeverityHigh:
+		return P1
+	case schema.SeverityMedium:
+		return P2
+	default:
+		return P3
+	}
 }
 
 func alertToDetection(a *events.Alert) Detection {
