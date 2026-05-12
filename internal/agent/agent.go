@@ -726,6 +726,16 @@ func (a *Agent) PrepareValidationHarness() {
 	}
 }
 
+// ScanValidationYARA runs a synchronous YARA scan and forwards matches to the validation sink.
+func (a *Agent) ScanValidationYARA(ctx context.Context, path string) {
+	if a == nil || a.advEngine == nil {
+		return
+	}
+	for _, d := range a.advEngine.ScanFileForValidation(ctx, path) {
+		a.emitValidationDetection(d)
+	}
+}
+
 func (a *Agent) emitValidationDetection(d detection.Detection) {
 	if a == nil {
 		return

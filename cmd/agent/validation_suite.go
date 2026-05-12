@@ -26,6 +26,7 @@ type ValidationTest struct {
 	MITRE        string
 	Severity     string
 	Simulate     func(ctx context.Context) error
+	AfterSimulate func(ctx context.Context, a *agent.Agent)
 	Verify       func(ctx context.Context, detections []detection.Detection) bool
 	Cleanup      func()
 	TimeoutSec   int
@@ -148,7 +149,7 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 			continue
 		}
 		fmt.Printf("[ RUN ] %s (%s)\n", test.Name, test.MITRE)
-		result := runOneTest(ctx, sink, test)
+		result := runOneTest(ctx, a, sink, test)
 		result.Optional = test.Optional
 		results = append(results, result)
 		if result.Passed {
@@ -211,7 +212,7 @@ func runValidationSuite(ctx context.Context, a *agent.Agent, cfg *config.Config)
 	return 0
 }
 
-func runOneTest(ctx context.Context, sink *ValidationSink, test ValidationTest) TestResult {
+func runOneTest(ctx context.Context, a *agent.Agent, sink *ValidationSink, test ValidationTest) TestResult {
 	startAt := time.Now()
 	res := TestResult{TestName: test.Name, MITRE: test.MITRE}
 	verify := test.Verify
@@ -228,6 +229,9 @@ func runOneTest(ctx context.Context, sink *ValidationSink, test ValidationTest) 
 	if err := test.Simulate(ctx); err != nil {
 		res.FailReason = fmt.Sprintf("simulate error: %v", err)
 		return res
+	}
+	if test.AfterSimulate != nil {
+		test.AfterSimulate(ctx, a)
 	}
 	deadline := time.Now().Add(time.Duration(test.TimeoutSec) * time.Second)
 	for time.Now().Before(deadline) {
@@ -333,6 +337,9 @@ func buildValidationTests() []ValidationTest {
 			Simulate: func(_ context.Context) error {
 				eicar := `X5O!P%@AP[4\PZX54(P^)7CC)7}` + `$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*`
 				return os.WriteFile(eicarPath, []byte(eicar), 0o644)
+			},
+			AfterSimulate: func(ctx context.Context, a *agent.Agent) {
+				a.ScanValidationYARA(ctx, eicarPath)
 			},
 			Verify: func(_ context.Context, detections []detection.Detection) bool {
 				for _, d := range detections {
