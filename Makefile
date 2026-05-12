@@ -79,7 +79,7 @@ BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/l
 .PHONY: models-bootstrap models-validate models-sign
 .PHONY: train-all train-pe train-behavior train-network train-ransomware
 .PHONY: install-linux install-darwin install-embedded edrctl
-.PHONY: package package-deb package-rpm package-pkg package-pkg-consumer notarize-pkg-consumer package-msi clean fmt lint vet
+.PHONY: package package-deb package-rpm package-sqa-kali package-pkg package-pkg-consumer notarize-pkg-consumer package-msi clean fmt lint vet
 
 # ============================================================================
 # Build targets
@@ -506,6 +506,10 @@ package-offline: build-all
 package-deb: build-linux
 	@echo "==> Creating .deb package"
 	./scripts/package_linux.sh
+
+package-sqa-kali:
+	@chmod +x scripts/package_sqa_kali.sh scripts/sqa_simulations.sh
+	./scripts/package_sqa_kali.sh
 
 package-rpm: build-linux
 	@echo "==> Creating .rpm package"
