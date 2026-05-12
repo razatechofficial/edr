@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/razatechofficial/edr/pkg/events"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -62,6 +63,7 @@ const (
 	bpfEvtSignal       = 25
 	bpfEvtUnshare      = 26
 	bpfEvtMadvise      = 27
+	bpfEvtPrivilege    = 42
 )
 
 // bpfBytecode holds embedded eBPF bytecode when compiled with `make ebpf-link`
@@ -386,6 +388,18 @@ func (d *EBPFDriver) bootstrapLoadedCollection() error {
 	d.setLoadDiag("")
 	d.coll = coll
 
+	// P2-16: defensively assert FD_CLOEXEC on every BPF map and
+	// program file descriptor. cilium/ebpf already requests CLOEXEC
+	// when allocating these via the bpf(2) syscall on recent kernels,
+	// but older kernels (RHEL 8 / 4.18) silently ignore the request
+	// and leave the FDs inheritable across exec(). If the agent ever
+	// spawns a helper (audit shell-outs, signing-tool runs, the
+	// sign_manifest tooling in dev) those leaked FDs would let the
+	// child write to or read from kernel maps it has no business
+	// touching. Setting FD_CLOEXEC via fcntl is the belt-and-braces
+	// fix that works regardless of kernel age.
+	d.setBPFFDsCloexec()
+
 	if err := d.attachTracepoints(); err != nil {
 		d.cleanup()
 		return fmt.Errorf("attaching tracepoints: %w", err)
@@ -608,6 +622,57 @@ var linkLoadPinnedFn = func(path string) (link.Link, error) {
 	return link.LoadPinnedLink(path, nil)
 }
 
+// setBPFFDsCloexec walks every map and program in d.coll and sets
+// FD_CLOEXEC on the underlying file descriptor. P2-16.
+//
+// Errors are swallowed deliberately: a missing FD_CLOEXEC is a
+// hardening miss, not a correctness bug, and we do not want a
+// fcntl(2) hiccup to abort agent startup. The first failure is
+// surfaced through d.captureVerifierDiag so it lands in the boot
+// diagnostics that operators already monitor.
+func (d *EBPFDriver) setBPFFDsCloexec() {
+	if d.coll == nil {
+		return
+	}
+	var firstErr error
+	for _, m := range d.coll.Maps {
+		if m == nil {
+			continue
+		}
+		if err := applyCloexecToFD(m.FD()); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("map fcntl FD_CLOEXEC: %w", err)
+		}
+	}
+	for _, p := range d.coll.Programs {
+		if p == nil {
+			continue
+		}
+		if err := applyCloexecToFD(p.FD()); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("prog fcntl FD_CLOEXEC: %w", err)
+		}
+	}
+	if firstErr != nil {
+		d.captureVerifierDiag(firstErr)
+	}
+}
+
+func applyCloexecToFD(fd int) error {
+	if fd < 0 {
+		return nil
+	}
+	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+	if err != nil {
+		return err
+	}
+	if flags&unix.FD_CLOEXEC != 0 {
+		return nil
+	}
+	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFD, flags|unix.FD_CLOEXEC); err != nil {
+		return err
+	}
+	return nil
+}
+
 func ebpfPinnedTraceLinkPath(base, progName string) string {
 	safe := strings.ReplaceAll(progName, "/", "_")
 	safe = strings.ReplaceAll(safe, ":", "_")
@@ -775,6 +840,38 @@ func (d *EBPFDriver) syncPolicyToMaps() error {
 			}
 		}
 	}
+
+	// P1-4: push FIM path prefixes into the eBPF path_filter map so the
+	// kernel side drops file events outside those prefixes before they
+	// hit userspace. The map is keyed by a fixed-size [256]byte buffer
+	// (matches the eBPF struct) holding the prefix bytes; value is a
+	// uint8 sentinel (1 = allowed). Clear-then-insert keeps the map in
+	// sync with whatever the policy currently lists.
+	if m, ok := d.coll.Maps["path_filter"]; ok {
+		var key [256]byte
+		var val uint8
+		iter := m.Iterate()
+		var keysToDelete [][256]byte
+		for iter.Next(&key, &val) {
+			keysToDelete = append(keysToDelete, key)
+		}
+		for _, k := range keysToDelete {
+			_ = m.Delete(k)
+		}
+		for _, prefix := range p.FIMPaths {
+			if prefix == "" {
+				continue
+			}
+			var k [256]byte
+			n := copy(k[:255], prefix)
+			// Null-terminate so the eBPF side can find the prefix length.
+			k[n] = 0
+			if err := m.Put(k, uint8(1)); err != nil {
+				return fmt.Errorf("adding FIM prefix %q: %w", prefix, err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -856,6 +953,15 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeSecurityEvent(raw, events.EventSignal)
+	case bpfEvtPrivilege:
+		// Privilege-change events (setuid family). The userspace policy
+		// reuses SignalEvents as the gating flag — same family of audit
+		// rules cover both — but the emitted shape is distinct so SIEM
+		// queries can scope on type=privilege.
+		if !p.SignalEvents {
+			return nil
+		}
+		return d.decodePrivilegeEvent(raw)
 	case bpfEvtUnshare:
 		if !p.ProcessEvents {
 			return nil
@@ -1042,6 +1148,50 @@ func (d *EBPFDriver) decodeSecurityEvent(data []byte, et events.EventType) error
 	return d.writeJSONEvent(envelope)
 }
 
+// decodePrivilegeEvent surfaces EVENT_PRIVILEGE emissions from the syscall
+// monitor (setuid / setgid / setreuid / setregid / setresuid / setresgid).
+// The bpfSecurityEvent.SysNr identifies which syscall fired; Arg0 is the
+// primary target ID (rUID for setuid, gid for setgid, etc.) with Arg1/Arg2
+// carrying the effective and saved IDs for the *res* variants.
+func (d *EBPFDriver) decodePrivilegeEvent(data []byte) error {
+	const sz = unsafe.Sizeof(bpfSecurityEvent{})
+	if uintptr(len(data)) < sz {
+		return fmt.Errorf("privilege event truncated: got %d, want >= %d", len(data), sz)
+	}
+	se := (*bpfSecurityEvent)(unsafe.Pointer(&data[0]))
+	op := "setid"
+	switch se.SysNr {
+	case 105:
+		op = "setuid"
+	case 106:
+		op = "setgid"
+	case 113:
+		op = "setreuid"
+	case 114:
+		op = "setregid"
+	case 117:
+		op = "setresuid"
+	case 119:
+		op = "setresgid"
+	}
+	env := map[string]interface{}{
+		"type":        events.EventPrivilege,
+		"timestamp":   time.Now().UTC(),
+		"agent_id":    d.agentID,
+		"pid":         se.Hdr.PID,
+		"ppid":        se.Hdr.PPID,
+		"caller_uid":  se.Hdr.UID,
+		"caller_gid":  se.Hdr.GID,
+		"comm":        nullTerminated(se.Hdr.Comm[:]),
+		"syscall_nr":  se.SysNr,
+		"operation":   op,
+		"new_id":      se.Arg0,
+		"effective":   se.Arg1,
+		"saved":       se.Arg2,
+	}
+	return d.writeJSONEvent(env)
+}
+
 func (d *EBPFDriver) decodeAdvancedSecurityEvent(data []byte) error {
 	const sz = unsafe.Sizeof(bpfSecurityEvent{})
 	if uintptr(len(data)) < sz {
@@ -1100,15 +1250,92 @@ func (d *EBPFDriver) decodeDNSQueryEvent(data []byte) error {
 		return fmt.Errorf("dns event truncated: got %d, want >= %d", len(data), sz)
 	}
 	ne := (*bpfNetworkEvent)(unsafe.Pointer(&data[0]))
+	raw := ne.DNSQuery[:]
+	qname := decodeDNSQName(raw)
+	qtypeStr := decodeDNSQType(raw)
 	env := map[string]interface{}{
 		"type":      "dns",
 		"timestamp": time.Now().UTC(),
 		"agent_id":  d.agentID,
 		"pid":       ne.PID,
-		"query":     nullTerminated(ne.DNSQuery[:]),
-		"dns_type":  ne.DNSQType,
+		"query":     qname,
+		"dns_type":  qtypeStr,
+		// dns_qtype_code retains the numeric type for downstream matchers
+		// that prefer the raw IANA-assigned QTYPE code over the label.
+		"dns_qtype_code": ne.DNSQType,
 	}
 	return d.writeJSONEvent(env)
+}
+
+// decodeDNSQName decodes a label-length-prefixed DNS QNAME from raw wire
+// bytes into a dotted name. Compression pointers (0xC0 prefix) cause the
+// decoder to stop early — we cannot resolve pointers without the full DNS
+// packet, which the eBPF capture intentionally does not retain.
+func decodeDNSQName(raw []byte) string {
+	if len(raw) < 1 {
+		return ""
+	}
+	var labels []string
+	i := 0
+	for i < len(raw) && i < 253 {
+		labelLen := int(raw[i])
+		if labelLen == 0 {
+			break
+		}
+		if labelLen&0xC0 == 0xC0 {
+			break
+		}
+		i++
+		if i+labelLen > len(raw) {
+			break
+		}
+		labels = append(labels, string(raw[i:i+labelLen]))
+		i += labelLen
+	}
+	return strings.Join(labels, ".")
+}
+
+// decodeDNSQType returns the IANA QTYPE label for the QTYPE word that
+// follows the QNAME terminator in the raw wire bytes. Falls back to "A"
+// when the bytes are too short to contain a QTYPE field.
+func decodeDNSQType(raw []byte) string {
+	i := 0
+	for i < len(raw) && raw[i] != 0 {
+		if raw[i]&0xC0 == 0xC0 {
+			i += 2
+			break
+		}
+		i += int(raw[i]) + 1
+	}
+	i++ // skip root label
+	if i+2 > len(raw) {
+		return "A"
+	}
+	qtype := binary.BigEndian.Uint16(raw[i : i+2])
+	switch qtype {
+	case 1:
+		return "A"
+	case 28:
+		return "AAAA"
+	case 15:
+		return "MX"
+	case 16:
+		return "TXT"
+	case 5:
+		return "CNAME"
+	case 2:
+		return "NS"
+	case 6:
+		return "SOA"
+	case 12:
+		return "PTR"
+	case 33:
+		return "SRV"
+	case 255:
+		return "ANY"
+	default:
+		return fmt.Sprintf("TYPE%d", qtype)
+	}
 }
 
 func (d *EBPFDriver) decodeSchedEvent(data []byte) error {
