@@ -48,11 +48,14 @@ int kp_tls_tcp_sendmsg(struct pt_regs *ctx)
 	if (iter.count < 6)
 		return 0;
 
-	const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
+	const struct iovec *iov = NULL;
+	BPF_CORE_READ_INTO(&iov, msg, msg_iter.__iov);
 	if (!iov)
 		return 0;
-	void *base = BPF_CORE_READ(iov, iov_base);
-	__u64 iov_len = BPF_CORE_READ(iov, iov_len);
+	void *base = NULL;
+	BPF_CORE_READ_INTO(&base, iov, iov_base);
+	__u64 iov_len = 0;
+	BPF_CORE_READ_INTO(&iov_len, iov, iov_len);
 	if (!base || iov_len < 6)
 		return 0;
 
