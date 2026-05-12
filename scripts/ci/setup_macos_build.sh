@@ -6,7 +6,9 @@ if ! command -v brew >/dev/null 2>&1; then
 	exit 1
 fi
 
-brew update
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+
 if ! brew list yara >/dev/null 2>&1; then
 	brew install yara
 fi

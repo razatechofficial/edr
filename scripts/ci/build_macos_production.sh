@@ -6,6 +6,8 @@ cd "${ROOT}"
 
 bash scripts/ci/setup_macos_build.sh
 
+export CGO_ENABLED=1
+
 VERSION="${EDR_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
 ARCH="$(go env GOARCH)"
 AGENT_OUT="dist/darwin-${ARCH}/edr-agent"
@@ -24,7 +26,7 @@ if ! CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
 		-ldflags "${LDFLAGS}" -o "${CTL_OUT}" ./cmd/cli
 fi
 
-if ! otool -L "${AGENT_OUT}" | grep -E 'EndpointSecurity|Security|SystemConfiguration' >/dev/null; then
+if ! otool -L "${AGENT_OUT}" | grep -Eiq 'EndpointSecurity|/System/Library/Frameworks/Security\.framework'; then
 	echo "expected macOS security frameworks are not linked into ${AGENT_OUT}" >&2
 	otool -L "${AGENT_OUT}" >&2 || true
 	exit 1

@@ -60,7 +60,10 @@ $(shell \
     echo ""; \
   fi)
 endef
-CLANG_BPF := $(call find_clang)
+CLANG_BPF ?= $(call find_clang)
+ifeq ($(CLANG_BPF),)
+CLANG_BPF := clang-16
+endif
 BPF_ARCH   := $(shell uname -m 2>/dev/null | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' || echo "x86")
 BPF_CFLAGS := -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) -Wall -Werror -Wno-missing-declarations
 LIBBPF_SYSTEM := $(shell pkg-config --cflags libbpf 2>/dev/null)
@@ -174,7 +177,10 @@ ebpf: $(VMLINUX_H) $(EBPF_OBJ)
 	@echo "==> eBPF programs compiled"
 
 platform/linux/ebpf/%.o: platform/linux/ebpf/%.c platform/linux/ebpf/common.h $(VMLINUX_H)
-	$(CLANG_BPF) $(BPF_CFLAGS) $(BPF_INCLUDES) -c $< -o $@
+	@BPF_CLANG="$(CLANG_BPF)"; \
+	if [ -z "$$BPF_CLANG" ]; then BPF_CLANG="$${CLANG:-clang-16}"; fi; \
+	if ! command -v "$$BPF_CLANG" >/dev/null 2>&1; then BPF_CLANG=clang; fi; \
+	"$$BPF_CLANG" $(BPF_CFLAGS) $(BPF_INCLUDES) -c $< -o $@
 
 ebpf-link: $(EBPF_OBJ)
 	@echo "==> Linking eBPF objects into single edr.bpf.o"

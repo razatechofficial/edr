@@ -4,6 +4,7 @@ set -euo pipefail
 OUT="platform/linux/ebpf/vmlinux.h"
 FALLBACK="platform/linux/ebpf/vmlinux_fallback.h"
 VENDOR_BPF="platform/linux/ebpf/libbpf/bpf/bpf_helpers.h"
+MIN_VMLINUX_LINES="${EDR_MIN_VMLINUX_LINES:-500}"
 
 find_clang_bpf() {
 	for candidate in \
@@ -22,6 +23,52 @@ find_clang_bpf() {
 	echo ""
 }
 
+resolve_bpftool() {
+	local kernel tools_dir tool
+
+	if command -v bpftool >/dev/null 2>&1; then
+		if bpftool version >/dev/null 2>&1; then
+			command -v bpftool
+			return 0
+		fi
+	fi
+
+	kernel="$(uname -r)"
+	tool="/usr/lib/linux-tools/${kernel}/bpftool"
+	if [ -x "${tool}" ]; then
+		echo "${tool}"
+		return 0
+	fi
+
+	for tools_dir in /usr/lib/linux-tools/* /usr/lib/linux-tools-*; do
+		[ -d "${tools_dir}" ] || continue
+		tool="${tools_dir}/bpftool"
+		if [ -x "${tool}" ]; then
+			echo "${tool}"
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+validate_vmlinux_header() {
+	local lines
+
+	if [ ! -s "${OUT}" ]; then
+		echo "ERROR: ${OUT} is missing or empty" >&2
+		return 1
+	fi
+
+	lines="$(wc -l <"${OUT}" | tr -d ' ')"
+	if [ "${lines}" -lt "${MIN_VMLINUX_LINES}" ]; then
+		echo "ERROR: ${OUT} is too small (${lines} lines); expected a BTF-generated header" >&2
+		return 1
+	fi
+
+	return 0
+}
+
 CLANG_BPF=$(find_clang_bpf)
 if [ -z "$CLANG_BPF" ]; then
 	echo "ERROR: No clang with BPF backend found." >&2
@@ -32,15 +79,22 @@ fi
 
 if ! pkg-config --exists libbpf 2>/dev/null && [ ! -f "$VENDOR_BPF" ]; then
 	echo "ERROR: libbpf headers not found." >&2
-	echo "  Run: bash scripts/vendor_libbpf_headers.sh" >&2
+	echo "  Run: bash scripts/install_libbpf_headers.sh" >&2
 	exit 1
 fi
 
 write_vmlinux_from_btf() {
-	if ! command -v bpftool >/dev/null 2>&1 || [ ! -f /sys/kernel/btf/vmlinux ]; then
+	local bpftool_bin
+
+	if [ ! -f /sys/kernel/btf/vmlinux ]; then
 		return 1
 	fi
-	bpftool btf dump file /sys/kernel/btf/vmlinux format c >"$OUT"
+
+	if ! bpftool_bin="$(resolve_bpftool)"; then
+		return 1
+	fi
+
+	"${bpftool_bin}" btf dump file /sys/kernel/btf/vmlinux format c >"${OUT}"
 }
 
 write_vmlinux_fallback() {
@@ -64,8 +118,21 @@ fi
 
 if write_vmlinux_from_btf; then
 	echo "Generated vmlinux.h from running kernel BTF"
+	validate_vmlinux_header
 	exit 0
 fi
 
-echo "Using fallback vmlinux.h (CI mode)"
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+	echo "ERROR: failed to generate vmlinux.h from kernel BTF on CI" >&2
+	echo "  kernel: $(uname -r)" >&2
+	echo "  btf:    $([ -f /sys/kernel/btf/vmlinux ] && echo present || echo missing)" >&2
+	if resolve_bpftool >/dev/null 2>&1; then
+		echo "  bpftool: $(resolve_bpftool)" >&2
+	else
+		echo "  bpftool: not found" >&2
+	fi
+	exit 1
+fi
+
+echo "Using fallback vmlinux.h (local dev without BTF)"
 write_vmlinux_fallback
