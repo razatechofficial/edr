@@ -172,6 +172,13 @@ func runAgent() error {
 		zap.String("config", configPath),
 	)
 
+	// P2-17: lock down the agent process before loading any third-
+	// party module. On Windows this enables PROCESS_MITIGATION_*
+	// policies (no dynamic code, no remote-image loads, no extension
+	// points). On other OSes this is a no-op stub. The boot posture
+	// surfaces success/failure per policy so an operator can verify.
+	_ = applyProcessMitigations(logger)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
