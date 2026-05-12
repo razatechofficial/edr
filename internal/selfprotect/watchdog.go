@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -233,16 +232,6 @@ func (w *Watchdog) monitorLoop(ctx context.Context) {
 	}
 }
 
-// processAlive checks whether a process with the given PID exists by sending
-// signal 0. On Unix this is a no-op probe; on Windows it always returns false
-// (the socket-based health check is the primary liveness mechanism there).
-func processAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
-}
+// processAlive is implemented per-platform. The Unix implementation uses
+// signal 0 as a non-destructive liveness probe; the Windows implementation
+// (watchdog_windows.go) uses OpenProcess + GetExitCodeProcess.
