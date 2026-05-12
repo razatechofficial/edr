@@ -28,6 +28,43 @@ struct {
 	__type(value, __u8);
 } path_filter SEC(".maps");
 
+/*
+ * P1-6: fd -> path tracking.
+ *
+ * pending_open_paths stores the filename argument captured at
+ * sys_enter_openat (we don't know the fd yet because the syscall hasn't
+ * returned). On sys_exit_openat we move the entry into fd_path_map keyed
+ * by (pid<<32 | fd) so subsequent write/pwrite/writev events can resolve
+ * fd back to a path. sys_enter_close clears the entry so the map does
+ * not leak.
+ *
+ * Each value is a fixed MAX_PATH_LEN buffer. With max_entries=65536 this
+ * pins ~16 MiB of kernel memory worst case which is acceptable for an
+ * EDR-class agent.
+ */
+struct fd_path_value {
+	char path[MAX_PATH_LEN];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 8192);
+	__type(key, __u64); /* tgid<<32 | tid */
+	__type(value, struct fd_path_value);
+} pending_open_paths SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 65536);
+	__type(key, __u64); /* pid<<32 | fd */
+	__type(value, struct fd_path_value);
+} fd_path_map SEC(".maps");
+
+static __always_inline __u64 fd_key(__u32 pid, __u32 fd)
+{
+	return ((__u64)pid << 32) | (__u64)fd;
+}
+
 static __always_inline void fill_header(struct event_header *hdr, __u32 type)
 {
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
@@ -82,6 +119,15 @@ int tracepoint__syscalls__sys_enter_openat(struct trace_event_raw_sys_enter *ctx
 	if (pid_is_filtered())
 		return 0;
 
+	/* P1-6: stash the filename for sys_exit_openat to claim once we
+	 * know the assigned fd. Keyed by full pid_tgid because two threads
+	 * in the same process can open files concurrently. */
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	struct fd_path_value pending = {};
+	bpf_probe_read_user_str(pending.path, sizeof(pending.path),
+		(const char *)ctx->args[1]);
+	bpf_map_update_elem(&pending_open_paths, &pid_tgid, &pending, BPF_ANY);
+
 	struct file_event *evt;
 	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
 	if (!evt)
@@ -91,8 +137,7 @@ int tracepoint__syscalls__sys_enter_openat(struct trace_event_raw_sys_enter *ctx
 	fill_header(&evt->hdr, EVENT_FILE_OPEN);
 
 	/* openat(2): args[0]=dfd, args[1]=filename, args[2]=flags, args[3]=mode */
-	const char *filename = (const char *)ctx->args[1];
-	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), filename);
+	__builtin_memcpy(evt->filename, pending.path, sizeof(evt->filename));
 	evt->flags = (__u32)ctx->args[2];
 	evt->mode  = (__u32)ctx->args[3];
 	mark_sensitive(evt);
@@ -101,25 +146,75 @@ int tracepoint__syscalls__sys_enter_openat(struct trace_event_raw_sys_enter *ctx
 	return 0;
 }
 
+/*
+ * sys_exit_openat: take the path stashed by sys_enter_openat and bind
+ * it to the (pid, fd) returned by the kernel so that write events can
+ * resolve fd back to a filename.
+ */
+SEC("tracepoint/syscalls/sys_exit_openat")
+int tracepoint__syscalls__sys_exit_openat(struct trace_event_raw_sys_exit *ctx)
+{
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	struct fd_path_value *pending = bpf_map_lookup_elem(&pending_open_paths, &pid_tgid);
+	if (!pending)
+		return 0;
+
+	long ret = ctx->ret;
+	if (ret >= 0) {
+		__u32 pid = pid_tgid >> 32;
+		__u64 key = fd_key(pid, (__u32)ret);
+		bpf_map_update_elem(&fd_path_map, &key, pending, BPF_ANY);
+	}
+	bpf_map_delete_elem(&pending_open_paths, &pid_tgid);
+	return 0;
+}
+
+/*
+ * sys_enter_close removes the (pid, fd) entry so the map does not leak
+ * stale entries when fds are recycled. We only act on actual close
+ * syscalls; the LRU eviction policy is a safety net for missed closes.
+ */
+SEC("tracepoint/syscalls/sys_enter_close")
+int tracepoint__syscalls__sys_enter_close(struct trace_event_raw_sys_enter *ctx)
+{
+	__u32 pid = bpf_get_current_pid_tgid() >> 32;
+	__u64 key = fd_key(pid, (__u32)ctx->args[0]);
+	bpf_map_delete_elem(&fd_path_map, &key);
+	return 0;
+}
+
+static __always_inline void emit_write_event(__u32 fd, __u64 count)
+{
+	struct file_event *evt;
+	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	if (!evt)
+		return;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_FILE_WRITE);
+
+	evt->write_fd = fd;
+	evt->bytes_written = count;
+
+	/* P1-6: enrich with filename when fd_path_map has a binding. */
+	__u32 pid = evt->hdr.pid;
+	__u64 key = fd_key(pid, fd);
+	struct fd_path_value *p = bpf_map_lookup_elem(&fd_path_map, &key);
+	if (p) {
+		__builtin_memcpy(evt->filename, p->path, sizeof(evt->filename));
+		mark_sensitive(evt);
+	}
+
+	bpf_ringbuf_submit(evt, 0);
+}
+
 SEC("tracepoint/syscalls/sys_enter_write")
 int tracepoint__syscalls__sys_enter_write(struct trace_event_raw_sys_enter *ctx)
 {
 	if (pid_is_filtered())
 		return 0;
-
-	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
-	if (!evt)
-		return 0;
-
-	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header(&evt->hdr, EVENT_FILE_WRITE);
-
 	/* write(2): args[0]=fd, args[2]=count */
-	evt->write_fd = (__u32)ctx->args[0];
-	evt->bytes_written = ctx->args[2];
-
-	bpf_ringbuf_submit(evt, 0);
+	emit_write_event((__u32)ctx->args[0], ctx->args[2]);
 	return 0;
 }
 
@@ -128,20 +223,8 @@ int tracepoint__syscalls__sys_enter_pwrite64(struct trace_event_raw_sys_enter *c
 {
 	if (pid_is_filtered())
 		return 0;
-
-	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
-	if (!evt)
-		return 0;
-
-	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header(&evt->hdr, EVENT_FILE_WRITE);
-
 	/* pwrite64(2): args[0]=fd, args[2]=count */
-	evt->write_fd = (__u32)ctx->args[0];
-	evt->bytes_written = ctx->args[2];
-
-	bpf_ringbuf_submit(evt, 0);
+	emit_write_event((__u32)ctx->args[0], ctx->args[2]);
 	return 0;
 }
 
@@ -189,6 +272,64 @@ int tracepoint__syscalls__sys_enter_renameat2(struct trace_event_raw_sys_enter *
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), oldname);
 	bpf_probe_read_user_str(evt->new_filename, sizeof(evt->new_filename), newname);
 	evt->flags = (__u32)ctx->args[4];
+	mark_sensitive(evt);
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+/*
+ * P1-8: cover the legacy rename(2) and renameat(2) variants. glibc 2.32+
+ * routes most callers through renameat2 already, but a non-trivial number
+ * of binaries (older containers, statically linked busybox, Go binaries
+ * built with older toolchains) still call the legacy syscalls directly.
+ * Skipping them creates a blind spot for ransomware reconnaissance and
+ * dropper rename activity.
+ */
+SEC("tracepoint/syscalls/sys_enter_rename")
+int tracepoint__syscalls__sys_enter_rename(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+
+	struct file_event *evt;
+	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_FILE_RENAME);
+
+	/* rename(2): args[0]=oldpath, args[1]=newpath */
+	const char *oldname = (const char *)ctx->args[0];
+	const char *newname = (const char *)ctx->args[1];
+	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), oldname);
+	bpf_probe_read_user_str(evt->new_filename, sizeof(evt->new_filename), newname);
+	mark_sensitive(evt);
+
+	bpf_ringbuf_submit(evt, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_renameat")
+int tracepoint__syscalls__sys_enter_renameat(struct trace_event_raw_sys_enter *ctx)
+{
+	if (pid_is_filtered())
+		return 0;
+
+	struct file_event *evt;
+	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	if (!evt)
+		return 0;
+
+	__builtin_memset(evt, 0, sizeof(*evt));
+	fill_header(&evt->hdr, EVENT_FILE_RENAME);
+
+	/* renameat(2): args[0]=olddfd, args[1]=oldname, args[2]=newdfd, args[3]=newname */
+	const char *oldname = (const char *)ctx->args[1];
+	const char *newname = (const char *)ctx->args[3];
+	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), oldname);
+	bpf_probe_read_user_str(evt->new_filename, sizeof(evt->new_filename), newname);
 	mark_sensitive(evt);
 
 	bpf_ringbuf_submit(evt, 0);
