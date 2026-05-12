@@ -49,7 +49,6 @@ struct trace_event_raw_sched_wakeup {
 	char comm[16];
 	pid_t pid;
 	int prio;
-	int success;
 	int target_cpu;
 };
 
