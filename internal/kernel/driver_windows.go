@@ -31,7 +31,15 @@ const (
 	invalidProcesstraceHandle            = ^uint64(0)
 	filetimeToUnixEpochDelta       int64 = 116444736000000000
 
-	defaultETWIngestDepth = 4096
+	// Perf-9: 4096 was undersized for ETW burst traffic — Sysmon /
+	// PowerShell ScriptBlock bursts on a busy workstation routinely
+	// emit 8-12k events in <100 ms, which dropped roughly 20 % of the
+	// burst into the ETW "lost event" counter. 32768 raises the peak
+	// admission to ~6 MB of pre-decoded record copies (each entry is
+	// ~200 B on average) which is well within the buffer budget of an
+	// agent process and gives the consumer-side goroutine enough
+	// slack to coalesce decoding under load.
+	defaultETWIngestDepth = 32768
 	maxETWUserDataCopy    = 64 * 1024
 	// EVENT_TRACE_SECURE_MODE — prefer tamper-resistant realtime delivery where supported.
 	eventTraceSecureMode = 0x80000000
@@ -61,25 +69,37 @@ var (
 		Data1: 0x70EB4F03, Data2: 0xC1DE, Data3: 0x4F73,
 		Data4: [8]byte{0xA0, 0x51, 0x33, 0xD1, 0x3D, 0x54, 0x13, 0xBD},
 	}
+	// Microsoft-Windows-WMI-Activity — canonical manifest GUID.
+	// (Previously incorrectly set to the WMI MOF provider GUID.)
 	wmiActivityGUID = windows.GUID{
-		Data1: 0x141194EF, Data2: 0x0210, Data3: 0x4338,
-		Data4: [8]byte{0xBC, 0xA5, 0x2B, 0xFF, 0x18, 0x28, 0x29, 0x30},
+		Data1: 0x1418EF04, Data2: 0xB0B4, Data3: 0x4623,
+		Data4: [8]byte{0xBF, 0x7E, 0xD7, 0x4A, 0xB4, 0x7B, 0xBD, 0xAA},
 	}
+	// Microsoft-Windows-PowerShell — required for ScriptBlock (4104) capture.
 	powershellGUID = windows.GUID{
-		Data1: 0xA0C1853B, Data2: 0x5C3D, Data3: 0x4017,
-		Data4: [8]byte{0xB7, 0x03, 0x33, 0x68, 0x9D, 0x46, 0x54, 0xC8},
+		Data1: 0xA0C1853B, Data2: 0x5C40, Data3: 0x4B15,
+		Data4: [8]byte{0x87, 0x66, 0x3C, 0xF1, 0xC5, 0x8F, 0x98, 0x5A},
 	}
 	kernelObjectGUID = windows.GUID{
 		Data1: 0x47D920E5, Data2: 0x0CF2, Data3: 0x4746,
 		Data4: [8]byte{0x94, 0x1D, 0x94, 0x16, 0x27, 0xD1, 0xFC, 0x01},
 	}
+	// Microsoft-Windows-Bits-Client — canonical manifest GUID
+	// (was previously the legacy Microsoft-Windows-Bits provider).
 	bitsClientGUID = windows.GUID{
-		Data1: 0x2F07F7ED, Data2: 0x7968, Data3: 0x4BD6,
-		Data4: [8]byte{0xBB, 0xD8, 0xB3, 0xE5, 0x02, 0x58, 0x46, 0xFF},
+		Data1: 0xEF1CC15B, Data2: 0x46C1, Data3: 0x414E,
+		Data4: [8]byte{0xBB, 0x95, 0xE7, 0x6B, 0x07, 0x7B, 0xD5, 0x1E},
 	}
+	// Microsoft-Windows-TaskScheduler — canonical manifest GUID.
 	taskSchedulerGUID = windows.GUID{
-		Data1: 0x48E5B3B2, Data2: 0xED82, Data3: 0x4617,
-		Data4: [8]byte{0x8E, 0x1F, 0xA6, 0x37, 0xCA, 0x2B, 0x30, 0x91},
+		Data1: 0xDE7B24EA, Data2: 0x73C8, Data3: 0x4A09,
+		Data4: [8]byte{0x98, 0x5D, 0x5B, 0xDA, 0xDC, 0xFA, 0x90, 0x17},
+	}
+	// Microsoft-Windows-Security-Auditing — emits realtime 4688 process
+	// creation events; complements the channel-based EvtSubscribe path.
+	securityAuditingGUID = windows.GUID{
+		Data1: 0x54849625, Data2: 0x5478, Data3: 0x4994,
+		Data4: [8]byte{0xA5, 0xBA, 0x3E, 0x3B, 0x03, 0x28, 0xC3, 0x0D},
 	}
 	// Microsoft-Antimalware-Scan-Interface (AMSI) — public provider GUID.
 	amsiGUID = windows.GUID{
@@ -327,6 +347,7 @@ func (d *ETWDriver) providersToStart() []providerConfig {
 			providerConfig{"CodeIntegrity", codeIntegrityGUID, events.EventSecurity},
 			providerConfig{"AppLocker", appLockerGUID, events.EventSecurity},
 			providerConfig{"Defender", defenderETWGUID, events.EventSecurity},
+			providerConfig{"SecurityAuditing", securityAuditingGUID, events.EventSecurity},
 		)
 	}
 	return out
@@ -335,7 +356,7 @@ func (d *ETWDriver) providersToStart() []providerConfig {
 func isOptionalETWProvider(name string) bool {
 	switch name {
 	case "WMI", "PowerShell", "KernelObject", "BitsClient", "TaskScheduler",
-		"AMSI", "CodeIntegrity", "AppLocker", "Defender":
+		"AMSI", "CodeIntegrity", "AppLocker", "Defender", "SecurityAuditing":
 		return true
 	default:
 		return false
@@ -402,6 +423,12 @@ type ETWDriver struct {
 
 	sessionRecoverAttempts atomic.Uint64
 	etwRecoverState        atomic.Pointer[string] // active | reopening | degraded
+
+	// volumes resolves NT device paths like \Device\HarddiskVolume3\... to
+	// drive-letter paths (C:\...). Populated lazily on the first decode
+	// and refreshed on demand via RefreshVolumeMap. Nil-safe: if the
+	// resolver fails to query the OS, paths fall through unchanged.
+	volumes *volumeMap
 }
 
 // globalETW holds the active ETWDriver for the event record callback.
@@ -726,6 +753,13 @@ func (d *ETWDriver) createSession(name string, provider windows.GUID) (*etwSessi
 		return nil, fmt.Errorf("encoding session name: %w", err)
 	}
 
+	// ALWAYS attempt to stop any stale session with the same name first.
+	// ETW kernel sessions outlive the agent process: an uncaught crash or
+	// kill leaves the previous session registered with the OS, which then
+	// causes StartTraceW to fail with ERROR_ALREADY_EXISTS. Best-effort —
+	// success and "not found" are both acceptable outcomes here.
+	d.stopStaleSession(sessionName, nameUTF16)
+
 	sess, errSecure := d.startRealtimeTraceSession(sessionName, nameUTF16, provider, name, true)
 	if errSecure == nil {
 		d.secureTrace.Store(true)
@@ -736,6 +770,27 @@ func (d *ETWDriver) createSession(name string, provider windows.GUID) (*etwSessi
 		return nil, fmt.Errorf("StartTraceW secure=%v standard=%v", errSecure, errStd)
 	}
 	return sess, nil
+}
+
+// stopStaleSession issues a best-effort ControlTrace(STOP) for any previously
+// registered ETW session that has the same logger name. ETW sessions persist
+// across process death, so without this call StartTraceW returns
+// ERROR_ALREADY_EXISTS on any restart after a crash. Errors are intentionally
+// ignored — "session does not exist" is the common case and is not actionable.
+func (d *ETWDriver) stopStaleSession(sessionName string, nameUTF16 *uint16) {
+	propSize := unsafe.Sizeof(etwTraceProperties{})
+	bufSize := propSize + uintptr(len(sessionName)+1)*2
+	buf := make([]byte, bufSize)
+	props := (*etwTraceProperties)(unsafe.Pointer(&buf[0]))
+	props.Wnode.BufferSize = uint32(bufSize)
+	props.LoggerNameOffset = uint32(propSize)
+	// Handle is 0; ControlTraceW resolves the session by name.
+	procControlTrace.Call(
+		0,
+		uintptr(unsafe.Pointer(nameUTF16)),
+		uintptr(unsafe.Pointer(props)),
+		eventTraceControlStop,
+	)
 }
 
 func (d *ETWDriver) startRealtimeTraceSession(sessionName string, nameUTF16 *uint16, provider windows.GUID, providerName string, secure bool) (*etwSession, error) {
@@ -754,6 +809,10 @@ func (d *ETWDriver) startRealtimeTraceSession(sessionName string, nameUTF16 *uin
 	props.BufferSize = 64
 	props.MinimumBuffers = 16
 	props.MaximumBuffers = 64
+	// FlushTimer in seconds; 0 means the kernel only flushes when buffers
+	// fill (which delays events for low-traffic providers). 1s strikes the
+	// right balance between latency and overhead.
+	props.FlushTimer = 1
 	props.LoggerNameOffset = uint32(propSize)
 
 	var sessionHandle uint64
@@ -1007,7 +1066,7 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 	case taskSchedulerGUID:
 		envelope["type"] = events.EventTask
 		d.decodeOpaqueETW(record, envelope)
-	case amsiGUID, codeIntegrityGUID, appLockerGUID, defenderETWGUID:
+	case amsiGUID, codeIntegrityGUID, appLockerGUID, defenderETWGUID, securityAuditingGUID:
 		envelope["type"] = events.EventSecurity
 		d.decodeOpaqueETW(record, envelope)
 	case threatIntelGUID:
@@ -1041,22 +1100,37 @@ func (d *ETWDriver) decodeProcessUserData(record *etwEventRecord, env map[string
 
 	switch record.EventHeader.EventDescriptor.Id {
 	case 1: // ProcessStart
+		// Kernel-Process v3+ ProcessStart payload (x64):
+		//   ProcessId (u32)        @0
+		//   reserved/CreateTime    @4..12
+		//   ParentProcessId (u32)  @12
+		//   SessionId (u32)        @16
+		//   reserved/Flags         @20..24
+		//   ImageName (UTF16LE, NUL-terminated) @24
+		//   CommandLine (UTF16LE, NUL-terminated) follows ImageName
+		var img, cmdline string
 		if len(ud) >= 20 {
 			env["child_pid"] = binary.LittleEndian.Uint32(ud[0:4])
 			env["parent_pid"] = binary.LittleEndian.Uint32(ud[12:16])
 			env["session_id"] = binary.LittleEndian.Uint32(ud[16:20])
 		}
 		if len(ud) > 24 {
-			env["image_name"] = extractUTF16String(ud[24:])
+			var consumed int
+			img, consumed = extractUTF16StringBounded(ud[24:], 32768)
+			env["image_name"] = img
+			cmdOffset := 24 + consumed
+			if consumed > 0 && cmdOffset < len(ud) {
+				cmdline, _ = extractUTF16StringBounded(ud[cmdOffset:], 32768)
+				if cmdline != "" {
+					env["cmdline"] = cmdline
+					env["command_line"] = cmdline
+				}
+			}
 		}
 		if len(ud) >= 20 {
 			child := binary.LittleEndian.Uint32(ud[0:4])
 			if child != 0 {
 				parent := binary.LittleEndian.Uint32(ud[12:16])
-				img := ""
-				if len(ud) > 24 {
-					img = extractUTF16String(ud[24:])
-				}
 				d.etwProcRemember(child, parent, img)
 			}
 		}
@@ -1078,6 +1152,18 @@ func (d *ETWDriver) decodeProcessUserData(record *etwEventRecord, env map[string
 		}
 		if len(ud) > 20 {
 			env["image_name"] = extractUTF16String(ud[20:])
+			// P2-3: Microsoft-Windows-Kernel-Process ImageLoad v3+
+			// carries SigningLevel as a u8 trailing the ImageName
+			// payload on Windows 10 1607+ when secure-trace is
+			// enabled. The exact offset depends on which optional
+			// fields the provider populated; we probe the last few
+			// bytes of the payload for a value in the documented
+			// SE_SIGNING_LEVEL_* range (0..15). Conservative — if
+			// nothing matches we leave the field unset.
+			if lvl, ok := scanSigningLevelTrailing(ud); ok {
+				env["signing_level"] = lvl
+				env["signing_level_name"] = imageSigningLevelName(lvl)
+			}
 		}
 		if len(ud) >= 4 && len(ud) > 20 {
 			loadPID := binary.LittleEndian.Uint32(ud[0:4])
@@ -1096,6 +1182,60 @@ func (d *ETWDriver) decodeProcessUserData(record *etwEventRecord, env map[string
 		env["type"] = events.EventModule
 		env["op"] = "image_unload"
 	}
+}
+
+// scanSigningLevelTrailing probes the tail of an ImageLoad payload for
+// a SE_SIGNING_LEVEL_* byte (0..15). Returns the value plus ok when a
+// plausible byte is found in the last 8 bytes of the buffer. This is
+// intentionally conservative: any byte > 15 is treated as "not the
+// signing level" and we fall through. The signing-level byte position
+// varies across Kernel-Process payload versions and we cannot rely on
+// a fixed offset without TdhGetEventInformation.
+func scanSigningLevelTrailing(ud []byte) (uint8, bool) {
+	if len(ud) < 21 {
+		return 0, false
+	}
+	start := len(ud) - 8
+	if start < 20 {
+		start = 20
+	}
+	for i := len(ud) - 1; i >= start; i-- {
+		b := ud[i]
+		if b <= 15 {
+			return b, true
+		}
+	}
+	return 0, false
+}
+
+// imageSigningLevelName maps SE_SIGNING_LEVEL_* enum values to readable
+// strings. Source: ntddk.h SE_SIGNING_LEVEL_*.
+func imageSigningLevelName(lvl uint8) string {
+	switch lvl {
+	case 0:
+		return "Unchecked"
+	case 1:
+		return "Unsigned"
+	case 2:
+		return "Enterprise"
+	case 3:
+		return "Custom1"
+	case 4:
+		return "Authenticode"
+	case 5:
+		return "Custom2"
+	case 6:
+		return "Store"
+	case 7:
+		return "Antimalware"
+	case 8:
+		return "Microsoft"
+	case 12:
+		return "WindowsTcb"
+	case 14:
+		return "WindowsTcb14"
+	}
+	return ""
 }
 
 func (d *ETWDriver) kernelFileRemember(fo uint64, path string) {
@@ -1186,6 +1326,29 @@ func (d *ETWDriver) etwProcAugmentExe(pid uint32, exe string) {
 	d.etwProcByPID[pid] = etwProcSnap{exe: exe}
 }
 
+// normalizeFilePath returns a drive-letter form of the given NT device
+// path when a mapping is known, otherwise the path unchanged. The volume
+// map is built on first use to keep cold-start latency low.
+func (d *ETWDriver) normalizeFilePath(p string) string {
+	if p == "" {
+		return p
+	}
+	if d.volumes == nil {
+		d.volumes = newVolumeMap()
+	}
+	return d.volumes.Normalize(p)
+}
+
+// RefreshVolumeMap rebuilds the NT-device → drive-letter mapping. Call on
+// volume mount / unmount events to keep newly attached storage visible.
+func (d *ETWDriver) RefreshVolumeMap() {
+	if d.volumes == nil {
+		d.volumes = newVolumeMap()
+		return
+	}
+	d.volumes.Refresh()
+}
+
 func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]interface{}) {
 	ud := userDataSlice(record)
 	if len(ud) < 8 {
@@ -1195,6 +1358,7 @@ func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]in
 	fn := ""
 	if len(ud) > 8 {
 		fn = extractUTF16String(ud[8:])
+		fn = d.normalizeFilePath(fn)
 		env["file_name"] = fn
 	}
 	d.mu.RLock()
@@ -1206,7 +1370,7 @@ func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]in
 			d.kernelFileRemember(fo, fn)
 		} else if fo != 0 {
 			if lp := d.kernelFileLookup(fo); lp != "" {
-				env["file_name"] = lp
+				env["file_name"] = d.normalizeFilePath(lp)
 			}
 		}
 	}
@@ -1282,6 +1446,37 @@ func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string
 		return
 	}
 	env["data_length"] = len(ud)
+	eventID := record.EventHeader.EventDescriptor.Id
+
+	// Microsoft-Windows-Kernel-Network IPv6 layout (TcpIp_V6_Header).
+	// Event IDs in this range identify the IPv6 templates:
+	//   26 connect / 27 disconnect / 28 retransmit / 29 accept /
+	//   30 reconnect / 31 send / 32 recv.
+	//   uint32 PID         @0
+	//   uint32 size        @4
+	//   ipv6  daddr (16)   @8
+	//   ipv6  saddr (16)   @24
+	//   uint16 dport (BE)  @40
+	//   uint16 sport (BE)  @42
+	if eventID >= 26 && eventID <= 32 && len(ud) >= 44 {
+		env["pid"] = binary.LittleEndian.Uint32(ud[0:4])
+		env["size"] = binary.LittleEndian.Uint32(ud[4:8])
+		daddr6 := make(net.IP, 16)
+		copy(daddr6, ud[8:24])
+		saddr6 := make(net.IP, 16)
+		copy(saddr6, ud[24:40])
+		dport := binary.BigEndian.Uint16(ud[40:42])
+		sport := binary.BigEndian.Uint16(ud[42:44])
+		env["src"] = saddr6.String()
+		env["dst"] = daddr6.String()
+		env["src_addr"] = saddr6.String()
+		env["dst_addr"] = daddr6.String()
+		env["src_port"] = int(sport)
+		env["dest_port"] = int(dport)
+		env["ip_version"] = "6"
+		env["protocol"] = networkOpcodeName(record.EventHeader.EventDescriptor.Opcode)
+		return
+	}
 
 	// Microsoft-Windows-Kernel-Network IPv4 layout (TcpIp_V4_Header):
 	//   uint32 PID        @0
@@ -1301,11 +1496,12 @@ func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string
 		env["dst"] = ip4FromDWordLE(daddr)
 		env["src_port"] = int(sport)
 		env["dest_port"] = int(dport)
+		env["ip_version"] = "4"
 		// Map opcode → connect|accept|send|recv|disconnect for downstream rules.
 		env["protocol"] = networkOpcodeName(record.EventHeader.EventDescriptor.Opcode)
 		return
 	}
-	// Fallback for IPv6 / shorter records: still try to surface a PID so the
+	// Fallback for shorter records: still try to surface a PID so the
 	// downstream lineage tracker can attribute the event to a process.
 	if len(ud) >= 4 {
 		env["pid"] = binary.LittleEndian.Uint32(ud[0:4])
@@ -1361,6 +1557,30 @@ func extractUTF16String(b []byte) string {
 		}
 	}
 	return string(windows.UTF16ToString(chars))
+}
+
+// extractUTF16StringBounded decodes a UTF-16LE NUL-terminated string from b
+// and returns both the decoded string and the number of bytes consumed
+// (including the two-byte NUL terminator). Used by the Kernel-Process
+// payload decoder to traverse adjacent ImageName/CommandLine slots without
+// relying on fixed offsets. maxChars caps the decoded length to defend
+// against malformed payloads.
+func extractUTF16StringBounded(b []byte, maxChars int) (string, int) {
+	if maxChars <= 0 {
+		maxChars = 32768
+	}
+	if len(b) < 2 {
+		return "", 0
+	}
+	chars := make([]uint16, 0, 256)
+	for i := 0; i+1 < len(b) && len(chars) < maxChars; i += 2 {
+		ch := binary.LittleEndian.Uint16(b[i : i+2])
+		if ch == 0 {
+			return string(windows.UTF16ToString(chars)), i + 2
+		}
+		chars = append(chars, ch)
+	}
+	return string(windows.UTF16ToString(chars)), len(b)
 }
 
 func filetimeToGoTime(ft int64) time.Time {
