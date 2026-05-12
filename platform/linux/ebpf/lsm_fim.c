@@ -57,7 +57,8 @@ int BPF_PROG(fim_path_unlink, struct path *dir, struct dentry *dentry)
 	__builtin_memset(evt, 0, sizeof(*evt));
 	fill_header(&evt->hdr, EVENT_LSM_FIM_UNLINK);
 
-	const unsigned char *nm = BPF_CORE_READ(dentry, d_name.name);
+	const unsigned char *nm = NULL;
+	BPF_CORE_READ_INTO(&nm, dentry, d_name.name);
 	if (nm)
 		bpf_probe_read_kernel_str(evt->filename, sizeof(evt->filename), nm);
 
@@ -81,11 +82,13 @@ int BPF_PROG(fim_path_rename, struct path *old_dir, struct dentry *old_dentry,
 	__builtin_memset(evt, 0, sizeof(*evt));
 	fill_header(&evt->hdr, EVENT_LSM_FIM_RENAME);
 
-	const unsigned char *onm = BPF_CORE_READ(old_dentry, d_name.name);
+	const unsigned char *onm = NULL;
+	BPF_CORE_READ_INTO(&onm, old_dentry, d_name.name);
 	if (onm)
 		bpf_probe_read_kernel_str(evt->filename, sizeof(evt->filename), onm);
 
-	const unsigned char *nnm = BPF_CORE_READ(new_dentry, d_name.name);
+	const unsigned char *nnm = NULL;
+	BPF_CORE_READ_INTO(&nnm, new_dentry, d_name.name);
 	if (nnm)
 		bpf_probe_read_kernel_str(evt->new_filename, sizeof(evt->new_filename), nnm);
 	evt->flags = flags;
@@ -107,7 +110,8 @@ int BPF_PROG(fim_inode_setattr, struct dentry *dentry, struct iattr *attr)
 	__builtin_memset(evt, 0, sizeof(*evt));
 	fill_header(&evt->hdr, EVENT_LSM_FIM_SETATTR);
 
-	const unsigned char *nm = BPF_CORE_READ(dentry, d_name.name);
+	const unsigned char *nm = NULL;
+	BPF_CORE_READ_INTO(&nm, dentry, d_name.name);
 	if (nm)
 		bpf_probe_read_kernel_str(evt->filename, sizeof(evt->filename), nm);
 
