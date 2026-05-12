@@ -8,18 +8,18 @@
 #include <bpf/bpf_core_read.h>
 #include "common.h"
 
-/* Merged with file_monitor.c by llvm-link / bpftool gen object */
-struct {
+/* Maps are defined once in file_monitor.c and linked into edr.bpf.o. */
+extern struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 1 << 24);
-} file_events SEC(".maps");
+} file_events;
 
-struct {
+extern struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 4096);
 	__type(key, __u32);
 	__type(value, __u8);
-} file_pid_filter SEC(".maps");
+} file_pid_filter;
 
 static __always_inline void fill_header(struct event_header *hdr, __u32 type)
 {
