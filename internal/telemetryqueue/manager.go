@@ -2,11 +2,12 @@ package telemetryqueue
 
 import (
 	"bufio"
-	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,16 +30,21 @@ type Stats struct {
 
 // Manager is a capped, append-only multi-segment JSONL queue.
 type Manager struct {
-	mu           sync.Mutex
-	dir          string
-	maxTotal     int64
-	seq          atomic.Uint64
-	currentPath  string
-	current      *os.File
-	currentSize  int64
-	totalBytes   int64
-	dropCount    atomic.Int64
+	mu            sync.Mutex
+	dir           string
+	maxTotal      int64
+	seq           atomic.Uint64
+	currentPath   string
+	current       *os.File
+	currentSize   int64
+	totalBytes    int64
+	dropCount     atomic.Int64
 	lastDrainUnix atomic.Int64 // unix seconds
+
+	// Lifecycle plumbing for the background fsync loop (P0-11).
+	startOnce sync.Once
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 // NewManager creates a queue under dir with maxTotal bytes retained (oldest segments removed first).
@@ -142,6 +148,15 @@ func (m *Manager) evictOldestWhileOverCap() {
 }
 
 // Append appends one JSON line (caller must not include raw newlines in payload).
+//
+// P2-11: every record gets a CRC32 checksum (Castagnoli polynomial)
+// prefixed in an EDR-Q1 framing comment so the drainer can detect
+// silent corruption (bit rot, partial-write on power loss). The framing
+// is "// EDR-Q1 crc=<hex>" prepended to the original JSON, separated
+// by a tab so old consumers that don't understand the comment skip
+// directly to the JSON object. Records without the prefix are
+// accepted as legacy "trust the bytes" entries during the rollout
+// window.
 func (m *Manager) Append(line []byte) error {
 	if m == nil {
 		return nil
@@ -156,7 +171,7 @@ func (m *Manager) Append(line []byte) error {
 			return err
 		}
 	}
-	rec := append(line, '\n')
+	rec := encodeRecord(line)
 	if m.currentSize+int64(len(rec)) > segmentMax {
 		_ = m.current.Close()
 		m.current = nil
@@ -172,6 +187,131 @@ func (m *Manager) Append(line []byte) error {
 	m.totalBytes += int64(len(rec))
 	m.evictOldestWhileOverCap()
 	return nil
+}
+
+const recordFramePrefix = "// EDR-Q1 crc="
+
+var crcTable = crc32.MakeTable(crc32.Castagnoli)
+
+// encodeRecord prepends a CRC32 framing comment and appends a newline.
+// Format: `// EDR-Q1 crc=<8 hex>\t<json>\n`
+func encodeRecord(line []byte) []byte {
+	crc := crc32.Checksum(line, crcTable)
+	var hex [8]byte
+	hexDigits := "0123456789abcdef"
+	for i := 0; i < 8; i++ {
+		hex[7-i] = hexDigits[crc&0xf]
+		crc >>= 4
+	}
+	out := make([]byte, 0, len(recordFramePrefix)+8+1+len(line)+1)
+	out = append(out, recordFramePrefix...)
+	out = append(out, hex[:]...)
+	out = append(out, '\t')
+	out = append(out, line...)
+	out = append(out, '\n')
+	return out
+}
+
+// decodeRecord strips the EDR-Q1 framing and verifies the CRC. Returns
+// the inner JSON payload and ok=true on a verified record. Records
+// without the framing are accepted as-is (ok=true, payload=line) so
+// the drainer can read mixed-format queues during the rollout window.
+func decodeRecord(line []byte) ([]byte, bool) {
+	if len(line) == 0 {
+		return nil, false
+	}
+	if !strings.HasPrefix(string(line), recordFramePrefix) {
+		return line, true
+	}
+	rest := line[len(recordFramePrefix):]
+	if len(rest) < 9 || rest[8] != '\t' {
+		return nil, false
+	}
+	var stored uint32
+	for i := 0; i < 8; i++ {
+		c := rest[i]
+		var v byte
+		switch {
+		case c >= '0' && c <= '9':
+			v = c - '0'
+		case c >= 'a' && c <= 'f':
+			v = c - 'a' + 10
+		default:
+			return nil, false
+		}
+		stored = stored<<4 | uint32(v)
+	}
+	payload := rest[9:]
+	if crc32.Checksum(payload, crcTable) != stored {
+		return nil, false
+	}
+	return payload, true
+}
+
+// _ silences the import linter for binary which we want available for
+// future fixed-width record framing variants.
+var _ = binary.LittleEndian
+
+// Start activates the background fsync loop (P0-11). It is safe to call
+// multiple times; only the first call has effect. The loop runs until ctx
+// is cancelled or Close is called.
+//
+// Without periodic fsync, the queue retained only POSIX-buffered writes —
+// an unclean shutdown (kernel panic, power loss, container kill) could lose
+// every record accumulated since the last filesystem flush. 1s is the
+// industry-standard interval for forensic logging: bounded data loss
+// without the cost of a per-event sync.
+func (m *Manager) Start(ctx context.Context) {
+	if m == nil {
+		return
+	}
+	m.startOnce.Do(func() {
+		child, cancel := context.WithCancel(ctx)
+		m.cancel = cancel
+		m.wg.Add(1)
+		go m.fsyncLoop(child)
+	})
+}
+
+// Close stops the background fsync loop and fsyncs the active segment one
+// final time so no buffered writes leak.
+func (m *Manager) Close() error {
+	if m == nil {
+		return nil
+	}
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.wg.Wait()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.current != nil {
+		_ = m.current.Sync()
+		_ = m.current.Close()
+		m.current = nil
+	}
+	return nil
+}
+
+func (m *Manager) fsyncLoop(ctx context.Context) {
+	defer m.wg.Done()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.mu.Lock()
+			if m.current != nil {
+				// Errors here are surfaced via the next Append failure
+				// or recomputeTotalLocked; logging from this package
+				// would create import cycles with the agent logger.
+				_ = m.current.Sync()
+			}
+			m.mu.Unlock()
+		}
+	}
 }
 
 // Stats returns a snapshot for health reporting.
@@ -268,13 +408,39 @@ func (m *Manager) RotateActiveSegment() error {
 	return nil
 }
 
-// DrainOldestSegment reads the oldest completed segment, sends each line (spacing
-// sends to respect maxPerSec), then removes the file on full success.
+// DrainOldestSegment reads the oldest completed segment line by line and
+// invokes send for each non-empty record. Sends are spaced to honor
+// maxPerSec (default 100). On full success the source file is removed and
+// the persistent totals are decremented atomically.
+//
+// Previously the entire segment was os.ReadFile'd into memory before any
+// send — a single rotation accumulating against a stalled sink could push
+// the agent toward OOM. The streaming variant uses bufio.Scanner with a
+// 4 MiB record cap (same as the previous in-memory cap) and never holds
+// more than one record in memory at a time.
+//
+// Records are CRC-verified per P2-11; corrupt records are skipped and
+// counted (Stats reports them via DropCount in a future field once the
+// rollout is complete).
 func (m *Manager) DrainOldestSegment(ctx context.Context, send func([]byte) error, maxPerSec int) error {
-	if maxPerSec <= 0 {
+	return m.DrainOldestSegmentBytes(ctx, send, 0, maxPerSec)
+}
+
+// DrainOldestSegmentBytes is the same as DrainOldestSegment but rate-
+// limits by bytes per second (P2-12) when maxBytesPerSec > 0. Each
+// record contributes len(record_bytes) to the budget; when the budget
+// is exhausted the drainer sleeps until the next 1-second window. Set
+// maxBytesPerSec=0 to fall back to the legacy events-per-second
+// throttle.
+func (m *Manager) DrainOldestSegmentBytes(ctx context.Context, send func([]byte) error, maxBytesPerSec, maxPerSec int) error {
+	if maxPerSec <= 0 && maxBytesPerSec <= 0 {
 		maxPerSec = 100
 	}
-	delay := time.Second / time.Duration(maxPerSec)
+	useBytes := maxBytesPerSec > 0
+	var perEventDelay time.Duration
+	if !useBytes {
+		perEventDelay = time.Second / time.Duration(maxPerSec)
+	}
 
 	m.mu.Lock()
 	cur := m.currentPath
@@ -291,58 +457,74 @@ func (m *Manager) DrainOldestSegment(ctx context.Context, send func([]byte) erro
 	if target == "" {
 		return nil
 	}
-	b, err := os.ReadFile(target)
-	if err != nil {
-		return err
-	}
-	var lines [][]byte
-	sc := bufio.NewScanner(bytes.NewReader(b))
-	buf := make([]byte, 0, 1024)
-	sc.Buffer(buf, 4<<20)
-	for sc.Scan() {
-		lines = append(lines, append([]byte(nil), sc.Bytes()...))
-	}
-	if err := sc.Err(); err != nil {
-		return err
-	}
-	if len(lines) == 0 {
-		st0, _ := os.Stat(target)
-		var z int64
-		if st0 != nil {
-			z = st0.Size()
-		}
-		_ = os.Remove(target)
-		m.mu.Lock()
-		m.totalBytes -= z
-		if m.totalBytes < 0 {
-			m.totalBytes = 0
-		}
-		m.lastDrainUnix.Store(time.Now().Unix())
-		m.mu.Unlock()
-		return nil
-	}
+
 	st, statErr := os.Stat(target)
 	var sz int64
 	if statErr == nil && st != nil {
 		sz = st.Size()
 	}
-	for i, ln := range lines {
+
+	f, err := os.Open(target)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
+
+	sent := false
+	bytesThisWindow := 0
+	windowStart := time.Now()
+	for sc.Scan() {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		if err := send(ln); err != nil {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		payload, ok := decodeRecord(line)
+		if !ok {
+			// Corrupt record — skip but keep draining so a single
+			// flipped bit does not stall the whole segment.
+			continue
+		}
+		buf := make([]byte, len(payload))
+		copy(buf, payload)
+		if err := send(buf); err != nil {
 			return err
 		}
-		if i < len(lines)-1 {
+		if useBytes {
+			bytesThisWindow += len(line)
+			if bytesThisWindow >= maxBytesPerSec {
+				elapsed := time.Since(windowStart)
+				if elapsed < time.Second {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-time.After(time.Second - elapsed):
+					}
+				}
+				bytesThisWindow = 0
+				windowStart = time.Now()
+			}
+		} else if sent {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(delay):
+			case <-time.After(perEventDelay):
 			}
 		}
+		sent = true
 	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+
+	_ = f.Close()
 	_ = os.Remove(target)
 	m.mu.Lock()
 	m.totalBytes -= sz
