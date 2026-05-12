@@ -89,13 +89,13 @@ static __always_inline bool is_filtered(void)
 	return false;
 }
 
+#define EXEC_ARGV_SLOTS 16
+#define EXEC_ARGV_CHUNK 64
+
 /*
- * capture_argv reads up to 16 argv strings into evt->args, separated by
- * single spaces. The trailing NUL written by bpf_probe_read_user_str is
- * overwritten with a space; the very last space is replaced with a NUL
- * before returning so the buffer is a valid C string. Stops early on
- * NULL argv slot, read failure, or buffer exhaustion. evt->args_size is
- * set to the number of bytes used (excluding the terminating NUL).
+ * capture_argv reads up to EXEC_ARGV_SLOTS argv strings into evt->args,
+ * separated by single spaces. Each token is read in fixed-size chunks so
+ * the verifier can prove the destination stays inside evt->args.
  */
 static __always_inline void capture_argv(struct process_event *evt,
                                          const char *const *argv)
@@ -105,27 +105,27 @@ static __always_inline void capture_argv(struct process_event *evt,
 	if (!argv)
 		return;
 
-	for (int i = 0; i < 16; i++) {
+	#pragma unroll
+	for (int i = 0; i < EXEC_ARGV_SLOTS; i++) {
 		const char *argp = NULL;
 
-		if (off >= MAX_ARGS_LEN - 1)
+		if (off > MAX_ARGS_LEN - 1 - EXEC_ARGV_CHUNK)
 			break;
 		if (bpf_probe_read_user(&argp, sizeof(argp), &argv[i]) < 0)
 			break;
 		if (!argp)
 			break;
 
-		__u32 remaining = MAX_ARGS_LEN - 1 - off;
-		if (remaining < 2)
-			break;
-
-		int written = bpf_probe_read_user_str(&evt->args[off], remaining, argp);
+		int written = bpf_probe_read_user_str(&evt->args[off],
+		                                      EXEC_ARGV_CHUNK, argp);
 		if (written <= 0)
 			break;
-		if (written > (__s32)remaining)
-			written = (__s32)remaining;
 
-		off += (__u32)written - 1;
+		__u32 len = (__u32)written - 1;
+		if (len >= EXEC_ARGV_CHUNK)
+			len = EXEC_ARGV_CHUNK - 1;
+
+		off += len;
 		if (off >= MAX_ARGS_LEN - 1)
 			break;
 		evt->args[off] = ' ';
