@@ -239,7 +239,10 @@ func tcpQuintKey(lIP string, lPort uint16, rIP string, rPort uint16) string {
 }
 
 func sockDiagTCP4Dump(ctx context.Context) (map[string]struct{}, error) {
-	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_SOCK_DIAG)
+	// P2-16: SOCK_CLOEXEC ensures this netlink fd is not inherited
+	// by any child process the agent may fork later (e.g. the auth
+	// collector's tooling probes).
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_SOCK_DIAG)
 	if err != nil {
 		return nil, err
 	}
