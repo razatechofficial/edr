@@ -23,7 +23,7 @@ func TestIntegrityCheckerBaseline(t *testing.T) {
 		files[i] = p
 	}
 
-	checker, err := NewIntegrityChecker(files, backupDir, zap.NewNop())
+	checker, err := NewIntegrityChecker(files, backupDir, t.TempDir(), zap.NewNop())
 	if err != nil {
 		t.Fatalf("NewIntegrityChecker: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestIntegrityCheckerDetectsModification(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	checker, err := NewIntegrityChecker([]string{tracked}, backupDir, zap.NewNop())
+	checker, err := NewIntegrityChecker([]string{tracked}, backupDir, t.TempDir(), zap.NewNop())
 	if err != nil {
 		t.Fatalf("NewIntegrityChecker: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestIntegrityCheckerNoFalsePositive(t *testing.T) {
 		files[i] = p
 	}
 
-	checker, err := NewIntegrityChecker(files, backupDir, zap.NewNop())
+	checker, err := NewIntegrityChecker(files, backupDir, t.TempDir(), zap.NewNop())
 	if err != nil {
 		t.Fatalf("NewIntegrityChecker: %v", err)
 	}
