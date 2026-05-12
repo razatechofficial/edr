@@ -62,4 +62,4 @@ temp/
 dist/
 pkg/deb-build/
 pkg/deb/
-pkg/macos/
+pkg/macos/sign_manifest
