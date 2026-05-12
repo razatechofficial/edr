@@ -656,6 +656,29 @@ func (e *Engine) yaraResultPump(ctx context.Context) {
 	}
 }
 
+// ScanFileForValidation runs a synchronous YARA scan for validation harnesses.
+func (e *Engine) ScanFileForValidation(ctx context.Context, path string) []Detection {
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	y := e.yara
+	e.mu.RUnlock()
+	if y == nil {
+		return nil
+	}
+	matches, err := y.ScanFile(ctx, path)
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+	raw := &schema.FileEvent{Path: path}
+	out := make([]Detection, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, FromAlert(yaraMatchToAlert(m, raw)))
+	}
+	return out
+}
+
 func (e *Engine) processYARAScanResult(res rules.YARAScanResult) {
 	for _, ym := range res.Matches {
 		if shouldSuppressYARANoise(ym, res.Path) {
