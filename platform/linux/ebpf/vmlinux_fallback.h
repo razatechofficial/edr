@@ -141,3 +141,5 @@ struct cred {
 union bpf_attr {
 	__u32 prog_type;
 };
+
+#define EDR_SCHED_TRACEPOINT_LAYOUTS
