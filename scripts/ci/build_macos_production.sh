@@ -14,6 +14,12 @@ if [ -z "${SDKROOT:-}" ] && command -v xcrun >/dev/null 2>&1; then
 		export SDKROOT="${_sdk}"
 	fi
 fi
+if command -v xcrun >/dev/null 2>&1; then
+	_clang="$(xcrun --find clang 2>/dev/null || true)"
+	if [ -n "${_clang}" ]; then
+		export CC="${_clang}"
+	fi
+fi
 
 # Match the host ABI (GitHub-hosted macOS is arm64). A mismatched GOARCH breaks
 # EndpointSecurity / YARA CGO links when the toolchain targets the wrong slice.

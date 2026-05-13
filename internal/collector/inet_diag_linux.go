@@ -178,9 +178,9 @@ func decodeProcNetAddr(s string) (ip string, port uint16, ok bool) {
 		if err != nil {
 			return "", 0, false
 		}
-		b[i] = v
+		// Match parseProcNetAddr in netlink_source_linux.go: hex octets are LE u32 in /proc/net/tcp.
+		b[3-i] = v
 	}
-	// /proc/net/tcp stores little-endian IPv4 quads
 	return ipStringFromBytes(b[0], b[1], b[2], b[3]), p, true
 }
 

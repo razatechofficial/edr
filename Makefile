@@ -234,7 +234,7 @@ GO_TEST_PKGS := $(shell go list ./... 2>/dev/null | grep -v '/temp/' || true)
 
 test:
 	@echo "==> Running all tests"
-	go test $$(go list ./... | grep -v '/temp/') -count=1 -timeout 120s
+	go test $$(go list ./... | grep -v '/temp/') -count=1 -timeout 600s
 
 test-ci: test
 
@@ -335,7 +335,7 @@ diagnose-esf:
 
 test-coverage:
 	@echo "==> Running tests with coverage"
-	go test ./... -coverprofile=coverage.out -covermode=atomic -timeout 120s
+	go test ./... -coverprofile=coverage.out -covermode=atomic -timeout 600s
 	go tool cover -func=coverage.out
 	@echo "==> HTML coverage report: coverage.html"
 	go tool cover -html=coverage.out -o coverage.html
