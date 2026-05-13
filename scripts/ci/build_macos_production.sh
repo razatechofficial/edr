@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
-bash scripts/ci/setup_macos_build.sh
+# shellcheck source=scripts/ci/setup_macos_build.sh
+source "${ROOT}/scripts/ci/setup_macos_build.sh"
 
 export CGO_ENABLED=1
 # Ensure CGO sees the active macOS SDK (framework search paths).
