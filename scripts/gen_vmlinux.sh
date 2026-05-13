@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 # shellcheck source=scripts/ci/resolve_bpftool.sh
@@ -25,7 +25,7 @@ find_clang_bpf() {
 }
 
 resolve_bpftool() {
-	resolve_bpftool_bin
+	resolve_bpftool_for_btf_dump || resolve_bpftool_bin
 }
 
 validate_vmlinux_header() {

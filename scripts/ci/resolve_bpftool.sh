@@ -1,33 +1,70 @@
 #!/usr/bin/env bash
 
-resolve_bpftool_bin() {
-	local kernel tools_dir tool
-
-	kernel="$(uname -r)"
-	tool="/usr/lib/linux-tools/${kernel}/bpftool"
-	if [ -x "${tool}" ]; then
-		echo "${tool}"
-		return 0
+# Emit bpftool paths to try, best-first: exact linux-tools-$(uname -r), then other
+# installed toolchains, then /usr/local/bin and PATH.
+bpftool_candidates() {
+	local k tools_dir t base
+	k="$(uname -r)"
+	t="/usr/lib/linux-tools/${k}/bpftool"
+	if [ -x "${t}" ]; then
+		echo "${t}"
 	fi
-
-	for tools_dir in /usr/lib/linux-tools/* /usr/lib/linux-tools-*; do
+	for tools_dir in /usr/lib/linux-tools/*/; do
 		[ -d "${tools_dir}" ] || continue
-		tool="${tools_dir}/bpftool"
-		if [ -x "${tool}" ]; then
-			echo "${tool}"
-			return 0
+		base="${tools_dir%/}"
+		base="${base##*/}"
+		[ "${base}" = "${k}" ] && continue
+		t="${tools_dir}bpftool"
+		if [ -x "${t}" ]; then
+			echo "${t}"
 		fi
 	done
-
-	if [ -x /usr/local/bin/bpftool ] && /usr/local/bin/bpftool version >/dev/null 2>&1; then
+	if [ -x /usr/local/bin/bpftool ]; then
 		echo /usr/local/bin/bpftool
-		return 0
+	fi
+	if command -v bpftool >/dev/null 2>&1; then
+		command -v bpftool
+	fi
+}
+
+# First bpftool that runs `version` and can read running-kernel BTF (when present).
+resolve_bpftool_for_btf_dump() {
+	local cand
+	if [ ! -f /sys/kernel/btf/vmlinux ]; then
+		return 1
+	fi
+	while IFS= read -r cand; do
+		[ -n "${cand}" ] || continue
+		[ -x "${cand}" ] || continue
+		if ! "${cand}" version >/dev/null 2>&1; then
+			continue
+		fi
+		if "${cand}" btf dump file /sys/kernel/btf/vmlinux format c 2>/dev/null | head -c 65536 | grep -q 'struct '; then
+			echo "${cand}"
+			return 0
+		fi
+	done < <(bpftool_candidates | awk '!a[$0]++')
+	return 1
+}
+
+resolve_bpftool_bin() {
+	local cand
+
+	if [ -f /sys/kernel/btf/vmlinux ]; then
+		if cand="$(resolve_bpftool_for_btf_dump)"; then
+			echo "${cand}"
+			return 0
+		fi
 	fi
 
-	if command -v bpftool >/dev/null 2>&1 && bpftool version >/dev/null 2>&1; then
-		command -v bpftool
-		return 0
-	fi
+	while IFS= read -r cand; do
+		[ -n "${cand}" ] || continue
+		[ -x "${cand}" ] || continue
+		if "${cand}" version >/dev/null 2>&1; then
+			echo "${cand}"
+			return 0
+		fi
+	done < <(bpftool_candidates | awk '!a[$0]++')
 
 	return 1
 }

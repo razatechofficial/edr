@@ -14,6 +14,13 @@ for opt in "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" "linux-head
 	sudo apt-get install -y "${opt}" || true
 done
 
+# GitHub-hosted Linux runners often use -azure / -aws kernels; the generic
+# meta-package may not install a bpftool that matches the running kernel.
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+	sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure 2>/dev/null || true
+	sudo apt-get install -y linux-tools-aws linux-cloud-tools-aws 2>/dev/null || true
+fi
+
 if ! pkg-config --exists libbpf 2>/dev/null; then
 	bash scripts/install_libbpf_headers.sh
 fi

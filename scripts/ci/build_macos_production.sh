@@ -7,6 +7,13 @@ cd "${ROOT}"
 bash scripts/ci/setup_macos_build.sh
 
 export CGO_ENABLED=1
+# Ensure CGO sees the active macOS SDK (framework search paths).
+if [ -z "${SDKROOT:-}" ] && command -v xcrun >/dev/null 2>&1; then
+	_sdk="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+	if [ -n "${_sdk}" ]; then
+		export SDKROOT="${_sdk}"
+	fi
+fi
 
 VERSION="${EDR_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
 ARCH="$(go env GOARCH)"
