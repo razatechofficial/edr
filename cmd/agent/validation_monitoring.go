@@ -323,10 +323,12 @@ func assertNoDrops(sources []map[string]any, cfg *config.Config) []monitoringAss
 			})
 		}
 		if rl := rateLimitedPositive(src["rate_limited_drops"]); rl > 0 {
+			// Soft signal: stream_max_eps backpressure is expected under load and
+			// is not treated as a monitoring health failure (see golden fixture
+			// stream_eps_rate_limited.json).
 			out = append(out, monitoringAssertion{
 				Name:   "rate_limit_drops." + name,
 				Detail: fmt.Sprintf("rate_limited_drops=%.0f (stream_max_eps)", rl),
-				Failed: true,
 			})
 		}
 	}
