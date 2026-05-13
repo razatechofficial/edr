@@ -32,6 +32,9 @@ LINUX_CGO ?= 1
 else
 LINUX_CGO ?= 0
 endif
+# linux/arm64 agent with CGO requires an aarch64 toolchain; on linux/amd64 CI
+# hosts cross-compilation fails with CGO_ENABLED=1. Native arm64 hosts keep YARA.
+LINUX_CGO_ARM64 ?= $(if $(filter arm64,$(shell go env GOHOSTARCH)),$(LINUX_CGO),0)
 ifneq ($(shell command -v x86_64-w64-mingw32-gcc 2>/dev/null),)
 WINDOWS_CGO ?= 1
 else
@@ -95,7 +98,7 @@ build-linux:
 	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-linux-amd64 ./cmd/cli
 	@mkdir -p dist/linux-amd64 dist/linux-arm64
 	CGO_ENABLED=$(LINUX_CGO) GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/linux-amd64/edr-agent ./cmd/agent
-	CGO_ENABLED=$(LINUX_CGO) GOOS=linux GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/linux-arm64/edr-agent ./cmd/agent
+	CGO_ENABLED=$(LINUX_CGO_ARM64) GOOS=linux GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/linux-arm64/edr-agent ./cmd/agent
 
 build-darwin:
 	@echo "==> Building macOS binaries"
