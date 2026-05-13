@@ -15,8 +15,16 @@ if [ -z "${SDKROOT:-}" ] && command -v xcrun >/dev/null 2>&1; then
 	fi
 fi
 
+# Match the host ABI (GitHub-hosted macOS is arm64). A mismatched GOARCH breaks
+# EndpointSecurity / YARA CGO links when the toolchain targets the wrong slice.
+case "${EDR_MACOS_ARCH:-$(uname -m)}" in
+arm64 | aarch64) export GOARCH=arm64 ;;
+amd64 | x86_64) export GOARCH=amd64 ;;
+*) export GOARCH="${GOARCH:-$(go env GOARCH)}" ;;
+esac
+
 VERSION="${EDR_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
-ARCH="$(go env GOARCH)"
+ARCH="${GOARCH}"
 AGENT_OUT="dist/darwin-${ARCH}/edr-agent"
 CTL_OUT="bin/edrctl-darwin-${ARCH}"
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.Version=${VERSION}"
