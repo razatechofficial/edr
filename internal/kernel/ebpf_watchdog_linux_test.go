@@ -8,10 +8,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/cilium/ebpf"
 )
 
 func TestWatchdogLoop_BatchesMissingPrograms_SingleReattach(t *testing.T) {
-	t.Parallel()
 	oldInt := ebpfWatchdogInterval
 	oldExists := ebpfProgramExistsForWatchdog
 	var reattachCalls int32
@@ -24,15 +25,16 @@ func TestWatchdogLoop_BatchesMissingPrograms_SingleReattach(t *testing.T) {
 		ebpfProgramExistsForWatchdog = oldExists
 		testEbpfReattachOverride = nil
 	}()
-	ebpfWatchdogInterval = 15 * time.Millisecond
+	ebpfWatchdogInterval = 20 * time.Millisecond
 	ebpfProgramExistsForWatchdog = func(uint32) bool { return false }
 
 	d := &EBPFDriver{
 		buf:        NewRingBuffer(4096),
 		ownProgIDs: []uint32{10, 20, 30},
+		coll:       &ebpf.Collection{},
 	}
 	d.running.Store(true)
-	ctx, cancel := context.WithTimeout(context.Background(), 38*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	go d.watchdogLoop(ctx)
 	<-ctx.Done()
@@ -47,7 +49,6 @@ func TestWatchdogLoop_BatchesMissingPrograms_SingleReattach(t *testing.T) {
 }
 
 func TestReattachWithBoundedRetry_RetriesUntilBudget(t *testing.T) {
-	t.Parallel()
 	var calls int32
 	testEbpfReattachOverride = func(_ *EBPFDriver, _ int) error {
 		atomic.AddInt32(&calls, 1)

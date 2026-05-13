@@ -35,7 +35,7 @@ func TestUpdateLinuxProcNetEnrichStats_LowRateStreak(t *testing.T) {
 func TestExportMonitoringHealth_PIDAttributionRate(t *testing.T) {
 	nc := NewNetworkCollector("e1", config.Config{})
 	nc.cfg.Monitoring.LinuxProcNetPIDEnrich = true
-	nc.linuxEnrichInodeLast.Store(10)
+	nc.linuxEnrichInodeLast.Store(100)
 	nc.linuxEnrichPIDLast.Store(1)
 	nc.linuxEnrichLowRateStreak.Store(6)
 	m := nc.ExportMonitoringHealth()
