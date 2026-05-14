@@ -1,8 +1,17 @@
-# Add WiX Toolset v3 bin (candle.exe / light.exe) to GITHUB_PATH for subsequent steps.
+# Ensure WiX v3 candle.exe / light.exe are on PATH (GITHUB_PATH for later steps).
+# Chocolatey package names/versions drift; official WiX binaries zip is deterministic for CI.
 $ErrorActionPreference = 'Stop'
 
+function Add-WixBinToPath {
+    param([string]$BinDir)
+    if (-not (Test-Path (Join-Path $BinDir 'candle.exe'))) { return $false }
+    Add-Content -Path $env:GITHUB_PATH -Value $BinDir
+    Write-Host "WiX bin added to GITHUB_PATH: $BinDir"
+    return $true
+}
+
 if (Get-Command candle -ErrorAction SilentlyContinue) {
-    Write-Host "candle already on PATH"
+    Write-Host "candle already on PATH: $((Get-Command candle).Source)"
     exit 0
 }
 
@@ -13,41 +22,30 @@ if (${env:ProgramFiles(x86)}) {
 if ($env:ProgramFiles) {
     $candidates += Get-ChildItem -Path "$env:ProgramFiles\WiX Toolset*" -Directory -ErrorAction SilentlyContinue
 }
-
 foreach ($dir in $candidates) {
     $bin = Join-Path $dir.FullName 'bin'
-    $candle = Join-Path $bin 'candle.exe'
-    if (Test-Path -LiteralPath $candle) {
-        Add-Content -Path $env:GITHUB_PATH -Value $bin
-        Write-Host "Added WiX to PATH: $bin"
-        exit 0
+    if (Add-WixBinToPath $bin) { exit 0 }
+}
+
+Write-Host "WiX not preinstalled; downloading WiX v3.14.1 binaries (official release)..."
+$zipUrl = 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip'
+$zipPath = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
+$dest = Join-Path $env:RUNNER_TEMP 'wix314-binaries'
+Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+Expand-Archive -Path $zipPath -DestinationPath $dest -Force
+
+$candlePath = Join-Path $dest 'candle.exe'
+if (Test-Path -LiteralPath $candlePath) {
+    $binDir = $dest
+} else {
+    $candle = Get-ChildItem -Path $dest -Recurse -Filter 'candle.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $candle) {
+        throw "candle.exe not found inside extracted WiX binaries (wix314-binaries.zip)"
     }
+    $binDir = $candle.Directory.FullName
 }
-
-Write-Host "WiX Toolset not found; installing via Chocolatey..."
-choco install wixtoolset -y --no-progress
-
-$machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-$user = [Environment]::GetEnvironmentVariable('Path', 'User')
-$env:PATH = "$machine;$user"
-
-if (Get-Command candle -ErrorAction SilentlyContinue) {
-    Write-Host "WiX available after choco: $( (Get-Command candle).Source )"
-    exit 0
+if (-not (Add-WixBinToPath $binDir)) {
+    throw "Failed to add WiX bin directory"
 }
-
-# choco may install without updating current process PATH; add common install dir.
-$candidates = @()
-if (${env:ProgramFiles(x86)}) {
-    $candidates += Get-ChildItem -Path "${env:ProgramFiles(x86)}\WiX Toolset*" -Directory -ErrorAction SilentlyContinue
-}
-foreach ($dir in $candidates) {
-    $bin = Join-Path $dir.FullName 'bin'
-    if (Test-Path -LiteralPath (Join-Path $bin 'candle.exe')) {
-        Add-Content -Path $env:GITHUB_PATH -Value $bin
-        Write-Host "Added WiX to GITHUB_PATH: $bin"
-        exit 0
-    }
-}
-
-throw "candle.exe not found after choco install wixtoolset"
+Write-Host "Using WiX from: $binDir"
