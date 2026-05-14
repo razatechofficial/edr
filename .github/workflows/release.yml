@@ -134,11 +134,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      # windows-latest does not ship GNU make; Makefile build-windows is the source of truth.
-      - name: Install GNU Make
-        run: choco install make -y
-      - name: Build windows
-        run: make build-windows
+      - name: Build Windows binaries
+        shell: bash
+        run: bash scripts/ci/build_windows_binaries.sh
+      - name: Ensure WiX (candle/light) on PATH
+        shell: pwsh
+        run: pwsh -NoProfile -File "${{ github.workspace }}/scripts/ci/ensure_wix_path.ps1"
       - name: Build MSI
         shell: cmd
         run: build\windows\build_msi.bat "${{ needs.release_meta.outputs.msi_version }}"
