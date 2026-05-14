@@ -149,7 +149,19 @@ jobs:
         run: |
           & "${{ github.workspace }}/scripts/ci/ensure_wix_path.ps1"
           & "${{ github.workspace }}/scripts/ci/build_windows_msi.ps1" -Version "${{ needs.release_meta.outputs.msi_version }}"
+      - name: Upload WiX logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-wix-logs
+          if-no-files-found: ignore
+          path: |
+            build/windows/candle-out.log
+            build/windows/candle-err.log
+            build/windows/light-out.log
+            build/windows/light-err.log
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: windows-packages
           path: dist/*.msi
