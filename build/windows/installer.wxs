@@ -50,7 +50,7 @@
           Type="ownProcess"
           Start="auto"
           ErrorControl="normal"
-          Arguments='--config "[CommonAppDataFolder]EDR Agent\config.yml"'/>
+          Arguments='--config "[#ConfigFile]"'/>
         <ServiceControl
           Id="StartService"
           Start="install"
@@ -60,7 +60,7 @@
           Wait="yes"/>
       </Component>
     </ComponentGroup>
-    <!-- Default config next to service --config path (ProgramData\EDR Agent\). -->
+    <!-- Default config under ProgramData; service uses MSI #[FileId] path (avoids fragile formatted dir strings). -->
     <ComponentGroup Id="ConfigDataComponents" Directory="DATFOLDER">
       <Component Id="ConfigFile" Guid="*">
         <File Id="ConfigFile"
