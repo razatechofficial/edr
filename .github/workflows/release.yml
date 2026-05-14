@@ -149,6 +149,17 @@ jobs:
         run: |
           & "${{ github.workspace }}/scripts/ci/ensure_wix_path.ps1"
           & "${{ github.workspace }}/scripts/ci/build_windows_msi.ps1" -Version "${{ needs.release_meta.outputs.msi_version }}"
+      - name: Show WiX logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          foreach ($p in @('build/windows/candle.log', 'build/windows/light.log')) {
+            if (Test-Path -LiteralPath $p) {
+              Write-Host "::group::$p"
+              Get-Content -LiteralPath $p
+              Write-Host "::endgroup::"
+            }
+          }
       - name: Upload WiX logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

@@ -12,7 +12,8 @@
 
     <Package InstallerVersion="500" Compressed="yes"
              InstallScope="perMachine"
-             InstallPrivileges="elevated"/>
+             InstallPrivileges="elevated"
+             Platform="x64"/>
 
     <MajorUpgrade DowngradeErrorMessage=
       "A newer version is already installed."/>
@@ -34,7 +35,7 @@
   <Fragment>
     <ComponentGroup Id="ProductComponents"
                     Directory="INSTALLFOLDER">
-      <Component Id="AgentFiles" Guid="*">
+      <Component Id="AgentFiles" Guid="*" Win64="yes">
         <File Id="AgentExe"
               Source="dist/windows-amd64/edr-agent.exe"
               KeyPath="yes"/>
