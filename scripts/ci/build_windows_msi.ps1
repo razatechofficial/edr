@@ -5,8 +5,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-# candle.exe/light.exe write normal progress to stderr. PS 7.2+ can surface native stderr as a
-# terminating error when $PSNativeCommandUseErrorActionPreference is true; keep legacy behavior.
 if ($PSVersionTable.PSVersion.Major -ge 7) {
     $PSNativeCommandUseErrorActionPreference = $false
 }
@@ -30,6 +28,27 @@ function Normalize-WiXProductVersion([string]$raw) {
     while ($nums.Count -lt 4) { $nums += 0 }
     if ($nums.Count -gt 4) { $nums = $nums[0..3] }
     return ($nums -join '.')
+}
+
+function Invoke-WiXNative {
+    param(
+        [string]$Label,
+        [string]$ExePath,
+        [string[]]$ArgList,
+        [string]$LogPath
+    )
+    Write-Host "==> $Label"
+    Write-Host "$ExePath $($ArgList -join ' ')"
+    $lines = & $ExePath @ArgList *>&1
+    $ec = $LASTEXITCODE
+    if ($null -ne $lines) {
+        $lines | Tee-Object -FilePath $LogPath
+    } else {
+        '' | Out-File -FilePath $LogPath -Encoding utf8
+    }
+    if (($null -ne $ec) -and ($ec -ne 0)) {
+        throw "$Label failed with exit $ec"
+    }
 }
 
 $Version = Normalize-WiXProductVersion $Version
@@ -63,42 +82,15 @@ $wxs = Join-Path $root 'build/windows/installer.wxs'
 $wixobj = Join-Path $root 'build/windows/installer.wixobj'
 $msi = Join-Path $root "dist/edr-agent_${Version}_amd64.msi"
 
-function Invoke-WiXTool {
-    param(
-        [string]$Label,
-        [string]$ExePath,
-        [string[]]$ArgList,
-        [string]$OutLog,
-        [string]$ErrLog
-    )
-    Write-Host "==> $Label"
-    Write-Host "$ExePath $($ArgList -join ' ')"
-    $p = Start-Process -WorkingDirectory $root -FilePath $ExePath -ArgumentList $ArgList `
-        -Wait -PassThru -NoNewWindow `
-        -RedirectStandardOutput $OutLog -RedirectStandardError $ErrLog
-    if ($null -eq $p -or $p.ExitCode -ne 0) {
-        $code = if ($null -eq $p) { 'null' } else { $p.ExitCode }
-        Write-Host "---- $Label stdout (tail) ----"
-        if (Test-Path -LiteralPath $OutLog) { Get-Content -LiteralPath $OutLog -Tail 80 | Write-Host }
-        Write-Host "---- $Label stderr (tail) ----"
-        if (Test-Path -LiteralPath $ErrLog) { Get-Content -LiteralPath $ErrLog -Tail 80 | Write-Host }
-        throw "$Label failed with exit $code"
-    }
-}
+$candleLog = Join-Path $root 'build/windows/candle.log'
+$lightLog = Join-Path $root 'build/windows/light.log'
 
-$candleOut = Join-Path $root 'build/windows/candle-out.log'
-$candleErr = Join-Path $root 'build/windows/candle-err.log'
-$lightOut = Join-Path $root 'build/windows/light-out.log'
-$lightErr = Join-Path $root 'build/windows/light-err.log'
-
-Invoke-WiXTool -Label 'candle (WiX)' -ExePath $candleExe `
+Invoke-WiXNative -Label 'candle (WiX)' -ExePath $candleExe `
     -ArgList @('-nologo', '-arch', 'x64', "-dVersion=$Version", $wxs, '-o', $wixobj) `
-    -OutLog $candleOut -ErrLog $candleErr
+    -LogPath $candleLog
 
-# -sval: skip ICE validation (CI often fails ICE on service installers; MSI still installs).
-# -sw1076: suppress duplicate-file warnings when harmless.
-Invoke-WiXTool -Label 'light (WiX)' -ExePath $lightExe `
+Invoke-WiXNative -Label 'light (WiX)' -ExePath $lightExe `
     -ArgList @('-nologo', '-sval', '-sw1076', $wixobj, '-o', $msi) `
-    -OutLog $lightOut -ErrLog $lightErr
+    -LogPath $lightLog
 
 Write-Host "Built: $msi"

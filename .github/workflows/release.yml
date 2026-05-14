@@ -156,10 +156,8 @@ jobs:
           name: windows-wix-logs
           if-no-files-found: ignore
           path: |
-            build/windows/candle-out.log
-            build/windows/candle-err.log
-            build/windows/light-out.log
-            build/windows/light-err.log
+            build/windows/candle.log
+            build/windows/light.log
       - uses: actions/upload-artifact@v4
         if: success()
         with:
