@@ -35,10 +35,20 @@ endif
 # linux/arm64 agent with CGO requires an aarch64 toolchain; on linux/amd64 CI
 # hosts cross-compilation fails with CGO_ENABLED=1. Native arm64 hosts keep YARA.
 LINUX_CGO_ARM64 ?= $(if $(filter arm64,$(shell go env GOHOSTARCH)),$(LINUX_CGO),0)
-ifneq ($(shell command -v x86_64-w64-mingw32-gcc 2>/dev/null),)
-WINDOWS_CGO ?= 1
+# dist/darwin-* agents need native macOS toolchains for ESF+YARA CGO; never force
+# CGO when cross-compiling from Linux/Windows (e.g. make build-all on GitHub).
+ifeq ($(HOST_OS),Darwin)
+DARWIN_DIST_CGO := 1
 else
-WINDOWS_CGO ?= 0
+DARWIN_DIST_CGO := 0
+endif
+# Windows: default off on non-Linux (hosted Windows has mingw without YARA deps).
+# Linux cross-builds may enable when mingw is present; override with WINDOWS_CGO=1/0.
+WINDOWS_CGO := 0
+ifeq ($(HOST_OS),Linux)
+ifneq ($(shell command -v x86_64-w64-mingw32-gcc 2>/dev/null),)
+WINDOWS_CGO := 1
+endif
 endif
 
 CLANG      ?= clang
@@ -109,15 +119,19 @@ build-darwin:
 	GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-amd64 ./cmd/cli
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-arm64 ./cmd/cli
 	@mkdir -p dist/darwin-amd64 dist/darwin-arm64
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-amd64/edr-agent ./cmd/agent
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-arm64/edr-agent ./cmd/agent
+	CGO_ENABLED=$(DARWIN_DIST_CGO) GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-amd64/edr-agent ./cmd/agent
+	CGO_ENABLED=$(DARWIN_DIST_CGO) GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-arm64/edr-agent ./cmd/agent
 
 build-windows:
 	@echo "==> Building Windows amd64 binaries"
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-windows-amd64.exe ./cmd/agent
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-windows-amd64.exe ./cmd/cli
 	@mkdir -p dist/windows-amd64
-	CGO_ENABLED=$(WINDOWS_CGO) GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
+ifeq ($(WINDOWS_CGO),1)
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
+else
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
+endif
 
 build-darwin-production:
 	@bash scripts/ci/build_macos_production.sh
@@ -335,7 +349,7 @@ diagnose-esf:
 
 test-coverage:
 	@echo "==> Running tests with coverage"
-	go test ./... -coverprofile=coverage.out -covermode=atomic -timeout 600s
+	go test $$(go list ./... | grep -v '/temp/') -coverprofile=coverage.out -covermode=atomic -timeout 600s
 	go tool cover -func=coverage.out
 	@echo "==> HTML coverage report: coverage.html"
 	go tool cover -html=coverage.out -o coverage.html
