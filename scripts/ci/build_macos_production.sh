@@ -60,6 +60,14 @@ if ! otool -L "${AGENT_OUT}" | grep -Eiq 'EndpointSecurity|/System/Library/Frame
 fi
 
 ENTITLEMENTS="build/macos/edr-agent.entitlements.plist"
+# Hosted CI often has APPLE_SIGN_IDENTITY from repo secrets but no matching private key
+# in the runner keychain; codesign would fail. Fall back to ad-hoc signing in that case.
+if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
+	if ! security find-identity -v -p codesigning 2>/dev/null | grep -Fq "${APPLE_SIGN_IDENTITY}"; then
+		echo "APPLE_SIGN_IDENTITY not present in keychain; using ad-hoc signing (CI or unsigned build)" >&2
+		APPLE_SIGN_IDENTITY=""
+	fi
+fi
 if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
 	if ! codesign --force --options runtime --timestamp \
 		--entitlements "${ENTITLEMENTS}" \
