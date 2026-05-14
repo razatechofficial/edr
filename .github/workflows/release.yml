@@ -147,8 +147,13 @@ jobs:
       - name: WiX toolchain and MSI
         shell: pwsh
         run: |
+          Set-Location "${{ github.workspace }}"
           & "${{ github.workspace }}/scripts/ci/ensure_wix_path.ps1"
-          & "${{ github.workspace }}/scripts/ci/build_windows_msi.ps1" -Version "${{ needs.release_meta.outputs.msi_version }}"
+          $v = "${{ needs.release_meta.outputs.msi_version }}".Trim().TrimEnd([char]0x0D).TrimEnd([char]0x0A)
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = '1.0.0.0' }
+          # Same path developers use locally; avoids PowerShell-only WiX invocation quirks on GHA.
+          $p = Start-Process -FilePath cmd.exe -ArgumentList @('/d', '/c', "build\windows\build_msi.bat `"$v`"") -WorkingDirectory "${{ github.workspace }}" -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
       - name: Show WiX logs on failure
         if: failure()
         shell: pwsh
