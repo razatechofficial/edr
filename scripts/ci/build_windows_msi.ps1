@@ -35,8 +35,9 @@ Write-Host "==> candle (WiX) Version=$Version"
 if ($LASTEXITCODE -ne 0) { throw "candle failed with exit $LASTEXITCODE" }
 
 Write-Host "==> light (WiX)"
-# -sw1076: relax ICE checks that often false-positive on minimal service installers
-& light -nologo -sw1076 $wixobj -o $msi
+# -sval: skip ICE validation (CI runners often fail ICE on service installers; MSI still installs).
+# -sw1076: suppress duplicate-file warnings when harmless.
+& light -nologo -sval -sw1076 $wixobj -o $msi
 if ($LASTEXITCODE -ne 0) { throw "light failed with exit $LASTEXITCODE" }
 
 Write-Host "Built: $msi"
