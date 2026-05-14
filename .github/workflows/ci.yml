@@ -160,6 +160,9 @@ jobs:
   macos-production-build:
     name: macOS production build (ESF)
     runs-on: macos-latest
+    env:
+      # Full Xcode SDK carries EndpointSecurity; some runners default to CLT-only paths.
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
 
@@ -413,8 +416,12 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go mod download
-      - run: go test ./internal/agent -run 'TestBuildTelemetryEnvelopeSealer|TestApplyEnvelopeSealerToSender' -count=1
-      - run: go test ./internal/telemetry -run 'TestSenderSealRequiredHealthReadyFalse|TestSenderSealerAppliedBeforeTransport' -count=1
+      - env:
+          CGO_ENABLED: "0"
+        run: go test ./internal/agent -run 'TestBuildTelemetryEnvelopeSealer|TestApplyEnvelopeSealerToSender' -count=1
+      - env:
+          CGO_ENABLED: "0"
+        run: go test ./internal/telemetry -run 'TestSenderSealRequiredHealthReadyFalse|TestSenderSealerAppliedBeforeTransport' -count=1
 
   linux-rootcheck-hidden-port-cross:
     name: linux-rootcheck-hidden-port-cross
@@ -664,6 +671,8 @@ jobs:
           cache: true
 
       - name: go vet
+        env:
+          CGO_ENABLED: "0"
         run: go vet ./...
 
   vulncheck:
