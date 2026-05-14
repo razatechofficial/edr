@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
+# Prefer full Xcode (EndpointSecurity in the macOS SDK) over Command Line Tools.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+	export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+fi
+
 # shellcheck source=scripts/ci/setup_macos_build.sh
 source "${ROOT}/scripts/ci/setup_macos_build.sh"
 
