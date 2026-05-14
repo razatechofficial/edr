@@ -11,7 +11,7 @@ if ([string]::IsNullOrWhiteSpace($root)) {
 }
 Set-Location $root
 
-$Version = $Version.Trim()
+$Version = $Version.Trim().Trim([char]0x0D)
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = '1.0.0.0'
 }
