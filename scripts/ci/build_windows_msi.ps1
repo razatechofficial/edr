@@ -30,29 +30,23 @@ function Normalize-WiXProductVersion([string]$raw) {
     return ($nums -join '.')
 }
 
-function Invoke-WiXViaCmd {
+function Invoke-WiXTool {
     param(
         [string]$Label,
         [string]$ExePath,
-        [string]$ArgsAfterExe,
+        [string[]]$ArgList,
         [string]$LogPath
     )
     Write-Host "==> $Label"
-    Write-Host "$ExePath $ArgsAfterExe"
-    # WiX tools are finicky under PowerShell Start-Process stdio redirection on GHA; run through cmd.exe
-    # so cwd, quoting, and exit codes match build_msi.bat / local developer shells.
-    $inner = "cd /d `"$root`" && `"$ExePath`" $ArgsAfterExe > `"$LogPath`" 2>&1"
-    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/c', $inner) -WorkingDirectory $root `
-        -Wait -PassThru -NoNewWindow
-    if ($null -eq $p) {
-        throw "$Label failed (cmd.exe Start-Process returned null)"
-    }
-    if ($p.ExitCode -ne 0) {
-        Write-Host "---- $Label log (tail) ----"
-        if (Test-Path -LiteralPath $LogPath) {
-            Get-Content -LiteralPath $LogPath -Tail 120 | Write-Host
-        }
-        throw "$Label failed with exit $($p.ExitCode)"
+    Write-Host ("$ExePath " + ($ArgList -join ' '))
+    # Invoke the WiX EXE directly. Embedding paths inside cmd.exe /c strings breaks on GHA (D:\a\... parsing).
+    $lines = @(& $ExePath @ArgList 2>&1)
+    $code = $LASTEXITCODE
+    $lines | Set-Content -LiteralPath $LogPath
+    if ($code -ne 0) {
+        Write-Host "---- $Label log ----"
+        $lines | Write-Host
+        throw "$Label failed with exit $code"
     }
 }
 
@@ -75,11 +69,11 @@ if (-not [string]::IsNullOrWhiteSpace($env:EDR_WIX_BIN)) {
     }
 }
 
-$agentExe = Join-Path $root 'dist/windows-amd64/edr-agent.exe'
+$agentExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edr-agent.exe'))
 if (-not (Test-Path -LiteralPath $agentExe)) {
     throw "Missing Windows agent binary (build it first): $agentExe"
 }
-$configYml = Join-Path $root 'build/windows/config.yml'
+$configYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.yml'))
 if (-not (Test-Path -LiteralPath $configYml)) {
     throw "Missing build/windows/config.yml (WiX source file)"
 }
@@ -94,12 +88,17 @@ $msi = Join-Path $root "dist/edr-agent_${Version}_amd64.msi"
 $candleLog = Join-Path $root 'build/windows/candle.log'
 $lightLog = Join-Path $root 'build/windows/light.log'
 
-$agentDef = "-dAgentExe=$agentExe"
-$configDef = "-dConfigYml=$configYml"
-$candleArgs = "-nologo -arch x64 -dVersion=$Version $agentDef $configDef `"$wxs`" -o `"$wixobj`""
-Invoke-WiXViaCmd -Label 'candle (WiX)' -ExePath $candleExe -ArgsAfterExe $candleArgs -LogPath $candleLog
+$candleArgList = @(
+    '-nologo', '-arch', 'x64',
+    "-dVersion=$Version",
+    "-dAgentExe=$agentExe",
+    "-dConfigYml=$configYml",
+    $wxs,
+    '-o', $wixobj
+)
+Invoke-WiXTool -Label 'candle (WiX)' -ExePath $candleExe -ArgList $candleArgList -LogPath $candleLog
 
-$lightArgs = "-nologo -sval -sw1076 `"$wixobj`" -o `"$msi`""
-Invoke-WiXViaCmd -Label 'light (WiX)' -ExePath $lightExe -ArgsAfterExe $lightArgs -LogPath $lightLog
+$lightArgList = @('-nologo', '-sval', '-sw1076', $wixobj, '-o', $msi)
+Invoke-WiXTool -Label 'light (WiX)' -ExePath $lightExe -ArgList $lightArgList -LogPath $lightLog
 
 Write-Host "Built: $msi"
