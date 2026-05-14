@@ -36,10 +36,10 @@
                     Directory="INSTALLFOLDER">
       <Component Id="AgentFiles" Guid="*">
         <File Id="AgentExe"
-              Source="dist\windows-amd64\edr-agent.exe"
+              Source="dist/windows-amd64/edr-agent.exe"
               KeyPath="yes"/>
         <File Id="ConfigFile"
-              Source="build\windows\config.yml"
+              Source="build/windows/config.yml"
               Name="config.yml"/>
       </Component>
     </ComponentGroup>
