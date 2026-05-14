@@ -12,18 +12,18 @@ if ([string]::IsNullOrWhiteSpace($root)) {
 Set-Location $root
 
 function Normalize-WiXProductVersion([string]$raw) {
-    $s = ($raw -replace '[\r\n]', '').Trim().TrimStart('v', 'V')
+    $s = (($raw -replace '[\r\n]', '').Trim() -replace '^[vV]+', '')
     if ([string]::IsNullOrWhiteSpace($s)) { return '1.0.0.0' }
-    $nums = [System.Collections.Generic.List[int]]::new()
+    $nums = @()
     foreach ($part in ($s -split '\.')) {
         if ($part -match '^(\d{1,5})') {
             $v = [int]$Matches[1]
             if ($v -gt 65535) { $v = 65535 }
-            $nums.Add($v) | Out-Null
+            $nums += $v
         }
     }
-    while ($nums.Count -lt 4) { $nums.Add(0) | Out-Null }
-    if ($nums.Count -gt 4) { $nums = $nums.GetRange(0, 4) }
+    while ($nums.Count -lt 4) { $nums += 0 }
+    if ($nums.Count -gt 4) { $nums = $nums[0..3] }
     return ($nums -join '.')
 }
 
