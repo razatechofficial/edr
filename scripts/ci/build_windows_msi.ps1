@@ -30,35 +30,29 @@ function Normalize-WiXProductVersion([string]$raw) {
     return ($nums -join '.')
 }
 
-function Invoke-WiXNative {
+function Invoke-WiXViaCmd {
     param(
         [string]$Label,
         [string]$ExePath,
-        [string[]]$ArgList,
+        [string]$ArgsAfterExe,
         [string]$LogPath
     )
     Write-Host "==> $Label"
-    Write-Host "$ExePath $($ArgList -join ' ')"
-    $stdout = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Guid]::NewGuid().ToString() + '-wix-out.log')
-    $stderr = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Guid]::NewGuid().ToString() + '-wix-err.log')
-    try {
-        $p = Start-Process -FilePath $ExePath -ArgumentList $ArgList -WorkingDirectory $root `
-            -Wait -PassThru -NoNewWindow `
-            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-        $merged = @()
-        if (Test-Path -LiteralPath $stdout) { $merged += Get-Content -LiteralPath $stdout -Raw }
-        if (Test-Path -LiteralPath $stderr) { $merged += Get-Content -LiteralPath $stderr -Raw }
-        ($merged -join "`n") | Set-Content -LiteralPath $LogPath -Encoding UTF8
-        if ($null -eq $p) {
-            throw "$Label failed (Start-Process returned null)"
+    Write-Host "$ExePath $ArgsAfterExe"
+    # WiX tools are finicky under PowerShell Start-Process stdio redirection on GHA; run through cmd.exe
+    # so cwd, quoting, and exit codes match build_msi.bat / local developer shells.
+    $inner = "cd /d `"$root`" && `"$ExePath`" $ArgsAfterExe > `"$LogPath`" 2>&1"
+    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/c', $inner) -WorkingDirectory $root `
+        -Wait -PassThru -NoNewWindow
+    if ($null -eq $p) {
+        throw "$Label failed (cmd.exe Start-Process returned null)"
+    }
+    if ($p.ExitCode -ne 0) {
+        Write-Host "---- $Label log (tail) ----"
+        if (Test-Path -LiteralPath $LogPath) {
+            Get-Content -LiteralPath $LogPath -Tail 120 | Write-Host
         }
-        if ($p.ExitCode -ne 0) {
-            Get-Content -LiteralPath $LogPath -Tail 120 -ErrorAction SilentlyContinue | Write-Host
-            throw "$Label failed with exit $($p.ExitCode)"
-        }
-    } finally {
-        Remove-Item -LiteralPath $stdout -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $stderr -Force -ErrorAction SilentlyContinue
+        throw "$Label failed with exit $($p.ExitCode)"
     }
 }
 
@@ -85,6 +79,10 @@ $agentExe = Join-Path $root 'dist/windows-amd64/edr-agent.exe'
 if (-not (Test-Path -LiteralPath $agentExe)) {
     throw "Missing Windows agent binary (build it first): $agentExe"
 }
+$configYml = Join-Path $root 'build/windows/config.yml'
+if (-not (Test-Path -LiteralPath $configYml)) {
+    throw "Missing build/windows/config.yml (WiX source file)"
+}
 
 New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
 New-Item -ItemType Directory -Force -Path 'build/windows' | Out-Null
@@ -96,12 +94,10 @@ $msi = Join-Path $root "dist/edr-agent_${Version}_amd64.msi"
 $candleLog = Join-Path $root 'build/windows/candle.log'
 $lightLog = Join-Path $root 'build/windows/light.log'
 
-Invoke-WiXNative -Label 'candle (WiX)' -ExePath $candleExe `
-    -ArgList @('-nologo', '-arch', 'x64', "-dVersion=$Version", $wxs, '-o', $wixobj) `
-    -LogPath $candleLog
+$candleArgs = "-nologo -arch x64 -dVersion=$Version `"$wxs`" -o `"$wixobj`""
+Invoke-WiXViaCmd -Label 'candle (WiX)' -ExePath $candleExe -ArgsAfterExe $candleArgs -LogPath $candleLog
 
-Invoke-WiXNative -Label 'light (WiX)' -ExePath $lightExe `
-    -ArgList @('-nologo', '-sval', '-sw1076', $wixobj, '-o', $msi) `
-    -LogPath $lightLog
+$lightArgs = "-nologo -sval -sw1076 `"$wixobj`" -o `"$msi`""
+Invoke-WiXViaCmd -Label 'light (WiX)' -ExePath $lightExe -ArgsAfterExe $lightArgs -LogPath $lightLog
 
 Write-Host "Built: $msi"
