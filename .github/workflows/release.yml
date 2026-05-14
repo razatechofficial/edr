@@ -1,11 +1,63 @@
+# Publishes installable artifacts for all three platforms to a GitHub Release.
+#
+# Triggers:
+#   - Push tag matching v*     → stable release (prerelease=false), tag = ref
+#   - Push branch prod         → prerelease; unique tag prod-<run>-<sha>; package
+#     version string from `git describe --tags --always` (falls back if no tags)
+#   - workflow_dispatch        → same as prod push semantics for the selected ref
+#
+# Testers download .deb / .rpm / .pkg / .msi from the Releases page (or API).
+# macOS notarized signing: set repo secret APPLE_SIGN_IDENTITY when keys are on the runner.
+
 name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+    branches:
+      - prod
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  release_meta:
+    runs-on: ubuntu-latest
+    outputs:
+      pkg_version: ${{ steps.meta.outputs.pkg_version }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve package and release identifiers
+        id: meta
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "pkg_version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PKG="$(git describe --tags --always --dirty 2>/dev/null || true)"
+          if [ -z "${PKG}" ]; then
+            PKG="0.0.0-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "pkg_version=${PKG}" >> "$GITHUB_OUTPUT"
+          SHORT="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          echo "release_tag=prod-${GITHUB_RUN_NUMBER}-${SHORT}" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+
   build-linux:
+    needs: release_meta
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +73,7 @@ jobs:
       - name: Build linux
         run: LINUX_CGO=1 make build-linux
       - name: Package deb/rpm
-        run: bash build/linux/package.sh ${{ github.ref_name }} amd64
+        run: bash build/linux/package.sh "${{ needs.release_meta.outputs.pkg_version }}" amd64
       - name: Verify complete Linux package
         run: |
           DEB="$(ls -1 dist/edr-agent_*_amd64.deb | head -1)"
@@ -34,7 +86,10 @@ jobs:
             dist/*.rpm
 
   build-darwin:
+    needs: release_meta
     runs-on: macos-latest
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -46,13 +101,14 @@ jobs:
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
         run: bash scripts/ci/build_macos_production.sh
       - name: Package pkg
-        run: bash build/macos/package.sh ${{ github.ref_name }} $(go env GOARCH)
+        run: bash build/macos/package.sh "${{ needs.release_meta.outputs.pkg_version }}" "$(go env GOARCH)"
       - uses: actions/upload-artifact@v4
         with:
           name: macos-packages
           path: dist/*.pkg
 
   build-windows:
+    needs: release_meta
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,19 +120,24 @@ jobs:
         run: make build-windows
       - name: Build MSI
         shell: cmd
-        run: build\windows\build_msi.bat ${{ github.ref_name }}
+        run: build\windows\build_msi.bat "${{ needs.release_meta.outputs.pkg_version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: windows-packages
           path: dist\*.msi
 
   release:
-    needs: [build-linux, build-darwin, build-windows]
+    needs: [release_meta, build-linux, build-darwin, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
       - uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ needs.release_meta.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ needs.release_meta.outputs.is_prerelease == 'true' }}
+          name: ${{ needs.release_meta.outputs.is_prerelease == 'true' && format('Prod build {0}', needs.release_meta.outputs.pkg_version) || needs.release_meta.outputs.pkg_version }}
+          generate_release_notes: true
           files: |
             linux-packages/*.deb
             linux-packages/*.rpm
