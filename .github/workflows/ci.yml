@@ -97,6 +97,8 @@ jobs:
         run: go mod download
 
       - name: Integration tests
+        env:
+          CGO_ENABLED: "0"
         run: go test -tags=integration -v ./tests/integration/...
 
   coverage:
@@ -116,6 +118,8 @@ jobs:
         run: go mod download
 
       - name: Generate coverage
+        env:
+          CGO_ENABLED: "0"
         run: make test-coverage
 
       - name: Upload coverage artifact
