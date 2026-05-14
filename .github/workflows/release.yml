@@ -49,6 +49,11 @@ jobs:
           msi_version_from() {
             local x="${1#v}"
             x="${x%%-*}"
+            # WiX Product/@Version: a.b.c.d, each segment 0-65535.
+            if [[ "$x" =~ ^[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}$ ]]; then
+              echo "$x"
+              return 0
+            fi
             if [[ "$x" =~ ^[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}$ ]]; then
               echo "${x}.0"
               return 0
@@ -137,12 +142,12 @@ jobs:
       - name: Build Windows binaries
         shell: bash
         run: bash scripts/ci/build_windows_binaries.sh
-      - name: Ensure WiX (candle/light) on PATH
+      # Single pwsh session: ensure_wix_path mutates PATH; avoids any runner PATH ordering issues between steps.
+      - name: WiX toolchain and MSI
         shell: pwsh
-        run: pwsh -NoProfile -File "${{ github.workspace }}/scripts/ci/ensure_wix_path.ps1"
-      - name: Build MSI
-        shell: pwsh
-        run: pwsh -NoProfile -File "${{ github.workspace }}/scripts/ci/build_windows_msi.ps1" -Version "${{ needs.release_meta.outputs.msi_version }}"
+        run: |
+          & "${{ github.workspace }}/scripts/ci/ensure_wix_path.ps1"
+          & "${{ github.workspace }}/scripts/ci/build_windows_msi.ps1" -Version "${{ needs.release_meta.outputs.msi_version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: windows-packages

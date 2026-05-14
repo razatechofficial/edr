@@ -16,6 +16,7 @@
 
     <Feature Id="ProductFeature" Title="EDR Agent" Level="1">
       <ComponentGroupRef Id="ProductComponents"/>
+      <ComponentGroupRef Id="ConfigDataComponents"/>
     </Feature>
   </Product>
 
@@ -49,7 +50,7 @@
           Start="auto"
           ErrorControl="normal"
           Account="LocalSystem"
-          Arguments='--config "[CommonAppDataFolder]EDR Agent\config.yml"'/>
+          Arguments="--config &quot;[CommonAppDataFolder]EDR Agent\config.yml&quot;"/>
         <ServiceControl
           Id="StartService"
           Start="install"
@@ -58,6 +59,9 @@
           Name="EDRAgent"
           Wait="yes"/>
       </Component>
+    </ComponentGroup>
+    <!-- Default config next to service --config path (ProgramData\EDR Agent\). -->
+    <ComponentGroup Id="ConfigDataComponents" Directory="DATFOLDER">
       <Component Id="ConfigFile" Guid="*">
         <File Id="ConfigFile"
               Source="build\windows\config.yml"

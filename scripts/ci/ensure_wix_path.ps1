@@ -19,6 +19,10 @@ function Add-WixBinToPath {
         Add-Content -Path $ghPathFile -Value $BinDir
     }
     $env:PATH = "$BinDir;$env:PATH"
+    $env:EDR_WIX_BIN = $BinDir
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_ENV)) {
+        Add-Content -Path $env:GITHUB_ENV -Value "EDR_WIX_BIN=$BinDir"
+    }
     Write-Host "WiX bin on PATH: $BinDir"
     return $true
 }
@@ -62,7 +66,13 @@ if ($env:GITHUB_ACTIONS -eq 'true') {
 }
 
 if (Get-Command candle -ErrorAction SilentlyContinue) {
-    Write-Host "candle already on PATH: $((Get-Command candle).Source)"
+    $src = (Get-Command candle).Source
+    Write-Host "candle already on PATH: $src"
+    $binDir = Split-Path -Parent $src
+    $env:EDR_WIX_BIN = $binDir
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_ENV)) {
+        Add-Content -Path $env:GITHUB_ENV -Value "EDR_WIX_BIN=$binDir"
+    }
     exit 0
 }
 
