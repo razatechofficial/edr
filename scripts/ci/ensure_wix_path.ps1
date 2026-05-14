@@ -73,7 +73,7 @@ function Install-PinnedWix314 {
 
 if ($env:GITHUB_ACTIONS -eq 'true') {
     Install-PinnedWix314
-    exit 0
+    return
 }
 
 if (Get-Command candle -ErrorAction SilentlyContinue) {
@@ -84,7 +84,7 @@ if (Get-Command candle -ErrorAction SilentlyContinue) {
     if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_ENV)) {
         Add-Content -Path $env:GITHUB_ENV -Value "EDR_WIX_BIN=$binDir"
     }
-    exit 0
+    return
 }
 
 $candidates = @()
@@ -96,7 +96,7 @@ if ($env:ProgramFiles) {
 }
 foreach ($dir in $candidates) {
     $bin = Join-Path $dir.FullName 'bin'
-    if (Add-WixBinToPath $bin) { exit 0 }
+    if (Add-WixBinToPath $bin) { return }
 }
 
 Install-PinnedWix314

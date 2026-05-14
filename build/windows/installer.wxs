@@ -6,7 +6,7 @@
   <Product Id="*"
            Name="EDR Agent"
            Language="1033"
-           Version="$(var.Version)"
+           Version="$(var.MsiProductVersion)"
            Manufacturer="RazaTech"
            UpgradeCode="7D3A6EE5-52D7-4D6A-9D66-6AFC9FA04A90">
 
@@ -37,12 +37,12 @@
       <!-- One key path per component (WiX / MSI rules). -->
       <Component Id="cmpAgentExe" Guid="*" Win64="yes">
         <File Id="AgentExe"
-              Source="$(var.AgentExe)"
+              Source="$(var.EdrAgentExe)"
               KeyPath="yes"/>
       </Component>
       <Component Id="cmpConfigYml" Guid="*" Win64="yes">
         <File Id="ConfigFile"
-              Source="$(var.ConfigYml)"
+              Source="$(var.EdrConfigYml)"
               Name="config.yml"
               KeyPath="yes"/>
       </Component>
