@@ -4,7 +4,9 @@ package kernel
 
 /*
 #cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework Foundation -framework EndpointSecurity
+// Newer macOS SDKs (e.g. Xcode 26) ship ESF as /usr/lib/libEndpointSecurity.tbd only;
+// -framework EndpointSecurity no longer resolves for the linker.
+#cgo LDFLAGS: -framework Foundation -lEndpointSecurity -lbsm
 
 #include <EndpointSecurity/EndpointSecurity.h>
 #include <bsm/libbsm.h>

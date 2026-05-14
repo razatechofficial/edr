@@ -4,7 +4,7 @@ package kernel
 
 /*
 #cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework Security -framework CoreFoundation -framework EndpointSecurity
+#cgo LDFLAGS: -framework Security -framework CoreFoundation -lEndpointSecurity
 
 #include <EndpointSecurity/EndpointSecurity.h>
 #include <Security/Security.h>
