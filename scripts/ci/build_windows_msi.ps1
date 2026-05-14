@@ -39,15 +39,26 @@ function Invoke-WiXNative {
     )
     Write-Host "==> $Label"
     Write-Host "$ExePath $($ArgList -join ' ')"
-    $lines = & $ExePath @ArgList *>&1
-    $ec = $LASTEXITCODE
-    if ($null -ne $lines) {
-        $lines | Tee-Object -FilePath $LogPath
-    } else {
-        '' | Out-File -FilePath $LogPath -Encoding utf8
-    }
-    if (($null -ne $ec) -and ($ec -ne 0)) {
-        throw "$Label failed with exit $ec"
+    $stdout = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Guid]::NewGuid().ToString() + '-wix-out.log')
+    $stderr = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Guid]::NewGuid().ToString() + '-wix-err.log')
+    try {
+        $p = Start-Process -FilePath $ExePath -ArgumentList $ArgList -WorkingDirectory $root `
+            -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        $merged = @()
+        if (Test-Path -LiteralPath $stdout) { $merged += Get-Content -LiteralPath $stdout -Raw }
+        if (Test-Path -LiteralPath $stderr) { $merged += Get-Content -LiteralPath $stderr -Raw }
+        ($merged -join "`n") | Set-Content -LiteralPath $LogPath -Encoding UTF8
+        if ($null -eq $p) {
+            throw "$Label failed (Start-Process returned null)"
+        }
+        if ($p.ExitCode -ne 0) {
+            Get-Content -LiteralPath $LogPath -Tail 120 -ErrorAction SilentlyContinue | Write-Host
+            throw "$Label failed with exit $($p.ExitCode)"
+        }
+    } finally {
+        Remove-Item -LiteralPath $stdout -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $stderr -Force -ErrorAction SilentlyContinue
     }
 }
 

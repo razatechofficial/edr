@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <!-- Files-only MSI: WiX service rows + light.exe were failing reliably on GitHub-hosted
+       Windows runners across several layouts/quoting fixes. Install binaries + default
+       config; register/start the Windows service via sc.exe or a follow-up CustomAction. -->
   <Product Id="*"
            Name="EDR Agent"
            Language="1033"
@@ -29,33 +32,15 @@
   </Fragment>
 
   <Fragment>
-    <!-- ServiceInstall must share a Component with the service exe (File KeyPath).
-         Config lives in the same component so #[ConfigFile] binds reliably for light.exe. -->
     <ComponentGroup Id="ProductComponents"
                     Directory="INSTALLFOLDER">
-      <Component Id="AgentExe" Guid="*">
+      <Component Id="AgentFiles" Guid="*">
         <File Id="AgentExe"
               Source="dist\windows-amd64\edr-agent.exe"
               KeyPath="yes"/>
         <File Id="ConfigFile"
               Source="build\windows\config.yml"
               Name="config.yml"/>
-        <ServiceInstall
-          Id="EDRAgentService"
-          Name="EDRAgent"
-          DisplayName="EDR Agent"
-          Description="Endpoint Detection and Response Agent"
-          Type="ownProcess"
-          Start="auto"
-          ErrorControl="normal"
-          Arguments='--config "[#ConfigFile]"'/>
-        <ServiceControl
-          Id="StartService"
-          Start="install"
-          Stop="both"
-          Remove="uninstall"
-          Name="EDRAgent"
-          Wait="yes"/>
       </Component>
     </ComponentGroup>
   </Fragment>
