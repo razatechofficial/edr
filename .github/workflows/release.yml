@@ -22,6 +22,9 @@ on:
 permissions:
   contents: write
 
+env:
+  GOTOOLCHAIN: local
+
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -31,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       pkg_version: ${{ steps.meta.outputs.pkg_version }}
+      msi_version: ${{ steps.meta.outputs.msi_version }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
       is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
     steps:
@@ -41,10 +45,23 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
+          # WiX Product/@Version must be numeric a.b.c.d (each segment <= 65535).
+          msi_version_from() {
+            local x="${1#v}"
+            x="${x%%-*}"
+            if [[ "$x" =~ ^[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}$ ]]; then
+              echo "${x}.0"
+              return 0
+            fi
+            local r=$((${GITHUB_RUN_NUMBER:-0} % 65535))
+            if [ "$r" -eq 0 ]; then r=1; fi
+            echo "0.0.${r}.0"
+          }
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             echo "pkg_version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "release_tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "msi_version=$(msi_version_from "${GITHUB_REF_NAME}")" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           PKG="$(git describe --tags --always --dirty 2>/dev/null || true)"
@@ -52,6 +69,7 @@ jobs:
             PKG="0.0.0-dev.${GITHUB_RUN_NUMBER}"
           fi
           echo "pkg_version=${PKG}" >> "$GITHUB_OUTPUT"
+          echo "msi_version=$(msi_version_from "${PKG}")" >> "$GITHUB_OUTPUT"
           SHORT="$(echo "${GITHUB_SHA}" | cut -c1-7)"
           echo "release_tag=prod-${GITHUB_RUN_NUMBER}-${SHORT}" >> "$GITHUB_OUTPUT"
           echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
@@ -116,11 +134,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # windows-latest does not ship GNU make; Makefile build-windows is the source of truth.
+      - name: Install GNU Make
+        run: choco install make -y
       - name: Build windows
         run: make build-windows
       - name: Build MSI
         shell: cmd
-        run: build\windows\build_msi.bat "${{ needs.release_meta.outputs.pkg_version }}"
+        run: build\windows\build_msi.bat "${{ needs.release_meta.outputs.msi_version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: windows-packages

@@ -632,6 +632,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Install GNU Make
+        run: choco install make -y
+
       - name: Build Windows binaries
         run: make build-windows
 
