@@ -4,7 +4,12 @@ setlocal
 set "VERSION=%~1"
 if "%VERSION%"=="" set "VERSION=1.0.0.0"
 pushd "%~dp0..\.."
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\ci\build_windows_msi.ps1" -Version "%VERSION%"
+where pwsh >nul 2>nul
+if errorlevel 1 (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\ci\build_windows_msi.ps1" -Version "%VERSION%"
+) else (
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "scripts\ci\build_windows_msi.ps1" -Version "%VERSION%"
+)
 set "ERR=%ERRORLEVEL%"
 popd
 exit /b %ERR%
