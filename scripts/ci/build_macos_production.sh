@@ -13,8 +13,8 @@ fi
 source "${ROOT}/scripts/ci/setup_macos_build.sh"
 
 export CGO_ENABLED=1
-# Ensure CGO sees the active macOS SDK (framework search paths).
-if [ -z "${SDKROOT:-}" ] && command -v xcrun >/dev/null 2>&1; then
+# Ensure CGO sees the active macOS SDK (framework / usr/lib *.tbd search paths).
+if command -v xcrun >/dev/null 2>&1; then
 	_sdk="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
 	if [ -n "${_sdk}" ]; then
 		export SDKROOT="${_sdk}"
