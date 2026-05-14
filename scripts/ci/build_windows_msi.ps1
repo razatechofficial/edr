@@ -5,6 +5,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# candle.exe/light.exe write normal progress to stderr. PS 7.2+ can surface native stderr as a
+# terminating error when $PSNativeCommandUseErrorActionPreference is true; keep legacy behavior.
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 $root = $env:GITHUB_WORKSPACE
 if ([string]::IsNullOrWhiteSpace($root)) {
     $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path

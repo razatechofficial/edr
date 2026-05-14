@@ -3,6 +3,10 @@
 # On GitHub Actions we *always* install pinned WiX v3.14.1 binaries: runners may expose a
 # different "candle" first on PATH (or WiX v4 tooling), which breaks v3 .wxs builds.
 $ErrorActionPreference = 'Stop'
+# Native tools (curl.exe, WiX) may write non-errors to stderr; PS 7.2+ can treat that as fatal with Stop.
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 function Add-WixBinToPath {
     param([string]$BinDir)
