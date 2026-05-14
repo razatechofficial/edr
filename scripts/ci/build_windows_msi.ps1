@@ -94,7 +94,9 @@ $msi = Join-Path $root "dist/edr-agent_${Version}_amd64.msi"
 $candleLog = Join-Path $root 'build/windows/candle.log'
 $lightLog = Join-Path $root 'build/windows/light.log'
 
-$candleArgs = "-nologo -arch x64 -dVersion=$Version `"$wxs`" -o `"$wixobj`""
+$agentDef = "-dAgentExe=$agentExe"
+$configDef = "-dConfigYml=$configYml"
+$candleArgs = "-nologo -arch x64 -dVersion=$Version $agentDef $configDef `"$wxs`" -o `"$wixobj`""
 Invoke-WiXViaCmd -Label 'candle (WiX)' -ExePath $candleExe -ArgsAfterExe $candleArgs -LogPath $candleLog
 
 $lightArgs = "-nologo -sval -sw1076 `"$wixobj`" -o `"$msi`""

@@ -36,12 +36,12 @@
     <ComponentGroup Id="ProductComponents"
                     Directory="INSTALLFOLDER">
       <Component Id="AgentFiles" Guid="*" Win64="yes">
-        <!-- Source is relative to this .wxs file (build/windows/), not repo root. -->
+        <!-- Payload paths come from candle -d… (repo root); avoids binder/CWD ambiguity on CI. -->
         <File Id="AgentExe"
-              Source="../dist/windows-amd64/edr-agent.exe"
+              Source="$(var.AgentExe)"
               KeyPath="yes"/>
         <File Id="ConfigFile"
-              Source="config.yml"
+              Source="$(var.ConfigYml)"
               Name="config.yml"/>
       </Component>
     </ComponentGroup>
