@@ -132,7 +132,8 @@ jobs:
 
   build-windows:
     needs: release_meta
-    runs-on: windows-latest
+    # windows-latest is moving to VS2026-based images; WiX v3 zip tools are more reliable on windows-2022.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

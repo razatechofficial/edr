@@ -40,10 +40,17 @@ function Install-PinnedWix314 {
         Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
     }
 
+    # Internet-downloaded zip/exes carry MOTW; headless runners can block execution (candle/light exit immediately).
+    Unblock-File -LiteralPath $zipPath -ErrorAction SilentlyContinue
+
     if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $dest)
+
+    Get-ChildItem -LiteralPath $dest -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+        Unblock-File -LiteralPath $_.FullName -ErrorAction SilentlyContinue
+    }
 
     $candlePath = Join-Path $dest 'candle.exe'
     if (-not (Test-Path -LiteralPath $candlePath)) {
