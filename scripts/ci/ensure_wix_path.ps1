@@ -31,7 +31,11 @@ Write-Host "WiX not preinstalled; downloading WiX v3.14.1 binaries (official rel
 $zipUrl = 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip'
 $zipPath = Join-Path $env:RUNNER_TEMP 'wix314-binaries.zip'
 $dest = Join-Path $env:RUNNER_TEMP 'wix314-binaries'
-Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+    & curl.exe -fsSL -o $zipPath $zipUrl
+} else {
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+}
 if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
 Expand-Archive -Path $zipPath -DestinationPath $dest -Force
 

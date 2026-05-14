@@ -16,7 +16,6 @@
 
     <Feature Id="ProductFeature" Title="EDR Agent" Level="1">
       <ComponentGroupRef Id="ProductComponents"/>
-      <ComponentGroupRef Id="ServiceComponent"/>
     </Feature>
   </Product>
 
@@ -32,23 +31,15 @@
   </Fragment>
 
   <Fragment>
+    <!-- ServiceInstall/ServiceControl must live in the same Component as the
+         service binary (File KeyPath). A separate component with only services
+         has no KeyPath and fails ICE validation under light. -->
     <ComponentGroup Id="ProductComponents"
                     Directory="INSTALLFOLDER">
       <Component Id="AgentExe" Guid="*">
         <File Id="AgentExe"
               Source="dist\windows-amd64\edr-agent.exe"
               KeyPath="yes"/>
-      </Component>
-      <Component Id="ConfigFile" Guid="*">
-        <File Id="ConfigFile"
-              Source="build\windows\config.yml"
-              Name="config.yml"/>
-      </Component>
-    </ComponentGroup>
-
-    <ComponentGroup Id="ServiceComponent"
-                    Directory="INSTALLFOLDER">
-      <Component Id="WindowsService" Guid="*">
         <ServiceInstall
           Id="EDRAgentService"
           Name="EDRAgent"
@@ -66,6 +57,12 @@
           Remove="uninstall"
           Name="EDRAgent"
           Wait="yes"/>
+      </Component>
+      <Component Id="ConfigFile" Guid="*">
+        <File Id="ConfigFile"
+              Source="build\windows\config.yml"
+              Name="config.yml"
+              KeyPath="yes"/>
       </Component>
     </ComponentGroup>
   </Fragment>
