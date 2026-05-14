@@ -13,7 +13,8 @@ function Add-WixBinToPath {
     if (-not (Test-Path (Join-Path $BinDir 'candle.exe'))) { return $false }
     if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_PATH)) {
         $ghPathFile = $env:GITHUB_PATH
-        $parent = Split-Path -LiteralPath $ghPathFile -Parent
+        # Avoid Split-Path -LiteralPath -Parent: some hosts resolve a bad parameter set; .NET is consistent.
+        $parent = [System.IO.Path]::GetDirectoryName($ghPathFile.TrimEnd('\', '/'))
         if ($parent -and -not (Test-Path -LiteralPath $parent)) {
             New-Item -ItemType Directory -Path $parent -Force | Out-Null
         }
