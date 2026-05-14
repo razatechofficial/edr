@@ -7,8 +7,9 @@
            Manufacturer="RazaTech"
            UpgradeCode="7D3A6EE5-52D7-4D6A-9D66-6AFC9FA04A90">
 
-    <Package InstallerVersion="200" Compressed="yes"
-             InstallScope="perMachine"/>
+    <Package InstallerVersion="500" Compressed="yes"
+             InstallScope="perMachine"
+             InstallPrivileges="elevated"/>
 
     <MajorUpgrade DowngradeErrorMessage=
       "A newer version is already installed."/>
@@ -49,8 +50,7 @@
           Type="ownProcess"
           Start="auto"
           ErrorControl="normal"
-          Account="LocalSystem"
-          Arguments="--config &quot;[CommonAppDataFolder]EDR Agent\config.yml&quot;"/>
+          Arguments='--config "[CommonAppDataFolder]EDR Agent\config.yml"'/>
         <ServiceControl
           Id="StartService"
           Start="install"

@@ -63,14 +63,42 @@ $wxs = Join-Path $root 'build/windows/installer.wxs'
 $wixobj = Join-Path $root 'build/windows/installer.wixobj'
 $msi = Join-Path $root "dist/edr-agent_${Version}_amd64.msi"
 
-Write-Host "==> candle (WiX) Version=$Version"
-& $candleExe -nologo -arch x64 "-dVersion=$Version" $wxs -o $wixobj
-if ($LASTEXITCODE -ne 0) { throw "candle failed with exit $LASTEXITCODE" }
+function Invoke-WiXTool {
+    param(
+        [string]$Label,
+        [string]$ExePath,
+        [string[]]$ArgList,
+        [string]$OutLog,
+        [string]$ErrLog
+    )
+    Write-Host "==> $Label"
+    Write-Host "$ExePath $($ArgList -join ' ')"
+    $p = Start-Process -WorkingDirectory $root -FilePath $ExePath -ArgumentList $ArgList `
+        -Wait -PassThru -NoNewWindow `
+        -RedirectStandardOutput $OutLog -RedirectStandardError $ErrLog
+    if ($null -eq $p -or $p.ExitCode -ne 0) {
+        $code = if ($null -eq $p) { 'null' } else { $p.ExitCode }
+        Write-Host "---- $Label stdout (tail) ----"
+        if (Test-Path -LiteralPath $OutLog) { Get-Content -LiteralPath $OutLog -Tail 80 | Write-Host }
+        Write-Host "---- $Label stderr (tail) ----"
+        if (Test-Path -LiteralPath $ErrLog) { Get-Content -LiteralPath $ErrLog -Tail 80 | Write-Host }
+        throw "$Label failed with exit $code"
+    }
+}
 
-Write-Host "==> light (WiX)"
+$candleOut = Join-Path $root 'build/windows/candle-out.log'
+$candleErr = Join-Path $root 'build/windows/candle-err.log'
+$lightOut = Join-Path $root 'build/windows/light-out.log'
+$lightErr = Join-Path $root 'build/windows/light-err.log'
+
+Invoke-WiXTool -Label 'candle (WiX)' -ExePath $candleExe `
+    -ArgList @('-nologo', '-arch', 'x64', "-dVersion=$Version", $wxs, '-o', $wixobj) `
+    -OutLog $candleOut -ErrLog $candleErr
+
 # -sval: skip ICE validation (CI often fails ICE on service installers; MSI still installs).
 # -sw1076: suppress duplicate-file warnings when harmless.
-& $lightExe -nologo -sval -sw1076 $wixobj -o $msi
-if ($LASTEXITCODE -ne 0) { throw "light failed with exit $LASTEXITCODE" }
+Invoke-WiXTool -Label 'light (WiX)' -ExePath $lightExe `
+    -ArgList @('-nologo', '-sval', '-sw1076', $wixobj, '-o', $msi) `
+    -OutLog $lightOut -ErrLog $lightErr
 
 Write-Host "Built: $msi"
