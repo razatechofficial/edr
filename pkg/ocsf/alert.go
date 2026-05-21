@@ -94,18 +94,18 @@ func FromDetectionAlert(in AlertInput, product Product) Envelope {
 			Path: path,
 			Type: "Regular File",
 		}
-		if in.FileSHA256 != "" {
-			if env.Unmapped == nil {
-				env.Unmapped = map[string]any{}
-			}
-			env.Unmapped["file_sha256"] = in.FileSHA256
+	}
+	if in.FileSHA256 != "" {
+		if env.Unmapped == nil {
+			env.Unmapped = map[string]any{}
 		}
-		if in.FileOperation != "" {
-			if env.Unmapped == nil {
-				env.Unmapped = map[string]any{}
-			}
-			env.Unmapped["file_operation"] = in.FileOperation
+		env.Unmapped["file_sha256"] = in.FileSHA256
+	}
+	if in.FileOperation != "" {
+		if env.Unmapped == nil {
+			env.Unmapped = map[string]any{}
 		}
+		env.Unmapped["file_operation"] = in.FileOperation
 	}
 	if in.DestIP != "" || in.DestPort != 0 {
 		env.DstEndpoint = &Endpoint{IP: in.DestIP, Port: in.DestPort}
