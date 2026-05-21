@@ -415,6 +415,10 @@ monitoring:
   etw_kernel_file_object_cache: true
   # Windows + regulated: enable grouped verbose ETW facets (WMI, PS script, pipes, BITS, tasks).
   etw_regulated_verbose: false
+  # macOS: unified-log security subsystems for imported Sigma UL rules.
+  darwin_unified_log_security: true
+  darwin_auth_unified_log: true
+  fim_preset: standard
 
 # -----------------------------------------------------------------------------
 # Baseline anomaly detection
@@ -432,6 +436,21 @@ baseline:
 
   # Standard deviation multiplier for the anomaly threshold (3.0 = 3-sigma).
   deviation_mult: 3.0
+
+# -----------------------------------------------------------------------------
+# Compliance (SCA / CIS policies)
+# -----------------------------------------------------------------------------
+# Env: EDR_COMPLIANCE_ENABLED, EDR_COMPLIANCE_RULES_DIR
+compliance:
+  enabled: true
+  rules_dir: ""
+  scan_on_start: true
+  interval_hours: 12
+  commands_enabled: true
+  command_timeout_sec: 30
+  enable_posture: true
+  enable_rootcheck: true
+  emit_passed_findings: false
 
 # =============================================================================
 # Legacy compatibility fields
