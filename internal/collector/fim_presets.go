@@ -11,8 +11,8 @@ import (
 
 const (
 	FIMPresetStandard = "standard"
-	FIMPresetDefault = "default"
-	FIMPresetCustom  = "custom"
+	FIMPresetDefault  = "default"
+	FIMPresetCustom   = "custom"
 )
 
 // StandardSystemPaths returns OS-critical directories for the standard FIM preset.
@@ -34,7 +34,6 @@ func StandardSystemPaths() []string {
 }
 
 // PlatformFIMExtras adds agent-specific paths beyond the standard system template.
-// (user home, TCC, LaunchAgents, temp dirs for realtime coverage).
 func PlatformFIMExtras() []string {
 	home, _ := os.UserHomeDir()
 	switch runtime.GOOS {
@@ -94,6 +93,8 @@ func ResolveFIMPaths(cfg config.Config) []string {
 		return dedupePaths(DefaultFIMPaths())
 	case FIMPresetCustom:
 		return dedupePaths(DefaultFIMPaths())
+	case FIMPresetStandard:
+		return dedupePaths(append(StandardSystemPaths(), PlatformFIMExtras()...))
 	default:
 		return dedupePaths(append(StandardSystemPaths(), PlatformFIMExtras()...))
 	}

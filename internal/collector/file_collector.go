@@ -83,7 +83,7 @@ func DefaultFIMPaths() []string {
 }
 
 // NewFileCollector creates a file integrity monitor watching the given paths.
-// When paths is empty, ResolveFIMPaths(cfg) uses the configured standard preset.
+// When paths is empty, ResolveFIMPaths(cfg) is used (standard FIM preset by default).
 func NewFileCollector(endpointID string, paths []string, cfg config.Config) (*FileCollector, error) {
 	if len(paths) == 0 {
 		paths = ResolveFIMPaths(cfg)
