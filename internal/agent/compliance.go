@@ -224,6 +224,7 @@ func complianceFindingToAlert(ev *schema.ComplianceFindingEvent) schema.Alert {
 		Title:         ev.Title,
 		Description:   desc,
 		Timestamp:     ev.Timestamp,
+		OCSF:          ev.OCSF,
 	}
 }
 

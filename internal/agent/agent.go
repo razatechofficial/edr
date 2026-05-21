@@ -41,6 +41,7 @@ import (
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/threatintel"
 	"github.com/razatechofficial/edr/pkg/events"
+	"github.com/razatechofficial/edr/pkg/ocsf"
 )
 
 type Agent struct {
@@ -1209,9 +1210,12 @@ func (a *Agent) checkDriftAlerts() error {
 }
 
 func (a *Agent) handleAlerts(alerts []schema.Alert) error {
-	for _, al := range alerts {
-		a.emitValidationDetection(detection.FromSchemaAlert(al))
-		if a.shouldSuppressNoisyAlert(al) {
+	product := ocsf.DefaultProduct(a.cfg.Agent.Version)
+	for i := range alerts {
+		al := &alerts[i]
+		ensureAlertOCSF(al, product)
+		a.emitValidationDetection(detection.FromSchemaAlert(*al))
+		if a.shouldSuppressNoisyAlert(*al) {
 			continue
 		}
 		correlationID := al.AlertID
@@ -1226,7 +1230,7 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 			"result", "detected",
 			"reason", al.Title,
 			"correlation_id", correlationID)
-		a.alertSpool.Push(al)
+		a.alertSpool.Push(*al)
 		if a.durableSpool != nil {
 			if data, err := json.Marshal(al); err == nil {
 				if err := a.durableSpool.Write(data); err != nil {
@@ -1234,15 +1238,15 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 				}
 			}
 		}
-		if err := a.writer.WriteAlert(al); err != nil {
+		if err := a.writer.WriteAlert(*al); err != nil {
 			return err
 		}
 		if a.forwarder != nil {
-			if err := a.forwarder.Send(al); err != nil {
+			if err := a.forwarder.Send(*al); err != nil {
 				a.logger.Error("forward alert failed", "error", err)
 			}
 		}
-		a.executeAutoResponse(al)
+		a.executeAutoResponse(*al)
 	}
 	return nil
 }
