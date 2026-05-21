@@ -45,6 +45,7 @@ func Load(path string) (Config, error) {
 	applyPerformanceDefaults(&cfg)
 	applyDarwinDataDirDefault(&cfg)
 	applyLoggingPathDefaults(&cfg)
+	ApplyComplianceDefaults(&cfg)
 
 	if err := Validate(&cfg); err != nil {
 		return Config{}, err
@@ -89,6 +90,7 @@ func LoadEncrypted(path string, key []byte) (Config, error) {
 	applyPerformanceDefaults(&cfg)
 	applyDarwinDataDirDefault(&cfg)
 	applyLoggingPathDefaults(&cfg)
+	ApplyComplianceDefaults(&cfg)
 
 	if err := Validate(&cfg); err != nil {
 		return Config{}, err
@@ -379,6 +381,15 @@ func applyResourcePathDefaults(cfg *Config, configPath string) {
 					cfg.Detection.CustomRules.RulesPath = sample
 					break
 				}
+			}
+		}
+	}
+	if cfg.Compliance.Enabled && cfg.Compliance.RulesDir == "" {
+		for _, root := range rulesRoots {
+			p := filepath.Join(root, "compliance", "sca")
+			if tryDir(p) {
+				cfg.Compliance.RulesDir = p
+				break
 			}
 		}
 	}

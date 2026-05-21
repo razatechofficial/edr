@@ -308,11 +308,27 @@ type Config struct {
 		DeviationMult float64 `yaml:"deviation_mult"`
 	} `yaml:"baseline"`
 
+	Compliance struct {
+		Enabled              bool   `yaml:"enabled" env:"EDR_COMPLIANCE_ENABLED"`
+		RulesDir             string `yaml:"rules_dir" env:"EDR_COMPLIANCE_RULES_DIR"`
+		ScanOnStart          bool   `yaml:"scan_on_start"`
+		IntervalHours        int    `yaml:"interval_hours"`
+		CommandsEnabled      bool   `yaml:"commands_enabled"`
+		CommandTimeoutSec    int    `yaml:"command_timeout_sec"`
+		EnablePosture        bool   `yaml:"enable_posture"`
+		EnableRootcheck      bool   `yaml:"enable_rootcheck"`
+		EmitPassedFindings   bool   `yaml:"emit_passed_findings"`
+	} `yaml:"compliance"`
+
 	// Monitoring controls host telemetry collectors (userland vs kernel hooks).
 	Monitoring struct {
 		Mode             string   `yaml:"mode" env:"EDR_MONITORING_MODE"` // auto|userland|kernel
 		KernelEnabled    bool     `yaml:"kernel_enabled" env:"EDR_MONITORING_KERNEL"`
 		FIMPaths         []string `yaml:"fim_paths"`
+		// FIMPreset selects built-in watch lists when fim_paths is empty: standard (default), default, custom.
+		FIMPreset string `yaml:"fim_preset" env:"EDR_MONITORING_FIM_PRESET"`
+		// FIMIgnorePatterns are glob patterns (basename) skipped by fsnotify FIM, e.g. "*.log".
+		FIMIgnorePatterns []string `yaml:"fim_ignore_patterns"`
 		UserlandFallback bool     `yaml:"userland_fallback"`
 		// SecurityProfile standard (default), regulated, or strict_complete.
 		// regulated/strict_complete forbid pillar stubs and require inventory;
@@ -436,6 +452,8 @@ type Config struct {
 		DarwinAttribNetwork bool `yaml:"darwin_attrib_network"`
 		// Darwin: auth via unified log stream when /var/log/system.log is unreadable.
 		DarwinAuthUnifiedLog bool `yaml:"darwin_auth_unified_log"`
+		// Darwin: unified-log security subsystems for imported macOS Sigma UL rules.
+		DarwinUnifiedLogSecurity bool `yaml:"darwin_unified_log_security"`
 		// Linux: follow journald for ssh/sudo when no /var/log/auth.log|secure.
 		LinuxAuthAutoJournal bool `yaml:"linux_auth_auto_journal"`
 		// Linux: override path to edr.bpf.o (empty = /var/lib/edr/bpf/edr.bpf.o).
@@ -597,6 +615,7 @@ func Defaults() Config {
 	cfg.ML.Thresholds.NetworkAnomaly = 0.70
 
 	cfg.Detection.Sigma.Enabled = true
+	cfg.Detection.CustomRules.Enabled = true
 	cfg.Detection.YARA.Enabled = true
 	cfg.Detection.YARA.MaxFileSizeMB = 8
 	cfg.Detection.YARA.RescanCooldownSec = 120
@@ -621,10 +640,22 @@ func Defaults() Config {
 	cfg.Baseline.LearningDays = 7
 	cfg.Baseline.DeviationMult = 3.0
 
+	cfg.Compliance.Enabled = true
+	cfg.Compliance.RulesDir = "rules/compliance/sca"
+	cfg.Compliance.ScanOnStart = true
+	cfg.Compliance.IntervalHours = 12
+	cfg.Compliance.CommandsEnabled = true
+	cfg.Compliance.CommandTimeoutSec = 30
+	cfg.Compliance.EnablePosture = true
+	cfg.Compliance.EnableRootcheck = true
+	cfg.Compliance.EmitPassedFindings = false
+
 	cfg.Monitoring.Mode = "auto"
+	cfg.Monitoring.FIMPreset = "standard"
 	cfg.Monitoring.KernelEnabled = true
 	cfg.Monitoring.UserlandFallback = true
 	cfg.Monitoring.DarwinAuthUnifiedLog = true
+	cfg.Monitoring.DarwinUnifiedLogSecurity = true
 	cfg.Monitoring.LinuxAuthAutoJournal = true
 	cfg.Monitoring.WindowsSysmonNetworkEvents = true
 	cfg.Monitoring.SecurityProfile = "standard"
