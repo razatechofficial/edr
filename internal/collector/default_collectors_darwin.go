@@ -29,5 +29,9 @@ func extendDarwinMonitoringCollectors(cols []Collector, cfg config.Config, endpo
 		np := NewMacosNotarizationPostureSource(endpointID, cfg)
 		cols = append(cols, newStreamingRunCollector("macos_notarization_posture", 32, cfg.Monitoring.StreamMaxEPS, np.Run, np.ExportMonitoringHealth))
 	}
+	if cfg.Monitoring.DarwinUnifiedLogSecurity {
+		sec := NewDarwinSecurityLogSource(endpointID, "")
+		cols = append(cols, newStreamingRunCollector("security_unified_log", 256, cfg.Monitoring.StreamMaxEPS, sec.Run, sec.ExportMonitoringHealth))
+	}
 	return cols
 }
