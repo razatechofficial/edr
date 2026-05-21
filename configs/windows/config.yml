@@ -13,8 +13,22 @@ detection:
   yara:
     enabled: true
     rules_dir: "C:\\ProgramData\\EDR Agent\\rules\\yara"
+  custom_rules:
+    enabled: true
+    rules_path: "C:\\ProgramData\\EDR Agent\\rules\\custom"
   behavioral:
     sensitivity: medium
+monitoring:
+  mode: auto
+  kernel_enabled: true
+compliance:
+  enabled: true
+  rules_dir: "C:\\ProgramData\\EDR Agent\\rules\\compliance\\sca"
+  scan_on_start: true
+  interval_hours: 12
+  enable_posture: true
+  enable_rootcheck: false
+  emit_passed_findings: false
 response:
   auto_response: true
   playbooks_dir: "C:\\ProgramData\\EDR Agent\\rules\\playbooks"
