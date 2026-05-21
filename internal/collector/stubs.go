@@ -78,6 +78,7 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 		users = NewUsernameCache()
 	}
 	cfgEff := ApplyRegulatedDefaults(cfg)
+	cfgEff.Monitoring.FIMPaths = ResolveFIMPaths(cfgEff)
 	endpointID := cfgEff.Service.EndpointID
 	pc, err := NewProcessCollector(endpointID)
 	if err != nil {
@@ -105,11 +106,7 @@ func DefaultCollectors(cfg config.Config, users *UsernameCache) ([]Collector, er
 	}
 
 	var fileCol Collector
-	fimPaths := cfgEff.Monitoring.FIMPaths
-	if len(fimPaths) == 0 {
-		fimPaths = nil
-	}
-	fc, fcErr := NewFileCollector(endpointID, fimPaths, cfgEff)
+	fc, fcErr := NewFileCollector(endpointID, cfgEff.Monitoring.FIMPaths, cfgEff)
 	if fcErr == nil {
 		fileCol = fc
 	} else {
