@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/monitoringdoctor"
 	"github.com/razatechofficial/edr/internal/pidfile"
 	"github.com/razatechofficial/edr/internal/response"
@@ -101,9 +101,9 @@ func printAlerts(path string) error {
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		var al schema.Alert
-		if err := json.Unmarshal(sc.Bytes(), &al); err != nil {
-			fmt.Printf("invalid row: %s\n", sc.Text())
+		al, err := alert.ParseAlertLine(sc.Bytes())
+		if err != nil {
+			fmt.Printf("invalid row: %s (%v)\n", sc.Text(), err)
 			continue
 		}
 		fmt.Printf("%s %-8s %-10s %s\n", al.Timestamp.Format("2006-01-02T15:04:05Z"), al.Severity, al.RuleID, al.Title)

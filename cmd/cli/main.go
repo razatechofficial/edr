@@ -22,6 +22,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/razatechofficial/edr/internal/alert"
 )
 
 var (
@@ -262,22 +264,32 @@ func newAlertsCmd() *cobra.Command {
 			defer f.Close()
 
 			type alertEntry struct {
-				AlertID     string    `json:"alert_id"`
-				RuleID      string    `json:"rule_id"`
-				Severity    string    `json:"severity"`
-				Score       int       `json:"score"`
-				Title       string    `json:"title"`
-				Timestamp   time.Time `json:"timestamp"`
-				ProcessName string    `json:"process_name"`
-				ProcessPID  int       `json:"process_pid"`
+				AlertID     string
+				RuleID      string
+				Severity    string
+				Score       int
+				Title       string
+				Timestamp   time.Time
+				ProcessName string
+				ProcessPID  int
 			}
 
 			var alerts []alertEntry
 			sc := bufio.NewScanner(f)
 			for sc.Scan() {
-				var a alertEntry
-				if err := json.Unmarshal(sc.Bytes(), &a); err != nil {
+				parsed, err := alert.ParseAlertLine(sc.Bytes())
+				if err != nil {
 					continue
+				}
+				a := alertEntry{
+					AlertID:     parsed.AlertID,
+					RuleID:      parsed.RuleID,
+					Severity:    string(parsed.Severity),
+					Score:       parsed.Score,
+					Title:       parsed.Title,
+					Timestamp:   parsed.Timestamp,
+					ProcessName: parsed.ProcessName,
+					ProcessPID:  parsed.ProcessPID,
 				}
 				if !cutoff.IsZero() && a.Timestamp.Before(cutoff) {
 					continue
