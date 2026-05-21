@@ -159,6 +159,10 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		pe.UnshareFlags = jsonUint64(raw, "unshare_flags")
 		pe.MadviseAdvice = int32(jsonInt(raw, "madvise_advice"))
 		pe.ExecEnv = jsonString(raw, "exec_env")
+		pe.ESFEventType = jsonInt(raw, "esf_type")
+		pe.ESFOperation = firstNonEmpty(jsonString(raw, "esf_op"), jsonString(raw, "operation"))
+		pe.TargetImage = firstNonEmpty(jsonString(raw, "target_image"), jsonString(raw, "target_path"))
+		pe.SignalNumber = jsonInt(raw, "signal_number", "signal")
 		if tg := jsonString(raw, "tags"); tg != "" {
 			pe.Tags = strings.Split(tg, ",")
 		}
@@ -297,6 +301,8 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		fe.OpenFlags = jsonUint32(raw, "open_flags")
 		fe.ChmodMode = jsonUint32(raw, "chmod_mode")
 		fe.FchmodatFlags = jsonUint32(raw, "fchmodat_flags")
+		fe.ESFEventType = jsonInt(raw, "esf_type")
+		fe.ESFOperation = firstNonEmpty(jsonString(raw, "esf_op"), fe.Operation)
 		if arr, ok := raw["tags"].([]interface{}); ok {
 			for _, v := range arr {
 				if s, ok := v.(string); ok && s != "" {
@@ -348,6 +354,8 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		// macOS ESF stamps esf_op; Windows ETW stamps op (image_load,
 		// image_unload). Fall back to evType if neither is provided.
 		op := firstNonEmpty(jsonString(raw, "esf_op"), jsonString(raw, "op"))
+		pe.ESFEventType = jsonInt(raw, "esf_type")
+		pe.ESFOperation = op
 		switch {
 		case evType == "module" && op == "image_load":
 			pe.ProcessName = "image_load"
@@ -365,6 +373,11 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 			jsonString(raw, "module_path"),
 			jsonString(raw, "image_name"),
 		)
+		if evType == "signal" {
+			pe.TargetImage = firstNonEmpty(jsonString(raw, "target_image"), jsonString(raw, "path"))
+			pe.SignalNumber = jsonInt(raw, "signal_number", "signal")
+			pe.ProcessPath = firstNonEmpty(jsonString(raw, "comm"), jsonString(raw, "process_path"), pe.ProcessPath)
+		}
 		pe.CommandLine = jsonString(raw, "message")
 		applyProcessUserFromJSON(pe, raw, users)
 		return &Telemetry{Process: pe}

@@ -214,11 +214,31 @@ func parseAuthLine(line, endpointID, hostname string, ts time.Time) (schema.Auth
 			Hostname:      hostname,
 			OS:            runtime.GOOS,
 		},
-		User:     strings.TrimSpace(user),
-		AuthType: authType,
-		SourceIP: strings.TrimSpace(sourceIP),
-		Outcome:  outcome,
+		User:      strings.TrimSpace(user),
+		AuthType:  authType,
+		SourceIP:  strings.TrimSpace(sourceIP),
+		Outcome:   outcome,
+		Message:   line,
+		Subsystem: authSubsystemForLine(authType, lower),
 	}, true
+}
+
+func authSubsystemForLine(authType, lower string) string {
+	switch authType {
+	case "sudo":
+		return "com.apple.sudo"
+	case "ssh":
+		return "com.apple.ssh"
+	case "session":
+		if strings.Contains(lower, "sudo") {
+			return "com.apple.sudo"
+		}
+		return "com.apple.loginwindow"
+	case "pam":
+		return "com.apple.opendirectoryd"
+	default:
+		return ""
+	}
 }
 
 func extractField(line, prefix string) string {

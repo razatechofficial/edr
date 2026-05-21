@@ -13,7 +13,7 @@ func u24kern(n int) []byte {
 }
 
 func TestMapKernelJSONToTelemetry_ProcessESFStyle(t *testing.T) {
-	raw := `{"type":"process","pid":4242,"ppid":1,"path":"/bin/bash","comm":"/bin/bash","args":"-c id","timestamp":"2020-01-02T15:04:05Z"}`
+	raw := `{"type":"process","pid":4242,"ppid":1,"path":"/bin/bash","comm":"/bin/bash","args":"-c id","esf_type":9,"esf_op":"exec","timestamp":"2020-01-02T15:04:05Z"}`
 	tel := MapKernelJSONToTelemetry([]byte(raw), "ep1", "host1", "darwin", nil)
 	if tel == nil || tel.Process == nil {
 		t.Fatalf("expected process telemetry")
@@ -23,6 +23,9 @@ func TestMapKernelJSONToTelemetry_ProcessESFStyle(t *testing.T) {
 	}
 	if tel.Process.ProcessPath != "/bin/bash" {
 		t.Fatalf("path: %q", tel.Process.ProcessPath)
+	}
+	if tel.Process.ESFEventType != 9 || tel.Process.ESFOperation != "exec" {
+		t.Fatalf("esf: type=%d op=%q", tel.Process.ESFEventType, tel.Process.ESFOperation)
 	}
 }
 
