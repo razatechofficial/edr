@@ -88,6 +88,9 @@ count_alerts_since() {
         local ts
         ts="$(echo "${line}" | grep -o '"timestamp":"[^"]*"' | head -1 | cut -d'"' -f4)"
         if [ -z "${ts}" ]; then
+            ts="$(echo "${line}" | grep -o '"time":[0-9]\+' | head -1 | cut -d':' -f2)"
+        fi
+        if [ -z "${ts}" ]; then
             continue
         fi
         if [ -n "${pattern}" ]; then
