@@ -1,0 +1,40 @@
+rules:
+  - id: OCSF-CEL-POWERSHELL-ENC
+    name: PowerShell encoded command
+    description: >
+      OCSF Process Activity (class 1007) rule using canonical class_uid and
+      process_cmd_line fields.
+    severity: high
+    enabled: true
+    expression: >
+      class_uid == 1007 &&
+      process_cmd_line.contains("-enc")
+    tags:
+      - ocsf
+      - custom-cel
+
+  - id: OCSF-CEL-SENSITIVE-FILE
+    name: Sensitive file path modification
+    description: >
+      OCSF File Activity (class 4001) rule matching writes to sensitive paths.
+    severity: medium
+    enabled: true
+    expression: >
+      class_uid == 4001 &&
+      file_path_ocsf.contains("/etc/passwd")
+    tags:
+      - ocsf
+      - custom-cel
+
+  - id: OCSF-CEL-NESTED-PROCESS
+    name: Nested OCSF envelope process match
+    description: >
+      Example using the nested ocsf map for class_uid and process.cmd_line.
+    severity: medium
+    enabled: false
+    expression: >
+      ocsf.class_uid == 1007 &&
+      ocsf.process.cmd_line.contains("whoami")
+    tags:
+      - ocsf
+      - custom-cel
