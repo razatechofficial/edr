@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -41,7 +40,6 @@ import (
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/threatintel"
 	"github.com/razatechofficial/edr/pkg/events"
-	"github.com/razatechofficial/edr/pkg/ocsf"
 )
 
 type Agent struct {
@@ -158,6 +156,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		fileHashPool:       newFileHashPool(),
 		noisyAlertLastSeen: make(map[string]time.Time),
 	}
+	a.writer.SetProductVersion(cfg.Agent.Version)
 	collector.LogMonitoringBootstrap(a.logger, cfg)
 	collector.OCSFProductVersion = cfg.Agent.Version
 
@@ -1210,10 +1209,10 @@ func (a *Agent) checkDriftAlerts() error {
 }
 
 func (a *Agent) handleAlerts(alerts []schema.Alert) error {
-	product := ocsf.DefaultProduct(a.cfg.Agent.Version)
+	productVersion := a.cfg.Agent.Version
 	for i := range alerts {
 		al := &alerts[i]
-		ensureAlertOCSF(al, product)
+		ensureAlertOCSF(al, productVersion)
 		a.emitValidationDetection(detection.FromSchemaAlert(*al))
 		if a.shouldSuppressNoisyAlert(*al) {
 			continue
@@ -1232,7 +1231,7 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 			"correlation_id", correlationID)
 		a.alertSpool.Push(*al)
 		if a.durableSpool != nil {
-			if data, err := json.Marshal(al); err == nil {
+			if data, err := marshalAlertOCSF(*al, productVersion); err == nil {
 				if err := a.durableSpool.Write(data); err != nil {
 					a.logger.Error("durable spool write failed", "error", err)
 				}
