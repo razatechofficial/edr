@@ -50,6 +50,9 @@ message Alert {
 
   // Raw event data for forensic purposes.
   bytes  raw_event       = 30;
+
+  // Canonical OCSF 1.3 Detection Finding JSON (class 2004).
+  bytes  ocsf            = 31;
 }
 
 // AlertAck is the server's acknowledgment of a received alert.

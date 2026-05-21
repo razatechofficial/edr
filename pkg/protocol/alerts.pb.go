@@ -174,7 +174,9 @@ type Alert struct {
 	ProcessPath string `protobuf:"bytes,22,opt,name=process_path,json=processPath,proto3" json:"process_path,omitempty"`
 	CommandLine string `protobuf:"bytes,23,opt,name=command_line,json=commandLine,proto3" json:"command_line,omitempty"`
 	// Raw event data for forensic purposes.
-	RawEvent      []byte `protobuf:"bytes,30,opt,name=raw_event,json=rawEvent,proto3" json:"raw_event,omitempty"`
+	RawEvent []byte `protobuf:"bytes,30,opt,name=raw_event,json=rawEvent,proto3" json:"raw_event,omitempty"`
+	// Canonical OCSF 1.3 Detection Finding JSON (class 2004).
+	Ocsf          []byte `protobuf:"bytes,31,opt,name=ocsf,proto3" json:"ocsf,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -317,6 +319,13 @@ func (x *Alert) GetCommandLine() string {
 func (x *Alert) GetRawEvent() []byte {
 	if x != nil {
 		return x.RawEvent
+	}
+	return nil
+}
+
+func (x *Alert) GetOcsf() []byte {
+	if x != nil {
+		return x.Ocsf
 	}
 	return nil
 }
@@ -477,7 +486,7 @@ const file_alerts_proto_rawDesc = "" +
 	"\x0etechnique_name\x18\x02 \x01(\tR\rtechniqueName\x12\x1b\n" +
 	"\ttactic_id\x18\x03 \x01(\tR\btacticId\x12\x1f\n" +
 	"\vtactic_name\x18\x04 \x01(\tR\n" +
-	"tacticName\"\x8f\x04\n" +
+	"tacticName\"\xa3\x04\n" +
 	"\x05Alert\x12\x19\n" +
 	"\balert_id\x18\x01 \x01(\tR\aalertId\x12\x17\n" +
 	"\arule_id\x18\x02 \x01(\tR\x06ruleId\x12\x1b\n" +
@@ -497,7 +506,8 @@ const file_alerts_proto_rawDesc = "" +
 	"\fprocess_name\x18\x15 \x01(\tR\vprocessName\x12!\n" +
 	"\fprocess_path\x18\x16 \x01(\tR\vprocessPath\x12!\n" +
 	"\fcommand_line\x18\x17 \x01(\tR\vcommandLine\x12\x1b\n" +
-	"\traw_event\x18\x1e \x01(\fR\brawEvent\"[\n" +
+	"\traw_event\x18\x1e \x01(\fR\brawEvent\x12\x12\n" +
+	"\x04ocsf\x18\x1f \x01(\fR\x04ocsf\"[\n" +
 	"\bAlertAck\x12\x19\n" +
 	"\balert_id\x18\x01 \x01(\tR\aalertId\x12\x1a\n" +
 	"\baccepted\x18\x02 \x01(\bR\baccepted\x12\x18\n" +
