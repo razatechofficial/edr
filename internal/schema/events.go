@@ -16,8 +16,9 @@ const (
 	EventFork      EventType = "fork"
 	EventRegistry  EventType = "registry"
 	EventInjection EventType = "injection"
-	EventCompliance EventType = "compliance"
+	EventCompliance     EventType = "compliance"
 	EventComplianceScan EventType = "compliance_scan"
+	EventPrivilege      EventType = "privilege"
 )
 
 type BaseEvent struct {

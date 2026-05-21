@@ -46,6 +46,8 @@ type Alert struct {
 	User     string `json:"user,omitempty"`
 	AuthType string `json:"auth_type,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`
+
+	OCSF map[string]any `json:"ocsf,omitempty"`
 }
 
 type AuditRecord struct {
