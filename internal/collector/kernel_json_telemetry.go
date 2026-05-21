@@ -179,6 +179,21 @@ func MapKernelJSONToTelemetry(data []byte, endpointID, hostname, goos string, us
 		ie.Technique = jsonString(raw, "technique")
 		return &Telemetry{Injection: ie}
 
+	case "privilege":
+		base.EventType = schema.EventPrivilege
+		pv := &schema.PrivilegeEvent{BaseEvent: base}
+		pv.PID = uint32(jsonInt(raw, "pid"))
+		pv.PPID = uint32(jsonInt(raw, "ppid", "parent_pid"))
+		pv.Comm = firstNonEmpty(jsonString(raw, "comm"), jsonString(raw, "process_name"))
+		pv.Operation = jsonString(raw, "operation")
+		pv.SyscallNr = jsonUint32(raw, "syscall_nr")
+		pv.NewUID = uint32(jsonInt(raw, "new_uid", "new_id"))
+		pv.NewGID = uint32(jsonInt(raw, "new_gid"))
+		pv.EffectiveID = uint32(jsonInt(raw, "effective_id", "effective"))
+		pv.SavedID = uint32(jsonInt(raw, "saved_id", "saved"))
+		pv.CallerUID = uint32(jsonInt(raw, "caller_uid"))
+		return &Telemetry{Privilege: pv}
+
 	case "credential_access":
 		base.EventType = schema.EventProcess
 		ce := &schema.CredentialAccessEvent{BaseEvent: base}

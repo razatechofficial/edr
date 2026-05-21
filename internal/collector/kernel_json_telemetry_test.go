@@ -64,6 +64,22 @@ func TestMapKernelJSONToTelemetry_Registry(t *testing.T) {
 	}
 }
 
+func TestMapKernelJSONToTelemetry_Privilege(t *testing.T) {
+	raw := `{"type":"privilege","pid":100,"ppid":1,"comm":"bash","operation":"setuid","syscall_nr":105,"new_id":0,"effective":0,"saved":1000,"caller_uid":1000,"timestamp":"2020-01-02T15:04:05Z"}`
+	tel := MapKernelJSONToTelemetry([]byte(raw), "ep", "host", "linux", nil)
+	if tel == nil || tel.Privilege == nil {
+		t.Fatalf("expected privilege telemetry, got %+v", tel)
+	}
+	if tel.Privilege.Operation != "setuid" || tel.Privilege.PID != 100 {
+		t.Fatalf("unexpected privilege event: %+v", tel.Privilege)
+	}
+	OCSFProductVersion = "test"
+	EnsureTelemetryOCSF(tel)
+	if len(tel.Privilege.OCSF) == 0 {
+		t.Fatal("expected OCSF on mapped privilege event")
+	}
+}
+
 func TestMapKernelJSONToTelemetry_Fork(t *testing.T) {
 	raw := `{"type":"fork","pid":1,"child_pid":2,"clone_flags":256,"timestamp":"2020-01-02T15:04:05Z"}`
 	tel := MapKernelJSONToTelemetry([]byte(raw), "e", "h", "linux", nil)
