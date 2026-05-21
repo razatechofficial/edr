@@ -1,6 +1,5 @@
-# Custom detection rules: YAML list of rules; each `expression` is CEL
-# against variables declared in internal/detection/rules/custom.go (event_type,
-# process_name, command_line, etc.). Use .yaml/.yml files under rules_path.
+# Custom detection rules: YAML list of rules; each `expression` is CEL against
+# OCSF 1.3 variables (class_uid, process_cmd_line, process_file_name, etc.).
 rules:
   - id: SAMPLE-CEL-001
     name: Sample CEL rule (never matches)
