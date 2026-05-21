@@ -8,6 +8,9 @@ const (
 	ClassSecurityFinding  = "security_finding"
 	ClassUIDSecurityFinding = 2001
 
+	ClassDetectionFinding    = "detection_finding"
+	ClassUIDDetectionFinding = 2004
+
 	ClassProcessActivity  = "process_activity"
 	ClassUIDProcessActivity = 1007
 
@@ -22,6 +25,15 @@ const (
 
 	ClassRegistryKeyActivity    = "registry_key_activity"
 	ClassUIDRegistryKeyActivity = 201001
+
+	ClassDNSActivity    = "dns_activity"
+	ClassUIDDNSActivity = 4004
+
+	ClassScheduledJobActivity    = "scheduled_job_activity"
+	ClassUIDScheduledJobActivity = 1006
+
+	ClassWindowsServiceActivity    = "windows_service_activity"
+	ClassUIDWindowsServiceActivity = 201004
 )
 
 // Envelope is the top-level OCSF event wrapper.
@@ -40,6 +52,8 @@ type Envelope struct {
 	Process      *Process       `json:"process,omitempty"`
 	File         *File          `json:"file,omitempty"`
 	RegKey       *RegKey        `json:"reg_key,omitempty"`
+	Query        *DNSQuery      `json:"query,omitempty"`
+	Job          *ScheduledJob  `json:"job,omitempty"`
 	SrcEndpoint  *Endpoint      `json:"src_endpoint,omitempty"`
 	DstEndpoint  *Endpoint      `json:"dst_endpoint,omitempty"`
 	User         *UserRecord    `json:"user,omitempty"`
@@ -84,13 +98,30 @@ type Finding struct {
 	Compliance  map[string]any `json:"compliance,omitempty"`
 }
 
+type ProcessParent struct {
+	PID int `json:"pid,omitempty"`
+}
+
+type ProcessFile struct {
+	Name string `json:"name,omitempty"`
+	Path string `json:"path,omitempty"`
+}
+
 type Process struct {
-	Name     string `json:"name,omitempty"`
-	Path     string `json:"path,omitempty"`
-	CmdLine  string `json:"cmd_line,omitempty"`
-	UID      string `json:"uid,omitempty"`
-	PID      int    `json:"pid,omitempty"`
-	ParentPID int   `json:"parent_process_uid,omitempty"`
+	File          *ProcessFile   `json:"file,omitempty"`
+	CmdLine       string         `json:"cmd_line,omitempty"`
+	User          *UserRecord    `json:"user,omitempty"`
+	PID           int            `json:"pid,omitempty"`
+	ParentProcess *ProcessParent `json:"parent_process,omitempty"`
+}
+
+type DNSQuery struct {
+	Hostname string `json:"hostname,omitempty"`
+}
+
+type ScheduledJob struct {
+	Name string `json:"name,omitempty"`
+	Cmd  string `json:"cmd_line,omitempty"`
 }
 
 type File struct {
