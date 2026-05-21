@@ -24,6 +24,12 @@ var celVarNames = []string{
 	"dns_query",
 	"registry_path",
 	"registry_value",
+	"finding_title",
+	"policy_id",
+	"check_id",
+	"finding_result",
+	"activity_id",
+	"severity_id",
 	// Legacy flat names (Sigma-era).
 	"process_name",
 	"process_path",
@@ -55,7 +61,7 @@ func newCELEnv() (*cel.Env, error) {
 	opts := make([]cel.EnvOption, 0, len(celVarNames)+1)
 	for _, name := range celVarNames {
 		switch name {
-		case "pid", "ppid", "source_port", "dest_port", "destination_port", "class_uid", "ocsf_class_uid":
+		case "pid", "ppid", "source_port", "dest_port", "destination_port", "class_uid", "ocsf_class_uid", "check_id", "activity_id", "severity_id":
 			opts = append(opts, cel.Variable(name, cel.IntType))
 		default:
 			opts = append(opts, cel.Variable(name, cel.StringType))
@@ -69,7 +75,7 @@ func activationFromMap(vars map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(celVarNames)+12)
 	for _, name := range celVarNames {
 		switch name {
-		case "pid", "ppid", "source_port", "dest_port", "destination_port", "class_uid", "ocsf_class_uid":
+		case "pid", "ppid", "source_port", "dest_port", "destination_port", "class_uid", "ocsf_class_uid", "check_id", "activity_id", "severity_id":
 			out[name] = int64(0)
 		default:
 			out[name] = ""
@@ -89,6 +95,12 @@ func activationFromMap(vars map[string]interface{}) map[string]interface{} {
 		"dns_query":           {"dns_query", "domain", "Domain", "QueryName", "dns.question.name"},
 		"registry_path":       {"registry_path", "RegistryPath", "TargetObject", "registry.path"},
 		"registry_value":      {"registry_value", "RegistryValue", "Details", "registry.value"},
+		"finding_title":       {"finding_title", "title", "Title", "ocsf.finding.title", "finding.title"},
+		"policy_id":           {"policy_id", "PolicyID", "policy.id"},
+		"check_id":            {"check_id", "CheckID", "check.id"},
+		"finding_result":      {"finding_result", "result", "Result"},
+		"activity_id":         {"activity_id", "ActivityID", "ocsf.activity_id"},
+		"severity_id":         {"severity_id", "SeverityID", "ocsf.severity_id"},
 		"ocsf_class_uid":      {"ocsf_class_uid", "class_uid", "ocsf.class_uid"},
 		"ocsf_class_name":     {"ocsf_class_name", "class_name", "ocsf.class_name"},
 		"process_name":        {"process_name", "ProcessName", "process.file.name", "process_file_name"},
