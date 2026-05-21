@@ -27,9 +27,10 @@ type Telemetry struct {
 	File          *schema.FileEvent
 	Fork          *schema.ForkEvent
 	Registry      *schema.RegistryEvent
-	Injection     *schema.ProcessInjectionEvent
-	Compliance    *schema.ComplianceFindingEvent
+	Injection      *schema.ProcessInjectionEvent
+	Compliance     *schema.ComplianceFindingEvent
 	ComplianceScan *schema.ComplianceScanSummaryEvent
+	Privilege      *schema.PrivilegeEvent
 }
 
 // Collector gathers host telemetry for the detection engine.

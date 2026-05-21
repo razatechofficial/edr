@@ -36,6 +36,7 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 		Injection     *schema.ProcessInjectionEvent `json:"injection,omitempty"`
 		Compliance    *schema.ComplianceFindingEvent `json:"compliance,omitempty"`
 		ComplianceScan *schema.ComplianceScanSummaryEvent `json:"compliance_scan,omitempty"`
+		Privilege      *schema.PrivilegeEvent             `json:"privilege,omitempty"`
 	}{}
 	switch {
 	case t.Process != nil:
@@ -82,6 +83,8 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 		w.Kind, w.Compliance = "compliance_finding", t.Compliance
 	case t.ComplianceScan != nil:
 		w.Kind, w.ComplianceScan = "compliance_scan", t.ComplianceScan
+	case t.Privilege != nil:
+		w.Kind, w.Privilege = "privilege", t.Privilege
 	default:
 		return nil, nil
 	}
