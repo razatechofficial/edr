@@ -4,12 +4,13 @@ import "testing"
 
 func TestEnrichDarwinSigmaFieldsESFExec(t *testing.T) {
 	t.Parallel()
-	out := EnrichDetectionMap(map[string]interface{}{
+	out := SigmaEvalMap(map[string]interface{}{
 		"os":           "darwin",
 		"esf_type":     9,
 		"esf_op":       "exec",
 		"process_path": "/usr/bin/curl",
 		"command_line": "curl https://example.com",
+		"event_type":   "process",
 	})
 	if out["esf.event_type"] != 9 {
 		t.Fatalf("esf.event_type=%v", out["esf.event_type"])
@@ -24,12 +25,13 @@ func TestEnrichDarwinSigmaFieldsESFExec(t *testing.T) {
 
 func TestEnrichDarwinSigmaFieldsSignalTarget(t *testing.T) {
 	t.Parallel()
-	out := EnrichDetectionMap(map[string]interface{}{
-		"os":           "darwin",
-		"esf_type":     27,
-		"esf_op":       "signal",
-		"process_path": "/Applications/Little Snitch.app/Contents/MacOS/Little Snitch",
+	out := SigmaEvalMap(map[string]interface{}{
+		"os":            "darwin",
+		"esf_type":      27,
+		"esf_op":        "signal",
+		"process_path":  "/Applications/Little Snitch.app/Contents/MacOS/Little Snitch",
 		"signal_number": 9,
+		"event_type":    "process",
 	})
 	if out["TargetImage"] == "" {
 		t.Fatalf("TargetImage missing: %v", out)
@@ -41,7 +43,7 @@ func TestEnrichDarwinSigmaFieldsSignalTarget(t *testing.T) {
 
 func TestEnrichDarwinSigmaFieldsUnifiedLog(t *testing.T) {
 	t.Parallel()
-	out := EnrichDetectionMap(map[string]interface{}{
+	out := SigmaEvalMap(map[string]interface{}{
 		"os":        "darwin",
 		"subsystem": "com.apple.sudo",
 		"category":  "sudo",

@@ -11,14 +11,14 @@ func TestEnrichDetectionMapProcess(t *testing.T) {
 		"command_line": "-enc ABC",
 		"pid":          float64(1234),
 	})
-	if out["Image"] != "C:\\Windows\\System32\\powershell.exe" {
-		t.Fatalf("Image=%v", out["Image"])
+	if out["class_uid"] != ClassUIDProcessActivity {
+		t.Fatalf("class_uid=%v", out["class_uid"])
 	}
-	if out["process.file.name"] != "powershell.exe" {
-		t.Fatalf("process.file.name=%v", out["process.file.name"])
+	if out["process_cmd_line"] != "-enc ABC" {
+		t.Fatalf("process_cmd_line=%v", out["process_cmd_line"])
 	}
-	if out["ocsf.class_uid"] != ClassUIDProcessActivity {
-		t.Fatalf("class_uid=%v", out["ocsf.class_uid"])
+	if v, ok := out["Image"]; ok && v != "" && v != nil {
+		t.Fatalf("unexpected sigma alias Image=%v", v)
 	}
 }
 
@@ -29,10 +29,7 @@ func TestEnrichDetectionMapFile(t *testing.T) {
 		"path":       "/etc/passwd",
 		"operation":  "write",
 	})
-	if out["TargetFilename"] != "/etc/passwd" {
-		t.Fatalf("TargetFilename=%v", out["TargetFilename"])
-	}
-	if out["file.path"] != "/etc/passwd" {
-		t.Fatalf("file.path=%v", out["file.path"])
+	if out["file_path_ocsf"] != "/etc/passwd" {
+		t.Fatalf("file_path_ocsf=%v", out["file_path_ocsf"])
 	}
 }
