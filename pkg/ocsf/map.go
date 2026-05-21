@@ -58,14 +58,7 @@ func FromProcess(in ProcessInput, product Product) Envelope {
 			Version: SchemaVersion,
 			Product: product,
 		},
-		Process: &Process{
-			Name:      in.ProcessName,
-			Path:      in.ProcessPath,
-			CmdLine:   in.CommandLine,
-			UID:       in.User,
-			PID:       in.PID,
-			ParentPID: in.PPID,
-		},
+		Process: processFromInput(in),
 		Unmapped: map[string]any{
 			"endpoint_id": in.EndpointID,
 			"hostname":    in.Hostname,
@@ -83,7 +76,7 @@ func FromFile(in FileInput, product Product) Envelope {
 	return Envelope{
 		ClassUID:     ClassUIDFileActivity,
 		ClassName:    ClassFileActivity,
-		CategoryUID:  4,
+		CategoryUID:  1,
 		CategoryName: "System Activity",
 		ActivityID:   1,
 		ActivityName: in.Operation,
@@ -232,6 +225,32 @@ func FromComplianceScan(in ComplianceScanInput, product Product) Envelope {
 			"duration_ms":         in.DurationMs,
 		},
 	}
+}
+
+func parentProcessRef(ppid int) *ProcessParent {
+	if ppid == 0 {
+		return nil
+	}
+	return &ProcessParent{PID: ppid}
+}
+
+func processFromInput(in ProcessInput) *Process {
+	if in.ProcessName == "" && in.ProcessPath == "" && in.CommandLine == "" &&
+		in.User == "" && in.PID == 0 && in.PPID == 0 {
+		return nil
+	}
+	p := &Process{
+		CmdLine:       in.CommandLine,
+		PID:           in.PID,
+		ParentProcess: parentProcessRef(in.PPID),
+	}
+	if in.ProcessName != "" || in.ProcessPath != "" {
+		p.File = &ProcessFile{Name: in.ProcessName, Path: in.ProcessPath}
+	}
+	if in.User != "" {
+		p.User = &UserRecord{Name: in.User, UID: in.User}
+	}
+	return p
 }
 
 func complianceSeverity(result string) (int, string) {

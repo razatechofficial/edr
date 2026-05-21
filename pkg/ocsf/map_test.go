@@ -43,7 +43,7 @@ func TestFromProcess(t *testing.T) {
 	if env.ClassUID != ClassUIDProcessActivity {
 		t.Fatalf("class_uid=%d", env.ClassUID)
 	}
-	if env.Process == nil || env.Process.Name != "bash" {
+	if env.Process == nil || env.Process.File == nil || env.Process.File.Name != "bash" {
 		t.Fatalf("process=%+v", env.Process)
 	}
 }
