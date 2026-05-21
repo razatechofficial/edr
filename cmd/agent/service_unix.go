@@ -37,18 +37,24 @@ WantedBy=multi-user.target
 <plist version="1.0"><dict>
 <key>Label</key><string>com.razatech.edr-agent</string>
 <key>ProgramArguments</key><array>
-<string>/usr/local/bin/edr-agent</string><string>--config</string><string>/etc/edr-agent/config.yml</string>
+<string>/usr/local/bin/edr-agent</string><string>run</string><string>--config</string><string>/Library/Application Support/EDR/config/agent.yaml</string>
 </array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><true/>
+<key>StandardOutPath</key><string>/Library/Logs/EDR/stdout.log</string>
+<key>StandardErrorPath</key><string>/Library/Logs/EDR/stderr.log</string>
 </dict></plist>
 `
 		const plistPath = "/Library/LaunchDaemons/com.razatech.edr-agent.plist"
 		if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
 			return err
 		}
+		_ = exec.Command("launchctl", "bootout", "system", plistPath).Run()
 		_ = exec.Command("launchctl", "unload", plistPath).Run()
-		return exec.Command("launchctl", "load", plistPath).Run()
+		if err := exec.Command("launchctl", "bootstrap", "system", plistPath).Run(); err != nil {
+			return exec.Command("launchctl", "load", plistPath).Run()
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported unix platform %s", runtime.GOOS)
 	}
@@ -64,6 +70,7 @@ func uninstallService() error {
 		return nil
 	case "darwin":
 		const plistPath = "/Library/LaunchDaemons/com.razatech.edr-agent.plist"
+		_ = exec.Command("launchctl", "bootout", "system", plistPath).Run()
 		_ = exec.Command("launchctl", "unload", plistPath).Run()
 		_ = os.Remove(plistPath)
 		return nil
