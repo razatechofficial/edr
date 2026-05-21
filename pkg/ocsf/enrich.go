@@ -6,9 +6,8 @@ import (
 	"strings"
 )
 
-// EnrichDetectionMap adds OCSF/ECS-style field aliases to a flat telemetry map so
-// Sigma, CEL, and future OCSF-native rules can match without per-engine adapters.
-// The original keys are preserved; aliases are only set when absent.
+// EnrichDetectionMap adds OCSF canonical fields, a nested ocsf envelope, and
+// legacy Sigma/ECS aliases to a flat telemetry map. Original keys are preserved.
 func EnrichDetectionMap(in map[string]interface{}) map[string]interface{} {
 	if len(in) == 0 {
 		return in
@@ -109,6 +108,12 @@ func EnrichDetectionMap(in map[string]interface{}) map[string]interface{} {
 	}
 
 	enrichDarwinSigmaFields(out)
+	applyCanonicalOCSFFields(out)
+	if existing, ok := in["ocsf"].(map[string]interface{}); ok && len(existing) > 0 {
+		out["ocsf"] = existing
+	} else if env := BuildDetectionEnvelope(in); len(env) > 0 {
+		out["ocsf"] = env
+	}
 
 	return out
 }
@@ -119,6 +124,16 @@ func classNameForEventType(t string) string {
 		return ClassProcessActivity
 	case "file", "file_access":
 		return ClassFileActivity
+	case "network":
+		return ClassNetworkActivity
+	case "auth", "authentication":
+		return ClassAuthentication
+	case "fork":
+		return ClassProcessActivity
+	case "registry":
+		return ClassRegistryKeyActivity
+	case "injection":
+		return ClassProcessActivity
 	case "compliance":
 		return ClassSecurityFinding
 	default:
@@ -132,6 +147,14 @@ func classUIDForEventType(t string) int {
 		return ClassUIDProcessActivity
 	case "file", "file_access":
 		return ClassUIDFileActivity
+	case "network":
+		return ClassUIDNetworkActivity
+	case "auth", "authentication":
+		return ClassUIDAuthentication
+	case "fork", "injection":
+		return ClassUIDProcessActivity
+	case "registry":
+		return ClassUIDRegistryKeyActivity
 	case "compliance":
 		return ClassUIDSecurityFinding
 	default:
