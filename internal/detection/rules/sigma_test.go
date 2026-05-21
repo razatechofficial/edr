@@ -124,3 +124,21 @@ detection:
 		t.Errorf("Count() = %d, want 2", engine.Count())
 	}
 }
+
+func TestSigmaEventCategoryDarwinESF(t *testing.T) {
+	t.Parallel()
+	if got := sigmaEventCategory(map[string]interface{}{
+		"event_type":   "process",
+		"esf_type":     27,
+		"event.action": "signal",
+	}); got != "process_signal" {
+		t.Fatalf("got %q", got)
+	}
+	if got := sigmaEventCategory(map[string]interface{}{
+		"event_type": "auth",
+		"subsystem":  "com.apple.sudo",
+		"category":   "sudo",
+	}	); got != "sudo" {
+		t.Fatalf("got %q", got)
+	}
+}
