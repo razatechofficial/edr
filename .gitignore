@@ -63,3 +63,4 @@ dist/
 pkg/deb-build/
 pkg/deb/
 pkg/macos/sign_manifest
+pkg/macos/root/Library/Application Support/
