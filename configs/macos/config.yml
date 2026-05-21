@@ -1,24 +1,51 @@
+# macOS system install profile (matches scripts/package_macos.sh layout).
+# Bundled rules live under ./rules relative to this config file at install time.
+
 agent:
   log_level: info
-  data_dir: /var/lib/edr-agent
-  temp_dir: /tmp/edr-agent
+  data_dir: "/Library/Application Support/EDR"
+  temp_dir: "/tmp/edr"
+
+rules_file: "/Library/Application Support/EDR/config/rules/baseline.yaml"
+
 logging:
   level: info
-  alert_file: /var/lib/edr-agent/alerts.jsonl
-  audit_file: /var/lib/edr-agent/audit.jsonl
+  alert_file: "/Library/Application Support/EDR/alerts/alerts.jsonl"
+  audit_file: "/Library/Application Support/EDR/audit/audit.jsonl"
+
 detection:
   sigma:
     enabled: true
-    rules_dir: /etc/edr-agent/rules/sigma
+    rules_dir: "/Library/Application Support/EDR/config/rules/sigma"
   yara:
     enabled: true
-    rules_dir: /etc/edr-agent/rules/yara
+    rules_dir: "/Library/Application Support/EDR/config/rules/yara"
+  custom_rules:
+    enabled: true
+    rules_path: "/Library/Application Support/EDR/config/rules/custom"
   behavioral:
     sensitivity: medium
+
+monitoring:
+  mode: auto
+  kernel_enabled: true
+  fim_preset: standard
+  darwin_unified_log_security: true
+  darwin_auth_unified_log: true
+
+compliance:
+  enabled: true
+  rules_dir: "/Library/Application Support/EDR/config/rules/compliance/sca"
+  scan_on_start: true
+  interval_hours: 12
+  enable_posture: true
+  enable_rootcheck: false
+  emit_passed_findings: false
+
 response:
   auto_response: true
-  playbooks_dir: /etc/edr-agent/rules/playbooks
-  forensics_dir: /var/lib/edr-agent/forensics
-  quarantine_dir: /var/lib/edr-agent/quarantine
+  playbooks_dir: "/Library/Application Support/EDR/config/rules/playbooks"
+  forensics_dir: "/Library/Application Support/EDR/forensics"
+  quarantine_dir: "/Library/Application Support/EDR/quarantine"
   approval:
     mode: auto

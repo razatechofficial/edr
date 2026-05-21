@@ -14,8 +14,25 @@ detection:
   yara:
     enabled: true
     rules_dir: /etc/edr-agent/rules/yara
+  custom_rules:
+    enabled: true
+    rules_path: /etc/edr-agent/rules/custom
   behavioral:
     sensitivity: medium
+monitoring:
+  mode: auto
+  kernel_enabled: true
+  fim_preset: standard
+  linux_auth_auto_journal: true
+  linux_rootcheck_enabled: false
+compliance:
+  enabled: true
+  rules_dir: /etc/edr-agent/rules/compliance/sca
+  scan_on_start: true
+  interval_hours: 12
+  enable_posture: true
+  enable_rootcheck: true
+  emit_passed_findings: false
 response:
   auto_response: true
   playbooks_path: /etc/edr-agent/rules/playbooks/playbooks.yml
