@@ -4,18 +4,22 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
-
-	"github.com/razatechofficial/edr/pkg/ocsf"
 )
 
 func TestActivationFromMapOCSF(t *testing.T) {
 	t.Parallel()
 	act := activationFromMap(map[string]interface{}{
-		"event_type":        "process",
-		"process.file.name": "cmd.exe",
-		"process.file.path": "C:\\Windows\\System32\\cmd.exe",
-		"class_uid":         float64(1007),
-		"destination.port":  float64(443),
+		"class_uid": float64(1007),
+		"process": map[string]interface{}{
+			"cmd_line": "cmd /c whoami",
+			"file": map[string]interface{}{
+				"name": "cmd.exe",
+				"path": "C:\\Windows\\System32\\cmd.exe",
+			},
+		},
+		"dst_endpoint": map[string]interface{}{
+			"port": float64(443),
+		},
 	})
 	if act["process_file_name"] != "cmd.exe" {
 		t.Fatalf("process_file_name=%v", act["process_file_name"])
@@ -81,5 +85,4 @@ func TestCustomEngineNestedOCSFRule(t *testing.T) {
 	if len(alerts) != 1 {
 		t.Fatalf("expected 1 alert, got %d", len(alerts))
 	}
-	_ = ocsf.ClassUIDProcessActivity
 }
