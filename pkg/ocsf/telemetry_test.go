@@ -18,6 +18,42 @@ func TestFromNetwork(t *testing.T) {
 	}
 }
 
+func TestFromDNS(t *testing.T) {
+	t.Parallel()
+	env := FromDNS(NetworkInput{
+		Domain:   "evil.example.com",
+		Protocol: "dns",
+	}, DefaultProduct("test"))
+	if env.ClassUID != ClassUIDDNSActivity {
+		t.Fatalf("class_uid=%d", env.ClassUID)
+	}
+	if env.Query == nil || env.Query.Hostname != "evil.example.com" {
+		t.Fatalf("query=%v", env.Query)
+	}
+}
+
+func TestFromNetworkDNSHeuristic(t *testing.T) {
+	t.Parallel()
+	env := FromNetwork(NetworkInput{Domain: "cdn.example.com"}, DefaultProduct("test"))
+	if env.ClassUID != ClassUIDDNSActivity {
+		t.Fatalf("expected dns class, got %d", env.ClassUID)
+	}
+}
+
+func TestFromScheduledJob(t *testing.T) {
+	t.Parallel()
+	env := FromScheduledJob(ScheduledJobInput{
+		TaskName:  "DailyBackup",
+		Operation: "Create",
+	}, DefaultProduct("test"))
+	if env.ClassUID != ClassUIDScheduledJobActivity {
+		t.Fatalf("class_uid=%d", env.ClassUID)
+	}
+	if env.Job == nil || env.Job.Name != "DailyBackup" {
+		t.Fatalf("job=%v", env.Job)
+	}
+}
+
 func TestFromAuth(t *testing.T) {
 	t.Parallel()
 	env := FromAuth(AuthInput{
@@ -49,6 +85,25 @@ func TestFromFork(t *testing.T) {
 	env := FromFork(ForkInput{ParentPID: 1, ChildPID: 2}, DefaultProduct("test"))
 	if env.ClassUID != ClassUIDProcessActivity {
 		t.Fatalf("class_uid=%d", env.ClassUID)
+	}
+	if env.Process == nil || env.Process.ParentProcess == nil || env.Process.ParentProcess.PID != 1 {
+		t.Fatalf("parent_process=%v", env.Process)
+	}
+}
+
+func TestFromPrivilege(t *testing.T) {
+	t.Parallel()
+	env := FromPrivilege(PrivilegeInput{
+		PID:       100,
+		PPID:      1,
+		Operation: "setuid",
+		NewUID:    0,
+	}, DefaultProduct("test"))
+	if env.ClassUID != ClassUIDProcessActivity {
+		t.Fatalf("class_uid=%d", env.ClassUID)
+	}
+	if env.Unmapped["privilege"] != true {
+		t.Fatal("expected privilege marker")
 	}
 }
 

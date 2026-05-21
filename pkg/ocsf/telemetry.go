@@ -2,6 +2,7 @@ package ocsf
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -51,6 +52,9 @@ type AuthInput struct {
 
 // FromNetwork maps network telemetry to an OCSF Network Activity envelope.
 func FromNetwork(in NetworkInput, product Product) Envelope {
+	if IsDNSNetworkInput(in) {
+		return FromDNS(in, product)
+	}
 	ts := in.Timestamp
 	if ts == 0 {
 		ts = timeNowMillis()
@@ -84,6 +88,197 @@ func FromNetwork(in NetworkInput, product Product) Envelope {
 		env.DstEndpoint = &Endpoint{IP: in.DestIP, Port: in.DestPort}
 	}
 	return env
+}
+
+// IsDNSNetworkInput reports whether the snapshot should map to DNS Activity.
+func IsDNSNetworkInput(in NetworkInput) bool {
+	if strings.EqualFold(strings.TrimSpace(in.Protocol), "dns") {
+		return true
+	}
+	domain := strings.TrimSpace(in.Domain)
+	if domain == "" {
+		return false
+	}
+	return strings.TrimSpace(in.DestIP) == "" && strings.TrimSpace(in.SourceIP) == ""
+}
+
+// FromDNS maps DNS query telemetry to an OCSF DNS Activity envelope.
+func FromDNS(in NetworkInput, product Product) Envelope {
+	ts := in.Timestamp
+	if ts == 0 {
+		ts = timeNowMillis()
+	}
+	return Envelope{
+		ClassUID:     ClassUIDDNSActivity,
+		ClassName:    ClassDNSActivity,
+		CategoryUID:  4,
+		CategoryName: "Network Activity",
+		ActivityID:   1,
+		ActivityName: "Query",
+		Time:         ts,
+		Metadata: Metadata{
+			Version: SchemaVersion,
+			Product: product,
+		},
+		Query: &DNSQuery{Hostname: strings.TrimSpace(in.Domain)},
+		Unmapped: map[string]any{
+			"endpoint_id": in.EndpointID,
+			"hostname":    in.Hostname,
+			"os":          in.OS,
+			"pid":         in.PID,
+			"protocol":    in.Protocol,
+			"transport":   in.Transport,
+		},
+	}
+}
+
+// ScheduledJobInput is a task scheduler snapshot for OCSF mapping.
+type ScheduledJobInput struct {
+	EndpointID  string
+	Hostname    string
+	OS          string
+	Timestamp   int64
+	TaskName    string
+	TaskContent string
+	Operation   string
+	SubjectUser string
+}
+
+// FromScheduledJob maps scheduled task telemetry to OCSF Scheduled Job Activity.
+func FromScheduledJob(in ScheduledJobInput, product Product) Envelope {
+	ts := in.Timestamp
+	if ts == 0 {
+		ts = timeNowMillis()
+	}
+	activity := strings.TrimSpace(in.Operation)
+	if activity == "" {
+		activity = "Create"
+	}
+	return Envelope{
+		ClassUID:     ClassUIDScheduledJobActivity,
+		ClassName:    ClassScheduledJobActivity,
+		CategoryUID:  1,
+		CategoryName: "System Activity",
+		ActivityID:   1,
+		ActivityName: activity,
+		Time:         ts,
+		Metadata: Metadata{
+			Version: SchemaVersion,
+			Product: product,
+		},
+		Job: &ScheduledJob{
+			Name: in.TaskName,
+			Cmd:  in.TaskContent,
+		},
+		Unmapped: map[string]any{
+			"endpoint_id":  in.EndpointID,
+			"hostname":     in.Hostname,
+			"os":           in.OS,
+			"subject_user": in.SubjectUser,
+		},
+	}
+}
+
+// ServiceInput is a service install/change snapshot for OCSF mapping.
+type ServiceInput struct {
+	EndpointID  string
+	Hostname    string
+	OS          string
+	Timestamp   int64
+	ServiceName string
+	ImagePath   string
+	ServiceType string
+	StartType   string
+	AccountName string
+}
+
+// FromService maps service telemetry to OCSF Windows Service Activity.
+func FromService(in ServiceInput, product Product) Envelope {
+	ts := in.Timestamp
+	if ts == 0 {
+		ts = timeNowMillis()
+	}
+	return Envelope{
+		ClassUID:     ClassUIDWindowsServiceActivity,
+		ClassName:    ClassWindowsServiceActivity,
+		CategoryUID:  1,
+		CategoryName: "System Activity",
+		ActivityID:   1,
+		ActivityName: "Install",
+		Time:         ts,
+		Metadata: Metadata{
+			Version: SchemaVersion,
+			Product: product,
+		},
+		Process: processFromInput(ProcessInput{
+			EndpointID:  in.EndpointID,
+			Hostname:    in.Hostname,
+			OS:          in.OS,
+			ProcessName: in.ServiceName,
+			ProcessPath: in.ImagePath,
+			User:        in.AccountName,
+		}),
+		Unmapped: map[string]any{
+			"endpoint_id":  in.EndpointID,
+			"hostname":     in.Hostname,
+			"os":           in.OS,
+			"service_type": in.ServiceType,
+			"start_type":   in.StartType,
+			"service":      true,
+		},
+	}
+}
+
+// MemoryInput is a memory operation snapshot for OCSF mapping.
+type MemoryInput struct {
+	EndpointID    string
+	Hostname      string
+	OS            string
+	Timestamp     int64
+	Operation     string
+	TargetPID     int
+	TargetProcess string
+	Address       uint64
+	Size          uint64
+	Protect       uint32
+}
+
+// FromMemory maps memory telemetry to OCSF Process Activity (memory operation).
+func FromMemory(in MemoryInput, product Product) Envelope {
+	ts := in.Timestamp
+	if ts == 0 {
+		ts = timeNowMillis()
+	}
+	activity := strings.TrimSpace(in.Operation)
+	if activity == "" {
+		activity = "Allocate"
+	}
+	return Envelope{
+		ClassUID:     ClassUIDProcessActivity,
+		ClassName:    ClassProcessActivity,
+		CategoryUID:  1,
+		CategoryName: "System Activity",
+		ActivityID:   4,
+		ActivityName: activity,
+		Time:         ts,
+		Metadata: Metadata{
+			Version: SchemaVersion,
+			Product: product,
+		},
+		Process: processFromInput(ProcessInput{
+			ProcessName: in.TargetProcess,
+			PID:         in.TargetPID,
+		}),
+		Unmapped: map[string]any{
+			"endpoint_id":  in.EndpointID,
+			"hostname":     in.Hostname,
+			"os":           in.OS,
+			"activity_kind": "memory",
+			"address":      in.Address,
+			"size":         in.Size,
+			"protect":      in.Protect,
+		},
+	}
 }
 
 // FromAuth maps authentication telemetry to an OCSF Authentication envelope.
@@ -180,8 +375,8 @@ func FromFork(in ForkInput, product Product) Envelope {
 			Product: product,
 		},
 		Process: &Process{
-			PID:       in.ChildPID,
-			ParentPID: in.ParentPID,
+			PID:           in.ChildPID,
+			ParentProcess: parentProcessRef(in.ParentPID),
 		},
 		Unmapped: map[string]any{
 			"endpoint_id": in.EndpointID,
@@ -244,10 +439,10 @@ func FromInjection(in InjectionInput, product Product) Envelope {
 			Version: SchemaVersion,
 			Product: product,
 		},
-		Process: &Process{
-			PID:  in.TargetPID,
-			Path: in.TargetImage,
-		},
+		Process: processFromInput(ProcessInput{
+			PID:         in.TargetPID,
+			ProcessPath: in.TargetImage,
+		}),
 		Unmapped: map[string]any{
 			"endpoint_id":  in.EndpointID,
 			"hostname":     in.Hostname,
@@ -255,6 +450,66 @@ func FromInjection(in InjectionInput, product Product) Envelope {
 			"source_pid":   in.SourcePID,
 			"technique":    in.Technique,
 			"injection":    true,
+		},
+	}
+}
+
+// PrivilegeInput is a privilege-change syscall snapshot for OCSF mapping.
+type PrivilegeInput struct {
+	EndpointID string
+	Hostname   string
+	OS         string
+	Timestamp  int64
+	PID        int
+	PPID       int
+	Comm       string
+	Operation  string
+	SyscallNr  uint32
+	NewUID     uint32
+	NewGID     uint32
+	EffectiveID uint32
+	SavedID    uint32
+	CallerUID  uint32
+}
+
+// FromPrivilege maps privilege-change telemetry to OCSF Process Activity.
+func FromPrivilege(in PrivilegeInput, product Product) Envelope {
+	ts := in.Timestamp
+	if ts == 0 {
+		ts = timeNowMillis()
+	}
+	activity := in.Operation
+	if activity == "" {
+		activity = "SetId"
+	}
+	return Envelope{
+		ClassUID:     ClassUIDProcessActivity,
+		ClassName:    ClassProcessActivity,
+		CategoryUID:  1,
+		CategoryName: "System Activity",
+		ActivityID:   3,
+		ActivityName: activity,
+		Time:         ts,
+		Metadata: Metadata{
+			Version: SchemaVersion,
+			Product: product,
+		},
+		Process: processFromInput(ProcessInput{
+			ProcessName: in.Comm,
+			PID:         in.PID,
+			PPID:        in.PPID,
+		}),
+		Unmapped: map[string]any{
+			"endpoint_id":  in.EndpointID,
+			"hostname":     in.Hostname,
+			"os":           in.OS,
+			"privilege":    true,
+			"syscall_nr":   in.SyscallNr,
+			"new_uid":      in.NewUID,
+			"new_gid":      in.NewGID,
+			"effective_id": in.EffectiveID,
+			"saved_id":     in.SavedID,
+			"caller_uid":   in.CallerUID,
 		},
 	}
 }
