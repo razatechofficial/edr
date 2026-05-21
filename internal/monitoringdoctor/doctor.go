@@ -140,6 +140,7 @@ func printDarwin(w io.Writer, cfg config.Config, parsed monitoringHealthParsed) 
 		fmt.Fprintln(w, "ESF: root ok (still needs codesign + endpoint-security entitlement)")
 	}
 	fmt.Fprintf(w, "darwin_auth_unified_log: %v (SSH/sudo via log stream when /var/log/system.log unreadable)\n", cfg.Monitoring.DarwinAuthUnifiedLog)
+	fmt.Fprintf(w, "darwin_unified_log_security: %v (TCC/sudo/xpc/Gatekeeper UL stream for macOS Sigma rules)\n", cfg.Monitoring.DarwinUnifiedLogSecurity)
 	exe, err := os.Executable()
 	if err == nil {
 		out, _ := exec.Command("codesign", "-dv", exe).CombinedOutput()

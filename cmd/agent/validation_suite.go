@@ -548,6 +548,39 @@ func preflightChecks(cfg *config.Config) []string {
 	} else {
 		fmt.Printf("  yara rules:  %d\n", n)
 	}
+	if cfg.Compliance.Enabled {
+		scaDir := cfg.Compliance.RulesDir
+		if scaDir == "" || !dirExists(scaDir) {
+			failures = append(failures, fmt.Sprintf("compliance sca rules_dir not found: %s", scaDir))
+		} else {
+			osDir := filepath.Join(scaDir, runtime.GOOS)
+			if runtime.GOOS == "darwin" {
+				osDir = filepath.Join(scaDir, "darwin")
+			}
+			if !dirExists(osDir) {
+				failures = append(failures, fmt.Sprintf("compliance sca os policies not found: %s", osDir))
+			} else if n := countFilesWithExt(osDir, ".yml"); n == 0 {
+				failures = append(failures, fmt.Sprintf("no sca policies in %s", osDir))
+			} else {
+				fmt.Printf("  sca policies (%s): %d\n", runtime.GOOS, n)
+			}
+		}
+	}
+	if cfg.Detection.CustomRules.Enabled {
+		customPath := cfg.Detection.CustomRules.RulesPath
+		if customPath == "" {
+			failures = append(failures, "custom_rules enabled but rules_path empty")
+		} else if st, err := os.Stat(customPath); err != nil {
+			failures = append(failures, fmt.Sprintf("custom rules path not found: %s", customPath))
+		} else if st.IsDir() {
+			n := countFilesWithExt(customPath, ".yaml") + countFilesWithExt(customPath, ".yml")
+			if n == 0 {
+				failures = append(failures, "no custom rule yaml files found")
+			} else {
+				fmt.Printf("  custom rules: %d\n", n)
+			}
+		}
+	}
 	pbPath := strings.TrimSpace(cfg.Response.PlaybooksPath)
 	if pbPath == "" {
 		pbDir := strings.TrimSpace(cfg.Response.PlaybooksDir)
