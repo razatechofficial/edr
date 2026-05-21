@@ -118,6 +118,7 @@ func MarshalTelemetryBinary(t *Telemetry) ([]byte, error) {
 	if t == nil {
 		return nil, nil
 	}
+	EnsureTelemetryOCSF(t)
 	kind, payload := telemetryPayload(t)
 	if kind == telemetryKindUnknown || payload == nil {
 		return nil, nil
@@ -154,7 +155,12 @@ func UnmarshalTelemetryBinary(data []byte) (*Telemetry, error) {
 	}
 	kind := telemetryKind(data[5])
 	body := data[6:]
-	return decodeTelemetryPayload(kind, body)
+	t, err := decodeTelemetryPayload(kind, body)
+	if err != nil || t == nil {
+		return t, err
+	}
+	EnsureTelemetryOCSF(t)
+	return t, nil
 }
 
 // IsTelemetryBinaryRecord cheaply probes for the magic prefix.
@@ -298,6 +304,7 @@ const (
 	tagBaseHostname      uint8 = 0x04
 	tagBaseOS            uint8 = 0x05
 	tagBaseTimestamp     uint8 = 0x06 // unix nanos
+	tagBaseOCSF          uint8 = 0x07 // nested JSON map
 )
 
 // ProcessEvent tags
@@ -330,6 +337,11 @@ func encodeBaseEvent(buf *bytes.Buffer, b *schema.BaseEvent) {
 	writeString(buf, tagBaseOS, b.OS)
 	if !b.Timestamp.IsZero() {
 		writeVarint(buf, tagBaseTimestamp, uint64(b.Timestamp.UnixNano()))
+	}
+	if len(b.OCSF) > 0 {
+		if raw, err := json.Marshal(b.OCSF); err == nil && len(raw) > 0 {
+			writeBytes(buf, tagBaseOCSF, raw)
+		}
 	}
 }
 
@@ -371,6 +383,19 @@ func applyBaseField(b *schema.BaseEvent, tag, wt uint8, r *bytes.Reader) error {
 			return err
 		}
 		b.Timestamp = time.Unix(0, int64(v)).UTC()
+	case tag == tagBaseOCSF && wt == wtBytes:
+		n, err := readVarint(r)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return nil
+		}
+		raw := make([]byte, n)
+		if _, err := io.ReadFull(r, raw); err != nil {
+			return err
+		}
+		_ = json.Unmarshal(raw, &b.OCSF)
 	default:
 		return skipField(wt, r)
 	}
