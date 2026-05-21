@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	alertpkg "github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/pkg/events"
 	"github.com/razatechofficial/edr/pkg/protocol"
 )
@@ -131,7 +132,7 @@ func (c *GRPCClient) StreamEvents(ctx context.Context) error {
 }
 
 // SendAlert transmits a critical alert to the server as a unary RPC.
-func (c *GRPCClient) SendAlert(ctx context.Context, alert *events.Alert) error {
+func (c *GRPCClient) SendAlert(ctx context.Context, alert *events.Alert, productVersion string) error {
 	c.mu.RLock()
 	api := c.api
 	c.mu.RUnlock()
@@ -140,33 +141,9 @@ func (c *GRPCClient) SendAlert(ctx context.Context, alert *events.Alert) error {
 		return fmt.Errorf("grpc_client: not connected")
 	}
 
-	req := &protocol.Alert{
-		AlertId:      alert.ID,
-		RuleId:       alert.RuleID,
-		RuleName:     alert.RuleName,
-		EndpointId:   c.endpoint,
-		Severity:     toProtoSeverity(alert.Severity),
-		Title:        alert.Title,
-		Description:  alert.Description,
-		Timestamp:    timestamppb.New(alert.Timestamp.UTC()),
-		Tags:         alert.Tags,
-		ProcessName:  "",
-		ProcessPath:  "",
-		CommandLine:  "",
-		ProcessPid:   0,
-	}
-	for _, m := range alert.MITRE {
-		req.Mitre = append(req.Mitre, &protocol.MITREAttack{
-			TechniqueId:   m.TechniqueID,
-			TechniqueName: m.TechniqueName,
-			TacticId:      m.TacticID,
-			TacticName:    m.TacticName,
-		})
-	}
-
-	raw, err := json.Marshal(alert.RawEvent)
-	if err == nil {
-		req.RawEvent = raw
+	req, err := alertpkg.ProtoFromEvents(alert, c.endpoint, productVersion)
+	if err != nil {
+		return fmt.Errorf("grpc_client: build alert: %w", err)
 	}
 
 	if _, err := api.ReportAlert(ctx, req); err != nil {
@@ -338,19 +315,4 @@ func (c *GRPCClient) emitServerCommand(cmd *protocol.Command) {
 		return
 	}
 	fn(payload)
-}
-
-func toProtoSeverity(s events.Severity) protocol.Severity {
-	switch s {
-	case events.SeverityCritical:
-		return protocol.Severity_SEVERITY_CRITICAL
-	case events.SeverityHigh:
-		return protocol.Severity_SEVERITY_HIGH
-	case events.SeverityMedium:
-		return protocol.Severity_SEVERITY_MEDIUM
-	case events.SeverityLow:
-		return protocol.Severity_SEVERITY_LOW
-	default:
-		return protocol.Severity_SEVERITY_INFO
-	}
 }
