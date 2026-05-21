@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/razatechofficial/edr/internal/agent"
+	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/rules"
@@ -87,9 +87,9 @@ func TestUnifiedAlertPath(t *testing.T) {
 		t.Fatal("expected at least one alert in alert file")
 	}
 
-	var al schema.Alert
-	if err := json.Unmarshal([]byte(lines[0]), &al); err != nil {
-		t.Fatalf("unmarshal alert: %v", err)
+	al, err := alert.ParseAlertLine([]byte(lines[0]))
+	if err != nil {
+		t.Fatalf("parse alert: %v", err)
 	}
 
 	if al.RuleID != "test-suspicious" {
