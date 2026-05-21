@@ -38,3 +38,31 @@ rules:
     tags:
       - ocsf
       - custom-cel
+
+  - id: OCSF-CEL-COMPLIANCE-FAIL
+    name: Failed compliance or posture finding
+    description: >
+      OCSF Security Finding (class 2001) rule for failed SCA or posture checks.
+    severity: medium
+    enabled: true
+    expression: >
+      class_uid == 2001 &&
+      finding_result == "failed"
+    tags:
+      - ocsf
+      - custom-cel
+      - compliance
+
+  - id: OCSF-CEL-DNS-QUERY
+    name: Suspicious DNS query
+    description: >
+      OCSF DNS Activity (class 4004) rule matching suspicious domain queries.
+    severity: medium
+    enabled: true
+    expression: >
+      class_uid == 4004 &&
+      dns_query.contains(".evil.")
+    tags:
+      - ocsf
+      - custom-cel
+      - dns
