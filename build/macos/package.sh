@@ -1,23 +1,53 @@
 #!/usr/bin/env bash
+# Lightweight macOS .pkg builder (dev/CI). Production packaging uses scripts/package_macos.sh.
 set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "${ROOT}"
+
 VERSION="${1:-dev}"
 ARCH="${2:-arm64}"
 BINARY="dist/darwin-${ARCH}/edr-agent"
-if [ ! -f "${BINARY}" ] && [ -f "dist/darwin-${ARCH}-nosec/edr-agent" ]; then
-  BINARY="dist/darwin-${ARCH}-nosec/edr-agent"
-  echo "using nosec binary fallback: ${BINARY}"
+if [[ ! -f "${BINARY}" && -f "dist/darwin-${ARCH}-nosec/edr-agent" ]]; then
+	BINARY="dist/darwin-${ARCH}-nosec/edr-agent"
+	echo "using nosec binary fallback: ${BINARY}"
+fi
+if [[ ! -f "${BINARY}" ]]; then
+	echo "missing binary: ${BINARY}" >&2
+	exit 1
+fi
+if [[ ! -f configs/agent.yaml ]]; then
+	echo "missing configs/agent.yaml" >&2
+	exit 1
 fi
 
+EDR_BASE="/Library/Application Support/EDR"
+RULES_BASELINE="${EDR_BASE}/config/rules/baseline.yaml"
 PKG_ROOT="pkg/macos/root"
-mkdir -p \
-    "${PKG_ROOT}/usr/local/bin" \
-    "${PKG_ROOT}/Library/LaunchDaemons" \
-    "${PKG_ROOT}/etc/edr-agent"
 
-cp "$BINARY" "${PKG_ROOT}/usr/local/bin/edr-agent"
+rm -rf "${PKG_ROOT}/etc/edr-agent"
+mkdir -p \
+	"${PKG_ROOT}/usr/local/bin" \
+	"${PKG_ROOT}/Library/LaunchDaemons" \
+	"${PKG_ROOT}/Library/Application Support/EDR/config/rules" \
+	"${PKG_ROOT}/Library/Logs/EDR"
+
+cp "${BINARY}" "${PKG_ROOT}/usr/local/bin/edr-agent"
 chmod 755 "${PKG_ROOT}/usr/local/bin/edr-agent"
 
-cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" << EOF
+if [[ -d rules ]]; then
+	cp -R rules/. "${PKG_ROOT}/Library/Application Support/EDR/config/rules/"
+fi
+
+CONFIG_DST="${PKG_ROOT}/Library/Application Support/EDR/config/agent.yaml"
+sed \
+	-e "s|data_dir: \"/var/lib/edr\"|data_dir: \"${EDR_BASE}\"|" \
+	-e "s|models_dir: \"./models\"|models_dir: \"${EDR_BASE}/models\"|" \
+	-e "s|^rules_file:.*|rules_file: \"${RULES_BASELINE}\"|" \
+	configs/agent.yaml > "${CONFIG_DST}"
+chmod 644 "${CONFIG_DST}"
+
+cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -28,43 +58,68 @@ cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" << EOF
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/edr-agent</string>
+        <string>run</string>
         <string>--config</string>
-        <string>/etc/edr-agent/config.yml</string>
+        <string>/Library/Application Support/EDR/config/agent.yaml</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/var/log/edr-agent.log</string>
+    <string>/Library/Logs/EDR/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/var/log/edr-agent.error.log</string>
+    <string>/Library/Logs/EDR/stderr.log</string>
 </dict>
 </plist>
 EOF
 
-cp configs/macos/config.yml "${PKG_ROOT}/etc/edr-agent/config.yml"
-
 mkdir -p pkg/macos/scripts
 
-cat > pkg/macos/scripts/postinstall << 'EOF'
+cat > pkg/macos/scripts/postinstall <<'EOF'
 #!/bin/bash
-launchctl load /Library/LaunchDaemons/com.razatech.edr-agent.plist
+set -e
+BASE="/Library/Application Support/EDR"
+CONFIG_DIR="${BASE}/config"
+CONFIG_FILE="${CONFIG_DIR}/agent.yaml"
+LOG_DIR="/Library/Logs/EDR"
+PLIST="/Library/LaunchDaemons/com.razatech.edr-agent.plist"
+RULES_BASELINE="${CONFIG_DIR}/rules/baseline.yaml"
+
+mkdir -p "${CONFIG_DIR}" "${BASE}/alerts" "${LOG_DIR}"
+chmod 755 "${BASE}" "${CONFIG_DIR}" 2>/dev/null || true
+
+if [[ -f "${CONFIG_FILE}" ]]; then
+	tmpf="$(mktemp "${TMPDIR:-/tmp}/edr-postinstall.XXXXXX")"
+	sed "s|^rules_file:.*|rules_file: \"${RULES_BASELINE}\"|" "${CONFIG_FILE}" > "${tmpf}" && mv "${tmpf}" "${CONFIG_FILE}"
+	chmod 644 "${CONFIG_FILE}"
+fi
+
+launchctl bootout system "${PLIST}" 2>/dev/null || true
+launchctl unload "${PLIST}" 2>/dev/null || true
+launchctl bootstrap system "${PLIST}" 2>/dev/null || launchctl load "${PLIST}"
+launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
 EOF
 chmod 755 pkg/macos/scripts/postinstall
 
-cat > pkg/macos/scripts/preinstall << 'EOF'
+cat > pkg/macos/scripts/preinstall <<'EOF'
 #!/bin/bash
-launchctl unload /Library/LaunchDaemons/com.razatech.edr-agent.plist 2>/dev/null || true
+set -e
+PLIST="/Library/LaunchDaemons/com.razatech.edr-agent.plist"
+if launchctl print "system/com.razatech.edr-agent" &>/dev/null; then
+	launchctl bootout system "${PLIST}" 2>/dev/null || true
+fi
+launchctl unload "${PLIST}" 2>/dev/null || true
 EOF
 chmod 755 pkg/macos/scripts/preinstall
 
 mkdir -p dist
 pkgbuild \
-    --root "${PKG_ROOT}" \
-    --scripts pkg/macos/scripts \
-    --identifier com.razatech.edr-agent \
-    --version "${VERSION}" \
-    "dist/edr-agent_${VERSION}_${ARCH}.pkg"
+	--root "${PKG_ROOT}" \
+	--scripts pkg/macos/scripts \
+	--identifier com.razatech.edr-agent \
+	--version "${VERSION}" \
+	--install-location "/" \
+	"dist/edr-agent_${VERSION}_${ARCH}.pkg"
 
 echo "macOS package: dist/edr-agent_${VERSION}_${ARCH}.pkg"
