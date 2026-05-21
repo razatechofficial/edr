@@ -158,6 +158,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		noisyAlertLastSeen: make(map[string]time.Time),
 	}
 	collector.LogMonitoringBootstrap(a.logger, cfg)
+	collector.OCSFProductVersion = cfg.Agent.Version
 
 	telEP := strings.TrimSpace(cfg.Forwarder.TelemetryEndpoint)
 	if telEP == "" {
@@ -903,6 +904,7 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 					continue
 				}
 			}
+			collector.EnsureTelemetryOCSF(tel)
 			a.maybeForwardTelemetry(ctx, tel)
 			if tel.Fork != nil {
 				ev := forkTelemetryToProcess(*tel.Fork)

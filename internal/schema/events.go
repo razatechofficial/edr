@@ -21,12 +21,13 @@ const (
 )
 
 type BaseEvent struct {
-	SchemaVersion string    `json:"schema_version"`
-	EventType     EventType `json:"event_type"`
-	EndpointID    string    `json:"endpoint_id"`
-	Timestamp     time.Time `json:"timestamp"`
-	Hostname      string    `json:"hostname"`
-	OS            string    `json:"os"`
+	SchemaVersion string         `json:"schema_version"`
+	EventType     EventType      `json:"event_type"`
+	EndpointID    string         `json:"endpoint_id"`
+	Timestamp     time.Time      `json:"timestamp"`
+	Hostname      string         `json:"hostname"`
+	OS            string         `json:"os"`
+	OCSF          map[string]any `json:"ocsf,omitempty"`
 }
 
 type ProcessEvent struct {
@@ -334,7 +335,6 @@ type ComplianceFindingEvent struct {
 	Error       string              `json:"error,omitempty"`
 	Compliance  map[string][]string `json:"compliance,omitempty"`
 	MITRE       map[string][]string `json:"mitre,omitempty"`
-	OCSF        map[string]any      `json:"ocsf,omitempty"`
 }
 
 // ComplianceScanSummaryEvent summarizes one full SCA scan run across applicable policies.
@@ -347,7 +347,6 @@ type ComplianceScanSummaryEvent struct {
 	PoliciesTotal       int   `json:"policies_total"`
 	PoliciesApplicable  int   `json:"policies_applicable"`
 	DurationMs          int64 `json:"duration_ms"`
-	OCSF                map[string]any `json:"ocsf,omitempty"`
 }
 
 // PrivilegeEvent is emitted when a process invokes a privilege-change

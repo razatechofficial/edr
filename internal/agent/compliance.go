@@ -101,6 +101,7 @@ func (a *Agent) emitComplianceFinding(res sca.CheckResult, endpointID, host stri
 			Timestamp:     now,
 			Hostname:      host,
 			OS:            runtime.GOOS,
+			OCSF:          ocsfMap,
 		},
 		PolicyID:    res.PolicyID,
 		PolicyName:  res.PolicyName,
@@ -112,7 +113,6 @@ func (a *Agent) emitComplianceFinding(res sca.CheckResult, endpointID, host stri
 		Error:       res.Error,
 		Compliance:  res.Compliance,
 		MITRE:       res.MITRE,
-		OCSF:        ocsfMap,
 	}
 	a.maybeForwardTelemetry(context.Background(), &collector.Telemetry{Compliance: ev})
 	if res.Result == "failed" {
@@ -154,6 +154,7 @@ func (a *Agent) emitComplianceScanSummary(summary sca.ScanCompleteSummary, endpo
 			Timestamp:     now,
 			Hostname:      host,
 			OS:            runtime.GOOS,
+			OCSF:          ocsfMap,
 		},
 		Passed:             summary.Passed,
 		Failed:             summary.Failed,
@@ -162,7 +163,6 @@ func (a *Agent) emitComplianceScanSummary(summary sca.ScanCompleteSummary, endpo
 		PoliciesTotal:      summary.PoliciesTotal,
 		PoliciesApplicable: summary.PoliciesApplicable,
 		DurationMs:         summary.Duration.Milliseconds(),
-		OCSF:               ocsfMap,
 	}
 	a.maybeForwardTelemetry(context.Background(), &collector.Telemetry{ComplianceScan: ev})
 	if summary.Failed > 0 || summary.Errors > 0 {
