@@ -3,7 +3,6 @@ package forwarder
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/schema"
 	"github.com/razatechofficial/edr/internal/transport"
 	"github.com/segmentio/kafka-go"
@@ -100,8 +100,8 @@ type httpForwarder struct {
 	seal     func([]byte) ([]byte, error)
 }
 
-func (h *httpForwarder) Send(alert schema.Alert) error {
-	body, err := json.Marshal(alert)
+func (h *httpForwarder) Send(al schema.Alert) error {
+	body, err := alert.MarshalOCSF(al, "")
 	if err != nil {
 		return err
 	}
@@ -133,8 +133,8 @@ type syslogForwarder struct {
 	seal   func([]byte) ([]byte, error)
 }
 
-func (s *syslogForwarder) Send(alert schema.Alert) error {
-	b, err := json.Marshal(alert)
+func (s *syslogForwarder) Send(al schema.Alert) error {
+	b, err := alert.MarshalOCSF(al, "")
 	if err != nil {
 		return err
 	}
@@ -160,8 +160,8 @@ type kafkaForwarder struct {
 	seal func([]byte) ([]byte, error)
 }
 
-func (k *kafkaForwarder) Send(alert schema.Alert) error {
-	b, err := json.Marshal(alert)
+func (k *kafkaForwarder) Send(al schema.Alert) error {
+	b, err := alert.MarshalOCSF(al, "")
 	if err != nil {
 		return err
 	}

@@ -7,10 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/schema"
 )
 
-// AppendSpool appends one JSON alert line for later replay.
+// AppendSpool appends one OCSF alert line for later replay.
 func AppendSpool(path string, a schema.Alert) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
@@ -20,7 +21,7 @@ func AppendSpool(path string, a schema.Alert) error {
 		return err
 	}
 	defer f.Close()
-	b, err := json.Marshal(a)
+	b, err := alert.MarshalOCSF(a, "")
 	if err != nil {
 		return err
 	}
@@ -43,10 +44,11 @@ func DrainSpool(path string, send func(schema.Alert) error) error {
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	var failed []schema.Alert
 	for sc.Scan() {
-		var a schema.Alert
-		if err := json.Unmarshal(sc.Bytes(), &a); err != nil {
+		var ocsfDoc map[string]any
+		if err := json.Unmarshal(sc.Bytes(), &ocsfDoc); err != nil {
 			continue
 		}
+		a := schema.Alert{OCSF: ocsfDoc}
 		if err := send(a); err != nil {
 			failed = append(failed, a)
 		}
@@ -63,7 +65,7 @@ func DrainSpool(path string, send func(schema.Alert) error) error {
 	}
 	defer f.Close()
 	for _, a := range failed {
-		line, err := json.Marshal(a)
+		line, err := alert.MarshalOCSF(a, "")
 		if err != nil {
 			return err
 		}
