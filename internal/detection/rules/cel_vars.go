@@ -7,9 +7,24 @@ import (
 	"github.com/google/cel-go/cel"
 )
 
-// celVarNames lists CEL activation keys in declaration order.
+// celVarNames lists CEL activation keys. Primary names follow OCSF 1.3 attributes;
+// legacy flat names are kept for backward-compatible rules.
 var celVarNames = []string{
 	"event_type",
+	// OCSF primary (flat form for CEL string/int ops).
+	"class_uid",
+	"class_name",
+	"process_cmd_line",
+	"process_file_name",
+	"process_file_path",
+	"file_path_ocsf",
+	"destination_ip",
+	"destination_port",
+	"source_ip_ocsf",
+	"dns_query",
+	"registry_path",
+	"registry_value",
+	// Legacy flat names (Sigma-era).
 	"process_name",
 	"process_path",
 	"command_line",
@@ -31,39 +46,30 @@ var celVarNames = []string{
 	"hostname",
 	"os",
 	"severity",
-	// OCSF-native aliases (underscore form; populated from EnrichDetectionMap keys).
-	"process_file_name",
-	"process_file_path",
-	"process_cmd_line",
-	"file_path_ocsf",
-	"registry_path",
-	"registry_value",
-	"destination_ip",
-	"destination_port",
-	"source_ip_ocsf",
-	"dns_query",
+	// Deprecated aliases (still populated).
 	"ocsf_class_uid",
 	"ocsf_class_name",
 }
 
 func newCELEnv() (*cel.Env, error) {
-	opts := make([]cel.EnvOption, 0, len(celVarNames))
+	opts := make([]cel.EnvOption, 0, len(celVarNames)+1)
 	for _, name := range celVarNames {
 		switch name {
-		case "pid", "ppid", "source_port", "dest_port", "destination_port", "ocsf_class_uid":
+		case "pid", "ppid", "source_port", "dest_port", "destination_port", "class_uid", "ocsf_class_uid":
 			opts = append(opts, cel.Variable(name, cel.IntType))
 		default:
 			opts = append(opts, cel.Variable(name, cel.StringType))
 		}
 	}
+	opts = append(opts, cel.Variable("ocsf", cel.DynType))
 	return cel.NewEnv(opts...)
 }
 
 func activationFromMap(vars map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(celVarNames)+8)
+	out := make(map[string]interface{}, len(celVarNames)+12)
 	for _, name := range celVarNames {
 		switch name {
-		case "pid", "ppid", "source_port", "dest_port", "destination_port", "ocsf_class_uid":
+		case "pid", "ppid", "source_port", "dest_port", "destination_port", "class_uid", "ocsf_class_uid":
 			out[name] = int64(0)
 		default:
 			out[name] = ""
@@ -71,37 +77,39 @@ func activationFromMap(vars map[string]interface{}) map[string]interface{} {
 	}
 
 	alias := map[string][]string{
-		"process_name":      {"process_name", "ProcessName", "process.file.name", "ocsf.process.file.name"},
-		"process_path":      {"process_path", "ProcessPath", "Image", "process.file.path", "ocsf.process.file.path", "process.executable"},
-		"command_line":      {"command_line", "CommandLine", "process.command_line", "ocsf.process.cmd_line"},
-		"parent_name":       {"parent_name", "ParentName", "ParentImage", "process.parent.name"},
-		"file_path":         {"file_path", "path", "Path", "TargetFilename"},
-		"file_path_ocsf":    {"file.path", "ocsf.file.path", "file_path", "path", "TargetFilename"},
-		"file_operation":    {"file_operation", "operation", "Operation", "file.action"},
-		"dest_ip":           {"dest_ip", "DstIP", "DestinationIp", "destination.ip", "ocsf.dst_endpoint.ip"},
-		"destination_ip":    {"destination_ip", "dest_ip", "DestinationIp", "destination.ip"},
-		"dest_port":           {"dest_port", "DstPort", "DestinationPort", "destination.port"},
-		"destination_port":    {"destination_port", "dest_port", "DestinationPort", "destination.port"},
-		"source_ip":           {"source_ip", "SrcIP", "SourceIp", "source.ip"},
-		"source_ip_ocsf":      {"source_ip_ocsf", "source_ip", "SourceIp", "ocsf.src_endpoint.ip"},
-		"domain":              {"domain", "Domain", "QueryName", "dns.question.name"},
-		"dns_query":             {"dns_query", "domain", "QueryName", "dns.question.name"},
-		"registry_path":         {"registry_path", "RegistryPath", "TargetObject", "registry.path"},
-		"registry_value":        {"registry_value", "RegistryValue", "Details", "registry.value"},
-		"process_file_name":     {"process_file_name", "process_name", "process.file.name"},
-		"process_file_path":     {"process_file_path", "process_path", "process.file.path", "Image"},
-		"process_cmd_line":      {"process_cmd_line", "command_line", "process.command_line"},
-		"ocsf_class_name":       {"ocsf_class_name", "ocsf.class_name"},
-		"ocsf_class_uid":        {"ocsf_class_uid", "ocsf.class_uid"},
-		"event_type":            {"event_type", "type", "EventType"},
-		"hostname":              {"hostname", "Hostname"},
-		"os":                    {"os", "OS"},
-		"user":                  {"user", "User"},
-		"protocol":              {"protocol", "Protocol", "network.transport"},
-		"auth_type":             {"auth_type", "AuthType"},
-		"auth_outcome":          {"auth_outcome", "AuthOutcome", "outcome"},
-		"severity":              {"severity", "Severity"},
-		"file_hash":             {"file_hash", "FileHash", "hash", "Hashes"},
+		"class_uid":         {"class_uid", "ocsf.class_uid", "ocsf_class_uid"},
+		"class_name":        {"class_name", "ocsf.class_name", "ocsf_class_name"},
+		"process_cmd_line":  {"process_cmd_line", "command_line", "CommandLine", "process.command_line", "ocsf.process.cmd_line"},
+		"process_file_name": {"process_file_name", "process_name", "ProcessName", "process.file.name", "ocsf.process.file.name"},
+		"process_file_path": {"process_file_path", "process_path", "ProcessPath", "Image", "process.file.path", "ocsf.process.file.path"},
+		"file_path_ocsf":    {"file_path_ocsf", "file.path", "ocsf.file.path", "file_path", "path", "TargetFilename"},
+		"destination_ip":    {"destination_ip", "dest_ip", "DstIP", "DestinationIp", "destination.ip", "ocsf.dst_endpoint.ip"},
+		"destination_port":  {"destination_port", "dest_port", "DstPort", "DestinationPort", "destination.port", "ocsf.dst_endpoint.port"},
+		"source_ip_ocsf":    {"source_ip_ocsf", "source_ip", "SrcIP", "SourceIp", "source.ip", "ocsf.src_endpoint.ip"},
+		"dns_query":           {"dns_query", "domain", "Domain", "QueryName", "dns.question.name"},
+		"registry_path":       {"registry_path", "RegistryPath", "TargetObject", "registry.path"},
+		"registry_value":      {"registry_value", "RegistryValue", "Details", "registry.value"},
+		"ocsf_class_uid":      {"ocsf_class_uid", "class_uid", "ocsf.class_uid"},
+		"ocsf_class_name":     {"ocsf_class_name", "class_name", "ocsf.class_name"},
+		"process_name":        {"process_name", "ProcessName", "process.file.name", "process_file_name"},
+		"process_path":        {"process_path", "ProcessPath", "Image", "process.file.path", "process_file_path"},
+		"command_line":        {"command_line", "CommandLine", "process.command_line", "process_cmd_line"},
+		"parent_name":         {"parent_name", "ParentName", "ParentImage", "process.parent.name"},
+		"file_path":           {"file_path", "path", "Path", "TargetFilename", "file_path_ocsf"},
+		"file_operation":      {"file_operation", "operation", "Operation", "file.action", "ocsf.file.activity_name"},
+		"dest_ip":             {"dest_ip", "DstIP", "DestinationIp", "destination.ip", "destination_ip"},
+		"dest_port":           {"dest_port", "DstPort", "DestinationPort", "destination.port", "destination_port"},
+		"source_ip":           {"source_ip", "SrcIP", "SourceIp", "source.ip", "source_ip_ocsf"},
+		"domain":              {"domain", "Domain", "QueryName", "dns.question.name", "dns_query"},
+		"event_type":          {"event_type", "type", "EventType"},
+		"hostname":            {"hostname", "Hostname", "ocsf.device.hostname"},
+		"os":                  {"os", "OS", "ocsf.device.os.name"},
+		"user":                {"user", "User", "ocsf.process.user.name"},
+		"protocol":            {"protocol", "Protocol", "network.transport"},
+		"auth_type":           {"auth_type", "AuthType"},
+		"auth_outcome":        {"auth_outcome", "AuthOutcome", "outcome"},
+		"severity":            {"severity", "Severity"},
+		"file_hash":           {"file_hash", "FileHash", "hash", "Hashes"},
 	}
 
 	for _, name := range celVarNames {
@@ -114,6 +122,10 @@ func activationFromMap(vars map[string]interface{}) map[string]interface{} {
 		if v, ok := vars[name]; ok {
 			out[name] = normalizeCELValue(v)
 		}
+	}
+
+	if ocsfObj, ok := vars["ocsf"]; ok {
+		out["ocsf"] = ocsfObj
 	}
 
 	for k, v := range vars {
