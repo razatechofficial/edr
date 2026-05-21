@@ -17,6 +17,8 @@ import (
 // PostureCollector performs cheap read-only posture probes (G-POSTURE).
 type PostureCollector struct {
 	cfg           config.Config
+	endpointID    string
+	hostname      string
 	mu            sync.Mutex
 	lastNote      string
 	probeOut      map[string]any
@@ -31,7 +33,16 @@ func NewPostureCollector(cfg config.Config) Collector {
 	if !cfg.Monitoring.PostureEnabled {
 		return nil
 	}
-	return &PostureCollector{cfg: cfg}
+	host, _ := os.Hostname()
+	ep := cfg.Service.EndpointID
+	if ep == "" {
+		ep = cfg.Agent.ID
+	}
+	return &PostureCollector{
+		cfg:        cfg,
+		endpointID: ep,
+		hostname:   host,
+	}
 }
 
 func (p *PostureCollector) Name() string { return "posture" }
@@ -74,7 +85,10 @@ func (p *PostureCollector) Collect(ctx context.Context) ([]Telemetry, error) {
 	p.lastNote = ""
 	p.mu.Unlock()
 	p.runOptionalPostureProbes(ctx)
-	return nil, nil
+	p.mu.Lock()
+	probes := p.probeOut
+	p.mu.Unlock()
+	return postureFindingsToTelemetry(p.endpointID, p.hostname, AnalyzePostureProbes(probes)), nil
 }
 
 func (p *PostureCollector) ExportMonitoringHealth() map[string]any {
