@@ -21,6 +21,7 @@ import (
 	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/baseline"
 	"github.com/razatechofficial/edr/internal/collector"
+	"github.com/razatechofficial/edr/internal/compliance/sca"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/detect"
 	"github.com/razatechofficial/edr/internal/detection"
@@ -65,6 +66,8 @@ type Agent struct {
 	baselineNet     *baseline.NetworkBaseline
 	baselineProc    *baseline.ProcessBaseline
 	baselineUser    *baseline.UserBaseline
+
+	scaRunner *sca.Runner
 
 	antiDebug     *selfprotect.AntiDebugger
 	tamper        *selfprotect.TamperDetector
@@ -191,6 +194,10 @@ func NewWithFiles(configPath string) (*Agent, error) {
 
 	if err := a.initBaseline(); err != nil {
 		a.logger.Warn("baseline engine init failed", "error", err)
+	}
+
+	if err := a.initCompliance(); err != nil {
+		a.logger.Warn("compliance sca init failed", "error", err)
 	}
 
 	spoolDir := filepath.Join(cfg.Agent.DataDir, "alert-spool")
@@ -678,6 +685,15 @@ func (a *Agent) Run(ctx context.Context) error {
 		defer a.shutdownBaseline()
 	}
 
+	if a.scaRunner != nil {
+		go func() {
+			if err := a.scaRunner.Run(ctx); err != nil && ctx.Err() == nil {
+				a.logger.Error("sca runner exited", "error", err)
+			}
+		}()
+		a.logger.Info("compliance sca runner started")
+	}
+
 	a.logger.Info("agent started")
 	a.logger.Info("rules loaded", "count", len(a.ruleSet.Rules))
 
@@ -937,6 +953,9 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 				if err := a.handleAlerts(a.detector.EvaluateAuth(ae)); err != nil {
 					return err
 				}
+				if a.advEngine != nil {
+					a.advEngine.Evaluate(ctx, &ae)
+				}
 				if a.baselineEngine != nil {
 					if err := a.handleAlerts(a.feedBaselineAuth(ae)); err != nil {
 						return err
@@ -1126,6 +1145,11 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 			}
 			if tel.Injection != nil && a.advEngine != nil {
 				a.advEngine.Evaluate(ctx, tel.Injection)
+			}
+			if tel.Compliance != nil {
+				if err := a.handleComplianceTelemetry(ctx, tel.Compliance); err != nil {
+					return err
+				}
 			}
 		}
 	}
