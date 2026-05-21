@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,30 +50,7 @@ type customRulesFile struct {
 // NewCustomEngine creates a CEL environment with EDR-specific variables
 // declared and ready for rule compilation.
 func NewCustomEngine(logger *zap.Logger) (*CustomEngine, error) {
-	env, err := cel.NewEnv(
-		cel.Variable("event_type", cel.StringType),
-		cel.Variable("process_name", cel.StringType),
-		cel.Variable("process_path", cel.StringType),
-		cel.Variable("command_line", cel.StringType),
-		cel.Variable("pid", cel.IntType),
-		cel.Variable("ppid", cel.IntType),
-		cel.Variable("parent_name", cel.StringType),
-		cel.Variable("user", cel.StringType),
-		cel.Variable("file_path", cel.StringType),
-		cel.Variable("file_operation", cel.StringType),
-		cel.Variable("file_hash", cel.StringType),
-		cel.Variable("source_ip", cel.StringType),
-		cel.Variable("dest_ip", cel.StringType),
-		cel.Variable("source_port", cel.IntType),
-		cel.Variable("dest_port", cel.IntType),
-		cel.Variable("protocol", cel.StringType),
-		cel.Variable("domain", cel.StringType),
-		cel.Variable("auth_type", cel.StringType),
-		cel.Variable("auth_outcome", cel.StringType),
-		cel.Variable("hostname", cel.StringType),
-		cel.Variable("os", cel.StringType),
-		cel.Variable("severity", cel.StringType),
-	)
+	env, err := newCELEnv()
 	if err != nil {
 		return nil, fmt.Errorf("cel: create environment: %w", err)
 	}
@@ -121,20 +99,23 @@ func (e *CustomEngine) loadRulesFromFile(path string) ([]compiledRule, error) {
 }
 
 func (e *CustomEngine) loadRulesFromDir(dir string) ([]compiledRule, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("cel: read rules dir: %w", err)
-	}
 	var paths []string
-	for _, ent := range entries {
-		if ent.IsDir() {
-			continue
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		ext := strings.ToLower(filepath.Ext(ent.Name()))
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
 		if ext != ".yaml" && ext != ".yml" {
-			continue
+			return nil
 		}
-		paths = append(paths, filepath.Join(dir, ent.Name()))
+		paths = append(paths, path)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cel: walk rules dir: %w", err)
 	}
 	sort.Strings(paths)
 
@@ -201,7 +182,7 @@ func (e *CustomEngine) Evaluate(vars map[string]interface{}) []*events.Alert {
 	snapshot := e.rules
 	e.mu.RUnlock()
 
-	activation := e.fillDefaults(vars)
+	activation := activationFromMap(vars)
 
 	var alerts []*events.Alert
 	for _, cr := range snapshot {
@@ -251,36 +232,7 @@ func (e *CustomEngine) compile(expr string) (cel.Program, error) {
 	return e.env.Program(ast)
 }
 
-// fillDefaults ensures every declared variable has a value so CEL evaluation
-// does not fail on missing keys. Unset strings default to "" and ints to 0.
+// fillDefaults is retained for tests; production uses activationFromMap.
 func (e *CustomEngine) fillDefaults(vars map[string]interface{}) map[string]interface{} {
-	defaults := map[string]interface{}{
-		"event_type":     "",
-		"process_name":   "",
-		"process_path":   "",
-		"command_line":   "",
-		"pid":            int64(0),
-		"ppid":           int64(0),
-		"parent_name":    "",
-		"user":           "",
-		"file_path":      "",
-		"file_operation": "",
-		"file_hash":      "",
-		"source_ip":      "",
-		"dest_ip":        "",
-		"source_port":    int64(0),
-		"dest_port":      int64(0),
-		"protocol":       "",
-		"domain":         "",
-		"auth_type":      "",
-		"auth_outcome":   "",
-		"hostname":       "",
-		"os":             "",
-		"severity":       "",
-	}
-
-	for k, v := range vars {
-		defaults[k] = v
-	}
-	return defaults
+	return activationFromMap(vars)
 }
