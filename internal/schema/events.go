@@ -16,6 +16,8 @@ const (
 	EventFork      EventType = "fork"
 	EventRegistry  EventType = "registry"
 	EventInjection EventType = "injection"
+	EventCompliance EventType = "compliance"
+	EventComplianceScan EventType = "compliance_scan"
 )
 
 type BaseEvent struct {
@@ -51,6 +53,12 @@ type ProcessEvent struct {
 	MadviseAdvice int32  `json:"madvise_advice,omitempty"`
 	// ExecEnv holds environment entries joined with ASCII RS (0x1e) from ESF NOTIFY_EXEC / AUTH_EXEC.
 	ExecEnv   string         `json:"exec_env,omitempty"`
+	// ESFEventType is the raw Endpoint Security event type integer (macOS Sigma esf.event_type).
+	ESFEventType int    `json:"esf_type,omitempty"`
+	ESFOperation string `json:"esf_op,omitempty"`
+	// TargetImage is the signal/get_task target process path on macOS ESF events.
+	TargetImage  string `json:"target_image,omitempty"`
+	SignalNumber int    `json:"signal_number,omitempty"`
 	Tags      []string       `json:"tags,omitempty"`
 	Severity  string         `json:"severity,omitempty"`
 	Ancestors []AncestorInfo `json:"ancestors,omitempty"`
@@ -96,6 +104,9 @@ type FileEvent struct {
 	Tags          []string `json:"tags,omitempty"`
 	// FIMDiffUnified is a base64-encoded unified diff vs prior capped snapshot (optional FIM diff).
 	FIMDiffUnified string `json:"fim_diff_unified,omitempty"`
+	// ESFEventType is the raw Endpoint Security event type integer (macOS Sigma esf.event_type).
+	ESFEventType int    `json:"esf_type,omitempty"`
+	ESFOperation string `json:"esf_op,omitempty"`
 }
 
 // ProcessInjectionEvent describes cross-process code injection indicators (e.g. ETW-TI).
@@ -186,6 +197,10 @@ type AuthEvent struct {
 	Success        bool     `json:"success"`
 	Privileged     bool     `json:"privileged,omitempty"`
 	SubjectLogonID string   `json:"subject_logon_id,omitempty"`
+	// Message holds the raw log line (macOS unified log / auth stream).
+	Message   string `json:"message,omitempty"`
+	Subsystem string `json:"subsystem,omitempty"`
+	Category  string `json:"category,omitempty"`
 }
 
 type TaskEvent struct {
@@ -304,6 +319,35 @@ type FeatureStatusEvent struct {
 	BaseEvent
 	Features map[string]bool `json:"features,omitempty"`
 	Degraded []string        `json:"degraded,omitempty"`
+}
+
+// ComplianceFindingEvent is a Security Configuration Assessment (SCA) check result.
+type ComplianceFindingEvent struct {
+	BaseEvent
+	PolicyID    string              `json:"policy_id"`
+	PolicyName  string              `json:"policy_name"`
+	CheckID     int                 `json:"check_id"`
+	Title       string              `json:"title"`
+	Description string              `json:"description,omitempty"`
+	Remediation string              `json:"remediation,omitempty"`
+	Result      string              `json:"result"` // passed|failed|not_applicable|error
+	Error       string              `json:"error,omitempty"`
+	Compliance  map[string][]string `json:"compliance,omitempty"`
+	MITRE       map[string][]string `json:"mitre,omitempty"`
+	OCSF        map[string]any      `json:"ocsf,omitempty"`
+}
+
+// ComplianceScanSummaryEvent summarizes one full SCA scan run across applicable policies.
+type ComplianceScanSummaryEvent struct {
+	BaseEvent
+	Passed              int   `json:"passed"`
+	Failed              int   `json:"failed"`
+	Errors              int   `json:"errors"`
+	Skipped             int   `json:"skipped"`
+	PoliciesTotal       int   `json:"policies_total"`
+	PoliciesApplicable  int   `json:"policies_applicable"`
+	DurationMs          int64 `json:"duration_ms"`
+	OCSF                map[string]any `json:"ocsf,omitempty"`
 }
 
 // PrivilegeEvent is emitted when a process invokes a privilege-change
