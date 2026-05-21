@@ -1,2 +1,7 @@
 #!/bin/bash
-launchctl unload /Library/LaunchDaemons/com.razatech.edr-agent.plist 2>/dev/null || true
+set -e
+PLIST="/Library/LaunchDaemons/com.razatech.edr-agent.plist"
+if launchctl print "system/com.razatech.edr-agent" &>/dev/null; then
+	launchctl bootout system "${PLIST}" 2>/dev/null || true
+fi
+launchctl unload "${PLIST}" 2>/dev/null || true

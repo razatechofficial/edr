@@ -1,2 +1,22 @@
 #!/bin/bash
-launchctl load /Library/LaunchDaemons/com.razatech.edr-agent.plist
+set -e
+BASE="/Library/Application Support/EDR"
+CONFIG_DIR="${BASE}/config"
+CONFIG_FILE="${CONFIG_DIR}/agent.yaml"
+LOG_DIR="/Library/Logs/EDR"
+PLIST="/Library/LaunchDaemons/com.razatech.edr-agent.plist"
+RULES_BASELINE="${CONFIG_DIR}/rules/baseline.yaml"
+
+mkdir -p "${CONFIG_DIR}" "${BASE}/alerts" "${LOG_DIR}"
+chmod 755 "${BASE}" "${CONFIG_DIR}" 2>/dev/null || true
+
+if [[ -f "${CONFIG_FILE}" ]]; then
+	tmpf="$(mktemp "${TMPDIR:-/tmp}/edr-postinstall.XXXXXX")"
+	sed "s|^rules_file:.*|rules_file: \"${RULES_BASELINE}\"|" "${CONFIG_FILE}" > "${tmpf}" && mv "${tmpf}" "${CONFIG_FILE}"
+	chmod 644 "${CONFIG_FILE}"
+fi
+
+launchctl bootout system "${PLIST}" 2>/dev/null || true
+launchctl unload "${PLIST}" 2>/dev/null || true
+launchctl bootstrap system "${PLIST}" 2>/dev/null || launchctl load "${PLIST}"
+launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
