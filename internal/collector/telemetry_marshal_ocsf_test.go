@@ -59,15 +59,11 @@ func TestMarshalTelemetryLineIncludesOCSFProcess(t *testing.T) {
 	if err := json.Unmarshal(line, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc["kind"] != "process" {
-		t.Fatalf("kind=%v", doc["kind"])
+	if int(doc["class_uid"].(float64)) != ocsf.ClassUIDProcessActivity {
+		t.Fatalf("class_uid=%v", doc["class_uid"])
 	}
-	ocsfObj, ok := doc["ocsf"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing ocsf object: %s", string(line))
-	}
-	if int(ocsfObj["class_uid"].(float64)) != ocsf.ClassUIDProcessActivity {
-		t.Fatalf("class_uid=%v", ocsfObj["class_uid"])
+	if doc["kind"] != nil {
+		t.Fatalf("unexpected legacy kind field: %v", doc["kind"])
 	}
 }
 
@@ -87,8 +83,8 @@ func TestMarshalTelemetryLineIncludesOCSFFile(t *testing.T) {
 	if err := json.Unmarshal(line, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := doc["ocsf"]; !ok {
-		t.Fatalf("missing ocsf: %s", string(line))
+	if int(doc["class_uid"].(float64)) != ocsf.ClassUIDFileActivity {
+		t.Fatalf("class_uid=%v", doc["class_uid"])
 	}
 }
 
@@ -112,12 +108,8 @@ func TestMarshalTelemetryLineIncludesOCSFCompliance(t *testing.T) {
 	if err := json.Unmarshal(line, &doc); err != nil {
 		t.Fatal(err)
 	}
-	ocsfObj, ok := doc["ocsf"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing ocsf: %s", string(line))
-	}
-	if int(ocsfObj["class_uid"].(float64)) != ocsf.ClassUIDSecurityFinding {
-		t.Fatalf("class_uid=%v", ocsfObj["class_uid"])
+	if int(doc["class_uid"].(float64)) != ocsf.ClassUIDSecurityFinding {
+		t.Fatalf("class_uid=%v", doc["class_uid"])
 	}
 }
 
