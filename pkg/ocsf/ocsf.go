@@ -13,6 +13,15 @@ const (
 
 	ClassFileActivity     = "file_activity"
 	ClassUIDFileActivity  = 4001
+
+	ClassNetworkActivity    = "network_activity"
+	ClassUIDNetworkActivity = 4003
+
+	ClassAuthentication    = "authentication"
+	ClassUIDAuthentication = 3002
+
+	ClassRegistryKeyActivity    = "registry_key_activity"
+	ClassUIDRegistryKeyActivity = 201001
 )
 
 // Envelope is the top-level OCSF event wrapper.
@@ -30,7 +39,26 @@ type Envelope struct {
 	Finding      *Finding       `json:"finding,omitempty"`
 	Process      *Process       `json:"process,omitempty"`
 	File         *File          `json:"file,omitempty"`
+	RegKey       *RegKey        `json:"reg_key,omitempty"`
+	SrcEndpoint  *Endpoint      `json:"src_endpoint,omitempty"`
+	DstEndpoint  *Endpoint      `json:"dst_endpoint,omitempty"`
+	User         *UserRecord    `json:"user,omitempty"`
+	Status       string         `json:"status,omitempty"`
+	StatusID     int            `json:"status_id,omitempty"`
 	Unmapped     map[string]any `json:"unmapped,omitempty"`
+}
+
+type Endpoint struct {
+	IP   string `json:"ip,omitempty"`
+	Port int    `json:"port,omitempty"`
+}
+
+type UserRecord struct {
+	Name      string `json:"name,omitempty"`
+	Domain    string `json:"domain,omitempty"`
+	Type      string `json:"type,omitempty"`
+	TypeID    int    `json:"type_id,omitempty"`
+	UID       string `json:"uid,omitempty"`
 }
 
 type Metadata struct {
@@ -69,4 +97,8 @@ type File struct {
 	Name string `json:"name,omitempty"`
 	Path string `json:"path,omitempty"`
 	Type string `json:"type,omitempty"`
+}
+
+type RegKey struct {
+	Path string `json:"path,omitempty"`
 }
