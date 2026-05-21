@@ -107,6 +107,28 @@ func EnrichDetectionMap(in map[string]interface{}) map[string]interface{} {
 		setIfAbsent(out, "ocsf.device.os.name", v)
 	}
 
+	if v := stringField(in, "title", "Title"); v != "" {
+		setIfAbsent(out, "ocsf.finding.title", v)
+		setIfAbsent(out, "finding.title", v)
+		setIfAbsent(out, "finding_title", v)
+	}
+	if v := stringField(in, "policy_id", "PolicyID"); v != "" {
+		setIfAbsent(out, "policy_id", v)
+	}
+	if v := intField(in, "check_id", "CheckID"); v != 0 {
+		setIfAbsent(out, "check_id", v)
+	}
+	if v := stringField(in, "result", "Result"); v != "" {
+		setIfAbsent(out, "finding_result", v)
+		setIfAbsent(out, "result", v)
+	}
+	if v := intField(in, "severity_id", "SeverityID"); v != 0 {
+		setIfAbsent(out, "severity_id", v)
+	}
+	if v := intField(in, "activity_id", "ActivityID"); v != 0 {
+		setIfAbsent(out, "activity_id", v)
+	}
+
 	enrichDarwinSigmaFields(out)
 	applyCanonicalOCSFFields(out)
 	if existing, ok := in["ocsf"].(map[string]interface{}); ok && len(existing) > 0 {
@@ -126,6 +148,8 @@ func classNameForEventType(t string) string {
 		return ClassFileActivity
 	case "network":
 		return ClassNetworkActivity
+	case "dns":
+		return ClassDNSActivity
 	case "auth", "authentication":
 		return ClassAuthentication
 	case "fork":
@@ -134,8 +158,24 @@ func classNameForEventType(t string) string {
 		return ClassRegistryKeyActivity
 	case "injection":
 		return ClassProcessActivity
-	case "compliance":
+	case "compliance", "compliance_finding":
 		return ClassSecurityFinding
+	case "compliance_scan":
+		return ClassSecurityFinding
+	case "privilege":
+		return ClassProcessActivity
+	case "task", "scheduled_job":
+		return ClassScheduledJobActivity
+	case "service":
+		return ClassWindowsServiceActivity
+	case "credential", "credential_access":
+		return ClassProcessActivity
+	case "container":
+		return ClassProcessActivity
+	case "security_policy", "tamper", "persistence", "gatekeeper", "gatekeeper_bypass", "dropped_events", "ti_status", "feature_status":
+		return ClassSecurityFinding
+	case "privacy":
+		return ClassProcessActivity
 	default:
 		return ""
 	}
@@ -149,13 +189,25 @@ func classUIDForEventType(t string) int {
 		return ClassUIDFileActivity
 	case "network":
 		return ClassUIDNetworkActivity
+	case "dns":
+		return ClassUIDDNSActivity
+	case "task", "scheduled_job":
+		return ClassUIDScheduledJobActivity
+	case "service":
+		return ClassUIDWindowsServiceActivity
 	case "auth", "authentication":
 		return ClassUIDAuthentication
 	case "fork", "injection":
 		return ClassUIDProcessActivity
 	case "registry":
 		return ClassUIDRegistryKeyActivity
-	case "compliance":
+	case "compliance", "compliance_finding", "compliance_scan":
+		return ClassUIDSecurityFinding
+	case "privilege":
+		return ClassUIDProcessActivity
+	case "credential", "credential_access", "container", "privacy":
+		return ClassUIDProcessActivity
+	case "security_policy", "tamper", "persistence", "gatekeeper", "gatekeeper_bypass", "dropped_events", "ti_status", "feature_status":
 		return ClassUIDSecurityFinding
 	default:
 		return 0
