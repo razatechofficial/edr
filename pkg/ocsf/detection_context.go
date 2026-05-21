@@ -5,8 +5,7 @@ import (
 	"strings"
 )
 
-// BuildDetectionEnvelope constructs a nested OCSF-shaped map for CEL and export.
-// Flat legacy and ECS aliases remain on the outer map via EnrichDetectionMap.
+// BuildDetectionEnvelope constructs an OCSF-shaped map from flat schema fields.
 func BuildDetectionEnvelope(in map[string]interface{}) map[string]interface{} {
 	if len(in) == 0 {
 		return nil
