@@ -12,8 +12,9 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 		return nil, nil
 	}
 	w := struct {
-		Kind          string                        `json:"kind"`
-		Process       *schema.ProcessEvent          `json:"process,omitempty"`
+		Kind           string                             `json:"kind"`
+		OCSF           map[string]any                     `json:"ocsf,omitempty"`
+		Process        *schema.ProcessEvent               `json:"process,omitempty"`
 		Network       *schema.NetworkEvent          `json:"network,omitempty"`
 		Auth          *schema.AuthEvent             `json:"auth,omitempty"`
 		Task          *schema.TaskEvent             `json:"task,omitempty"`
@@ -84,5 +85,6 @@ func MarshalTelemetryLine(t *Telemetry) ([]byte, error) {
 	default:
 		return nil, nil
 	}
+	w.OCSF = ocsfEnvelopeForTelemetry(t)
 	return json.Marshal(w)
 }
