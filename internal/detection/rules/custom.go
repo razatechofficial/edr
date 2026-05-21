@@ -182,7 +182,7 @@ func (e *CustomEngine) Evaluate(vars map[string]interface{}) []*events.Alert {
 	snapshot := e.rules
 	e.mu.RUnlock()
 
-	activation := activationFromMap(vars)
+	activation := activationFromMap(EventToMap(vars))
 
 	var alerts []*events.Alert
 	for _, cr := range snapshot {

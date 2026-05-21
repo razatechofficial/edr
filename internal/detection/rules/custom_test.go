@@ -26,7 +26,7 @@ func TestCustomEngineCELRule(t *testing.T) {
 		ID:         "CEL-001",
 		Name:       "Evil process",
 		Severity:   "high",
-		Expression: `process_name == "evil.exe"`,
+		Expression: `process_file_name == "evil.exe"`,
 		Enabled:    true,
 	})
 	if err != nil {
@@ -34,6 +34,7 @@ func TestCustomEngineCELRule(t *testing.T) {
 	}
 
 	alerts := engine.Evaluate(map[string]interface{}{
+		"event_type":   "process",
 		"process_name": "evil.exe",
 	})
 	if len(alerts) == 0 {
@@ -51,11 +52,12 @@ func TestCustomEngineCELNoMatch(t *testing.T) {
 	engine.AddRule(CustomRule{
 		ID:         "CEL-001",
 		Name:       "Evil process",
-		Expression: `process_name == "evil.exe"`,
+		Expression: `process_file_name == "evil.exe"`,
 		Enabled:    true,
 	})
 
 	alerts := engine.Evaluate(map[string]interface{}{
+		"event_type":   "process",
 		"process_name": "notepad.exe",
 	})
 	if len(alerts) != 0 {
@@ -68,9 +70,9 @@ func TestCustomEngineMultipleRules(t *testing.T) {
 	engine := newTestCustomEngine(t)
 
 	rules := []CustomRule{
-		{ID: "R1", Name: "rule-A", Expression: `process_name == "a.exe"`, Enabled: true},
-		{ID: "R2", Name: "rule-B", Expression: `process_name == "b.exe"`, Enabled: true},
-		{ID: "R3", Name: "rule-C", Expression: `process_name == "c.exe"`, Enabled: true},
+		{ID: "R1", Name: "rule-A", Expression: `process_file_name == "a.exe"`, Enabled: true},
+		{ID: "R2", Name: "rule-B", Expression: `process_file_name == "b.exe"`, Enabled: true},
+		{ID: "R3", Name: "rule-C", Expression: `process_file_name == "c.exe"`, Enabled: true},
 	}
 	for _, r := range rules {
 		if err := engine.AddRule(r); err != nil {
@@ -79,6 +81,7 @@ func TestCustomEngineMultipleRules(t *testing.T) {
 	}
 
 	alerts := engine.Evaluate(map[string]interface{}{
+		"event_type":   "process",
 		"process_name": "b.exe",
 	})
 	if len(alerts) != 1 {
@@ -99,13 +102,13 @@ func TestCustomEngineLoadRulesRecursive(t *testing.T) {
 	rootRule := `rules:
   - id: ROOT-001
     name: root rule
-    expression: process_name == "root.exe"
+    expression: process_file_name == "root.exe"
     enabled: true
 `
 	nestedRule := `rules:
   - id: NESTED-001
     name: nested rule
-    expression: process_name == "nested.exe"
+    expression: process_file_name == "nested.exe"
     enabled: true
 `
 	if err := os.WriteFile(filepath.Join(dir, "root.yaml"), []byte(rootRule), 0o644); err != nil {
@@ -131,7 +134,7 @@ func TestCustomEngineComplexExpression(t *testing.T) {
 	engine.AddRule(CustomRule{
 		ID:         "COMPLEX-001",
 		Name:       "Complex rule",
-		Expression: `process_name == "cmd.exe" && command_line.contains("whoami")`,
+		Expression: `process_file_name == "cmd.exe" && process_cmd_line.contains("whoami")`,
 		Enabled:    true,
 	})
 
@@ -142,17 +145,17 @@ func TestCustomEngineComplexExpression(t *testing.T) {
 	}{
 		{
 			name:    "both conditions met",
-			vars:    map[string]interface{}{"process_name": "cmd.exe", "command_line": "cmd /c whoami"},
+			vars:    map[string]interface{}{"event_type": "process", "process_name": "cmd.exe", "command_line": "cmd /c whoami"},
 			matched: true,
 		},
 		{
 			name:    "wrong process",
-			vars:    map[string]interface{}{"process_name": "powershell.exe", "command_line": "whoami"},
+			vars:    map[string]interface{}{"event_type": "process", "process_name": "powershell.exe", "command_line": "whoami"},
 			matched: false,
 		},
 		{
 			name:    "wrong command",
-			vars:    map[string]interface{}{"process_name": "cmd.exe", "command_line": "dir"},
+			vars:    map[string]interface{}{"event_type": "process", "process_name": "cmd.exe", "command_line": "dir"},
 			matched: false,
 		},
 	}
