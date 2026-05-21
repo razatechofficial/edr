@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/pkg/events"
 	"github.com/razatechofficial/edr/pkg/ocsf"
 )
@@ -259,7 +260,7 @@ func sigmaEventCategory(m map[string]interface{}) string {
 
 // Evaluate tests an event (as a flat key-value map) against loaded rules.
 func (e *SigmaEngine) Evaluate(event map[string]interface{}) []*events.Alert {
-	event = normalizeSigmaEvent(event)
+	event = ocsf.SigmaEvalMap(event)
 	set := e.current.Load()
 	if set == nil {
 		return nil
@@ -386,27 +387,30 @@ func (e *SigmaEngine) EnabledRuleCount() int {
 	return n
 }
 
-// EventToMap converts a typed event struct to a flat map with Sigma field
-// aliases and OCSF detection enrichments applied.
+// EventToMap converts an event to an OCSF-native map for CEL rule evaluation.
 func EventToMap(event interface{}) map[string]interface{} {
 	if event == nil {
 		return nil
 	}
-	if m, ok := event.(map[string]interface{}); ok {
-		m = normalizeSigmaEvent(m)
-		return ocsf.EnrichDetectionMap(m)
-	}
-
-	data, err := json.Marshal(event)
-	if err != nil {
+	product := ocsf.DefaultProduct("")
+	env := collector.OCSFEnvelopeFromEvent(event, product)
+	if env == nil {
 		return nil
 	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil
+	out := ocsf.CELActivationMap(env)
+	switch v := event.(type) {
+	case map[string]interface{}:
+		ocsf.MergeFlatSchemaFields(out, v)
+	default:
+		data, err := json.Marshal(event)
+		if err == nil {
+			var raw map[string]interface{}
+			if json.Unmarshal(data, &raw) == nil {
+				ocsf.MergeFlatSchemaFields(out, raw)
+			}
+		}
 	}
-	m = normalizeSigmaEvent(m)
-	return ocsf.EnrichDetectionMap(m)
+	return out
 }
 
 // WatchAndReload watches the rules directory for file changes and reloads.
