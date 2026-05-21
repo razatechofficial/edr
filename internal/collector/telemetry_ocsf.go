@@ -29,57 +29,173 @@ func EnsureTelemetryOCSF(t *Telemetry) {
 		attachOCSF(&t.Registry.BaseEvent, ocsfFromRegistry(t.Registry, product))
 	case t.Injection != nil:
 		attachOCSF(&t.Injection.BaseEvent, ocsfFromInjection(t.Injection, product))
+	case t.Compliance != nil:
+		attachOCSF(&t.Compliance.BaseEvent, ocsfFromComplianceFinding(t.Compliance, product))
+	case t.ComplianceScan != nil:
+		attachOCSF(&t.ComplianceScan.BaseEvent, ocsfFromComplianceScan(t.ComplianceScan, product))
+	case t.Privilege != nil:
+		attachOCSF(&t.Privilege.BaseEvent, ocsfFromPrivilege(t.Privilege, product))
 	case t.Task != nil:
 		ev := t.Task
-		attachSynthetic(&ev.BaseEvent, product, "task_scheduler", ev.TaskName, ev.Operation, 0, ev.SubjectUser, "task", nil)
+		attachOCSF(&ev.BaseEvent, ocsf.FromScheduledJob(ocsf.ScheduledJobInput{
+			EndpointID:  ev.EndpointID,
+			Hostname:    ev.Hostname,
+			OS:          ev.OS,
+			Timestamp:   ev.Timestamp.UnixMilli(),
+			TaskName:    ev.TaskName,
+			TaskContent: ev.TaskContent,
+			Operation:   ev.Operation,
+			SubjectUser: ev.SubjectUser,
+		}, product))
 	case t.Service != nil:
 		ev := t.Service
-		attachSynthetic(&ev.BaseEvent, product, "service_install", ev.ImagePath, ev.ServiceName, 0, ev.AccountName, "service", map[string]any{
-			"service_type": ev.ServiceType,
-			"start_type":   ev.StartType,
-		})
+		attachOCSF(&ev.BaseEvent, ocsf.FromService(ocsf.ServiceInput{
+			EndpointID:  ev.EndpointID,
+			Hostname:    ev.Hostname,
+			OS:          ev.OS,
+			Timestamp:   ev.Timestamp.UnixMilli(),
+			ServiceName: ev.ServiceName,
+			ImagePath:   ev.ImagePath,
+			ServiceType: ev.ServiceType,
+			StartType:   ev.StartType,
+			AccountName: ev.AccountName,
+		}, product))
 	case t.Credential != nil:
 		ev := t.Credential
-		attachSynthetic(&ev.BaseEvent, product, "credential_access", ev.TargetPath, ev.Technique, int(ev.SourcePID), ev.SourceProcess, "credential_access", nil)
+		attachOCSF(&ev.BaseEvent, ocsf.FromCredentialAccess(ocsf.CredentialInput{
+			EndpointID:    ev.EndpointID,
+			Hostname:      ev.Hostname,
+			OS:            ev.OS,
+			Timestamp:     ev.Timestamp.UnixMilli(),
+			Technique:     ev.Technique,
+			SourcePID:     int(ev.SourcePID),
+			SourceProcess: ev.SourceProcess,
+			TargetPath:    ev.TargetPath,
+			AccessMask:    ev.AccessMask,
+			Severity:      ev.Severity,
+		}, product))
 	case t.Memory != nil:
 		ev := t.Memory
-		attachSynthetic(&ev.BaseEvent, product, "memory_event", ev.TargetProcess, ev.Operation, int(ev.TargetPID), "", "memory", map[string]any{
-			"address": ev.Address,
-			"size":    ev.Size,
-		})
+		attachOCSF(&ev.BaseEvent, ocsf.FromMemory(ocsf.MemoryInput{
+			EndpointID:    ev.EndpointID,
+			Hostname:      ev.Hostname,
+			OS:            ev.OS,
+			Timestamp:     ev.Timestamp.UnixMilli(),
+			Operation:     ev.Operation,
+			TargetPID:     int(ev.TargetPID),
+			TargetProcess: ev.TargetProcess,
+			Address:       ev.Address,
+			Size:          ev.Size,
+			Protect:       ev.Protect,
+		}, product))
 	case t.Container != nil:
 		ev := t.Container
-		attachSynthetic(&ev.BaseEvent, product, ev.ProcessName, ev.Path, ev.Operation, ev.PID, "", "container", nil)
+		attachOCSF(&ev.BaseEvent, ocsf.FromContainer(ocsf.ContainerInput{
+			EndpointID:  ev.EndpointID,
+			Hostname:    ev.Hostname,
+			OS:          ev.OS,
+			Timestamp:   ev.Timestamp.UnixMilli(),
+			Operation:   ev.Operation,
+			PID:         ev.PID,
+			ProcessName: ev.ProcessName,
+			Path:        ev.Path,
+			Mode:        ev.Mode,
+		}, product))
 	case t.SecPolicy != nil:
 		ev := t.SecPolicy
-		attachSynthetic(&ev.BaseEvent, product, "security_policy", "", ev.Operation, ev.PID, "", "security_policy", nil)
+		attachOCSF(&ev.BaseEvent, ocsf.FromSecPolicy(ocsf.SecPolicyInput{
+			EndpointID: ev.EndpointID,
+			Hostname:   ev.Hostname,
+			OS:         ev.OS,
+			Timestamp:  ev.Timestamp.UnixMilli(),
+			Operation:  ev.Operation,
+			PID:        ev.PID,
+			Flags:      ev.Flags,
+		}, product))
 	case t.Tamper != nil:
 		ev := t.Tamper
-		attachSynthetic(&ev.BaseEvent, product, "tamper", ev.Component, ev.Message, 0, "", "tamper", nil)
+		attachOCSF(&ev.BaseEvent, ocsf.FromTamper(ocsf.TamperInput{
+			EndpointID: ev.EndpointID,
+			Hostname:   ev.Hostname,
+			OS:         ev.OS,
+			Timestamp:  ev.Timestamp.UnixMilli(),
+			Component:  ev.Component,
+			ProgramID:  ev.ProgramID,
+			Message:    ev.Message,
+		}, product))
 	case t.Persistence != nil:
 		ev := t.Persistence
-		attachSynthetic(&ev.BaseEvent, product, "persistence", ev.ExecutablePath, ev.Technique, int(ev.PID), "", "persistence", map[string]any{
-			"item_type": ev.ItemType,
-		})
+		attachOCSF(&ev.BaseEvent, ocsf.FromPersistence(ocsf.PersistenceInput{
+			EndpointID:     ev.EndpointID,
+			Hostname:       ev.Hostname,
+			OS:             ev.OS,
+			Timestamp:      ev.Timestamp.UnixMilli(),
+			Technique:      ev.Technique,
+			ExecutablePath: ev.ExecutablePath,
+			ItemType:       ev.ItemType,
+			IsLegacy:       ev.IsLegacy,
+			IsManaged:      ev.IsManaged,
+			PID:            int(ev.PID),
+			ProcessPath:    ev.ProcessPath,
+		}, product))
 	case t.Privacy != nil:
 		ev := t.Privacy
-		attachSynthetic(&ev.BaseEvent, product, "privacy", ev.AccessingProcess, ev.Operation, int(ev.AccessingPID), "", "privacy", map[string]any{
-			"service": ev.Service,
-		})
+		attachOCSF(&ev.BaseEvent, ocsf.FromPrivacy(ocsf.PrivacyInput{
+			EndpointID:       ev.EndpointID,
+			Hostname:         ev.Hostname,
+			OS:               ev.OS,
+			Timestamp:        ev.Timestamp.UnixMilli(),
+			Operation:        ev.Operation,
+			Service:          ev.Service,
+			AuthValue:        ev.AuthValue,
+			AuthReason:       ev.AuthReason,
+			AccessingPID:     int(ev.AccessingPID),
+			AccessingProcess: ev.AccessingProcess,
+		}, product))
 	case t.Gatekeeper != nil:
 		ev := t.Gatekeeper
-		attachSynthetic(&ev.BaseEvent, product, "gatekeeper_bypass", ev.FilePath, ev.ProcessPath, int(ev.PID), "", "gatekeeper", nil)
+		attachOCSF(&ev.BaseEvent, ocsf.FromGatekeeper(ocsf.GatekeeperInput{
+			EndpointID:    ev.EndpointID,
+			Hostname:      ev.Hostname,
+			OS:            ev.OS,
+			Timestamp:     ev.Timestamp.UnixMilli(),
+			FilePath:      ev.FilePath,
+			PID:           int(ev.PID),
+			ProcessPath:   ev.ProcessPath,
+			SigningStatus: ev.SigningStatus,
+		}, product))
 	case t.Dropped != nil:
 		ev := t.Dropped
-		attachSynthetic(&ev.BaseEvent, product, "dropped_events", "", ev.EventClass, 0, "", "dropped_events", map[string]any{
-			"gap_size": ev.GapSize,
-		})
+		attachOCSF(&ev.BaseEvent, ocsf.FromDropped(ocsf.DroppedInput{
+			EndpointID: ev.EndpointID,
+			Hostname:   ev.Hostname,
+			OS:         ev.OS,
+			Timestamp:  ev.Timestamp.UnixMilli(),
+			EventClass: ev.EventClass,
+			GapSize:    ev.GapSize,
+			LastSeq:    ev.LastSeq,
+			CurrentSeq: ev.CurrentSeq,
+		}, product))
 	case t.TIStatus != nil:
 		ev := t.TIStatus
-		attachSynthetic(&ev.BaseEvent, product, "ti_status", "", ev.Status+":"+ev.Reason, 0, "", "ti_status", nil)
+		attachOCSF(&ev.BaseEvent, ocsf.FromTIStatus(ocsf.TIStatusInput{
+			EndpointID: ev.EndpointID,
+			Hostname:   ev.Hostname,
+			OS:         ev.OS,
+			Timestamp:  ev.Timestamp.UnixMilli(),
+			Status:     ev.Status,
+			Reason:     ev.Reason,
+		}, product))
 	case t.FeatureStatus != nil:
 		ev := t.FeatureStatus
-		attachSynthetic(&ev.BaseEvent, product, "feature_status", "", "feature_coverage", 0, "", "feature_status", nil)
+		attachOCSF(&ev.BaseEvent, ocsf.FromFeatureStatus(ocsf.FeatureStatusInput{
+			EndpointID: ev.EndpointID,
+			Hostname:   ev.Hostname,
+			OS:         ev.OS,
+			Timestamp:  ev.Timestamp.UnixMilli(),
+			Features:   ev.Features,
+			Degraded:   ev.Degraded,
+		}, product))
 	}
 }
 
@@ -90,27 +206,6 @@ func attachOCSF(base *schema.BaseEvent, env ocsf.Envelope) {
 	if m := ocsf.EnvelopeToMap(env); len(m) > 0 {
 		base.OCSF = m
 	}
-}
-
-func attachSynthetic(base *schema.BaseEvent, product ocsf.Product, name, path, cmd string, pid int, user, kind string, extra map[string]any) {
-	if base == nil {
-		return
-	}
-	attachOCSF(base, ocsf.FromAnnotatedProcess(ocsf.AnnotatedProcessInput{
-		ProcessInput: ocsf.ProcessInput{
-			EndpointID:  base.EndpointID,
-			Hostname:    base.Hostname,
-			OS:          base.OS,
-			Timestamp:   base.Timestamp,
-			PID:         pid,
-			ProcessName: name,
-			ProcessPath: path,
-			CommandLine: cmd,
-			User:        user,
-		},
-		ActivityKind: kind,
-		Extra:        extra,
-	}, product))
 }
 
 func ocsfEnvelopeForTelemetry(t *Telemetry) map[string]any {
@@ -137,6 +232,8 @@ func ocsfEnvelopeForTelemetry(t *Telemetry) map[string]any {
 		return t.Compliance.OCSF
 	case t.ComplianceScan != nil:
 		return t.ComplianceScan.OCSF
+	case t.Privilege != nil:
+		return t.Privilege.OCSF
 	case t.Task != nil:
 		return t.Task.OCSF
 	case t.Service != nil:
@@ -265,5 +362,58 @@ func ocsfFromInjection(ev *schema.ProcessInjectionEvent, product ocsf.Product) o
 		TargetPID:   ev.TargetPID,
 		TargetImage: ev.TargetImage,
 		Technique:   ev.Technique,
+	}, product)
+}
+
+func ocsfFromComplianceFinding(ev *schema.ComplianceFindingEvent, product ocsf.Product) ocsf.Envelope {
+	return ocsf.FromComplianceFinding(ocsf.ComplianceInput{
+		EndpointID:  ev.EndpointID,
+		Hostname:    ev.Hostname,
+		OS:          ev.OS,
+		PolicyID:    ev.PolicyID,
+		PolicyName:  ev.PolicyName,
+		CheckID:     ev.CheckID,
+		Title:       ev.Title,
+		Description: ev.Description,
+		Remediation: ev.Remediation,
+		Result:      ev.Result,
+		Compliance:  ev.Compliance,
+		MITRE:       ev.MITRE,
+		Timestamp:   ev.Timestamp,
+	}, product)
+}
+
+func ocsfFromComplianceScan(ev *schema.ComplianceScanSummaryEvent, product ocsf.Product) ocsf.Envelope {
+	return ocsf.FromComplianceScan(ocsf.ComplianceScanInput{
+		EndpointID:         ev.EndpointID,
+		Hostname:           ev.Hostname,
+		OS:                 ev.OS,
+		Timestamp:          ev.Timestamp,
+		Passed:             ev.Passed,
+		Failed:             ev.Failed,
+		Errors:             ev.Errors,
+		Skipped:            ev.Skipped,
+		PoliciesTotal:      ev.PoliciesTotal,
+		PoliciesApplicable: ev.PoliciesApplicable,
+		DurationMs:         ev.DurationMs,
+	}, product)
+}
+
+func ocsfFromPrivilege(ev *schema.PrivilegeEvent, product ocsf.Product) ocsf.Envelope {
+	return ocsf.FromPrivilege(ocsf.PrivilegeInput{
+		EndpointID:  ev.EndpointID,
+		Hostname:    ev.Hostname,
+		OS:          ev.OS,
+		Timestamp:   ev.Timestamp.UnixMilli(),
+		PID:         int(ev.PID),
+		PPID:        int(ev.PPID),
+		Comm:        ev.Comm,
+		Operation:   ev.Operation,
+		SyscallNr:   ev.SyscallNr,
+		NewUID:      ev.NewUID,
+		NewGID:      ev.NewGID,
+		EffectiveID: ev.EffectiveID,
+		SavedID:     ev.SavedID,
+		CallerUID:   ev.CallerUID,
 	}, product)
 }
