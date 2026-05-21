@@ -4,12 +4,14 @@ import (
 	"net"
 	"strings"
 
+	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/schema"
 )
 
 // CortexObservables groups IOC-shaped strings expected by Cortex/TheHive analyzers.
 // Mirrors docs/integrations/cortex_misp_observable_contract.md.
 func CortexObservables(a schema.Alert) map[string][]string {
+	a = alert.WithOCSFContext(a)
 	out := map[string][]string{}
 	add := func(k, v string) {
 		v = strings.TrimSpace(v)

@@ -3,6 +3,7 @@ package detection
 import (
 	"time"
 
+	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/schema"
 	"github.com/razatechofficial/edr/pkg/events"
 )
@@ -14,6 +15,7 @@ func FromAlert(a *events.Alert) Detection {
 
 // FromSchemaAlert converts a baseline-rule alert into a [Detection] for validation and response consumers.
 func FromSchemaAlert(al schema.Alert) Detection {
+	al = alert.WithOCSFContext(al)
 	d := Detection{
 		ID:          al.AlertID,
 		Timestamp:   al.Timestamp,
