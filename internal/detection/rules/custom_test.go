@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"go.uber.org/zap"
@@ -84,6 +86,41 @@ func TestCustomEngineMultipleRules(t *testing.T) {
 	}
 	if alerts[0].RuleID != "R2" {
 		t.Errorf("RuleID = %q, want %q", alerts[0].RuleID, "R2")
+	}
+}
+
+func TestCustomEngineLoadRulesRecursive(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "ocsf", "imported")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootRule := `rules:
+  - id: ROOT-001
+    name: root rule
+    expression: process_name == "root.exe"
+    enabled: true
+`
+	nestedRule := `rules:
+  - id: NESTED-001
+    name: nested rule
+    expression: process_name == "nested.exe"
+    enabled: true
+`
+	if err := os.WriteFile(filepath.Join(dir, "root.yaml"), []byte(rootRule), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "nested.yaml"), []byte(nestedRule), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := newTestCustomEngine(t)
+	if err := engine.LoadRules(dir); err != nil {
+		t.Fatalf("LoadRules: %v", err)
+	}
+	if engine.Count() != 2 {
+		t.Fatalf("Count() = %d, want 2", engine.Count())
 	}
 }
 

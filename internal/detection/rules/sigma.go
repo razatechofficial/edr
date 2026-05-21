@@ -20,6 +20,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/razatechofficial/edr/pkg/events"
+	"github.com/razatechofficial/edr/pkg/ocsf"
 )
 
 // compiledSigmaSet is swapped atomically on successful reload.
@@ -173,8 +174,70 @@ func buildSigmaCategoryIndex(evals []*sigmaeval.RuleEvaluator) map[string][]*sig
 	return out
 }
 
-// sigmaEventCategory maps normalized telemetry event_type to a Sigma logsource category.
+func sigmaEvaluatorsForCategory(set *compiledSigmaSet, cat string) []*sigmaeval.RuleEvaluator {
+	if set == nil {
+		return nil
+	}
+	if cat == "" {
+		return set.evaluators
+	}
+	seen := make(map[string]struct{}, len(set.evaluators))
+	var out []*sigmaeval.RuleEvaluator
+	add := func(list []*sigmaeval.RuleEvaluator) {
+		for _, ev := range list {
+			if ev == nil {
+				continue
+			}
+			if _, ok := seen[ev.ID]; ok {
+				continue
+			}
+			seen[ev.ID] = struct{}{}
+			out = append(out, ev)
+		}
+	}
+	add(set.byCategory[cat])
+	add(set.byCategory["_uncat"])
+	if len(out) == 0 {
+		return set.evaluators
+	}
+	return out
+}
+
+// sigmaEventCategory maps normalized telemetry to a Sigma logsource category.
 func sigmaEventCategory(m map[string]interface{}) string {
+	action := strings.ToLower(stringField(m, "event.action", "esf_op"))
+	switch action {
+	case "signal":
+		return "process_signal"
+	case "xpc_connect":
+		return "xpc_connection"
+	}
+	if sub := stringField(m, "subsystem"); sub != "" {
+		switch sub {
+		case "com.apple.sudo":
+			return "sudo"
+		case "com.apple.TCC":
+			if cat := strings.ToLower(stringField(m, "category")); cat != "" {
+				return cat
+			}
+			return "tcc"
+		case "com.apple.xpc":
+			return "xpc"
+		case "com.apple.syspolicy":
+			return "syspolicy"
+		case "com.apple.launchd":
+			return "launchd"
+		case "com.apple.security.assessment":
+			return "gatekeeper"
+		case "com.apple.alf":
+			return "firewall_events"
+		case "com.apple.authorization":
+			return "authorization"
+		}
+	}
+	if cat := strings.ToLower(stringField(m, "category")); cat != "" {
+		return cat
+	}
 	t := strings.ToLower(stringField(m, "event_type", "type"))
 	switch t {
 	case "process":
@@ -202,12 +265,7 @@ func (e *SigmaEngine) Evaluate(event map[string]interface{}) []*events.Alert {
 		return nil
 	}
 	cat := sigmaEventCategory(event)
-	evals := set.evaluators
-	if cat != "" {
-		if sub := set.byCategory[cat]; len(sub) > 0 {
-			evals = sub
-		}
-	}
+	evals := sigmaEvaluatorsForCategory(set, cat)
 
 	var alerts []*events.Alert
 	ctx := context.Background()
@@ -328,13 +386,15 @@ func (e *SigmaEngine) EnabledRuleCount() int {
 	return n
 }
 
-// EventToMap converts a typed event struct to a flat map.
+// EventToMap converts a typed event struct to a flat map with Sigma field
+// aliases and OCSF detection enrichments applied.
 func EventToMap(event interface{}) map[string]interface{} {
 	if event == nil {
 		return nil
 	}
 	if m, ok := event.(map[string]interface{}); ok {
-		return m
+		m = normalizeSigmaEvent(m)
+		return ocsf.EnrichDetectionMap(m)
 	}
 
 	data, err := json.Marshal(event)
@@ -345,7 +405,8 @@ func EventToMap(event interface{}) map[string]interface{} {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil
 	}
-	return m
+	m = normalizeSigmaEvent(m)
+	return ocsf.EnrichDetectionMap(m)
 }
 
 // WatchAndReload watches the rules directory for file changes and reloads.
