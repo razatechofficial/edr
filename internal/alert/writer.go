@@ -18,10 +18,11 @@ import (
 )
 
 type Writer struct {
-	alertPath string
-	auditPath string
-	maxBytes  int64
-	encKey    []byte // 32-byte AES-256 key; nil = plaintext
+	alertPath      string
+	auditPath      string
+	maxBytes       int64
+	encKey         []byte // 32-byte AES-256 key; nil = plaintext
+	productVersion string
 }
 
 func NewWriter(alertPath, auditPath string, maxBytes int64) *Writer {
@@ -29,6 +30,11 @@ func NewWriter(alertPath, auditPath string, maxBytes int64) *Writer {
 		maxBytes = 5 * 1024 * 1024
 	}
 	return &Writer{alertPath: alertPath, auditPath: auditPath, maxBytes: maxBytes}
+}
+
+// SetProductVersion sets the agent version label embedded in exported OCSF alerts.
+func (w *Writer) SetProductVersion(version string) {
+	w.productVersion = version
 }
 
 // NewEncryptedWriter creates a writer that encrypts each rotated alert file
@@ -42,7 +48,11 @@ func NewEncryptedWriter(alertPath, auditPath string, maxBytes int64, encKey []by
 }
 
 func (w *Writer) WriteAlert(v schema.Alert) error {
-	return w.appendJSON(w.alertPath, v)
+	body, err := MarshalOCSF(v, w.productVersion)
+	if err != nil {
+		return err
+	}
+	return w.appendBytes(w.alertPath, body)
 }
 
 func (w *Writer) WriteAudit(v schema.AuditRecord) error {
@@ -50,6 +60,14 @@ func (w *Writer) WriteAudit(v schema.AuditRecord) error {
 }
 
 func (w *Writer) appendJSON(path string, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return w.appendBytes(path, b)
+}
+
+func (w *Writer) appendBytes(path string, b []byte) error {
 	if path == "" {
 		return fmt.Errorf("alert writer: output path is empty (set logging.alert_file / logging.audit_file or data_dir)")
 	}
@@ -66,10 +84,6 @@ func (w *Writer) appendJSON(path string, v any) error {
 		return err
 	}
 	defer f.Close()
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
 	if _, err := f.Write(append(b, '\n')); err != nil {
 		return err
 	}
