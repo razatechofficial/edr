@@ -23,9 +23,10 @@ import (
 // fsnotify (inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows).
 // Accumulated events are returned on each Collect call and the buffer is drained.
 type FileCollector struct {
-	endpointID string
-	watchPaths []string
-	watcher    *fsnotify.Watcher
+	endpointID     string
+	watchPaths     []string
+	ignorePatterns []string
+	watcher        *fsnotify.Watcher
 	hostname   string
 	fimDiff    *forensics.FIMDiffCache
 
@@ -82,11 +83,12 @@ func DefaultFIMPaths() []string {
 }
 
 // NewFileCollector creates a file integrity monitor watching the given paths.
-// If paths is empty, DefaultFIMPaths() are used.
+// When paths is empty, ResolveFIMPaths(cfg) uses the configured standard preset.
 func NewFileCollector(endpointID string, paths []string, cfg config.Config) (*FileCollector, error) {
 	if len(paths) == 0 {
-		paths = DefaultFIMPaths()
+		paths = ResolveFIMPaths(cfg)
 	}
+	ignorePatterns := ResolveFIMIgnorePatterns(cfg)
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -96,9 +98,10 @@ func NewFileCollector(endpointID string, paths []string, cfg config.Config) (*Fi
 	hostname, _ := os.Hostname()
 
 	fc := &FileCollector{
-		endpointID: endpointID,
-		watchPaths: paths,
-		watcher:    watcher,
+		endpointID:     endpointID,
+		watchPaths:     paths,
+		ignorePatterns: ignorePatterns,
+		watcher:        watcher,
 		hostname:   hostname,
 		done:       make(chan struct{}),
 		fimDiff: forensics.NewFIMDiffCache(forensics.FIMDiffConfig{
@@ -184,6 +187,9 @@ func (fc *FileCollector) watchLoop() {
 }
 
 func (fc *FileCollector) handleFSEvent(event fsnotify.Event) {
+	if shouldIgnoreFIMEvent(event.Name, fc.ignorePatterns) {
+		return
+	}
 	op := mapFSOperation(event.Op)
 	if op == "" {
 		return
