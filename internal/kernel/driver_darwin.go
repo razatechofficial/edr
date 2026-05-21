@@ -16,7 +16,8 @@ package kernel
 #include <string.h>
 
 extern void goESFEventCallback(int eventType, int pid, int ppid, int uid, int gid,
-    const char *comm, const char *path, const char *exec_args, const char *exec_env);
+    const char *comm, const char *path, const char *exec_args, const char *exec_env,
+    int extra_int, const char *detail);
 extern int goESFAuthCallback(int eventType, int pid, const char *comm, const char *path, int budget_ms);
 
 // esf_auth_budget_ms converts ESF message deadline to remaining milliseconds (best-effort).
@@ -258,8 +259,70 @@ static char* esf_event_path(const es_message_t *msg) {
     case ES_EVENT_TYPE_NOTIFY_BTM_LAUNCH_ITEM_REMOVE:
         return safe_proc_exec_path_copy(msg->process);
 #endif
+#ifdef ES_EVENT_TYPE_NOTIFY_XPC_CONNECT
+    case ES_EVENT_TYPE_NOTIFY_XPC_CONNECT:
+        return esf_copy_string(msg->event.xpc_connect.service_name);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_CS_INVALIDATED
+    case ES_EVENT_TYPE_NOTIFY_CS_INVALIDATED:
+        return safe_proc_exec_path_copy(msg->process);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_TCC_MODIFY
+    case ES_EVENT_TYPE_NOTIFY_TCC_MODIFY:
+        return safe_proc_exec_path_copy(msg->process);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_GATEKEEPER_USER_OVERRIDE
+    case ES_EVENT_TYPE_NOTIFY_GATEKEEPER_USER_OVERRIDE:
+        return safe_file_path_copy(msg->event.gatekeeper_user_override.file);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_XP_MALWARE_DETECTED
+    case ES_EVENT_TYPE_NOTIFY_XP_MALWARE_DETECTED:
+        return safe_file_path_copy(msg->event.xp_malware_detected.file);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_XP_MALWARE_REMEDIATED
+    case ES_EVENT_TYPE_NOTIFY_XP_MALWARE_REMEDIATED:
+        return safe_file_path_copy(msg->event.xp_malware_remediated.file);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_PROFILE_ADD
+    case ES_EVENT_TYPE_NOTIFY_PROFILE_ADD:
+        return esf_copy_string(msg->event.profile_add.profile_path);
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_PROFILE_REMOVE
+    case ES_EVENT_TYPE_NOTIFY_PROFILE_REMOVE:
+        return esf_copy_string(msg->event.profile_remove.profile_path);
+#endif
     default:
         return strdup("");
+    }
+}
+
+static void esf_extra_fields(const es_message_t *msg, int *extra_int, char **detail_out) {
+    *extra_int = 0;
+    *detail_out = strdup("");
+    if (msg == NULL || detail_out == NULL) {
+        return;
+    }
+    switch (msg->event_type) {
+    case ES_EVENT_TYPE_AUTH_SIGNAL:
+        *extra_int = (int)msg->event.signal.sig;
+        break;
+    case ES_EVENT_TYPE_NOTIFY_SIGNAL:
+        *extra_int = (int)msg->event.signal.sig;
+        break;
+#ifdef ES_EVENT_TYPE_NOTIFY_XPC_CONNECT
+    case ES_EVENT_TYPE_NOTIFY_XPC_CONNECT:
+        free(*detail_out);
+        *detail_out = esf_copy_string(msg->event.xpc_connect.service_name);
+        break;
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_TCC_MODIFY
+    case ES_EVENT_TYPE_NOTIFY_TCC_MODIFY:
+        free(*detail_out);
+        *detail_out = esf_copy_string(msg->event.tcc_modify.service);
+        break;
+#endif
+    default:
+        break;
     }
 }
 
@@ -298,11 +361,19 @@ static void esf_handle_message(es_client_t *client, const es_message_t *msg) {
     if (!exec_env) {
         exec_env = strdup("");
     }
+    int extra_int = 0;
+    char *detail = NULL;
+    esf_extra_fields(msg, &extra_int, &detail);
+    if (!detail) {
+        detail = strdup("");
+    }
     goESFEventCallback((int)msg->event_type, (int)pid, (int)ppid,
         (int)uid, (int)gid,
         comm ? comm : "",
         path ? path : "",
-        exec_args, exec_env);
+        exec_args, exec_env,
+        extra_int, detail ? detail : "");
+    free(detail);
     free(exec_args);
     free(exec_env);
 
@@ -397,6 +468,45 @@ static int esf_subscribe_all(void) {
 #endif
 #ifdef ES_EVENT_TYPE_NOTIFY_CS_INVALIDATED
         ES_EVENT_TYPE_NOTIFY_CS_INVALIDATED,
+#endif
+#ifdef ES_EVENT_TYPE_AUTH_SETUID
+        ES_EVENT_TYPE_AUTH_SETUID,
+#endif
+#ifdef ES_EVENT_TYPE_AUTH_SETGID
+        ES_EVENT_TYPE_AUTH_SETGID,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_SETUID
+        ES_EVENT_TYPE_NOTIFY_SETUID,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_SETGID
+        ES_EVENT_TYPE_NOTIFY_SETGID,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_TCC_MODIFY
+        ES_EVENT_TYPE_NOTIFY_TCC_MODIFY,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_GATEKEEPER_USER_OVERRIDE
+        ES_EVENT_TYPE_NOTIFY_GATEKEEPER_USER_OVERRIDE,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_XP_MALWARE_DETECTED
+        ES_EVENT_TYPE_NOTIFY_XP_MALWARE_DETECTED,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_XP_MALWARE_REMEDIATED
+        ES_EVENT_TYPE_NOTIFY_XP_MALWARE_REMEDIATED,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_SCREENSHARING_ATTACH
+        ES_EVENT_TYPE_NOTIFY_SCREENSHARING_ATTACH,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_SCREENSHARING_DETACH
+        ES_EVENT_TYPE_NOTIFY_SCREENSHARING_DETACH,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_OD_USER_ADD
+        ES_EVENT_TYPE_NOTIFY_OD_USER_ADD,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_OD_USER_REMOVE
+        ES_EVENT_TYPE_NOTIFY_OD_USER_REMOVE,
+#endif
+#ifdef ES_EVENT_TYPE_NOTIFY_OD_GROUP_REMOVE
+        ES_EVENT_TYPE_NOTIFY_OD_GROUP_REMOVE,
 #endif
     };
     es_return_t ret = es_subscribe(_esf_client, evts, sizeof(evts)/sizeof(evts[0]));
@@ -494,15 +604,17 @@ const (
 
 // ESFNotifyPayload carries a notify/auth-adjacent ES event off the ESF callback thread.
 type ESFNotifyPayload struct {
-	EventType int
-	PID       int
-	PPID      int
-	UID       int
-	GID       int
-	Comm      string
-	Path      string
-	Args      string
-	Env       string
+	EventType    int
+	PID          int
+	PPID         int
+	UID          int
+	GID          int
+	Comm         string
+	Path         string
+	Args         string
+	Env          string
+	SignalNumber int
+	Detail       string
 }
 
 // globalESF holds the active ESFDriver instance for C callback routing.
@@ -1109,6 +1221,15 @@ func mapESFEventType(raw int) events.EventType {
 	}
 }
 
+func esfIsSignalType(raw int) bool {
+	switch raw {
+	case int(C.ES_EVENT_TYPE_AUTH_SIGNAL), int(C.ES_EVENT_TYPE_NOTIFY_SIGNAL):
+		return true
+	default:
+		return false
+	}
+}
+
 // esfOperationName returns the lowercase operation name for a raw ESF event
 // type. It is used by the userland mapper to populate FileEvent.Operation
 // and ProcessEvent.ProcessName so detection rules see explicit op names
@@ -1154,7 +1275,7 @@ func esfOperationName(raw int) string {
 	case int(C.ES_EVENT_TYPE_AUTH_MOUNT):
 		return "mount"
 	}
-	return "unknown"
+	return esfOperationNameFallback(raw)
 }
 
 func (d *ESFDriver) clientCreateError(result int) error {

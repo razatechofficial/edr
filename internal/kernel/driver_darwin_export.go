@@ -13,7 +13,8 @@ import (
 
 //export goESFEventCallback
 func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C.int,
-	comm *C.char, pathStr *C.char, execArgs *C.char, execEnv *C.char) {
+	comm *C.char, pathStr *C.char, execArgs *C.char, execEnv *C.char,
+	extraInt C.int, detail *C.char) {
 
 	d := globalESF.Load()
 	if d == nil || d.notifyCh == nil {
@@ -59,15 +60,17 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 	}
 
 	payload := ESFNotifyPayload{
-		EventType: int(eventType),
-		PID:       int(pid),
-		PPID:      int(ppid),
-		UID:       int(uid),
-		GID:       int(gid),
-		Comm:      safeGoString(comm),
-		Path:      safeGoString(pathStr),
-		Args:      safeGoString(execArgs),
-		Env:       safeGoString(execEnv),
+		EventType:    int(eventType),
+		PID:          int(pid),
+		PPID:         int(ppid),
+		UID:          int(uid),
+		GID:          int(gid),
+		Comm:         safeGoString(comm),
+		Path:         safeGoString(pathStr),
+		Args:         safeGoString(execArgs),
+		Env:          safeGoString(execEnv),
+		SignalNumber: int(extraInt),
+		Detail:       safeGoString(detail),
 	}
 	select {
 	case d.notifyCh <- payload:
@@ -103,6 +106,23 @@ func processESFNotifyPayload(d *ESFDriver, p *ESFNotifyPayload) {
 	envelope["path"] = pathGo
 	envelope["args"] = argsDisplay
 	envelope["exec_env"] = envTok
+	if p.SignalNumber != 0 {
+		envelope["signal_number"] = p.SignalNumber
+	}
+	if p.Detail != "" {
+		envelope["xpc_service"] = p.Detail
+	}
+	if esfIsSignalType(p.EventType) {
+		envelope["target_image"] = pathGo
+		if p.Comm != "" {
+			envelope["path"] = p.Comm
+			envelope["process_path"] = p.Comm
+		}
+	} else if p.Detail != "" && esfOperationNameFallback(p.EventType) == "xpc_connect" {
+		if p.Comm != "" {
+			envelope["process_path"] = p.Comm
+		}
+	}
 	classifyAppleScriptEnvelope(envelope, pathGo, argsDisplay)
 	if esfIsExecEvent(p.EventType) {
 		if pathGo != "" {
