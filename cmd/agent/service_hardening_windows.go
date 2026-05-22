@@ -12,14 +12,18 @@ import (
 	"unsafe"
 
 	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/selfprotect"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
 const serviceHardeningPosturePath = `C:\ProgramData\EDR Agent\service_hardening_posture.json`
 
-// SERVICE_LAUNCH_PROTECTED_WINDOWS_LIGHT (0x2) — SCM launch protection tier.
+// SERVICE_LAUNCH_PROTECTED_WINDOWS_LIGHT (0x2) — SCM launch protection tier (legacy generic PPL).
 const serviceLaunchProtectedWindowsLight = 0x00000002
+
+// SERVICE_LAUNCH_PROTECTED_ANTIMALWARE_LIGHT (0x3) — AM-PPL service launch tier.
+const serviceLaunchProtectedAntimalwareLight = 0x00000003
 
 // serviceRequiredPrivilegesInfo mirrors SERVICE_REQUIRED_PRIVILEGES_INFO.
 type serviceRequiredPrivilegesInfo struct {
@@ -127,6 +131,7 @@ func applyWindowsServiceHardening(s *mgr.Service, exePath string, c config.Confi
 		"install_dir_acl_attempted":  false,
 		"required_privileges_set":    false,
 		"service_dacl_hardened":      false,
+		"launch_protected_tier":      "none",
 	}
 	if s == nil {
 		out["reason"] = "nil_service"
@@ -166,12 +171,42 @@ func applyWindowsServiceHardening(s *mgr.Service, exePath string, c config.Confi
 		out["required_privileges_set"] = true
 	}
 
-	if c.Monitoring.WindowsServiceLaunchProtected {
-		if lerr := setServiceLaunchProtected(s.Handle, serviceLaunchProtectedWindowsLight); lerr != nil {
+	launchLevel, launchTier, launchEnabled := selfprotect.ResolveLaunchProtectedTier(
+		c.Monitoring.WindowsServiceLaunchProtectedTier,
+		c.Monitoring.WindowsServiceLaunchProtected,
+	)
+	out["launch_protected_tier"] = launchTier
+	out["wdm_protect_device"] = `\\.\EdrProtect`
+	out["wdm_protect_inf"] = "platform/windows/driver/edr_protect.inf"
+	out["elam_inf"] = "platform/windows/elam/edr_elam.inf"
+	out["signing_pipeline"] = "platform/windows/signing/pipeline.json"
+	if launchEnabled {
+		if lerr := setServiceLaunchProtected(s.Handle, launchLevel); lerr != nil {
 			out["launch_protected_error"] = lerr.Error()
 		} else {
-			out["launch_protected"] = "windows_light"
+			out["launch_protected"] = launchTier
+			out["launch_protected_scm_level"] = launchLevel
 		}
+	}
+
+	exePathForPPL := exePath
+	if exePathForPPL == "" {
+		exePathForPPL, _ = os.Executable()
+	}
+	ppl := selfprotect.PPLPostureSnapshot(exePathForPPL)
+	out["ppl_runtime_level"] = ppl.ProtectionLevel
+	out["ppl_runtime_level_name"] = ppl.LevelName
+	out["ppl_is_antimalware"] = ppl.IsAntimalwarePPL
+	out["authenticode_signed"] = ppl.AuthenticodeSigned
+	out["antimalware_eku"] = ppl.AntimalwareEKU
+	if ppl.AuthenticodeSubject != "" {
+		out["authenticode_subject"] = ppl.AuthenticodeSubject
+	}
+	if ppl.SigningNote != "" {
+		out["signing_prerequisite"] = ppl.SigningNote
+	}
+	if launchTier == "antimalware_light" && !ppl.AntimalwareEKU {
+		out["signing_action_required"] = "Deploy binary signed with Microsoft Antimalware Authenticode EKU (MVI attestation) before AM-PPL can activate"
 	}
 
 	if c.Monitoring.WindowsServiceHardeningACL {
