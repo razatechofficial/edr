@@ -576,11 +576,27 @@ func assertWindowsServiceHardeningDepth(cfg *config.Config) []monitoringAssertio
 	}
 	rp, _ := m["required_privileges_set"].(bool)
 	sid, _ := m["service_sid_type"].(string)
+	tier, _ := m["launch_protected_tier"].(string)
 	if !rp || sid != "restricted" {
 		return []monitoringAssertion{{
 			Name:   "windows_service_hardening_depth",
 			Detail: fmt.Sprintf("required_privileges_set=%v service_sid_type=%q want true+restricted", rp, sid),
 			Failed: true,
+		}}
+	}
+	if cfg.Monitoring.WindowsPPLRequired || tier == "antimalware_light" {
+		isAM, _ := m["ppl_is_antimalware"].(bool)
+		eku, _ := m["antimalware_eku"].(bool)
+		if !isAM || !eku {
+			return []monitoringAssertion{{
+				Name:   "windows_am_ppl_posture",
+				Detail: fmt.Sprintf("launch_tier=%q ppl_is_antimalware=%v antimalware_eku=%v", tier, isAM, eku),
+				Failed: cfg.Monitoring.WindowsPPLRequired,
+			}}
+		}
+		return []monitoringAssertion{{
+			Name:   "windows_am_ppl_posture",
+			Detail: "AM-PPL runtime + antimalware EKU ok",
 		}}
 	}
 	return []monitoringAssertion{{

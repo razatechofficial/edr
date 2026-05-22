@@ -3,22 +3,11 @@
 package kernel
 
 import (
-	"os/exec"
+	"errors"
 )
 
-// ensureTIPPLService attempts to bootstrap an optional helper service.
-// Production PPL still requires ELAM/PPL signing; this is best-effort fallback.
+// ensureTIPPLService is deprecated; AM-PPL is granted via MVI-signed user-mode
+// service (launch_protected_tier=antimalware_light), not a helper service.
 func ensureTIPPLService() error {
-	steps := [][]string{
-		{"sc", "create", "EdrnTISvc", "binPath=", `%SystemRoot%\System32\edrn_ti.exe`, "type=", "own", "start=", "auto"},
-		{"sc", "privs", "EdrnTISvc", "SeDebugPrivilege"},
-		{"sc", "start", "EdrnTISvc"},
-	}
-	for _, argv := range steps {
-		cmd := exec.Command(argv[0], argv[1:]...)
-		if err := cmd.Run(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return errors.New("kernel: ETW-TI full provider requires AM-PPL signed agent (MVI); see platform/windows/signing/pipeline.json")
 }

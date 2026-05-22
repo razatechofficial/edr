@@ -11,6 +11,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/razatechofficial/edr/internal/selfprotect"
 	"golang.org/x/sys/windows"
 )
 
@@ -96,8 +97,12 @@ func (d *ETWDriver) probeThreatIntelProviders() bool {
 		return false
 	}
 	if err := trySubscribeETWTI(d.sessions[0]); err == nil {
+		if lvl, lerr := selfprotect.CurrentProtectionLevel(); lerr == nil && selfprotect.IsAntimalwareProtectionLevel(lvl) {
+			d.tiCap.setStatus("active_am_ppl", "")
+		} else {
+			d.tiCap.setStatus("active_unprivileged", "")
+		}
 		d.tiCap.set(true)
-		d.tiCap.setStatus("active_unprivileged", "")
 		d.emitTIStatusEvent()
 		return true
 	}
