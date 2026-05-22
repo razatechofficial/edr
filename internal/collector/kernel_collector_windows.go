@@ -13,6 +13,7 @@ import (
 
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/kernel"
+	"github.com/razatechofficial/edr/internal/selfprotect"
 	"github.com/razatechofficial/edr/internal/telemetryenrich"
 	"golang.org/x/sys/windows"
 )
@@ -150,6 +151,15 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if sh := kernel.WindowsServiceHardeningPosture(); sh != nil {
 		extras["service_hardening_posture"] = sh
 	}
+	ppl := selfprotect.PPLPostureSnapshot("")
+	extras["ppl_runtime"] = map[string]any{
+		"protection_level":    ppl.ProtectionLevel,
+		"level_name":          ppl.LevelName,
+		"is_antimalware_ppl":  ppl.IsAntimalwarePPL,
+		"authenticode_signed": ppl.AuthenticodeSigned,
+		"antimalware_eku":     ppl.AntimalwareEKU,
+	}
+	extras["wdm_protect"] = kernel.GlobalWDMProtect().Health()
 	controlReady := kc.controlPlaneReady(extras)
 	extras["control_plane_required"] = kc.cfg.Monitoring.WindowsControlPlaneRequired
 	extras["control_plane_ready"] = controlReady

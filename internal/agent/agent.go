@@ -30,6 +30,7 @@ import (
 	mlpkg "github.com/razatechofficial/edr/internal/detection/ml"
 	"github.com/razatechofficial/edr/internal/forwarder"
 	"github.com/razatechofficial/edr/internal/forensics"
+	"github.com/razatechofficial/edr/internal/kernel"
 	"github.com/razatechofficial/edr/internal/pidfile"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/rules"
@@ -605,6 +606,18 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	selfprotect.CheckPrivileges(a.zapLogger)
+
+	if runtime.GOOS == "windows" && a.cfg.Monitoring.WindowsWDMProtectEnabled {
+		if dev := strings.TrimSpace(a.cfg.Monitoring.WindowsWDMProtectDevice); dev != "" {
+			kernel.GlobalWDMProtect().SetDevice(dev)
+		}
+		posture := kernel.RegisterCurrentProcessWithWDM()
+		if conn, _ := posture["connected"].(bool); conn {
+			a.logger.Info("wdm process protection active", "posture", posture)
+		} else {
+			a.logger.Warn("wdm process protection unavailable (install signed edr_protect.sys)", "posture", posture)
+		}
+	}
 
 	if a.antiDebug != nil {
 		go func() {
