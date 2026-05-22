@@ -179,6 +179,10 @@ func runAgent() error {
 	// surfaces success/failure per policy so an operator can verify.
 	_ = applyProcessMitigations(logger)
 
+	if err := validateWindowsPPLBoot(cfg, logger); err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
