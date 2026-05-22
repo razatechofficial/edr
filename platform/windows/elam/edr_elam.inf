@@ -1,0 +1,52 @@
+;
+; edr_elam.sys — Early Launch Anti-Malware boot-start driver scaffold
+; Requires Microsoft Hardware Dev Center attestation signing before deployment.
+;
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = EarlyLaunch
+ClassGuid   = {D2313345-B905-42BD-852A-DF3E174CDD7C}
+Provider    = %ManufacturerName%
+CatalogFile = edr_elam.cat
+DriverVer   = 01/01/2026,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+edr_elam.sys = 1
+
+[Manufacturer]
+%ManufacturerName% = Standard,NTamd64
+
+[Standard.NTamd64]
+%DeviceDesc% = EdrElam_Install, Root\EdrElam
+
+[EdrElam_Install.NT]
+CopyFiles = EdrElam_CopyFiles
+
+[EdrElam_CopyFiles]
+edr_elam.sys
+
+[EdrElam_Install.NT.Services]
+AddService = EdrElam,%SPSVCINST_ASSOCSERVICE%,EdrElam_Service
+
+[EdrElam_Service]
+DisplayName    = %ServiceDesc%
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 0                  ; SERVICE_BOOT_START
+ErrorControl   = 1                  ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\edr_elam.sys
+LoadOrderGroup = Early-Launch
+
+[Strings]
+ManufacturerName = "RazaTech EDR"
+DiskName         = "EDR ELAM Driver"
+DeviceDesc       = "EDR Early Launch Anti-Malware"
+ServiceDesc      = "EDR ELAM"
+SPSVCINST_ASSOCSERVICE = 0x00000002
