@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "description": "Windows AM-PPL and ELAM signing pipeline for EDR agent self-preservation",
+  "prerequisites": [
+    {
+      "id": "mvi",
+      "name": "Microsoft Virus Initiative (MVI) membership",
+      "required_for": ["am_ppl_user_mode", "etw_threat_intelligence", "elam_driver"]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "edr-agent.exe",
+      "type": "user_mode_service",
+      "signing": {
+        "authenticode_eku": "1.3.6.1.4.1.311.61.4.1",
+        "notes": "Microsoft Antimalware Authenticode EKU via MVI attestation"
+      },
+      "enables": [
+        "SERVICE_LAUNCH_PROTECTED_ANTIMALWARE_LIGHT",
+        "Microsoft-Windows-Threat-Intelligence ETW provider",
+        "PsProtectedSignerAntimalware-Light process protection"
+      ]
+    },
+    {
+      "id": "edr_protect.sys",
+      "type": "wdm_kernel",
+      "path": "platform/windows/driver/edr_protect.c",
+      "inf": "platform/windows/driver/edr_protect.inf",
+      "signing": {
+        "portal": "Microsoft Hardware Dev Center",
+        "method": "WHQL attestation or HLK",
+        "start_type": "demand_start"
+      },
+      "enables": [
+        "ObRegisterCallbacks handle stripping on registered agent PIDs"
+      ]
+    },
+    {
+      "id": "edr_elam.sys",
+      "type": "elam_boot_start",
+      "path": "platform/windows/elam/edr_elam.c",
+      "inf": "platform/windows/elam/edr_elam.inf",
+      "signing": {
+        "portal": "Microsoft Hardware Dev Center",
+        "method": "ELAM attestation signing",
+        "start_type": "boot_start",
+        "class_guid": "D2313345-B905-42BD-852A-DF3E174CDD7C"
+      },
+      "enables": [
+        "Boot-start driver classification",
+        "Early Launch Antimalware trust chain"
+      ]
+    }
+  ],
+  "deployment_order": [
+    "Obtain MVI membership and Antimalware Authenticode certificate",
+    "Sign edr-agent.exe with Antimalware EKU",
+    "Install agent service with windows_service_launch_protected_tier=antimalware_light",
+    "Sign edr_protect.sys and install via edr_protect.inf",
+    "Sign edr_elam.sys and install via edr_elam.inf (boot-start)",
+    "Enable monitoring.windows_ppl_required=true in production config"
+  ],
+  "verification": {
+    "posture_keys": [
+      "ppl_is_antimalware",
+      "antimalware_eku",
+      "wdm_protect.connected",
+      "wdm_protect.ob_callbacks",
+      "ti_status"
+    ],
+    "expected_ti_status_when_ppl_active": "active_am_ppl"
+  }
+}
