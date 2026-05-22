@@ -201,6 +201,22 @@ func TestValidateMonitoringWindowsServiceDACLRequiresHardening(t *testing.T) {
 	}
 }
 
+func TestValidateMonitoringWindowsPPLRequired(t *testing.T) {
+	cfg := Defaults()
+	cfg.Monitoring.WindowsPPLRequired = true
+	if err := Validate(&cfg); err == nil {
+		t.Fatal("expected validation error when windows_ppl_required without hardening/tier")
+	}
+
+	cfg = Defaults()
+	cfg.Monitoring.WindowsServiceHardening = true
+	cfg.Monitoring.WindowsPPLRequired = true
+	cfg.Monitoring.WindowsServiceLaunchProtectedTier = "antimalware_light"
+	if err := Validate(&cfg); err != nil {
+		t.Fatalf("expected valid AM-PPL production config: %v", err)
+	}
+}
+
 func TestValidateLogTargetsOSCompatibility(t *testing.T) {
 	cfg := Defaults()
 	if runtime.GOOS != "windows" {

@@ -397,8 +397,16 @@ type Config struct {
 		WindowsServiceHardeningACL bool `yaml:"windows_service_hardening_acl"`
 		// WindowsServiceDaclHardened applies service object DACL hardening (deny stop/delete for non-admin/non-SYSTEM).
 		WindowsServiceDaclHardened bool `yaml:"windows_service_dacl_hardened"`
-		// WindowsServiceLaunchProtected sets SERVICE_LAUNCH_PROTECTED (Windows Light) during install when hardening is enabled.
+		// WindowsServiceLaunchProtected sets SERVICE_LAUNCH_PROTECTED (Windows Light) during install when hardening is enabled (legacy; prefer windows_service_launch_protected_tier).
 		WindowsServiceLaunchProtected bool `yaml:"windows_service_launch_protected"`
+		// WindowsServiceLaunchProtectedTier selects SCM launch protection: none | windows_light | antimalware_light (AM-PPL).
+		WindowsServiceLaunchProtectedTier string `yaml:"windows_service_launch_protected_tier" env:"EDR_MONITORING_WIN_LAUNCH_PROTECTED_TIER"`
+		// WindowsPPLRequired fails agent startup when the process is not running as AM-PPL with Antimalware Authenticode EKU.
+		WindowsPPLRequired bool `yaml:"windows_ppl_required" env:"EDR_MONITORING_WIN_PPL_REQUIRED"`
+		// WindowsWDMProtectEnabled registers the agent PID with edr_protect.sys (ObRegisterCallbacks) when the signed driver is installed.
+		WindowsWDMProtectEnabled bool `yaml:"windows_wdm_protect_enabled" env:"EDR_MONITORING_WIN_WDM_PROTECT"`
+		// WindowsWDMProtectDevice user-mode device path for edr_protect.sys (default \\.\EdrProtect).
+		WindowsWDMProtectDevice string `yaml:"windows_wdm_protect_device" env:"EDR_MONITORING_WIN_WDM_DEVICE"`
 		// HealthSnapshotSec writes monitoring_health.json under data_dir when > 0.
 		HealthSnapshotSec int `yaml:"health_snapshot_sec"`
 		// RequireKernel, when true, makes monitoring validation fail if the kernel source is absent/unavailable when kernel tier is configured.
@@ -670,6 +678,10 @@ func Defaults() Config {
 	cfg.Monitoring.WindowsServiceHardeningACL = false
 	cfg.Monitoring.WindowsServiceDaclHardened = false
 	cfg.Monitoring.WindowsServiceLaunchProtected = false
+	cfg.Monitoring.WindowsServiceLaunchProtectedTier = ""
+	cfg.Monitoring.WindowsPPLRequired = false
+	cfg.Monitoring.WindowsWDMProtectEnabled = true
+	cfg.Monitoring.WindowsWDMProtectDevice = `\\.\EdrProtect`
 	cfg.Monitoring.LinuxRootcheckEnabled = false
 	cfg.Monitoring.LinuxRootcheckIntervalSec = 300
 	cfg.Monitoring.LinuxRootcheckSUIDPrefixes = []string{"/usr", "/bin", "/sbin", "/opt"}

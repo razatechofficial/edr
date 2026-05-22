@@ -176,6 +176,25 @@ func Validate(cfg *Config) error {
 	if cfg.Monitoring.WindowsServiceDaclHardened && !cfg.Monitoring.WindowsServiceHardening {
 		errs.add("monitoring.windows_service_dacl_hardened=true requires monitoring.windows_service_hardening=true")
 	}
+	if cfg.Monitoring.WindowsPPLRequired {
+		if !cfg.Monitoring.WindowsServiceHardening {
+			errs.add("monitoring.windows_ppl_required=true requires monitoring.windows_service_hardening=true")
+		}
+		tier := strings.ToLower(strings.TrimSpace(cfg.Monitoring.WindowsServiceLaunchProtectedTier))
+		if tier == "" && !cfg.Monitoring.WindowsServiceLaunchProtected {
+			errs.add("monitoring.windows_ppl_required=true requires monitoring.windows_service_launch_protected_tier=antimalware_light")
+		}
+		if tier != "" && tier != "antimalware_light" && tier != "antimalware-light" && tier != "am-ppl" && tier != "ppl" && tier != "antimalware" {
+			errs.add("monitoring.windows_ppl_required=true requires monitoring.windows_service_launch_protected_tier=antimalware_light (got %q)", tier)
+		}
+	}
+	if tier := strings.ToLower(strings.TrimSpace(cfg.Monitoring.WindowsServiceLaunchProtectedTier)); tier != "" {
+		switch tier {
+		case "none", "off", "false", "0", "windows", "windows_light", "windows-light", "light", "antimalware", "antimalware_light", "antimalware-light", "am-ppl", "ppl":
+		default:
+			errs.add("monitoring.windows_service_launch_protected_tier must be none, windows_light, or antimalware_light (got %q)", tier)
+		}
+	}
 
 	for i, lt := range cfg.Monitoring.LogTargets {
 		t := strings.ToLower(strings.TrimSpace(lt.Type))
