@@ -1,0 +1,52 @@
+;
+; edr_protect.sys — WDM ObRegisterCallbacks process protection
+; Service type: demand-start kernel driver (loads after agent registers PID)
+;
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = edr_protect.cat
+DriverVer   = 01/01/2026,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+edr_protect.sys = 1
+
+[Manufacturer]
+%ManufacturerName% = Standard,NTamd64
+
+[Standard.NTamd64]
+%DeviceDesc% = EdrProtect_Install, Root\EdrProtect
+
+[EdrProtect_Install.NT]
+CopyFiles = EdrProtect_CopyFiles
+
+[EdrProtect_CopyFiles]
+edr_protect.sys
+
+[EdrProtect_Install.NT.Services]
+AddService = EdrProtect,%SPSVCINST_ASSOCSERVICE%,EdrProtect_Service
+
+[EdrProtect_Service]
+DisplayName    = %ServiceDesc%
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 3                  ; SERVICE_DEMAND_START
+ErrorControl   = 1                  ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\edr_protect.sys
+LoadOrderGroup = Extended Base
+
+[Strings]
+ManufacturerName = "RazaTech EDR"
+DiskName         = "EDR Protect Driver"
+DeviceDesc       = "EDR Process Protection Driver"
+ServiceDesc      = "EDR Process Protection"
+SPSVCINST_ASSOCSERVICE = 0x00000002
