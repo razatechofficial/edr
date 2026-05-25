@@ -9,15 +9,11 @@ const (
 	fileAnyAccess     = 0
 )
 
-func ctlCode(deviceType, function, method, access uint32) uint32 {
-	return (deviceType << 16) | (access << 14) | (function << 2) | method
-}
-
 const (
-	IOCTL_EDRAddProtectedPID    = ctlCode(fileDeviceUnknown, 0x800, methodBuffered, fileAnyAccess)
-	IOCTL_EDRRemoveProtectedPID = ctlCode(fileDeviceUnknown, 0x801, methodBuffered, fileAnyAccess)
-	IOCTL_EDRClearProtectedPIDs = ctlCode(fileDeviceUnknown, 0x802, methodBuffered, fileAnyAccess)
-	IOCTL_EDRGetStatus          = ctlCode(fileDeviceUnknown, 0x803, methodBuffered, fileAnyAccess)
+	IOCTL_EDRAddProtectedPID    = (fileDeviceUnknown << 16) | (fileAnyAccess << 14) | (0x800 << 2) | methodBuffered
+	IOCTL_EDRRemoveProtectedPID = (fileDeviceUnknown << 16) | (fileAnyAccess << 14) | (0x801 << 2) | methodBuffered
+	IOCTL_EDRClearProtectedPIDs = (fileDeviceUnknown << 16) | (fileAnyAccess << 14) | (0x802 << 2) | methodBuffered
+	IOCTL_EDRGetStatus          = (fileDeviceUnknown << 16) | (fileAnyAccess << 14) | (0x803 << 2) | methodBuffered
 )
 
 // DefaultWDMProtectDevice is the user-mode path for edr_protect.sys.

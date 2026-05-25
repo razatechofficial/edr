@@ -163,9 +163,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: macos-packages-${{ matrix.arch }}
-          path: |
-            dist/edr-agent_*_${{ matrix.arch }}.pkg
-            dist/edr-agent-${{ matrix.arch }}.app
+          path: dist/edr-agent_*_${{ matrix.arch }}.pkg
 
   build-windows:
     needs: release_meta
@@ -230,6 +228,6 @@ jobs:
           generate_release_notes: true
           files: |
             linux-packages/**/*
-            macos-packages-arm64/**/*
-            macos-packages-amd64/**/*
+            macos-packages-arm64/**/*.pkg
+            macos-packages-amd64/**/*.pkg
             windows-packages/**/*

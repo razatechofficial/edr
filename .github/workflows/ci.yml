@@ -181,25 +181,31 @@ jobs:
 
       - run: go mod download
 
-      - name: Install macOS build dependencies
+      - name: Import Apple signing certificate (${{ matrix.arch }})
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_INSTALLER_CERTIFICATE_P12: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_P12 }}
+          APPLE_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_INSTALLER_SIGN_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGN_IDENTITY }}
+        run: bash scripts/ci/import_apple_signing.sh
+
+      - name: Install macOS build dependencies (${{ matrix.arch }})
         run: bash scripts/ci/setup_macos_build.sh
 
-      - name: Build production agent with EndpointSecurity
+      - name: Build production macOS agent (${{ matrix.arch }})
         env:
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
         run: bash scripts/ci/macos_run_build.sh bash scripts/ci/build_macos_production.sh
 
-      - name: Package macOS installer
+      - name: Package macOS installer (${{ matrix.arch }})
         run: bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "$(git describe --tags --always --dirty)" "${{ matrix.arch }}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-production-packages-${{ matrix.arch }}
-          path: |
-            dist/edr-agent-${{ matrix.arch }}.app
-            dist/edr-agent_*_${{ matrix.arch }}.pkg
-            dist/darwin-${{ matrix.arch }}/edr-agent
-            bin/edrctl-darwin-${{ matrix.arch }}
+          path: dist/edr-agent_*_${{ matrix.arch }}.pkg
 
   windows-monitoring-smoke:
     name: Windows monitoring smoke
