@@ -132,6 +132,7 @@ jobs:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_INSTALLER_SIGN_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGN_IDENTITY }}
         run: bash scripts/ci/import_apple_signing.sh
       - name: Install macOS build dependencies (${{ matrix.arch }})
         run: bash scripts/ci/setup_macos_build.sh

@@ -41,11 +41,27 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
 fi
 
 echo "Imported Apple signing certificate(s) into ${KEYCHAIN}"
-security find-identity -v -p codesigning "${KEYCHAIN}" || true
+echo "=== codesigning identities (Developer ID Application) ==="
+CODESIGN_IDS="$(security find-identity -v -p codesigning "${KEYCHAIN}" 2>/dev/null || true)"
+echo "${CODESIGN_IDS}"
+echo "=== basic identities (Developer ID Installer) ==="
+INSTALLER_IDS="$(security find-identity -v -p basic "${KEYCHAIN}" 2>/dev/null || true)"
+echo "${INSTALLER_IDS}"
 
 if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
-	if ! security find-identity -v -p codesigning "${KEYCHAIN}" | grep -Fq "${APPLE_SIGN_IDENTITY}"; then
-		echo "APPLE_SIGN_IDENTITY not found after import: ${APPLE_SIGN_IDENTITY}" >&2
+	if ! grep -Fq "${APPLE_SIGN_IDENTITY}" <<<"${CODESIGN_IDS}"; then
+		echo "ERROR: APPLE_SIGN_IDENTITY not found after import: ${APPLE_SIGN_IDENTITY}" >&2
+		echo "The .p12 likely contains only the Installer cert. Re-export from Keychain Access with BOTH:" >&2
+		echo "  - Developer ID Application: ... (private key included)" >&2
+		echo "  - Developer ID Installer: ... (private key included)" >&2
+		echo "Then update APPLE_CERTIFICATE_P12 (base64) and APPLE_CERTIFICATE_PASSWORD in GitHub secrets." >&2
+		exit 1
+	fi
+fi
+
+if [[ -n "${APPLE_INSTALLER_SIGN_IDENTITY:-}" ]]; then
+	if ! grep -Fq "${APPLE_INSTALLER_SIGN_IDENTITY}" <<<"${INSTALLER_IDS}" && ! grep -Fq "${APPLE_INSTALLER_SIGN_IDENTITY}" <<<"${CODESIGN_IDS}"; then
+		echo "ERROR: APPLE_INSTALLER_SIGN_IDENTITY not found after import: ${APPLE_INSTALLER_SIGN_IDENTITY}" >&2
 		exit 1
 	fi
 fi
