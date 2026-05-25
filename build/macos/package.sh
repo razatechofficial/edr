@@ -7,10 +7,12 @@ cd "${ROOT}"
 
 VERSION="${1:-dev}"
 ARCH="${2:-arm64}"
-APP_BUNDLE="dist/edr-agent.app"
+APP_BUNDLE="dist/edr-agent-${ARCH}.app"
 BINARY="dist/darwin-${ARCH}/edr-agent"
 if [[ -d "${APP_BUNDLE}/Contents/MacOS" && -f "${APP_BUNDLE}/Contents/MacOS/edr-agent" ]]; then
 	:
+elif [[ -d "dist/edr-agent.app/Contents/MacOS" && -f "dist/edr-agent.app/Contents/MacOS/edr-agent" ]]; then
+	APP_BUNDLE="dist/edr-agent.app"
 elif [[ -f "${BINARY}" ]]; then
 	echo "warning: ${APP_BUNDLE} missing; packaging unsigned binary only (ES entitlement will not work)" >&2
 else

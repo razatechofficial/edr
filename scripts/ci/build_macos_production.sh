@@ -61,9 +61,9 @@ fi
 
 # Hardened Runtime rejects unsigned Homebrew libyara; bundle in .app/Frameworks.
 # ES entitlement requires embedded.provisionprofile (app-like wrapper per Apple TN3125).
-bash "${ROOT}/scripts/ci/macos_app_bundle.sh" "${AGENT_OUT}" "dist/edr-agent.app"
-AGENT_OUT="dist/edr-agent.app/Contents/MacOS/edr-agent"
-APP_BUNDLE="dist/edr-agent.app"
+APP_BUNDLE="dist/edr-agent-${ARCH}.app"
+bash "${ROOT}/scripts/ci/macos_app_bundle.sh" "${AGENT_OUT}" "${APP_BUNDLE}"
+AGENT_OUT="${APP_BUNDLE}/Contents/MacOS/edr-agent"
 
 ENTITLEMENTS="build/macos/edr-agent.entitlements.plist"
 PROVISION="build/macos/EDR_Agent_Developer_ID.provisionprofile"
