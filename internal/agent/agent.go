@@ -20,6 +20,7 @@ import (
 	"github.com/razatechofficial/edr/internal/alert"
 	"github.com/razatechofficial/edr/internal/baseline"
 	"github.com/razatechofficial/edr/internal/collector"
+	"github.com/razatechofficial/edr/internal/comms"
 	"github.com/razatechofficial/edr/internal/compliance/sca"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/detect"
@@ -94,6 +95,8 @@ type Agent struct {
 	validationSink     func(detection.Detection)
 	noisyAlertMu       sync.Mutex
 	noisyAlertLastSeen map[string]time.Time
+
+	controlPlane *comms.ControlPlane
 }
 
 // SetValidationSink registers a callback invoked for each detection surfaced by the agent.
@@ -228,6 +231,10 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	}
 	if err := a.initResponseLayer(); err != nil {
 		a.logger.Warn("response playbook layer init failed", "error", err)
+	}
+
+	if err := a.initControlPlane(); err != nil {
+		a.logger.Warn("control plane init failed", "error", err)
 	}
 
 	if cfg.ML.Enabled && cfg.ML.ModelsDir != "" {
@@ -716,6 +723,14 @@ func (a *Agent) Run(ctx context.Context) error {
 		defer a.responseLayer.Stop()
 	}
 
+	if a.controlPlane != nil {
+		if err := a.startControlPlane(ctx); err != nil {
+			a.logger.Error("control plane start failed", "error", err)
+		} else {
+			defer a.stopControlPlane()
+		}
+	}
+
 	if a.telemetryRelay != nil {
 		go a.telemetryRelay.Run(ctx)
 	}
@@ -911,6 +926,7 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 		}
 		for i := range telemetries {
 			tel := &telemetries[i]
+			a.recordControlPlaneEvent()
 			if tel.File != nil && a.fileDedup != nil {
 				fe := tel.File
 				if !a.fileDedup.ShouldEmitFile(fe.EventType, fe.ActorPID, fe.Path, fe.Operation) {
@@ -1243,6 +1259,7 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 			"reason", al.Title,
 			"correlation_id", correlationID)
 		a.alertSpool.Push(*al)
+		a.recordControlPlaneAlert()
 		if a.durableSpool != nil {
 			if data, err := marshalAlertOCSF(*al, productVersion); err == nil {
 				if err := a.durableSpool.Write(data); err != nil {
@@ -1258,6 +1275,7 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 				a.logger.Error("forward alert failed", "error", err)
 			}
 		}
+		a.sendControlPlaneAlert(context.Background(), *al)
 		a.executeAutoResponse(*al)
 	}
 	return nil
