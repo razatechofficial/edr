@@ -18,5 +18,8 @@ fi
 
 launchctl bootout system "${PLIST}" 2>/dev/null || true
 launchctl unload "${PLIST}" 2>/dev/null || true
+if [[ -x "/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent" ]]; then
+	ln -sf "../libexec/edr-agent.app/Contents/MacOS/edr-agent" /usr/local/bin/edr-agent
+fi
 launchctl bootstrap system "${PLIST}" 2>/dev/null || launchctl load "${PLIST}"
 launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true

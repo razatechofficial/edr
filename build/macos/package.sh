@@ -7,14 +7,20 @@ cd "${ROOT}"
 
 VERSION="${1:-dev}"
 ARCH="${2:-arm64}"
+APP_BUNDLE="dist/edr-agent.app"
 BINARY="dist/darwin-${ARCH}/edr-agent"
-if [[ ! -f "${BINARY}" && -f "dist/darwin-${ARCH}-nosec/edr-agent" ]]; then
-	BINARY="dist/darwin-${ARCH}-nosec/edr-agent"
-	echo "using nosec binary fallback: ${BINARY}"
-fi
-if [[ ! -f "${BINARY}" ]]; then
-	echo "missing binary: ${BINARY}" >&2
-	exit 1
+if [[ -d "${APP_BUNDLE}/Contents/MacOS" && -f "${APP_BUNDLE}/Contents/MacOS/edr-agent" ]]; then
+	:
+elif [[ -f "${BINARY}" ]]; then
+	echo "warning: ${APP_BUNDLE} missing; packaging unsigned binary only (ES entitlement will not work)" >&2
+else
+	if [[ -f "dist/darwin-${ARCH}-nosec/edr-agent" ]]; then
+		BINARY="dist/darwin-${ARCH}-nosec/edr-agent"
+		echo "using nosec binary fallback: ${BINARY}"
+	else
+		echo "missing ${APP_BUNDLE} or ${BINARY}; run build_macos_production.sh first" >&2
+		exit 1
+	fi
 fi
 if [[ ! -f configs/agent.yaml ]]; then
 	echo "missing configs/agent.yaml" >&2
@@ -26,14 +32,26 @@ RULES_BASELINE="${EDR_BASE}/config/rules/baseline.yaml"
 PKG_ROOT="pkg/macos/root"
 
 rm -rf "${PKG_ROOT}/etc/edr-agent"
+AGENT_APP="/usr/local/libexec/edr-agent.app"
+AGENT_BIN="${AGENT_APP}/Contents/MacOS/edr-agent"
+
 mkdir -p \
+	"${PKG_ROOT}/usr/local/libexec" \
 	"${PKG_ROOT}/usr/local/bin" \
 	"${PKG_ROOT}/Library/LaunchDaemons" \
 	"${PKG_ROOT}/Library/Application Support/EDR/config/rules" \
+	"${PKG_ROOT}/Library/Application Support/EDR/models" \
 	"${PKG_ROOT}/Library/Logs/EDR"
 
-cp "${BINARY}" "${PKG_ROOT}/usr/local/bin/edr-agent"
-chmod 755 "${PKG_ROOT}/usr/local/bin/edr-agent"
+if [[ -d "${APP_BUNDLE}/Contents" ]]; then
+	cp -R "${APP_BUNDLE}" "${PKG_ROOT}/usr/local/libexec/"
+	chmod -R 755 "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
+elif [[ -f "${BINARY}" ]]; then
+	mkdir -p "${PKG_ROOT}/usr/local/bin"
+	cp "${BINARY}" "${PKG_ROOT}/usr/local/bin/edr-agent"
+	chmod 755 "${PKG_ROOT}/usr/local/bin/edr-agent"
+	AGENT_BIN="/usr/local/bin/edr-agent"
+fi
 
 if [[ -d rules ]]; then
 	cp -R rules/. "${PKG_ROOT}/Library/Application Support/EDR/config/rules/"
@@ -57,7 +75,7 @@ cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" <<'EOF'
     <string>com.razatech.edr-agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/edr-agent</string>
+        <string>/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent</string>
         <string>run</string>
         <string>--config</string>
         <string>/Library/Application Support/EDR/config/agent.yaml</string>
@@ -86,7 +104,7 @@ LOG_DIR="/Library/Logs/EDR"
 PLIST="/Library/LaunchDaemons/com.razatech.edr-agent.plist"
 RULES_BASELINE="${CONFIG_DIR}/rules/baseline.yaml"
 
-mkdir -p "${CONFIG_DIR}" "${BASE}/alerts" "${LOG_DIR}"
+mkdir -p "${CONFIG_DIR}" "${BASE}/alerts" "${BASE}/models" "${LOG_DIR}"
 chmod 755 "${BASE}" "${CONFIG_DIR}" 2>/dev/null || true
 
 if [[ -f "${CONFIG_FILE}" ]]; then
@@ -97,6 +115,9 @@ fi
 
 launchctl bootout system "${PLIST}" 2>/dev/null || true
 launchctl unload "${PLIST}" 2>/dev/null || true
+if [[ -x "/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent" ]]; then
+	ln -sf "../libexec/edr-agent.app/Contents/MacOS/edr-agent" /usr/local/bin/edr-agent
+fi
 launchctl bootstrap system "${PLIST}" 2>/dev/null || launchctl load "${PLIST}"
 launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
 EOF
