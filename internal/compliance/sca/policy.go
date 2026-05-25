@@ -131,10 +131,14 @@ func loadPolicyFile(path string) (Policy, error) {
 	if err != nil {
 		return Policy{}, err
 	}
-	b = sanitizeSCAYAML(b)
 	var p Policy
 	if err := yaml.Unmarshal(b, &p); err != nil {
-		return Policy{}, err
+		// Some CIS exports use \/ in double-quoted remediation strings; others use
+		// \\/ which must stay intact. Only rewrite when the raw file fails to parse.
+		b = sanitizeSCAYAML(b)
+		if err := yaml.Unmarshal(b, &p); err != nil {
+			return Policy{}, err
+		}
 	}
 	p.sourcePath = path
 	if p.Policy.ID == "" {

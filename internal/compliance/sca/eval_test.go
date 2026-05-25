@@ -2,9 +2,11 @@ package sca
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -38,9 +40,32 @@ func TestEvaluateCommandRuleModprobe(t *testing.T) {
 	}
 }
 
+func TestLoadAllLinuxPolicyFiles(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join("..", "..", "..", "rules", "compliance", "sca", "linux")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yml") {
+			continue
+		}
+		path := filepath.Join(root, e.Name())
+		if _, err := loadPolicyFile(path); err != nil {
+			t.Fatalf("%s: %v", e.Name(), err)
+		}
+	}
+}
+
 func TestLoadCISPolicyFixtures(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"cis_amazon_linux_2023.yml", "cis_centos7_linux.yml"} {
+	for _, name := range []string{
+		"cis_amazon_linux_2023.yml",
+		"cis_centos7_linux.yml",
+		"cis_alma_linux_10.yml",
+		"cis_ubuntu24-04.yml",
+	} {
 		path := filepath.Join("..", "..", "..", "rules", "compliance", "sca", "linux", name)
 		if _, err := loadPolicyFile(path); err != nil {
 			t.Fatalf("%s: %v", name, err)
