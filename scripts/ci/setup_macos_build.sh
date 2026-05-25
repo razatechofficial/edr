@@ -24,14 +24,23 @@ arm64 | aarch64) HOST_ARCH=arm64 ;;
 x86_64) HOST_ARCH=amd64 ;;
 esac
 
+# macos_run_build.sh wraps amd64 builds in arch -x86_64; uname then reports x86_64 on
+# Apple Silicon hosts, so also honor EDR_MACOS_USE_ROSETTA / proc_translated.
+USE_ROSETTA=0
+if [[ "${EDR_MACOS_USE_ROSETTA:-}" == "1" ]] || [[ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" == "1" ]]; then
+	USE_ROSETTA=1
+elif [[ "${TARGET_ARCH}" == "amd64" && "${HOST_ARCH}" == "arm64" ]]; then
+	USE_ROSETTA=1
+fi
+
 BREW=(brew)
-if [[ "${TARGET_ARCH}" == "amd64" && "${HOST_ARCH}" == "arm64" ]]; then
+if [[ "${USE_ROSETTA}" == "1" ]]; then
 	if [[ ! -x /usr/local/bin/brew ]]; then
 		echo "Installing x86_64 Homebrew for Intel macOS builds on Apple Silicon runner..."
 		arch -x86_64 /bin/bash -c 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 	fi
 	eval "$(/usr/local/bin/brew shellenv)"
-	BREW=(arch -x86_64 brew)
+	BREW=(arch -x86_64 /usr/local/bin/brew)
 	export EDR_MACOS_USE_ROSETTA=1
 fi
 

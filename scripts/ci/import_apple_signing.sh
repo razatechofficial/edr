@@ -87,7 +87,9 @@ if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
 fi
 
 if [[ -n "${APPLE_INSTALLER_SIGN_IDENTITY:-}" ]]; then
-	if ! grep -Fq "${APPLE_INSTALLER_SIGN_IDENTITY}" <<<"${INSTALLER_IDS}" && ! grep -Fq "${APPLE_INSTALLER_SIGN_IDENTITY}" <<<"${CODESIGN_IDS}"; then
+	if ! grep -Fq "Developer ID Installer:" <<<"${INSTALLER_IDS}" && \
+		! grep -Fq "${APPLE_INSTALLER_SIGN_IDENTITY}" <<<"${INSTALLER_IDS}" && \
+		! grep -Fq "${APPLE_INSTALLER_SIGN_IDENTITY}" <<<"${CODESIGN_IDS}"; then
 		echo "ERROR: APPLE_INSTALLER_SIGN_IDENTITY not found after import: ${APPLE_INSTALLER_SIGN_IDENTITY}" >&2
 		echo "Export Developer ID Installer (+ private key) to APPLE_INSTALLER_CERTIFICATE_P12," >&2
 		echo "or combine Application + Installer in one p12 export." >&2

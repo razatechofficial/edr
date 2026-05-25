@@ -55,24 +55,46 @@ fi
 
 echo "==> Submitting to Apple Notary Service: ${PKG}"
 
+SUBMIT_JSON="$(mktemp "${TMPDIR:-/tmp}/edr-notary-submit.XXXXXX")"
+trap 'rm -f "${SUBMIT_JSON}"' EXIT
+
 if [[ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
-	xcrun notarytool submit "${PKG}" --keychain-profile "${NOTARY_KEYCHAIN_PROFILE}" --wait
-	NOTARY_STATUS=$?
+	xcrun notarytool submit "${PKG}" \
+		--keychain-profile "${NOTARY_KEYCHAIN_PROFILE}" \
+		--output-format json --wait >"${SUBMIT_JSON}"
 elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
 	xcrun notarytool submit "${PKG}" \
 		--apple-id "${APPLE_ID}" \
 		--team-id "${APPLE_TEAM_ID}" \
 		--password "${APPLE_APP_SPECIFIC_PASSWORD}" \
-		--wait
-	NOTARY_STATUS=$?
+		--output-format json --wait >"${SUBMIT_JSON}"
 else
 	echo "Set NOTARY_KEYCHAIN_PROFILE or APPLE_ID + APPLE_TEAM_ID + APPLE_APP_SPECIFIC_PASSWORD" >&2
 	exit 1
 fi
 
-if [[ "${NOTARY_STATUS:-1}" -ne 0 ]]; then
-	echo "notarization failed; fetch details with:" >&2
-	echo "  xcrun notarytool log <submission-id> --keychain-profile ${NOTARY_KEYCHAIN_PROFILE:-<profile>}" >&2
+SUBMISSION_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "${SUBMIT_JSON}")"
+NOTARY_STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "${SUBMIT_JSON}")"
+
+if [[ "${NOTARY_STATUS}" != "Accepted" ]]; then
+	echo "notarization failed: status=${NOTARY_STATUS} id=${SUBMISSION_ID}" >&2
+	LOG_JSON="$(mktemp "${TMPDIR:-/tmp}/edr-notary-log.XXXXXX")"
+	if [[ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
+		xcrun notarytool log "${SUBMISSION_ID}" \
+			--keychain-profile "${NOTARY_KEYCHAIN_PROFILE}" >"${LOG_JSON}" 2>/dev/null || true
+	elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
+		xcrun notarytool log "${SUBMISSION_ID}" \
+			--apple-id "${APPLE_ID}" \
+			--team-id "${APPLE_TEAM_ID}" \
+			--password "${APPLE_APP_SPECIFIC_PASSWORD}" >"${LOG_JSON}" 2>/dev/null || true
+	fi
+	if [[ -s "${LOG_JSON}" ]]; then
+		echo "==> Apple notarization log (${SUBMISSION_ID})" >&2
+		cat "${LOG_JSON}" >&2
+	fi
+	rm -f "${LOG_JSON}"
+	echo "Fetch log manually with:" >&2
+	echo "  xcrun notarytool log ${SUBMISSION_ID} --keychain-profile ${NOTARY_KEYCHAIN_PROFILE:-<profile>}" >&2
 	exit 1
 fi
 

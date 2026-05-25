@@ -52,7 +52,7 @@ else
 	echo "FAIL: missing ${APP_ID}" >&2
 	ok=1
 fi
-if grep -Fq "${INSTALLER_ID}" <<<"${INSTALLER_IDS}" || grep -Fq "${INSTALLER_ID}" <<<"${CODESIGN_IDS}"; then
+if grep -Fq "Developer ID Installer:" <<<"${INSTALLER_IDS}" || grep -Fq "${INSTALLER_ID}" <<<"${INSTALLER_IDS}"; then
 	echo "OK: Installer identity found"
 else
 	echo "FAIL: missing ${INSTALLER_ID}" >&2

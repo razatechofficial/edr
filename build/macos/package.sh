@@ -33,7 +33,7 @@ EDR_BASE="/Library/Application Support/EDR"
 RULES_BASELINE="${EDR_BASE}/config/rules/baseline.yaml"
 PKG_ROOT="pkg/macos/root"
 
-rm -rf "${PKG_ROOT}/etc/edr-agent"
+rm -rf "${PKG_ROOT}/etc/edr-agent" "${PKG_ROOT}/usr/local/libexec"
 AGENT_APP="/usr/local/libexec/edr-agent.app"
 AGENT_BIN="${AGENT_APP}/Contents/MacOS/edr-agent"
 
@@ -46,7 +46,7 @@ mkdir -p \
 	"${PKG_ROOT}/Library/Logs/EDR"
 
 if [[ -d "${APP_BUNDLE}/Contents" ]]; then
-	cp -R "${APP_BUNDLE}" "${PKG_ROOT}/usr/local/libexec/"
+	cp -R "${APP_BUNDLE}" "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
 	chmod -R 755 "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
 elif [[ -f "${BINARY}" ]]; then
 	mkdir -p "${PKG_ROOT}/usr/local/bin"
