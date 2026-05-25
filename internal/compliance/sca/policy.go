@@ -1,6 +1,7 @@
 package sca
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -130,6 +131,7 @@ func loadPolicyFile(path string) (Policy, error) {
 	if err != nil {
 		return Policy{}, err
 	}
+	b = sanitizeSCAYAML(b)
 	var p Policy
 	if err := yaml.Unmarshal(b, &p); err != nil {
 		return Policy{}, err
@@ -139,4 +141,13 @@ func loadPolicyFile(path string) (Policy, error) {
 		p.Policy.ID = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 	return p, nil
+}
+
+// sanitizeSCAYAML fixes common Wazuh/CIS export escapes that yaml.v3 rejects in
+// double-quoted scalars (e.g. \/etc\/audit -> /etc/audit).
+func sanitizeSCAYAML(b []byte) []byte {
+	if !bytes.Contains(b, []byte(`\/`)) {
+		return b
+	}
+	return bytes.ReplaceAll(b, []byte(`\/`), []byte(`/`))
 }
