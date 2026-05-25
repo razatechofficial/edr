@@ -7,7 +7,7 @@
     <string>com.razatech.edr-agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/edr-agent</string>
+        <string>/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent</string>
         <string>run</string>
         <string>--config</string>
         <string>/Library/Application Support/EDR/config/agent.yaml</string>
