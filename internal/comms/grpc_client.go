@@ -27,6 +27,7 @@ import (
 type GRPCClient struct {
 	endpoint string
 	port     int
+	agentID  string
 	tlsCfg   *tls.Config
 	logger   *zap.Logger
 
@@ -40,18 +41,22 @@ type GRPCClient struct {
 	stopOnce sync.Once
 	stopCh   chan struct{}
 
-	onEvent func([]byte)
+	onCommand func(*protocol.Command)
 }
 
-// NewGRPCClient creates a GRPCClient targeting the given endpoint and port.
-// The caller must invoke Connect to establish the underlying connection.
-func NewGRPCClient(endpoint string, port int, tlsCfg *tls.Config, logger *zap.Logger) (*GRPCClient, error) {
+// NewGRPCClient creates a GRPCClient targeting the given server host and port.
+// agentID is the enrolled endpoint identity sent on every RPC payload.
+func NewGRPCClient(endpoint string, port int, agentID string, tlsCfg *tls.Config, logger *zap.Logger) (*GRPCClient, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("grpc_client: endpoint is required")
+	}
+	if agentID == "" {
+		return nil, fmt.Errorf("grpc_client: agent_id is required")
 	}
 	return &GRPCClient{
 		endpoint:      endpoint,
 		port:          port,
+		agentID:       agentID,
 		tlsCfg:        tlsCfg,
 		logger:        logger,
 		reconnectBase: 1 * time.Second,
@@ -60,12 +65,36 @@ func NewGRPCClient(endpoint string, port int, tlsCfg *tls.Config, logger *zap.Lo
 	}, nil
 }
 
-// SetEventHandler registers a callback for events received from the server
-// via bidirectional streaming.
-func (c *GRPCClient) SetEventHandler(fn func([]byte)) {
+// AgentID returns the enrolled agent identity.
+func (c *GRPCClient) AgentID() string {
+	return c.agentID
+}
+
+// ServerAddr returns the dial target host:port.
+func (c *GRPCClient) ServerAddr() string {
+	return fmt.Sprintf("%s:%d", c.endpoint, c.port)
+}
+
+// SetCommandHandler registers a callback for commands received from the server.
+func (c *GRPCClient) SetCommandHandler(fn func(*protocol.Command)) {
 	c.mu.Lock()
-	c.onEvent = fn
+	c.onCommand = fn
 	c.mu.Unlock()
+}
+
+// SetEventHandler registers a callback for commands received as JSON payloads.
+func (c *GRPCClient) SetEventHandler(fn func([]byte)) {
+	c.SetCommandHandler(func(cmd *protocol.Command) {
+		if fn == nil {
+			return
+		}
+		payload, err := json.Marshal(cmd)
+		if err != nil {
+			c.logger.Warn("grpc command marshal failed", zap.Error(err))
+			return
+		}
+		fn(payload)
+	})
 }
 
 // Connect dials the control-plane server and starts a background goroutine
@@ -120,7 +149,7 @@ func (c *GRPCClient) StreamEvents(ctx context.Context) error {
 		case t := <-ticker.C:
 			sequence++
 			batch := &protocol.EventBatch{
-				AgentId:   c.endpoint,
+				AgentId:   c.agentID,
 				BatchTime: timestamppb.New(t.UTC()),
 				Sequence:  sequence,
 			}
@@ -141,7 +170,7 @@ func (c *GRPCClient) SendAlert(ctx context.Context, alert *events.Alert, product
 		return fmt.Errorf("grpc_client: not connected")
 	}
 
-	req, err := alertpkg.ProtoFromEvents(alert, c.endpoint, productVersion)
+	req, err := alertpkg.ProtoFromEvents(alert, c.agentID, productVersion)
 	if err != nil {
 		return fmt.Errorf("grpc_client: build alert: %w", err)
 	}
@@ -174,9 +203,9 @@ func (c *GRPCClient) SendRaw(ctx context.Context, data []byte) error {
 		Base: &protocol.BaseEvent{
 			SchemaVersion: "v1",
 			EventType:     protocol.EventType_EVENT_TYPE_FILE,
-			EndpointId:    c.endpoint,
+			EndpointId:    c.agentID,
 			Timestamp:     timestamppb.New(now),
-			Hostname:      c.endpoint,
+			Hostname:      c.agentID,
 			Os:            "unknown",
 		},
 		Path:      "raw://payload",
@@ -184,7 +213,7 @@ func (c *GRPCClient) SendRaw(ctx context.Context, data []byte) error {
 		Hash:      base64.StdEncoding.EncodeToString(data),
 	}
 	if err := stream.Send(&protocol.EventBatch{
-		AgentId:    c.endpoint,
+		AgentId:    c.agentID,
 		BatchTime:  timestamppb.New(now),
 		Sequence:   1,
 		FileEvents: []*protocol.FileEvent{ev},
@@ -192,6 +221,60 @@ func (c *GRPCClient) SendRaw(ctx context.Context, data []byte) error {
 		return fmt.Errorf("grpc_client: send raw batch: %w", err)
 	}
 	return nil
+}
+
+// Register enrolls the agent with the control plane.
+func (c *GRPCClient) Register(ctx context.Context, req *protocol.RegistrationRequest) (*protocol.RegistrationResponse, error) {
+	c.mu.RLock()
+	api := c.api
+	c.mu.RUnlock()
+	if api == nil {
+		return nil, fmt.Errorf("grpc_client: not connected")
+	}
+	if req.GetAgentId() == "" {
+		req.AgentId = c.agentID
+	}
+	resp, err := api.Register(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("grpc_client: register: %w", err)
+	}
+	return resp, nil
+}
+
+// Heartbeat sends a health report and returns any pending commands.
+func (c *GRPCClient) Heartbeat(ctx context.Context, req *protocol.HeartbeatRequest) (*protocol.HeartbeatResponse, error) {
+	c.mu.RLock()
+	api := c.api
+	c.mu.RUnlock()
+	if api == nil {
+		return nil, fmt.Errorf("grpc_client: not connected")
+	}
+	if req.GetAgentId() == "" {
+		req.AgentId = c.agentID
+	}
+	resp, err := api.Heartbeat(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("grpc_client: heartbeat: %w", err)
+	}
+	return resp, nil
+}
+
+// GetPolicy retrieves the current policy for this agent.
+func (c *GRPCClient) GetPolicy(ctx context.Context, currentHash string) (*protocol.PolicyResponse, error) {
+	c.mu.RLock()
+	api := c.api
+	c.mu.RUnlock()
+	if api == nil {
+		return nil, fmt.Errorf("grpc_client: not connected")
+	}
+	resp, err := api.GetPolicy(ctx, &protocol.PolicyRequest{
+		AgentId:           c.agentID,
+		CurrentPolicyHash: currentHash,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("grpc_client: get policy: %w", err)
+	}
+	return resp, nil
 }
 
 // Close terminates the gRPC connection and stops background goroutines.
@@ -304,15 +387,10 @@ func (c *GRPCClient) calcBackoff(attempt int) time.Duration {
 
 func (c *GRPCClient) emitServerCommand(cmd *protocol.Command) {
 	c.mu.RLock()
-	fn := c.onEvent
+	fn := c.onCommand
 	c.mu.RUnlock()
-	if fn == nil {
+	if fn == nil || cmd == nil {
 		return
 	}
-	payload, err := json.Marshal(cmd)
-	if err != nil {
-		c.logger.Warn("grpc command marshal failed", zap.Error(err))
-		return
-	}
-	fn(payload)
+	fn(cmd)
 }
