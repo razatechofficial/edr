@@ -38,7 +38,7 @@ func TestEvaluateCommandRuleModprobe(t *testing.T) {
 	}
 }
 
-func TestLoadWazuhSCAYAMLFixtures(t *testing.T) {
+func TestLoadCISPolicyFixtures(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"cis_amazon_linux_2023.yml", "cis_centos7_linux.yml"} {
 		path := filepath.Join("..", "..", "..", "rules", "compliance", "sca", "linux", name)

@@ -143,7 +143,7 @@ func loadPolicyFile(path string) (Policy, error) {
 	return p, nil
 }
 
-// sanitizeSCAYAML fixes common Wazuh/CIS export escapes that yaml.v3 rejects in
+// sanitizeSCAYAML fixes common CIS SCA policy export escapes that yaml.v3 rejects in
 // double-quoted scalars (e.g. \/etc\/audit -> /etc/audit).
 func sanitizeSCAYAML(b []byte) []byte {
 	if !bytes.Contains(b, []byte(`\/`)) {
