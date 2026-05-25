@@ -7,8 +7,10 @@
 #   - workflow_dispatch        → same as prod push semantics for the selected ref
 #
 # Testers download .deb / .rpm / .pkg / .msi from the Releases page (or API).
-# macOS signed release: set repo secrets APPLE_SIGN_IDENTITY, APPLE_INSTALLER_SIGN_IDENTITY,
-# and NOTARY_KEYCHAIN_PROFILE (from: xcrun notarytool store-credentials).
+# macOS signed release secrets:
+#   APPLE_SIGN_IDENTITY, APPLE_INSTALLER_SIGN_IDENTITY
+#   APPLE_CERTIFICATE_P12 (base64 .p12), APPLE_CERTIFICATE_PASSWORD
+#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_SPECIFIC_PASSWORD, NOTARY_KEYCHAIN_PROFILE
 
 name: Release
 
@@ -125,6 +127,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Import Apple signing certificate (${{ matrix.arch }})
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+        run: bash scripts/ci/import_apple_signing.sh
       - name: Install macOS build dependencies (${{ matrix.arch }})
         run: bash scripts/ci/setup_macos_build.sh
       - name: Build production macOS agent (${{ matrix.arch }})
@@ -137,13 +145,17 @@ jobs:
         env:
           SIGN_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGN_IDENTITY }}
           NOTARY_KEYCHAIN_PROFILE: ${{ secrets.NOTARY_KEYCHAIN_PROFILE }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           set -euo pipefail
           PKG="dist/edr-agent_${{ needs.release_meta.outputs.pkg_version }}_${{ matrix.arch }}.pkg"
-          if [[ -z "${SIGN_IDENTITY:-}" && -z "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
+          if [[ -z "${SIGN_IDENTITY:-}" && -z "${NOTARY_KEYCHAIN_PROFILE:-}" && -z "${APPLE_ID:-}" ]]; then
             echo "Skipping pkg sign/notarize (secrets not configured)"
             exit 0
           fi
+          bash scripts/ci/setup_apple_notary.sh
           bash scripts/ci/macos_run_build.sh bash scripts/notarize_macos_pkg.sh "${PKG}"
       - uses: actions/upload-artifact@v4
         with:
