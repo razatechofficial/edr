@@ -7,7 +7,8 @@
 #   - workflow_dispatch        → same as prod push semantics for the selected ref
 #
 # Testers download .deb / .rpm / .pkg / .msi from the Releases page (or API).
-# macOS notarized signing: set repo secret APPLE_SIGN_IDENTITY when keys are on the runner.
+# macOS signed release: set repo secrets APPLE_SIGN_IDENTITY, APPLE_INSTALLER_SIGN_IDENTITY,
+# and NOTARY_KEYCHAIN_PROFILE (from: xcrun notarytool store-credentials).
 
 name: Release
 
@@ -111,24 +112,45 @@ jobs:
   build-darwin:
     needs: release_meta
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      EDR_MACOS_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build production macOS agent
+      - name: Install macOS build dependencies (${{ matrix.arch }})
+        run: bash scripts/ci/setup_macos_build.sh
+      - name: Build production macOS agent (${{ matrix.arch }})
         env:
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
-        run: bash scripts/ci/build_macos_production.sh
-      - name: Package pkg
-        run: bash build/macos/package.sh "${{ needs.release_meta.outputs.pkg_version }}" "$(go env GOARCH)"
+        run: bash scripts/ci/macos_run_build.sh bash scripts/ci/build_macos_production.sh
+      - name: Package macOS installer (${{ matrix.arch }})
+        run: bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "${{ needs.release_meta.outputs.pkg_version }}" "${{ matrix.arch }}"
+      - name: Sign and notarize pkg (${{ matrix.arch }})
+        env:
+          SIGN_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGN_IDENTITY }}
+          NOTARY_KEYCHAIN_PROFILE: ${{ secrets.NOTARY_KEYCHAIN_PROFILE }}
+        run: |
+          set -euo pipefail
+          PKG="dist/edr-agent_${{ needs.release_meta.outputs.pkg_version }}_${{ matrix.arch }}.pkg"
+          if [[ -z "${SIGN_IDENTITY:-}" && -z "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
+            echo "Skipping pkg sign/notarize (secrets not configured)"
+            exit 0
+          fi
+          bash scripts/ci/macos_run_build.sh bash scripts/notarize_macos_pkg.sh "${PKG}"
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-packages
-          path: dist/*.pkg
+          name: macos-packages-${{ matrix.arch }}
+          path: |
+            dist/edr-agent_*_${{ matrix.arch }}.pkg
+            dist/edr-agent-${{ matrix.arch }}.app
 
   build-windows:
     needs: release_meta
@@ -192,7 +214,7 @@ jobs:
           name: ${{ needs.release_meta.outputs.is_prerelease == 'true' && format('Prod build {0}', needs.release_meta.outputs.pkg_version) || needs.release_meta.outputs.pkg_version }}
           generate_release_notes: true
           files: |
-            linux-packages/*.deb
-            linux-packages/*.rpm
-            macos-packages/*.pkg
-            windows-packages/*.msi
+            linux-packages/**/*
+            macos-packages-arm64/**/*
+            macos-packages-amd64/**/*
+            windows-packages/**/*
