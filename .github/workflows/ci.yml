@@ -162,11 +162,15 @@ jobs:
           path: bin/
 
   macos-production-build:
-    name: macOS production build (ESF)
+    name: macOS production build (${{ matrix.arch }})
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
     env:
-      # Full Xcode SDK carries EndpointSecurity; some runners default to CLT-only paths.
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      EDR_MACOS_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
 
@@ -177,21 +181,25 @@ jobs:
 
       - run: go mod download
 
+      - name: Install macOS build dependencies
+        run: bash scripts/ci/setup_macos_build.sh
+
       - name: Build production agent with EndpointSecurity
         env:
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
-        run: bash scripts/ci/build_macos_production.sh
+        run: bash scripts/ci/macos_run_build.sh bash scripts/ci/build_macos_production.sh
 
       - name: Package macOS installer
-        run: bash build/macos/package.sh "$(git describe --tags --always --dirty)" "$(go env GOARCH)"
+        run: bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "$(git describe --tags --always --dirty)" "${{ matrix.arch }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-production-packages
+          name: macos-production-packages-${{ matrix.arch }}
           path: |
-            dist/darwin-*/edr-agent
-            dist/*.pkg
-            bin/edrctl-darwin-*
+            dist/edr-agent-${{ matrix.arch }}.app
+            dist/edr-agent_*_${{ matrix.arch }}.pkg
+            dist/darwin-${{ matrix.arch }}/edr-agent
+            bin/edrctl-darwin-${{ matrix.arch }}
 
   windows-monitoring-smoke:
     name: Windows monitoring smoke
