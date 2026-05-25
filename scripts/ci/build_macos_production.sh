@@ -59,7 +59,14 @@ if ! otool -L "${AGENT_OUT}" | grep -Eiq 'EndpointSecurity|/System/Library/Frame
 	exit 1
 fi
 
+# Hardened Runtime rejects unsigned Homebrew libyara; bundle in .app/Frameworks.
+# ES entitlement requires embedded.provisionprofile (app-like wrapper per Apple TN3125).
+bash "${ROOT}/scripts/ci/macos_app_bundle.sh" "${AGENT_OUT}" "dist/edr-agent.app"
+AGENT_OUT="dist/edr-agent.app/Contents/MacOS/edr-agent"
+APP_BUNDLE="dist/edr-agent.app"
+
 ENTITLEMENTS="build/macos/edr-agent.entitlements.plist"
+PROVISION="build/macos/EDR_Agent_Developer_ID.provisionprofile"
 # Hosted CI often has APPLE_SIGN_IDENTITY from repo secrets but no matching private key
 # in the runner keychain; codesign would fail. Fall back to ad-hoc signing in that case.
 if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
@@ -69,10 +76,26 @@ if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
 	fi
 fi
 if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
+	if [ ! -f "${PROVISION}" ]; then
+		echo "missing ${PROVISION}; required for Endpoint Security entitlement at runtime" >&2
+		exit 1
+	fi
+	FRAMEWORKS="${APP_BUNDLE}/Contents/Frameworks"
+	for dylib in "${FRAMEWORKS}"/*.dylib; do
+		[[ -f "${dylib}" ]] || continue
+		codesign --force --options runtime --timestamp \
+			--sign "${APPLE_SIGN_IDENTITY}" "${dylib}"
+	done
 	if ! codesign --force --options runtime --timestamp \
 		--entitlements "${ENTITLEMENTS}" \
 		--sign "${APPLE_SIGN_IDENTITY}" "${AGENT_OUT}"; then
 		echo "codesign with APPLE_SIGN_IDENTITY failed" >&2
+		exit 1
+	fi
+	if ! codesign --force --options runtime --timestamp \
+		--preserve-metadata=entitlements,flags,runtime \
+		--sign "${APPLE_SIGN_IDENTITY}" "${APP_BUNDLE}"; then
+		echo "codesign for ${APP_BUNDLE} failed" >&2
 		exit 1
 	fi
 	if ! codesign --force --options runtime --timestamp \
@@ -84,10 +107,14 @@ if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
 		echo "endpoint-security entitlement missing after signing" >&2
 		exit 1
 	fi
+	if ! "${AGENT_OUT}" version >/dev/null 2>&1; then
+		echo "signed agent failed smoke test (version); check bundled libyara" >&2
+		exit 1
+	fi
 else
 	codesign --force --sign - "${AGENT_OUT}" || echo "warning: ad-hoc codesign skipped for ${AGENT_OUT}" >&2
 	codesign --force --sign - "${CTL_OUT}" || echo "warning: ad-hoc codesign skipped for ${CTL_OUT}" >&2
 	echo "Ad-hoc signed; set APPLE_SIGN_IDENTITY for release entitlements"
 fi
 
-echo "Built production macOS agent: ${AGENT_OUT}"
+echo "Built production macOS agent: ${APP_BUNDLE}"
