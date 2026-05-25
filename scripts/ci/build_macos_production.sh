@@ -67,10 +67,18 @@ AGENT_OUT="${APP_BUNDLE}/Contents/MacOS/edr-agent"
 
 ENTITLEMENTS="build/macos/edr-agent.entitlements.plist"
 PROVISION="build/macos/EDR_Agent_Developer_ID.provisionprofile"
-# Hosted CI often has APPLE_SIGN_IDENTITY from repo secrets but no matching private key
-# in the runner keychain; codesign would fail. Fall back to ad-hoc signing in that case.
+# Release signing requires import_apple_signing.sh (sets KEYCHAIN_PATH). Without it,
+# GHA runners may list a matching cert name in the login keychain but codesign fails.
+if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -z "${KEYCHAIN_PATH:-}" ]; then
+	echo "APPLE_SIGN_IDENTITY set without KEYCHAIN_PATH; run import_apple_signing.sh or ad-hoc sign" >&2
+	APPLE_SIGN_IDENTITY=""
+fi
 if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
-	if ! security find-identity -v -p codesigning 2>/dev/null | grep -Fq "${APPLE_SIGN_IDENTITY}"; then
+	_keychain_search=()
+	if [ -n "${KEYCHAIN_PATH:-}" ]; then
+		_keychain_search=("${KEYCHAIN_PATH}")
+	fi
+	if ! security find-identity -v -p codesigning "${_keychain_search[@]}" 2>/dev/null | grep -Fq "${APPLE_SIGN_IDENTITY}"; then
 		echo "APPLE_SIGN_IDENTITY not present in keychain; using ad-hoc signing (CI or unsigned build)" >&2
 		APPLE_SIGN_IDENTITY=""
 	fi
