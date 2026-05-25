@@ -1,19 +1,37 @@
 package collector
 
 import (
+	"sync"
+
 	"github.com/razatechofficial/edr/internal/schema"
 	"github.com/razatechofficial/edr/pkg/ocsf"
 )
 
-// OCSFProductVersion is set by the agent before forwarding telemetry (build/version label).
-var OCSFProductVersion string
+var (
+	ocsfProductVersionMu sync.RWMutex
+	ocsfProductVersion   string
+)
+
+// SetOCSFProductVersion sets the build/version label embedded in OCSF metadata.
+func SetOCSFProductVersion(v string) {
+	ocsfProductVersionMu.Lock()
+	ocsfProductVersion = v
+	ocsfProductVersionMu.Unlock()
+}
+
+func ocsfProductForTelemetry() ocsf.Product {
+	ocsfProductVersionMu.RLock()
+	v := ocsfProductVersion
+	ocsfProductVersionMu.RUnlock()
+	return ocsf.DefaultProduct(v)
+}
 
 // EnsureTelemetryOCSF attaches an OCSF 1.3 envelope to schema events when absent.
 func EnsureTelemetryOCSF(t *Telemetry) {
 	if t == nil {
 		return
 	}
-	product := ocsf.DefaultProduct(OCSFProductVersion)
+	product := ocsfProductForTelemetry()
 	switch {
 	case t.Process != nil:
 		attachOCSF(&t.Process.BaseEvent, ocsfFromProcess(t.Process, product))

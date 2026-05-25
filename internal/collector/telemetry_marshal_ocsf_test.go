@@ -40,7 +40,7 @@ func TestEnsureTelemetryOCSFRegistry(t *testing.T) {
 
 func TestMarshalTelemetryLineIncludesOCSFProcess(t *testing.T) {
 	t.Parallel()
-	OCSFProductVersion = "test"
+	SetOCSFProductVersion("test")
 	line, err := MarshalTelemetryLine(&Telemetry{
 		Process: &schema.ProcessEvent{
 			BaseEvent: schema.BaseEvent{
@@ -115,7 +115,7 @@ func TestMarshalTelemetryLineIncludesOCSFCompliance(t *testing.T) {
 
 func TestEnsureTelemetryOCSFPostureCompliance(t *testing.T) {
 	t.Parallel()
-	OCSFProductVersion = "test"
+	SetOCSFProductVersion("test")
 	tel := postureFindingsToTelemetry("ep1", "host1", []PostureFinding{{
 		ProbeID: "posture_hidden_pid",
 		Title:   "Hidden PID",
@@ -183,7 +183,7 @@ func TestEnsureTelemetryOCSFScheduledJob(t *testing.T) {
 
 func TestMarshalTelemetryBinaryIncludesOCSF(t *testing.T) {
 	t.Parallel()
-	OCSFProductVersion = "test"
+	SetOCSFProductVersion("test")
 	src := &Telemetry{
 		Process: &schema.ProcessEvent{
 			BaseEvent: schema.BaseEvent{

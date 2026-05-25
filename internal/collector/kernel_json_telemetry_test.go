@@ -73,7 +73,7 @@ func TestMapKernelJSONToTelemetry_Privilege(t *testing.T) {
 	if tel.Privilege.Operation != "setuid" || tel.Privilege.PID != 100 {
 		t.Fatalf("unexpected privilege event: %+v", tel.Privilege)
 	}
-	OCSFProductVersion = "test"
+	SetOCSFProductVersion("test")
 	EnsureTelemetryOCSF(tel)
 	if len(tel.Privilege.OCSF) == 0 {
 		t.Fatal("expected OCSF on mapped privilege event")

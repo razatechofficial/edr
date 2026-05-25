@@ -162,7 +162,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	}
 	a.writer.SetProductVersion(cfg.Agent.Version)
 	collector.LogMonitoringBootstrap(a.logger, cfg)
-	collector.OCSFProductVersion = cfg.Agent.Version
+	collector.SetOCSFProductVersion(cfg.Agent.Version)
 
 	telEP := strings.TrimSpace(cfg.Forwarder.TelemetryEndpoint)
 	if telEP == "" {
