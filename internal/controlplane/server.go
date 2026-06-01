@@ -3,6 +3,7 @@ package controlplane
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -33,6 +34,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/v1/agents", s.handleAgents)
+	mux.HandleFunc("/v1/alerts", s.handleAlerts)
 	mux.HandleFunc("/v1/enroll", s.handleEnroll)
 	mux.HandleFunc("/v1/heartbeat", s.handleHeartbeat)
 	mux.HandleFunc("/v1/ingest", s.handleIngest)
@@ -68,6 +70,29 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"agents": s.registry.ListAgents(),
 	})
+}
+
+func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.registry == nil {
+		http.Error(w, "registry unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			limit = n
+		}
+	}
+	alerts, err := s.registry.ListRecentAlerts(limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"alerts": alerts})
 }
 
 type enrollRequest struct {

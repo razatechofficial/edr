@@ -19,6 +19,7 @@ fi
 
 HEALTH_URL="${SCHEME}://${HOST}:${HTTP_PORT}/healthz"
 AGENTS_URL="${SCHEME}://${HOST}:${HTTP_PORT}/v1/agents"
+ALERTS_URL="${SCHEME}://${HOST}:${HTTP_PORT}/v1/alerts?limit=5"
 
 echo "==> HTTP health: ${HEALTH_URL}"
 if ! curl -fsS "${CURL_OPTS[@]}" "${HEALTH_URL}"; then
@@ -43,5 +44,8 @@ fi
 echo
 echo "==> enrolled agents: ${AGENTS_URL}"
 curl -fsS "${CURL_OPTS[@]}" "${AGENTS_URL}" | python3 -m json.tool 2>/dev/null || curl -fsS "${CURL_OPTS[@]}" "${AGENTS_URL}"
+echo
+echo "==> recent alerts: ${ALERTS_URL}"
+curl -fsS "${CURL_OPTS[@]}" "${ALERTS_URL}" | python3 -m json.tool 2>/dev/null || curl -fsS "${CURL_OPTS[@]}" "${ALERTS_URL}"
 echo
 echo "control plane pilot check OK"

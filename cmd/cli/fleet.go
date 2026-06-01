@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"text/tabwriter"
@@ -33,7 +31,7 @@ func newFleetCmd() *cobra.Command {
 		Use:   "fleet",
 		Short: "Fleet control plane enrollment visibility",
 	}
-	cmd.AddCommand(newFleetLocalCmd(), newFleetAgentsCmd())
+	cmd.AddCommand(newFleetLocalCmd(), newFleetAgentsCmd(), newFleetAlertsCmd())
 	return cmd
 }
 
@@ -87,44 +85,22 @@ func newFleetAgentsCmd() *cobra.Command {
 		Use:   "agents",
 		Short: "List agents enrolled on the control plane",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if host == "" {
-				peek, err := readFleetConfigPeek(configFile)
-				if err != nil {
-					return fmt.Errorf("--host required: %w", err)
-				}
-				host = peek.Server.Endpoint
-			}
-			if host == "" || host == "YOUR_CONTROL_PLANE_HOST" {
-				return fmt.Errorf("control plane host is not configured; pass --host")
+			resolvedHost, err := resolveFleetHost(host)
+			if err != nil {
+				return err
 			}
 			scheme := "http"
 			if https {
 				scheme = "https"
 			}
-			url := fmt.Sprintf("%s://%s:%d/v1/agents", scheme, host, port)
-			req, err := http.NewRequest(http.MethodGet, url, nil)
+			url := fmt.Sprintf("%s://%s:%d/v1/agents", scheme, resolvedHost, port)
+			client, err := fleetHTTPClient(https, resolveFleetCACert(caCert), timeout)
 			if err != nil {
 				return err
 			}
-			if token != "" {
-				req.Header.Set("Authorization", "Bearer "+token)
-			}
-			client := &http.Client{Timeout: timeout}
-			if https && caCert != "" {
-				// Keep simple: rely on system trust or curl in scripts for custom CA pinning.
-				_ = caCert
-			}
-			resp, err := client.Do(req)
+			body, err := fleetHTTPGet(url, token, client)
 			if err != nil {
 				return err
-			}
-			defer resp.Body.Close()
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return err
-			}
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("control plane returned %s: %s", resp.Status, string(body))
 			}
 			var payload struct {
 				Agents []struct {
@@ -159,6 +135,68 @@ func newFleetAgentsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&https, "https", false, "use HTTPS for control plane HTTP API")
 	cmd.Flags().StringVar(&token, "token", os.Getenv("EDR_CONTROLPLANE_API_TOKEN"), "control plane API token")
 	cmd.Flags().StringVar(&caCert, "ca-cert", "", "CA certificate path for HTTPS verification")
+	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "HTTP request timeout")
+	return cmd
+}
+
+func newFleetAlertsCmd() *cobra.Command {
+	var (
+		host    string
+		port    int
+		https   bool
+		token   string
+		caCert  string
+		limit   int
+		timeout time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "alerts",
+		Short: "List recent alerts ingested by the control plane",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedHost, err := resolveFleetHost(host)
+			if err != nil {
+				return err
+			}
+			scheme := "http"
+			if https {
+				scheme = "https"
+			}
+			url := fmt.Sprintf("%s://%s:%d/v1/alerts?limit=%d", scheme, resolvedHost, port, limit)
+			client, err := fleetHTTPClient(https, resolveFleetCACert(caCert), timeout)
+			if err != nil {
+				return err
+			}
+			body, err := fleetHTTPGet(url, token, client)
+			if err != nil {
+				return err
+			}
+			var payload struct {
+				Alerts []map[string]any `json:"alerts"`
+			}
+			if err := json.Unmarshal(body, &payload); err != nil {
+				return fmt.Errorf("parsing alerts response: %w", err)
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "RECEIVED\tALERT ID\tAGENT ID\tRULE ID\tSEVERITY\tTITLE")
+			for _, alert := range payload.Alerts {
+				fmt.Fprintf(w, "%s\t%v\t%v\t%v\t%v\t%v\n",
+					alert["received_at"],
+					alert["alert_id"],
+					alert["agent_id"],
+					alert["rule_id"],
+					alert["severity"],
+					alert["title"],
+				)
+			}
+			return w.Flush()
+		},
+	}
+	cmd.Flags().StringVar(&host, "host", "", "control plane host (defaults to server.endpoint in config)")
+	cmd.Flags().IntVar(&port, "port", 8080, "control plane HTTP port")
+	cmd.Flags().BoolVar(&https, "https", false, "use HTTPS for control plane HTTP API")
+	cmd.Flags().StringVar(&token, "token", os.Getenv("EDR_CONTROLPLANE_API_TOKEN"), "control plane API token")
+	cmd.Flags().StringVar(&caCert, "ca-cert", "", "CA certificate path for HTTPS verification")
+	cmd.Flags().IntVar(&limit, "limit", 20, "maximum alerts to return")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "HTTP request timeout")
 	return cmd
 }

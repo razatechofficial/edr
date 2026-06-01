@@ -39,4 +39,11 @@ func TestHealthAndAgentsWithRegistry(t *testing.T) {
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"agent_id":"agent-1"`)) {
 		t.Fatalf("agents body = %s", rec.Body.String())
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/alerts?limit=10", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("alerts status = %d", rec.Code)
+	}
 }

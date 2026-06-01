@@ -62,4 +62,9 @@ if [[ "${WAIT}" == "1" || "${WAIT}" == "true" ]]; then
 fi
 
 echo
+echo "Check fleet from control plane host:"
+echo "  edrctl fleet agents --host ${HOST} --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"
+echo "  edrctl fleet alerts --host ${HOST} --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"
+
+echo
 echo "Fleet pilot checklist complete for ${HOST}"
