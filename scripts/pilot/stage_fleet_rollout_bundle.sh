@@ -57,6 +57,9 @@ for script in \
 	scripts/pilot/list_fleet_endpoints.sh \
 	scripts/pilot/verify_controlplane_policy.sh \
 	scripts/pilot/verify_agent_policy_sync.sh \
+	scripts/pilot/verify_policy_sync.sh \
+	scripts/pilot/wait_for_policy_sync.sh \
+	scripts/pilot/run_policy_pilot.sh \
 	scripts/pilot/run_rollout_validation.sh \
 	scripts/pilot/upgrade_linux_agent.sh \
 	scripts/pilot/upgrade_macos_agent.sh \
@@ -92,6 +95,12 @@ fi
 if [[ -f "${ROOT}/scripts/pilot/pilot_fleet_check.sh" ]]; then
 	cp "${ROOT}/scripts/pilot/pilot_fleet_check.sh" "${OUT}/scripts/pilot/"
 fi
+if [[ -f "${ROOT}/scripts/pilot/verify_agent_policy_sync.ps1" ]]; then
+	cp "${ROOT}/scripts/pilot/verify_agent_policy_sync.ps1" "${OUT}/scripts/pilot/"
+fi
+if [[ -f "${ROOT}/scripts/pilot/verify_policy_sync.ps1" ]]; then
+	cp "${ROOT}/scripts/pilot/verify_policy_sync.ps1" "${OUT}/scripts/pilot/"
+fi
 
 cat > "${OUT}/ROLLOUT.txt" <<'TXT'
 Offline fleet rollout bundle
@@ -116,7 +125,8 @@ Policy bundles (control plane):
   edrctl fleet policy --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt
 
 Agent policy sync (endpoint, after CP policy staged):
-  bash scripts/pilot/verify_agent_policy_sync.sh
+  bash scripts/pilot/wait_for_policy_sync.sh <cp-host>
+  EDR_PILOT_VERIFY_POLICY=1 bash scripts/pilot/run_endpoint_pilot.sh <cp-host>
 
 Remote mTLS distribution (from control plane, over SSH):
   scripts/deploy/distribute_agent_tls.sh tls <agent-host> linux

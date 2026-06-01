@@ -57,4 +57,12 @@ fi
 
 bash "${ROOT}/scripts/pilot/pilot_fleet_check.sh" "${ACTIVE}"
 
+if [[ "${EDR_PILOT_VERIFY_POLICY:-0}" == "1" || "${EDR_PILOT_VERIFY_POLICY:-0}" == "true" ]]; then
+	echo "==> agent policy sync"
+	bash "${ROOT}/scripts/pilot/verify_agent_policy_sync.sh"
+	if [[ -n "${CP_HOST}" && -n "${EDR_CONTROLPLANE_API_TOKEN:-}" ]]; then
+		bash "${ROOT}/scripts/pilot/verify_policy_sync.sh" "${CP_HOST}"
+	fi
+fi
+
 echo "macOS tenant pilot check OK"

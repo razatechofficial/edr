@@ -9,6 +9,7 @@ DETECT="${EDR_PILOT_VERIFY_DETECTION:-0}"
 if [[ -z "${HOST}" ]]; then
 	echo "usage: $0 <control-plane-host>" >&2
 	echo "  env: EDR_PILOT_VERIFY_DETECTION=1 to run Log4Shell YARA probe" >&2
+	echo "       EDR_PILOT_VERIFY_POLICY=1 to wait for CP policy sync" >&2
 	exit 1
 fi
 
@@ -32,6 +33,12 @@ if [[ "${DETECT}" == "1" || "${DETECT}" == "true" ]]; then
 		fi
 		;;
 	esac
+fi
+
+if [[ "${EDR_PILOT_VERIFY_POLICY:-0}" == "1" || "${EDR_PILOT_VERIFY_POLICY:-0}" == "true" ]]; then
+	echo
+	echo "==> policy sync"
+	bash "${ROOT}/scripts/pilot/wait_for_policy_sync.sh" "${HOST}"
 fi
 
 echo "Endpoint pilot OK"

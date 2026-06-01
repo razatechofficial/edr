@@ -14,6 +14,7 @@ if [[ -z "${HOST}" ]]; then
 	echo "       EDR_ROLLOUT_VALIDATE=1" >&2
 	echo "       EDR_ROLLOUT_FETCH_ARTIFACTS=1, EDR_ROLLOUT_STAGE_BUNDLE=1" >&2
 	echo "       EDR_ROLLOUT_VERIFY=1 (final fleet verification)" >&2
+	echo "       EDR_ROLLOUT_STAGE_POLICY=1, EDR_ROLLOUT_VERIFY_POLICY=1" >&2
 	exit 1
 fi
 
@@ -34,6 +35,15 @@ if [[ "${EDR_ROLLOUT_ENABLE_TLS:-0}" == "1" || "${EDR_ROLLOUT_ENABLE_TLS:-0}" ==
 	if [[ -z "${EDR_CONTROLPLANE_API_TOKEN:-}" && -f /etc/edr-controlplane/env ]]; then
 		export EDR_CONTROLPLANE_API_TOKEN="$(grep -E '^EDR_CONTROLPLANE_API_TOKEN=' /etc/edr-controlplane/env | cut -d= -f2- || true)"
 	fi
+fi
+
+if [[ "${EDR_ROLLOUT_STAGE_POLICY:-0}" == "1" || "${EDR_ROLLOUT_STAGE_POLICY:-0}" == "true" ]]; then
+	echo
+	echo "==> stage control plane policy bundles"
+	sudo make -C "${ROOT}" stage-controlplane-policy
+	sudo systemctl restart edr-controlplane
+	sleep 2
+	bash "${ROOT}/scripts/pilot/verify_controlplane_policy.sh" "${HOST}"
 fi
 
 export EDR_PILOT_MTLS="${EDR_PILOT_MTLS:-1}"
@@ -61,6 +71,7 @@ fi
 if [[ "${EDR_ROLLOUT_VERIFY:-0}" == "1" || "${EDR_ROLLOUT_VERIFY:-0}" == "true" ]]; then
 	echo
 	echo "==> fleet rollout verification"
+	export EDR_ROLLOUT_VERIFY_POLICY="${EDR_ROLLOUT_VERIFY_POLICY:-0}"
 	bash "${ROOT}/scripts/pilot/verify_fleet_rollout.sh" "${HOST}" "${EXPECTED}"
 fi
 

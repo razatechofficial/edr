@@ -112,4 +112,12 @@ if ($ControlPlaneHost) {
 	Write-Host "gRPC port reachable"
 }
 
+if ($env:EDR_PILOT_VERIFY_POLICY -eq '1' -or $env:EDR_PILOT_VERIFY_POLICY -eq 'true') {
+	Write-Host '==> agent policy sync'
+	& "$PSScriptRoot\verify_agent_policy_sync.ps1"
+	if ($ControlPlaneHost -and $env:EDR_CONTROLPLANE_API_TOKEN) {
+		& "$PSScriptRoot\verify_policy_sync.ps1" -ControlPlaneHost $ControlPlaneHost
+	}
+}
+
 Write-Host "Windows tenant pilot check OK"
