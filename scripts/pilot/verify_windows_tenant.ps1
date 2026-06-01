@@ -80,9 +80,10 @@ $edrctl = Get-Command edrctl -ErrorAction SilentlyContinue
 if (-not $edrctl -and (Test-Path -LiteralPath $edrctlPath)) {
 	$edrctl = Get-Command $edrctlPath
 }
-if ($edrctl) {
+$edrctlExe = if ($edrctl) { $edrctl.Source } else { $null }
+if ($edrctlExe) {
 	Write-Host '==> edrctl fleet local'
-	& edrctl --config $active fleet local
+	& $edrctlExe --config $active fleet local
 }
 
 if ($env:EDR_CONTROLPLANE_API_TOKEN) {
@@ -97,9 +98,9 @@ if ($env:EDR_CONTROLPLANE_API_TOKEN) {
 	if ($ca) {
 		$args += @('--ca-cert', $ca)
 	}
-	if ($edrctl) {
+	if ($edrctlExe) {
 		Write-Host '==> edrctl fleet check'
-		& edrctl @args
+		& $edrctlExe @args
 	}
 }
 

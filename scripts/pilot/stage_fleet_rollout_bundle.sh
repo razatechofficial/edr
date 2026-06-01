@@ -44,6 +44,8 @@ for script in \
 	scripts/pilot/pilot_mtls_check.sh \
 	scripts/pilot/run_endpoint_pilot.sh \
 	scripts/pilot/check_prod_release.sh \
+	scripts/pilot/wait_for_prod_release.sh \
+	scripts/pilot/prepare_fleet_rollout.sh \
 	scripts/pilot/run_rollout_validation.sh \
 	scripts/pilot/upgrade_linux_agent.sh \
 	scripts/pilot/upgrade_macos_agent.sh \
@@ -92,6 +94,11 @@ Control plane host (already deployed):
   bash scripts/pilot/rollout_status.sh <cp-host> <expected-agents>
   bash scripts/pilot/run_rollout_validation.sh <cp-host> <expected-agents>
 
+Remote mTLS distribution (from control plane, over SSH):
+  scripts/deploy/distribute_agent_tls.sh tls <agent-host> linux
+  EDR_SSH_USER=<user> scripts/deploy/distribute_agent_tls.sh tls <agent-host> macos
+  EDR_SSH_USER=Administrator scripts/deploy/distribute_agent_tls.sh tls <agent-host> windows
+
 Linux endpoint:
   sudo dpkg -i packages/edr-agent_*_amd64.deb
   sudo scripts/deploy/copy_agent_tls.sh tls linux
@@ -109,6 +116,10 @@ Windows endpoint (Admin):
   copy tls\*.crt tls\*.key to C:\ProgramData\EDR Agent\tls\
   apply_tenant_tls_config.bat <cp-host>
   powershell -File scripts\pilot\verify_windows_tenant.ps1
+  "C:\Program Files\EDR Agent\edrctl.exe" --config "%ProgramData%\EDR Agent\config.yml" fleet local
+
+Endpoint pilot (post-install + optional detection):
+  EDR_PILOT_VERIFY_DETECTION=1 bash scripts/pilot/run_endpoint_pilot.sh <cp-host>
 
 Upgrade (preserve agent_id/config):
   sudo scripts/pilot/upgrade_linux_agent.sh packages/edr-agent_*_amd64.deb

@@ -205,6 +205,12 @@ run-endpoint-pilot:
 check-prod-release:
 	@bash scripts/pilot/check_prod_release.sh $(BRANCH)
 
+wait-for-prod-release:
+	@bash scripts/pilot/wait_for_prod_release.sh $(BRANCH)
+
+prepare-fleet-rollout:
+	@EDR_ROLLOUT_WAIT_RELEASE=$(WAIT) bash scripts/pilot/prepare_fleet_rollout.sh $(TAG) $(OUT)
+
 distribute-agent-tls:
 	@bash scripts/deploy/distribute_agent_tls.sh $(TLS_SRC) $(HOST) $(PLATFORM)
 
@@ -238,7 +244,7 @@ upgrade-macos-agent:
 upgrade-windows-agent:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pilot/upgrade_windows_agent.ps1 $(PKG)
 
-.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-endpoint-pilot check-prod-release distribute-agent-tls run-prod-rollout fetch-release-artifacts rollout-status stage-fleet-rollout-bundle backup-controlplane restore-controlplane validate-rollout upgrade-linux-agent upgrade-macos-agent upgrade-windows-agent
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-endpoint-pilot check-prod-release wait-for-prod-release prepare-fleet-rollout distribute-agent-tls run-prod-rollout fetch-release-artifacts rollout-status stage-fleet-rollout-bundle backup-controlplane restore-controlplane validate-rollout upgrade-linux-agent upgrade-macos-agent upgrade-windows-agent
 
 # ============================================================================
 # eBPF targets (Linux only)
