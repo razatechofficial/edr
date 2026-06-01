@@ -180,7 +180,10 @@ generate-controlplane-tls:
 prepare-windows-signing-secrets:
 	@bash scripts/ci/prepare_github_windows_signing_secrets.sh $(PFX)
 
-.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls
+run-fleet-pilot:
+	@bash scripts/pilot/run_fleet_pilot.sh $(HOST) $(EXPECTED)
+
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot
 
 # ============================================================================
 # eBPF targets (Linux only)

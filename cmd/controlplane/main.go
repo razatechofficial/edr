@@ -26,6 +26,7 @@ func main() {
 	tlsKey := flag.String("tls-key", envOr("EDR_CONTROLPLANE_TLS_KEY", ""), "server TLS private key (PEM)")
 	tlsClientCA := flag.String("tls-client-ca", envOr("EDR_CONTROLPLANE_TLS_CLIENT_CA", ""), "client CA for mutual TLS (PEM)")
 	mutualTLS := flag.Bool("mutual-tls", envBool("EDR_CONTROLPLANE_MUTUAL_TLS", false), "require agent client certificates")
+	apiToken := flag.String("api-token", envOr("EDR_CONTROLPLANE_API_TOKEN", ""), "optional bearer token for HTTP admin routes")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -67,7 +68,7 @@ func main() {
 
 	httpSrv := controlplane.NewServerWithRegistry(registry)
 	go func() {
-		handler := httpSrv.Routes()
+		handler := httpSrv.RoutesWithAuth(*apiToken)
 		if tlsCfg != nil {
 			log.Printf("controlplane HTTPS listening on %s (mutual_tls=%v)", *httpAddr, *mutualTLS)
 			srv := &http.Server{

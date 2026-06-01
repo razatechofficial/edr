@@ -35,10 +35,16 @@ upsert_env EDR_CONTROLPLANE_TLS_KEY "${TLS_DIR}/server.key"
 upsert_env EDR_CONTROLPLANE_TLS_CLIENT_CA "${TLS_DIR}/ca.crt"
 upsert_env EDR_CONTROLPLANE_MUTUAL_TLS true
 
+if ! grep -q '^EDR_CONTROLPLANE_API_TOKEN=' "${ENV_FILE}"; then
+	api_token="$(openssl rand -hex 24)"
+	upsert_env EDR_CONTROLPLANE_API_TOKEN "${api_token}"
+	echo "  API token:       ${api_token}"
+fi
+
 systemctl restart edr-controlplane
 
 echo "Control plane mTLS enabled."
 echo "  Agent ca_cert:   ${TLS_DIR}/ca.crt"
 echo "  Agent tls_cert:  ${TLS_DIR}/agent-client.crt"
 echo "  Agent tls_key:   ${TLS_DIR}/agent-client.key"
-echo "  Verify: EDR_CONTROLPLANE_HTTPS=1 bash ${ROOT}/scripts/pilot/verify_controlplane.sh ${HOST:-localhost}"
+echo "  Verify: EDR_CONTROLPLANE_HTTPS=1 EDR_CONTROLPLANE_API_TOKEN=\$(grep ^EDR_CONTROLPLANE_API_TOKEN= ${ENV_FILE} | cut -d= -f2-) bash ${ROOT}/scripts/pilot/verify_controlplane.sh ${HOST:-localhost}"

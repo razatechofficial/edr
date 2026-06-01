@@ -40,6 +40,10 @@ func (s *Server) Routes() http.Handler {
 	return mux
 }
 
+func (s *Server) RoutesWithAuth(apiToken string) http.Handler {
+	return withAPIToken(apiToken, s.Routes())
+}
+
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

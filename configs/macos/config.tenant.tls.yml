@@ -1,0 +1,78 @@
+# Enterprise tenant profile with mTLS to the control plane.
+agent:
+  log_level: info
+  data_dir: "/Library/Application Support/EDR"
+  temp_dir: "/tmp/edr"
+rules_file: "/Library/Application Support/EDR/config/rules/baseline.yaml"
+server:
+  endpoint: "YOUR_CONTROL_PLANE_HOST"
+  grpc_port: 50051
+  mutual_tls: true
+  tls_cert: "/Library/Application Support/EDR/tls/agent-client.crt"
+  tls_key: "/Library/Application Support/EDR/tls/agent-client.key"
+  ca_cert: "/Library/Application Support/EDR/tls/ca.crt"
+  heartbeat_sec: 30
+  reconnect_sec: 5
+logging:
+  level: info
+  alert_file: "/Library/Application Support/EDR/alerts/alerts.jsonl"
+  audit_file: "/Library/Application Support/EDR/audit/audit.jsonl"
+detection:
+  sigma:
+    enabled: true
+    rules_dir: "/Library/Application Support/EDR/config/rules/sigma"
+  yara:
+    enabled: true
+    rules_dir: "/Library/Application Support/EDR/config/rules/yara"
+  custom_rules:
+    enabled: true
+    rules_path: "/Library/Application Support/EDR/config/rules/custom"
+  ioc:
+    enabled: true
+    hash_db_path: "/Library/Application Support/EDR/config/rules/ioc/hashes.json"
+    ip_db_path: "/Library/Application Support/EDR/config/rules/ioc/ips.csv"
+    domain_db_path: "/Library/Application Support/EDR/config/rules/ioc/domains.csv"
+  behavioral:
+    sensitivity: high
+monitoring:
+  mode: auto
+  kernel_enabled: true
+  fim_preset: standard
+  darwin_unified_log_security: true
+  darwin_auth_unified_log: true
+compliance:
+  enabled: true
+  rules_dir: "/Library/Application Support/EDR/config/rules/compliance/sca"
+  scan_on_start: true
+  interval_hours: 12
+  enable_posture: true
+  enable_rootcheck: false
+  emit_passed_findings: false
+ml:
+  enabled: true
+  require_runtime: false
+  models_dir: "/Library/Application Support/EDR/models"
+  auto_update: false
+  models:
+    pe_classifier: pe_classifier.onnx
+    behavior_lstm: behavior_lstm.onnx
+    network_anomaly: network_anomaly.onnx
+    ransomware: ransomware.onnx
+  thresholds:
+    pe_malicious: 0.80
+    behavior_anomaly: 0.75
+    ransomware_score: 0.85
+    network_anomaly: 0.70
+self_protect:
+  enabled: true
+  watchdog: true
+  anti_debug: true
+  integrity_check: true
+  protected_process: false
+response:
+  auto_response: true
+  playbooks_dir: "/Library/Application Support/EDR/config/rules/playbooks"
+  forensics_dir: "/Library/Application Support/EDR/forensics"
+  quarantine_dir: "/Library/Application Support/EDR/quarantine"
+  approval:
+    mode: auto
