@@ -65,4 +65,9 @@ if [[ "${EDR_PILOT_VERIFY_POLICY:-0}" == "1" || "${EDR_PILOT_VERIFY_POLICY:-0}" 
 	fi
 fi
 
+if [[ "${EDR_PILOT_VERIFY_IOC:-0}" == "1" || "${EDR_PILOT_VERIFY_IOC:-0}" == "true" ]]; then
+	echo "==> offline IOC databases"
+	bash "${ROOT}/scripts/pilot/verify_agent_ioc.sh" macos
+fi
+
 echo "macOS tenant pilot check OK"

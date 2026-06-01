@@ -561,10 +561,18 @@ func (a *Agent) initThreatIntel() error {
 	}
 
 	for _, cf := range ti.CustomFeeds {
-		if cf.URL != "" {
-			mgr.RegisterFeed(threatintel.NewFeedClient(cf.Name, cf.URL, cf.Format, cf.APIKey))
-			a.logger.Info("threat intel: custom feed registered", "name", cf.Name, "format", cf.Format)
+		path := strings.TrimSpace(cf.URL)
+		if path == "" {
+			continue
 		}
+		if strings.HasPrefix(path, "file://") {
+			localPath := strings.TrimPrefix(path, "file://")
+			mgr.RegisterFeed(threatintel.NewLocalFeed(cf.Name, localPath, cf.Format))
+			a.logger.Info("threat intel: local feed registered", "name", cf.Name, "path", localPath)
+			continue
+		}
+		mgr.RegisterFeed(threatintel.NewFeedClient(cf.Name, path, cf.Format, cf.APIKey))
+		a.logger.Info("threat intel: custom feed registered", "name", cf.Name, "format", cf.Format)
 	}
 
 	a.threatIntel = mgr

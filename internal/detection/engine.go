@@ -559,6 +559,11 @@ func (e *Engine) Process(ctx context.Context, event interface{}) []Detection {
 
 // Reload hot-reloads all rule-backed engines.
 func (e *Engine) Reload() error {
+	if e.ioc != nil && e.cfg.IOCEnabled {
+		if err := e.ioc.LoadAll(e.cfg.IOCHashDBPath, e.cfg.IOCIPDBPath, e.cfg.IOCDomainDBPath); err != nil {
+			return fmt.Errorf("reload ioc: %w", err)
+		}
+	}
 	if e.sigma != nil {
 		if err := e.sigma.LoadRules(); err != nil {
 			return err

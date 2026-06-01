@@ -210,6 +210,11 @@ threat_intel:
     update_interval_hours: 0
 
   custom_feeds: []
+  # Sneakernet refresh from removable media (no network):
+  # - name: "offline-ips"
+  #   url: "file:///var/lib/edr/ioc/updates/ips.csv"
+  #   format: "csv"
+  #   update_interval_hours: 24
 
 self_protect:
   enabled: true

@@ -61,8 +61,8 @@ func (a *Agent) applyControlPlanePolicy(ctx context.Context, resp *protocol.Poli
 	if len(resp.GetRuleBundles()) == 0 {
 		return a.saveControlPlanePolicyHash(resp.GetPolicyHash())
 	}
-	if !a.cfg.Detection.YARA.Enabled {
-		return fmt.Errorf("control plane policy requires detection.yara.enabled")
+	if !a.cfg.Detection.YARA.Enabled && !a.cfg.Detection.Sigma.Enabled && !a.cfg.Detection.IOC.Enabled {
+		return fmt.Errorf("control plane policy requires at least one detection engine enabled")
 	}
 
 	rulesRoot, err := a.controlPlaneRulesRoot()
@@ -108,6 +108,7 @@ func (a *Agent) applyControlPlanePolicy(ctx context.Context, resp *protocol.Poli
 		a.logger.Info("detection rules reloaded after policy sync",
 			"yara_rules", stats.RulesLoaded.YARA,
 			"sigma_rules", stats.RulesLoaded.Sigma,
+			"ioc_enabled", a.cfg.Detection.IOC.Enabled,
 		)
 	}
 

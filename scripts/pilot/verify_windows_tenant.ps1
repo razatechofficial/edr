@@ -120,4 +120,9 @@ if ($env:EDR_PILOT_VERIFY_POLICY -eq '1' -or $env:EDR_PILOT_VERIFY_POLICY -eq 't
 	}
 }
 
+if ($env:EDR_PILOT_VERIFY_IOC -eq '1' -or $env:EDR_PILOT_VERIFY_IOC -eq 'true') {
+	Write-Host '==> offline IOC databases'
+	& bash "$PSScriptRoot/verify_agent_ioc.sh" windows
+}
+
 Write-Host "Windows tenant pilot check OK"

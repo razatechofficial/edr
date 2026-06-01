@@ -10,6 +10,7 @@ if [[ -z "${HOST}" ]]; then
 	echo "usage: $0 <control-plane-host>" >&2
 	echo "  env: EDR_PILOT_VERIFY_DETECTION=1 to run Log4Shell YARA probe" >&2
 	echo "       EDR_PILOT_VERIFY_POLICY=1 to wait for CP policy sync" >&2
+	echo "       EDR_PILOT_VERIFY_IOC=1 to verify offline IOC databases" >&2
 	exit 1
 fi
 
@@ -39,6 +40,12 @@ if [[ "${EDR_PILOT_VERIFY_POLICY:-0}" == "1" || "${EDR_PILOT_VERIFY_POLICY:-0}" 
 	echo
 	echo "==> policy sync"
 	bash "${ROOT}/scripts/pilot/wait_for_policy_sync.sh" "${HOST}"
+fi
+
+if [[ "${EDR_PILOT_VERIFY_IOC:-0}" == "1" || "${EDR_PILOT_VERIFY_IOC:-0}" == "true" ]]; then
+	echo
+	echo "==> offline IOC databases"
+	bash "${ROOT}/scripts/pilot/verify_agent_ioc.sh"
 fi
 
 echo "Endpoint pilot OK"

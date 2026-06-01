@@ -69,6 +69,13 @@ trap 'rm -f "${TMP_MANIFEST}"' EXIT
 	write_bundle "sigma-linux-core" "sigma-linux-core.tar.gz" "sigma/linux/execution" "sigma/linux/defense_evasion" "sigma/linux/discovery"
 	write_bundle "sigma-macos" "sigma-macos.tar.gz" "sigma/macos"
 	write_bundle "sigma-windows-process" "sigma-windows-process.tar.gz" "sigma/windows/process_creation"
+	if [[ -f "${RULES_ROOT}/ioc/hashes.json" && -f "${RULES_ROOT}/ioc/ips.csv" && -f "${RULES_ROOT}/ioc/domains.csv" ]]; then
+		ioc_paths=(ioc/hashes.json ioc/ips.csv ioc/domains.csv)
+		if [[ -f "${RULES_ROOT}/ioc/kev.json" ]]; then
+			ioc_paths+=(ioc/kev.json)
+		fi
+		write_bundle "ioc-offline" "ioc-offline.tar.gz" "${ioc_paths[@]}"
+	fi
 } > "${TMP_MANIFEST}"
 
 python3 - <<'PY' "${TMP_MANIFEST}" "${POLICY_DIR}/manifest.json"
