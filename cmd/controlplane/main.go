@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"go.uber.org/zap"
@@ -26,8 +27,14 @@ func main() {
 	tlsKey := flag.String("tls-key", envOr("EDR_CONTROLPLANE_TLS_KEY", ""), "server TLS private key (PEM)")
 	tlsClientCA := flag.String("tls-client-ca", envOr("EDR_CONTROLPLANE_TLS_CLIENT_CA", ""), "client CA for mutual TLS (PEM)")
 	mutualTLS := flag.Bool("mutual-tls", envBool("EDR_CONTROLPLANE_MUTUAL_TLS", false), "require agent client certificates")
+	policyDir := flag.String("policy-dir", envOr("EDR_CONTROLPLANE_POLICY_DIR", ""), "rule bundle policy directory (default: <data-dir>/policy)")
 	apiToken := flag.String("api-token", envOr("EDR_CONTROLPLANE_API_TOKEN", ""), "optional bearer token for HTTP admin routes")
 	flag.Parse()
+
+	policyPath := *policyDir
+	if policyPath == "" {
+		policyPath = filepath.Join(*dataDir, "policy")
+	}
 
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -53,7 +60,15 @@ func main() {
 		log.Fatalf("registry: %v", err)
 	}
 
-	grpcSvc := controlplane.NewGRPCService(registry, logger)
+	policyStore, err := controlplane.NewPolicyStore(policyPath)
+	if err != nil {
+		log.Fatalf("policy: %v", err)
+	}
+	if policyStore.PolicyHash() != "" {
+		log.Printf("controlplane policy loaded: hash=%s dir=%s", policyStore.PolicyHash(), policyPath)
+	}
+
+	grpcSvc := controlplane.NewGRPCService(registry, policyStore, logger)
 	var grpcOpts []grpc.ServerOption
 	if tlsCfg != nil {
 		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
@@ -66,7 +81,7 @@ func main() {
 		log.Fatalf("grpc listen: %v", err)
 	}
 
-	httpSrv := controlplane.NewServerWithRegistry(registry)
+	httpSrv := controlplane.NewServerWithRegistry(registry, policyStore)
 	go func() {
 		handler := httpSrv.RoutesWithAuth(*apiToken)
 		if tlsCfg != nil {

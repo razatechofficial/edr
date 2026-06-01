@@ -10,6 +10,7 @@ import (
 
 type Server struct {
 	registry *Registry
+	policy   *PolicyStore
 
 	mu          sync.RWMutex
 	enrolledAt  map[string]time.Time
@@ -18,12 +19,13 @@ type Server struct {
 }
 
 func NewServer() *Server {
-	return NewServerWithRegistry(nil)
+	return NewServerWithRegistry(nil, nil)
 }
 
-func NewServerWithRegistry(registry *Registry) *Server {
+func NewServerWithRegistry(registry *Registry, policy *PolicyStore) *Server {
 	return &Server{
 		registry:    registry,
+		policy:      policy,
 		enrolledAt:  map[string]time.Time{},
 		lastBeatAt:  map[string]time.Time{},
 		latestRules: map[string]string{},
@@ -35,6 +37,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/v1/agents", s.handleAgents)
 	mux.HandleFunc("/v1/alerts", s.handleAlerts)
+	mux.HandleFunc("/v1/policy", s.handlePolicy)
 	mux.HandleFunc("/v1/enroll", s.handleEnroll)
 	mux.HandleFunc("/v1/heartbeat", s.handleHeartbeat)
 	mux.HandleFunc("/v1/ingest", s.handleIngest)
@@ -93,6 +96,21 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"alerts": alerts})
+}
+
+func (s *Server) handlePolicy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.policy == nil || s.policy.PolicyHash() == "" {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"policy_hash": "local-default",
+			"bundles":     []any{},
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(s.policy.AdminSummary())
 }
 
 type enrollRequest struct {

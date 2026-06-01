@@ -29,6 +29,7 @@ if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
 fi
 
 install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${DATA_DIR}"
+install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${DATA_DIR}/policy"
 install -d -m 0755 "${ENV_DIR}"
 if [[ ! -f "${ENV_FILE}" ]]; then
 	install -m 0644 "${ROOT}/deploy/controlplane/env.example" "${ENV_FILE}"
@@ -47,4 +48,5 @@ echo "  gRPC:  $(hostname -f 2>/dev/null || hostname):50051"
 echo "  data:  ${DATA_DIR}"
 echo "  env:   ${ENV_FILE}"
 echo "  mTLS:  sudo make enable-controlplane-tls HOST=your-cp-hostname"
+echo "  Policy: sudo make stage-controlplane-policy && sudo systemctl restart edr-controlplane"
 echo "  Backup: sudo make backup-controlplane"

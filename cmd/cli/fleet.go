@@ -33,7 +33,7 @@ func newFleetCmd() *cobra.Command {
 		Use:   "fleet",
 		Short: "Fleet control plane enrollment visibility",
 	}
-	cmd.AddCommand(newFleetLocalCmd(), newFleetCheckCmd(), newFleetAgentsCmd(), newFleetAlertsCmd())
+	cmd.AddCommand(newFleetLocalCmd(), newFleetCheckCmd(), newFleetAgentsCmd(), newFleetAlertsCmd(), newFleetPolicyCmd())
 	return cmd
 }
 
@@ -292,6 +292,71 @@ func newFleetAlertsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&token, "token", os.Getenv("EDR_CONTROLPLANE_API_TOKEN"), "control plane API token")
 	cmd.Flags().StringVar(&caCert, "ca-cert", "", "CA certificate path for HTTPS verification")
 	cmd.Flags().IntVar(&limit, "limit", 20, "maximum alerts to return")
+	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "HTTP request timeout")
+	return cmd
+}
+
+func newFleetPolicyCmd() *cobra.Command {
+	var (
+		host    string
+		port    int
+		https   bool
+		token   string
+		caCert  string
+		timeout time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "policy",
+		Short: "Show detection rule bundles published by the control plane",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedHost, err := resolveFleetHost(host)
+			if err != nil {
+				return err
+			}
+			scheme := "http"
+			if https {
+				scheme = "https"
+			}
+			url := fmt.Sprintf("%s://%s:%d/v1/policy", scheme, resolvedHost, port)
+			client, err := fleetHTTPClient(https, resolveFleetCACert(caCert), timeout)
+			if err != nil {
+				return err
+			}
+			body, err := fleetHTTPGet(url, token, client)
+			if err != nil {
+				return err
+			}
+			var payload struct {
+				PolicyHash string `json:"policy_hash"`
+				Bundles    []struct {
+					Name    string `json:"name"`
+					Version string `json:"version"`
+					Format  string `json:"format"`
+					Hash    string `json:"hash"`
+				} `json:"bundles"`
+			}
+			if err := json.Unmarshal(body, &payload); err != nil {
+				return fmt.Errorf("parsing policy response: %w", err)
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+			fmt.Fprintf(w, "Policy Hash:\t%s\n", payload.PolicyHash)
+			fmt.Fprintln(w, "NAME\tVERSION\tFORMAT\tHASH")
+			for _, bundle := range payload.Bundles {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+					bundle.Name,
+					bundle.Version,
+					bundle.Format,
+					bundle.Hash,
+				)
+			}
+			return w.Flush()
+		},
+	}
+	cmd.Flags().StringVar(&host, "host", "", "control plane host (defaults to server.endpoint in config)")
+	cmd.Flags().IntVar(&port, "port", 8080, "control plane HTTP port")
+	cmd.Flags().BoolVar(&https, "https", false, "use HTTPS for control plane HTTP API")
+	cmd.Flags().StringVar(&token, "token", os.Getenv("EDR_CONTROLPLANE_API_TOKEN"), "control plane API token")
+	cmd.Flags().StringVar(&caCert, "ca-cert", "", "CA certificate path for HTTPS verification")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "HTTP request timeout")
 	return cmd
 }

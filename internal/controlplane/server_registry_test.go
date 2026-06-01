@@ -20,7 +20,7 @@ func TestHealthAndAgentsWithRegistry(t *testing.T) {
 		Os:       "windows",
 	})
 
-	srv := NewServerWithRegistry(reg)
+	srv := NewServerWithRegistry(reg, nil)
 	h := srv.Routes()
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)

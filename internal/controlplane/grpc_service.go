@@ -16,15 +16,16 @@ type GRPCService struct {
 	protocol.UnimplementedEDRServiceServer
 
 	registry *Registry
+	policy   *PolicyStore
 	logger   *zap.Logger
 }
 
 // NewGRPCService builds a gRPC service backed by registry state.
-func NewGRPCService(registry *Registry, logger *zap.Logger) *GRPCService {
+func NewGRPCService(registry *Registry, policy *PolicyStore, logger *zap.Logger) *GRPCService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &GRPCService{registry: registry, logger: logger}
+	return &GRPCService{registry: registry, policy: policy, logger: logger}
 }
 
 func (s *GRPCService) Register(ctx context.Context, req *protocol.RegistrationRequest) (*protocol.RegistrationResponse, error) {
@@ -53,6 +54,9 @@ func (s *GRPCService) Heartbeat(ctx context.Context, req *protocol.HeartbeatRequ
 func (s *GRPCService) GetPolicy(ctx context.Context, req *protocol.PolicyRequest) (*protocol.PolicyResponse, error) {
 	if req == nil || req.GetAgentId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id required")
+	}
+	if s.policy != nil {
+		return s.policy.GetPolicy(req.GetCurrentPolicyHash()), nil
 	}
 	return &protocol.PolicyResponse{
 		PolicyHash: "local-default",

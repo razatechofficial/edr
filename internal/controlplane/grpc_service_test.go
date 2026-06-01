@@ -20,7 +20,7 @@ func TestGRPCServiceRegisterHeartbeatAlert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := NewGRPCService(reg, zap.NewNop())
+	svc := NewGRPCService(reg, nil, zap.NewNop())
 
 	const bufSize = 1024 * 1024
 	lis := bufconn.Listen(bufSize)
@@ -86,5 +86,53 @@ func TestGRPCServiceRegisterHeartbeatAlert(t *testing.T) {
 	}
 	if reg.AgentCount() != 1 {
 		t.Fatalf("agent count = %d want 1", reg.AgentCount())
+	}
+}
+
+func TestGRPCServiceGetPolicy(t *testing.T) {
+	t.Parallel()
+
+	dir := writeTestPolicyDir(t)
+	policyStore, err := NewPolicyStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := NewRegistry(RegistryConfig{DataDir: t.TempDir(), HeartbeatSec: 15})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewGRPCService(reg, policyStore, zap.NewNop())
+
+	const bufSize = 1024 * 1024
+	lis := bufconn.Listen(bufSize)
+	s := grpc.NewServer()
+	protocol.RegisterEDRServiceServer(s, svc)
+	go func() { _ = s.Serve(lis) }()
+	t.Cleanup(s.Stop)
+
+	dialer := func(context.Context, string) (net.Conn, error) {
+		return lis.Dial()
+	}
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := protocol.NewEDRServiceClient(conn)
+	resp, err := client.GetPolicy(context.Background(), &protocol.PolicyRequest{
+		AgentId: "agent-test-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.GetChanged() {
+		t.Fatal("expected changed policy")
+	}
+	if len(resp.GetRuleBundles()) != 1 {
+		t.Fatalf("bundles = %d want 1", len(resp.GetRuleBundles()))
 	}
 }

@@ -55,6 +55,7 @@ for script in \
 	scripts/pilot/preflight_rollout.sh \
 	scripts/pilot/verify_fleet_rollout.sh \
 	scripts/pilot/list_fleet_endpoints.sh \
+	scripts/pilot/verify_controlplane_policy.sh \
 	scripts/pilot/run_rollout_validation.sh \
 	scripts/pilot/upgrade_linux_agent.sh \
 	scripts/pilot/upgrade_macos_agent.sh \
@@ -62,6 +63,8 @@ for script in \
 	scripts/deploy/restore_controlplane.sh \
 	scripts/deploy/copy_agent_tls.sh \
 	scripts/deploy/distribute_agent_tls.sh \
+	scripts/deploy/stage_controlplane_policy.sh \
+	scripts/deploy/export_controlplane_env.sh \
 	scripts/linux/apply_tenant_tls_config.sh \
 	scripts/macos/apply_tenant_tls_config.sh \
 	scripts/windows/apply_tenant_tls_config.bat; do
@@ -104,6 +107,12 @@ Control plane host (already deployed):
   export EDR_CONTROLPLANE_API_TOKEN=<from /etc/edr-controlplane/env>
   bash scripts/pilot/list_fleet_endpoints.sh <cp-host>
   bash scripts/pilot/verify_fleet_rollout.sh <cp-host> <expected-agents>
+
+Policy bundles (control plane):
+  sudo scripts/deploy/stage_controlplane_policy.sh
+  sudo systemctl restart edr-controlplane
+  bash scripts/pilot/verify_controlplane_policy.sh <cp-host>
+  edrctl fleet policy --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt
 
 Remote mTLS distribution (from control plane, over SSH):
   scripts/deploy/distribute_agent_tls.sh tls <agent-host> linux

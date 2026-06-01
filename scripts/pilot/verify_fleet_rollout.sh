@@ -44,5 +44,11 @@ if [[ -n "${EDR_CONTROLPLANE_API_TOKEN:-}" ]]; then
 	fi
 fi
 
+if [[ "${EDR_ROLLOUT_VERIFY_POLICY:-0}" == "1" || "${EDR_ROLLOUT_VERIFY_POLICY:-0}" == "true" ]]; then
+	echo
+	echo "==> control plane policy bundles"
+	bash "${ROOT}/scripts/pilot/verify_controlplane_policy.sh" "${HOST}"
+fi
+
 echo
 echo "fleet rollout verification OK"
