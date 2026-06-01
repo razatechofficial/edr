@@ -38,12 +38,18 @@ by_os = Counter((a.get("os") or "?").lower() for a in agents)
 print("by OS:", ", ".join(f"{k}={v}" for k, v in sorted(by_os.items())))
 
 print()
-print(f"{'AGENT_ID':<36} {'HOSTNAME':<24} {'OS':<10} {'VERSION':<12} LAST_HEARTBEAT")
+print(f"{'AGENT_ID':<36} {'HOSTNAME':<24} {'OS':<10} {'POLICY':<14} {'VERSION':<12} LAST_HEARTBEAT")
 for agent in agents:
+    policy = (agent.get("policy_hash") or "")[:12]
+    if policy:
+        policy = policy + "..."
+    else:
+        policy = "-"
     print(
         f"{agent.get('agent_id', '?'):<36} "
         f"{agent.get('hostname', '?'):<24} "
         f"{agent.get('os', '?'):<10} "
+        f"{policy:<14} "
         f"{agent.get('version', '?'):<12} "
         f"{agent.get('last_heartbeat', '')}"
     )

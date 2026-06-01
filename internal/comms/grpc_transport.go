@@ -13,6 +13,7 @@ import (
 type grpcHeartbeatTransport struct {
 	client     *GRPCClient
 	rulesFn    func() int
+	policyHash func() string
 	onCommands func([]*protocol.Command)
 }
 
@@ -33,6 +34,9 @@ func (t *grpcHeartbeatTransport) SendHeartbeat(ctx context.Context, data []byte)
 		AlertsGenerated: payload.AlertsGenerated,
 		RulesLoaded:     int32(t.rulesFn()),
 		UptimeSince:     timestamppb.New(time.Now().UTC().Add(-time.Duration(payload.Uptime) * time.Second)),
+	}
+	if t.policyHash != nil {
+		req.PolicyHash = t.policyHash()
 	}
 
 	resp, err := t.client.Heartbeat(ctx, req)

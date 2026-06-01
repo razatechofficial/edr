@@ -220,6 +220,7 @@ type HeartbeatRequest struct {
 	RulesLoaded     int32                  `protobuf:"varint,9,opt,name=rules_loaded,json=rulesLoaded,proto3" json:"rules_loaded,omitempty"`
 	Isolated        bool                   `protobuf:"varint,10,opt,name=isolated,proto3" json:"isolated,omitempty"`
 	UptimeSince     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=uptime_since,json=uptimeSince,proto3" json:"uptime_since,omitempty"`
+	PolicyHash      string                 `protobuf:"bytes,12,opt,name=policy_hash,json=policyHash,proto3" json:"policy_hash,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -329,6 +330,13 @@ func (x *HeartbeatRequest) GetUptimeSince() *timestamppb.Timestamp {
 		return x.UptimeSince
 	}
 	return nil
+}
+
+func (x *HeartbeatRequest) GetPolicyHash() string {
+	if x != nil {
+		return x.PolicyHash
+	}
+	return ""
 }
 
 // HeartbeatResponse carries any pending commands for the agent.
@@ -852,7 +860,7 @@ const file_agent_proto_rawDesc = "" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12#\n" +
 	"\rheartbeat_sec\x18\x04 \x01(\x05R\fheartbeatSec\x12:\n" +
 	"\x0einitial_policy\x18\n" +
-	" \x01(\v2\x13.edr.PolicyResponseR\rinitialPolicy\"\xab\x03\n" +
+	" \x01(\v2\x13.edr.PolicyResponseR\rinitialPolicy\"\xcc\x03\n" +
 	"\x10HeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x128\n" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x18\n" +
@@ -866,7 +874,9 @@ const file_agent_proto_rawDesc = "" +
 	"\frules_loaded\x18\t \x01(\x05R\vrulesLoaded\x12\x1a\n" +
 	"\bisolated\x18\n" +
 	" \x01(\bR\bisolated\x12=\n" +
-	"\fuptime_since\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\vuptimeSince\"\x96\x01\n" +
+	"\fuptime_since\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\vuptimeSince\x12\x1f\n" +
+	"\vpolicy_hash\x18\f \x01(\tR\n" +
+	"policyHash\"\x96\x01\n" +
 	"\x11HeartbeatResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x127\n" +
 	"\x10pending_commands\x18\x02 \x03(\v2\f.edr.CommandR\x0fpendingCommands\x12,\n" +

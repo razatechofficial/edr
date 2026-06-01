@@ -46,8 +46,8 @@ fi
 
 if [[ "${EDR_ROLLOUT_VERIFY_POLICY:-0}" == "1" || "${EDR_ROLLOUT_VERIFY_POLICY:-0}" == "true" ]]; then
 	echo
-	echo "==> control plane policy bundles"
-	bash "${ROOT}/scripts/pilot/verify_controlplane_policy.sh" "${HOST}"
+	echo "==> fleet policy rollout"
+	bash "${ROOT}/scripts/pilot/verify_fleet_policy_rollout.sh" "${HOST}" "${EXPECTED}"
 fi
 
 echo

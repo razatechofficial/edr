@@ -62,14 +62,22 @@ func TestGRPCServiceRegisterHeartbeatAlert(t *testing.T) {
 	}
 
 	hbResp, err := client.Heartbeat(ctx, &protocol.HeartbeatRequest{
-		AgentId: "agent-test-1",
-		Status:  "running",
+		AgentId:    "agent-test-1",
+		Status:     "running",
+		PolicyHash: "policy-hash-abc",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !hbResp.GetAccepted() {
 		t.Fatal("heartbeat rejected")
+	}
+	agents := reg.ListAgents()
+	if len(agents) != 1 {
+		t.Fatalf("agents = %d want 1", len(agents))
+	}
+	if agents[0].PolicyHash != "policy-hash-abc" {
+		t.Fatalf("policy_hash = %q want policy-hash-abc", agents[0].PolicyHash)
 	}
 
 	ack, err := client.ReportAlert(ctx, &protocol.Alert{

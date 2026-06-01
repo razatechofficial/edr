@@ -22,6 +22,7 @@ fi
 HEALTH_URL="${SCHEME}://${HOST}:${HTTP_PORT}/healthz"
 AGENTS_URL="${SCHEME}://${HOST}:${HTTP_PORT}/v1/agents"
 ALERTS_URL="${SCHEME}://${HOST}:${HTTP_PORT}/v1/alerts?limit=500"
+POLICY_URL="${SCHEME}://${HOST}:${HTTP_PORT}/v1/policy"
 
 echo "==> control plane ${HOST}"
 echo "    HTTP:  ${HEALTH_URL}"
@@ -43,24 +44,38 @@ fi
 
 AGENTS_TMP="$(mktemp)"
 ALERTS_TMP="$(mktemp)"
-trap 'rm -f "${AGENTS_TMP}" "${ALERTS_TMP}"' EXIT
+POLICY_TMP="$(mktemp)"
+trap 'rm -f "${AGENTS_TMP}" "${ALERTS_TMP}" "${POLICY_TMP}"' EXIT
 curl -fsS "${CURL_OPTS[@]}" "${AGENTS_URL}" > "${AGENTS_TMP}"
 curl -fsS "${CURL_OPTS[@]}" "${ALERTS_URL}" > "${ALERTS_TMP}"
+curl -fsS "${CURL_OPTS[@]}" "${POLICY_URL}" > "${POLICY_TMP}" 2>/dev/null || echo '{"policy_hash":"","bundles":[]}' > "${POLICY_TMP}"
 
 export EXPECTED
-python3 - <<'PY' "${AGENTS_TMP}" "${ALERTS_TMP}"
+python3 - <<'PY' "${AGENTS_TMP}" "${ALERTS_TMP}" "${POLICY_TMP}"
 import json, os, sys
 
 with open(sys.argv[1], encoding="utf-8") as f:
     agents = json.load(f).get("agents") or []
 with open(sys.argv[2], encoding="utf-8") as f:
     alerts = json.load(f).get("alerts") or []
+with open(sys.argv[3], encoding="utf-8") as f:
+    policy = json.load(f)
 expected = os.environ.get("EXPECTED", "")
+
+cp_hash = (policy.get("policy_hash") or "").strip()
+policy_ok = 0
+if cp_hash and cp_hash != "local-default":
+    for agent in agents:
+        if (agent.get("policy_hash") or "").strip() == cp_hash:
+            policy_ok += 1
 
 print()
 print("Fleet summary:")
 print(f"  enrolled agents: {len(agents)}")
 print(f"  ingested alerts: {len(alerts)}")
+if cp_hash and cp_hash != "local-default":
+    print(f"  control plane policy: {cp_hash[:16]}... ({len(policy.get('bundles') or [])} bundles)")
+    print(f"  agents on current policy: {policy_ok}/{len(agents)}")
 if expected:
     want = int(expected)
     if len(agents) >= want:

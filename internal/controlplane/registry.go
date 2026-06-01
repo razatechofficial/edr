@@ -27,6 +27,7 @@ type AgentRecord struct {
 	EventsTotal   uint64            `json:"events_processed,omitempty"`
 	AlertsTotal   uint64            `json:"alerts_generated,omitempty"`
 	RulesLoaded   int32             `json:"rules_loaded,omitempty"`
+	PolicyHash    string            `json:"policy_hash,omitempty"`
 }
 
 // Registry stores enrolled agents and appends alerts to disk.
@@ -129,6 +130,9 @@ func (r *Registry) Heartbeat(req *protocol.HeartbeatRequest) *protocol.Heartbeat
 	rec.EventsTotal = req.GetEventsProcessed()
 	rec.AlertsTotal = req.GetAlertsGenerated()
 	rec.RulesLoaded = req.GetRulesLoaded()
+	if req.GetPolicyHash() != "" {
+		rec.PolicyHash = req.GetPolicyHash()
+	}
 	if req.GetVersion() != "" {
 		rec.Version = req.GetVersion()
 	}

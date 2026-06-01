@@ -60,6 +60,7 @@ for script in \
 	scripts/pilot/verify_policy_sync.sh \
 	scripts/pilot/wait_for_policy_sync.sh \
 	scripts/pilot/run_policy_pilot.sh \
+	scripts/pilot/verify_fleet_policy_rollout.sh \
 	scripts/pilot/run_rollout_validation.sh \
 	scripts/pilot/upgrade_linux_agent.sh \
 	scripts/pilot/upgrade_macos_agent.sh \
@@ -126,7 +127,7 @@ Policy bundles (control plane):
 
 Agent policy sync (endpoint, after CP policy staged):
   bash scripts/pilot/wait_for_policy_sync.sh <cp-host>
-  EDR_PILOT_VERIFY_POLICY=1 bash scripts/pilot/run_endpoint_pilot.sh <cp-host>
+  make verify-fleet-policy-rollout HOST=<cp-host> EXPECTED=<expected-agents>
 
 Remote mTLS distribution (from control plane, over SSH):
   scripts/deploy/distribute_agent_tls.sh tls <agent-host> linux

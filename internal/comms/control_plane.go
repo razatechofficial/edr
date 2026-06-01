@@ -133,6 +133,12 @@ func NewControlPlane(cfg ControlPlaneConfig, logger *zap.Logger) (*ControlPlane,
 	transport := &grpcHeartbeatTransport{
 		client:  client,
 		rulesFn: cp.rulesCount,
+		policyHash: func() string {
+			if cp.policyHashFn != nil {
+				return cp.policyHashFn()
+			}
+			return ""
+		},
 		onCommands: func(cmds []*protocol.Command) {
 			cp.handleCommands(cmds...)
 		},

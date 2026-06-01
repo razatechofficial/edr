@@ -76,6 +76,7 @@ message HeartbeatRequest {
   int32                     rules_loaded      = 9;
   bool                      isolated          = 10;
   google.protobuf.Timestamp uptime_since      = 11;
+  string                    policy_hash       = 12;
 }
 
 // HeartbeatResponse carries any pending commands for the agent.

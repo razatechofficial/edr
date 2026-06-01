@@ -10,7 +10,7 @@ WAIT="${EDR_PILOT_WAIT_AGENTS:-0}"
 if [[ -z "${HOST}" ]]; then
 	echo "usage: $0 <control-plane-host> [expected-agents]" >&2
 	echo "  env: EDR_PILOT_MTLS=1, EDR_CONTROLPLANE_HTTPS=1, EDR_CONTROLPLANE_API_TOKEN=..." >&2
-	echo "       EDR_PILOT_WAIT_AGENTS=1, EDR_PILOT_VERIFY_ENROLLMENT=1, EDR_PILOT_VERIFY_DETECTION=1" >&2
+	echo "       EDR_PILOT_WAIT_AGENTS=1, EDR_PILOT_VERIFY_ENROLLMENT=1, EDR_PILOT_VERIFY_DETECTION=1, EDR_PILOT_VERIFY_POLICY=1" >&2
 	exit 1
 fi
 
@@ -41,6 +41,11 @@ Windows (Admin, OpenSSH):
 
 Post-install + detection (local endpoint):
   EDR_PILOT_VERIFY_DETECTION=1 bash scripts/pilot/run_endpoint_pilot.sh ${HOST}
+
+Policy bundles (control plane + endpoints):
+  sudo make stage-controlplane-policy && sudo systemctl restart edr-controlplane
+  EDR_PILOT_VERIFY_POLICY=1 bash scripts/pilot/wait_for_policy_sync.sh ${HOST}
+  make verify-fleet-policy-rollout HOST=${HOST} EXPECTED=${EXPECTED}
 EOF
 else
 	cat <<EOF
@@ -74,6 +79,12 @@ if [[ "${EDR_PILOT_VERIFY_DETECTION:-0}" == "1" || "${EDR_PILOT_VERIFY_DETECTION
 	echo
 	echo "==> Step 5: verify detection pipeline (run on enrolled Linux/macOS endpoint)"
 	make verify-detection-pilot HOST="${HOST}"
+fi
+
+if [[ "${EDR_PILOT_VERIFY_POLICY:-0}" == "1" || "${EDR_PILOT_VERIFY_POLICY:-0}" == "true" ]]; then
+	echo
+	echo "==> Step 6: verify fleet policy rollout"
+	bash "${ROOT}/scripts/pilot/verify_fleet_policy_rollout.sh" "${HOST}" "${EXPECTED}"
 fi
 
 echo

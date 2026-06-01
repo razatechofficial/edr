@@ -203,6 +203,7 @@ func newFleetAgentsCmd() *cobra.Command {
 					Hostname      string    `json:"hostname"`
 					OS            string    `json:"os"`
 					Version       string    `json:"version"`
+					PolicyHash    string    `json:"policy_hash"`
 					LastHeartbeat time.Time `json:"last_heartbeat"`
 					LastStatus    string    `json:"last_status"`
 				} `json:"agents"`
@@ -211,12 +212,20 @@ func newFleetAgentsCmd() *cobra.Command {
 				return fmt.Errorf("parsing agents response: %w", err)
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "AGENT ID\tHOSTNAME\tOS\tVERSION\tLAST HEARTBEAT\tSTATUS")
+			fmt.Fprintln(w, "AGENT ID\tHOSTNAME\tOS\tPOLICY\tVERSION\tLAST HEARTBEAT\tSTATUS")
 			for _, agent := range payload.Agents {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				policy := agent.PolicyHash
+				if len(policy) > 12 {
+					policy = policy[:12] + "..."
+				}
+				if policy == "" {
+					policy = "-"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					agent.AgentID,
 					agent.Hostname,
 					agent.OS,
+					policy,
 					agent.Version,
 					agent.LastHeartbeat.UTC().Format(time.RFC3339),
 					agent.LastStatus,
