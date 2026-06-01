@@ -59,6 +59,18 @@ if [[ -d rules ]]; then
 	cp -R rules/. "${PKG_ROOT}/Library/Application Support/EDR/config/rules/"
 fi
 
+if [[ -d models ]] && compgen -G "models/*.onnx" >/dev/null; then
+	cp models/*.onnx "${PKG_ROOT}/Library/Application Support/EDR/models/"
+	[[ -f models/manifest.json ]] && cp models/manifest.json "${PKG_ROOT}/Library/Application Support/EDR/models/"
+	for sig in models/*.onnx.sig; do
+		[[ -f "${sig}" ]] && cp "${sig}" "${PKG_ROOT}/Library/Application Support/EDR/models/"
+	done
+fi
+
+if [[ -f configs/macos/config.enterprise.yml ]]; then
+	cp configs/macos/config.enterprise.yml "${PKG_ROOT}/Library/Application Support/EDR/config/config.enterprise.yml"
+fi
+
 CONFIG_DST="${PKG_ROOT}/Library/Application Support/EDR/config/agent.yaml"
 sed \
 	-e "s|data_dir: \"/var/lib/edr\"|data_dir: \"${EDR_BASE}\"|" \

@@ -24,6 +24,7 @@
     <Feature Id="ProductFeature" Title="EDR Agent" Level="1">
       <ComponentGroupRef Id="ProductComponents"/>
       <ComponentGroupRef Id="RulesComponents"/>
+      <ComponentGroupRef Id="ModelsComponents"/>
     </Feature>
 
     <CustomAction Id="CaInstallService"
@@ -54,6 +55,7 @@
       <Directory Id="CommonAppDataFolder">
         <Directory Id="DATAROOT" Name="EDR Agent">
           <Directory Id="RULESROOT" Name="rules"/>
+          <Directory Id="MODELSROOT" Name="models"/>
         </Directory>
       </Directory>
     </Directory>
@@ -78,6 +80,12 @@
         <File Id="ConfigHardenedFile"
               Source="$(var.EdrConfigHardenedYml)"
               Name="config.hardened.yml"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpConfigEnterpriseYml" Guid="*" Directory="DATAROOT" Win64="yes">
+        <File Id="ConfigEnterpriseFile"
+              Source="$(var.EdrConfigEnterpriseYml)"
+              Name="config.enterprise.yml"
               KeyPath="yes"/>
       </Component>
     </ComponentGroup>

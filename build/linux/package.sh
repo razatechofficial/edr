@@ -44,12 +44,23 @@ if [ -f "${EDRCTL}" ]; then
 fi
 
 cp configs/linux/config.yml pkg/deb/etc/edr-agent/config.yml
+if [ -f configs/linux/config.enterprise.yml ]; then
+    cp configs/linux/config.enterprise.yml pkg/deb/etc/edr-agent/config.enterprise.yml
+fi
 if [ ! -d "${RULES_SRC}" ]; then
     echo "rules directory not found: ${RULES_SRC}" >&2
     exit 1
 fi
 mkdir -p pkg/deb/etc/edr-agent/rules
 cp -R "${RULES_SRC}/." pkg/deb/etc/edr-agent/rules/
+if [ -d models ] && compgen -G "models/*.onnx" >/dev/null; then
+    mkdir -p pkg/deb/usr/share/edr-agent/models
+    cp models/*.onnx pkg/deb/usr/share/edr-agent/models/
+    [ -f models/manifest.json ] && cp models/manifest.json pkg/deb/usr/share/edr-agent/models/
+    for sig in models/*.onnx.sig; do
+        [ -f "${sig}" ] && cp "${sig}" pkg/deb/usr/share/edr-agent/models/
+    done
+fi
 mkdir -p pkg/deb/var/lib/edr/bpf
 cp "${EBPF_OBJ}" pkg/deb/var/lib/edr/bpf/edr.bpf.o
 cp "${EBPF_VER}" pkg/deb/var/lib/edr/bpf/edr.bpf.version

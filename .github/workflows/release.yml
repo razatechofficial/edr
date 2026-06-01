@@ -82,11 +82,44 @@ jobs:
           echo "release_tag=prod-${GITHUB_RUN_NUMBER}-${SHORT}" >> "$GITHUB_OUTPUT"
           echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
 
-  build-linux:
-    needs: release_meta
+  prepare-release-assets:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: ml/training/requirements.txt
+      - name: Install ML bootstrap dependencies
+        run: pip install -r ml/training/requirements.txt
+      - name: Refresh IOC feeds and bootstrap ML models
+        run: bash scripts/ci/prepare_release_assets.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-ioc
+          path: rules/ioc/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-models
+          path: |
+            models/*.onnx
+            models/manifest.json
+            models/*.sig
+
+  build-linux:
+    needs: [release_meta, prepare-release-assets]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-ioc
+          path: rules/ioc
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-models
+          path: models
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -112,7 +145,7 @@ jobs:
             dist/*.rpm
 
   build-darwin:
-    needs: release_meta
+    needs: [release_meta, prepare-release-assets]
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -123,6 +156,14 @@ jobs:
       EDR_MACOS_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-ioc
+          path: rules/ioc
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-models
+          path: models
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -166,11 +207,19 @@ jobs:
           path: dist/edr-agent_*_${{ matrix.arch }}.pkg
 
   build-windows:
-    needs: release_meta
+    needs: [release_meta, prepare-release-assets]
     # windows-latest is moving to VS2026-based images; WiX v3 zip tools are more reliable on windows-2022.
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-ioc
+          path: rules/ioc
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-models
+          path: models
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

@@ -98,7 +98,7 @@ BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/l
 .PHONY: run-agent run-agent-ml test-edr-macos-lab
 .PHONY: test-bench
 .PHONY: vulncheck
-.PHONY: rules-update intel-update models-update
+.PHONY: rules-update intel-update models-update release-assets
 .PHONY: models-bootstrap models-validate models-sign
 .PHONY: train-all train-pe train-behavior train-network train-ransomware
 .PHONY: install-linux install-darwin install-embedded edrctl
@@ -393,6 +393,9 @@ intel-update:
 	@echo "==> Updating threat intelligence feeds"
 	@./scripts/update-intel.sh
 	@echo "IOC update complete (see rules/ioc/*.json and rules/ioc/*.csv)"
+
+release-assets:
+	@bash scripts/ci/prepare_release_assets.sh
 
 models-update:
 	@echo "==> Updating ML models"

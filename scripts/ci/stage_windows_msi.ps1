@@ -47,12 +47,69 @@ if (Test-Path -LiteralPath $configHardenedSrc) {
     Copy-Item -LiteralPath $configHardenedSrc -Destination $configHardenedDest -Force
 }
 
+$configEnterpriseSrc = Join-Path $root 'configs/windows/config.enterprise.yml'
+$configEnterpriseDest = Join-Path $root 'build/windows/config.enterprise.yml'
+if (Test-Path -LiteralPath $configEnterpriseSrc) {
+    Copy-Item -LiteralPath $configEnterpriseSrc -Destination $configEnterpriseDest -Force
+}
+
 $heatExe = 'heat.exe'
 if (-not [string]::IsNullOrWhiteSpace($env:EDR_WIX_BIN)) {
     $heatExe = Join-Path $env:EDR_WIX_BIN 'heat.exe'
 }
 if (-not (Get-Command $heatExe -ErrorAction SilentlyContinue)) {
     throw "heat.exe not on PATH; run ensure_wix_path.ps1 first or set EDR_WIX_BIN"
+}
+
+$modelsStage = Join-Path $root 'build/windows/msi-models'
+$modelsWxs = Join-Path $root 'build/windows/models.wxs'
+if (Test-Path -LiteralPath $modelsStage) {
+    Remove-Item -LiteralPath $modelsStage -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $modelsStage | Out-Null
+
+$modelsSrc = Join-Path $root 'models'
+$modelFiles = @(Get-ChildItem -LiteralPath $modelsSrc -Filter '*.onnx' -ErrorAction SilentlyContinue)
+if ($modelFiles.Count -gt 0) {
+    foreach ($model in $modelFiles) {
+        Copy-Item -LiteralPath $model.FullName -Destination (Join-Path $modelsStage $model.Name) -Force
+    }
+    $manifest = Join-Path $modelsSrc 'manifest.json'
+    if (Test-Path -LiteralPath $manifest) {
+        Copy-Item -LiteralPath $manifest -Destination (Join-Path $modelsStage 'manifest.json') -Force
+    }
+    foreach ($sig in (Get-ChildItem -LiteralPath $modelsSrc -Filter '*.onnx.sig' -ErrorAction SilentlyContinue)) {
+        Copy-Item -LiteralPath $sig.FullName -Destination (Join-Path $modelsStage $sig.Name) -Force
+    }
+
+    Write-Host "==> heat models fragment"
+    & $heatExe dir $modelsStage `
+        -cg ModelsComponents `
+        -dr MODELSROOT `
+        -var var.ModelsStage `
+        -srd `
+        -scom `
+        -sreg `
+        -gg `
+        -out $modelsWxs `
+        -nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw "heat models failed with exit $LASTEXITCODE"
+    }
+    Write-Host "Staged models -> $modelsWxs"
+} else {
+    Write-Host "skip models MSI fragment (no models/*.onnx)"
+    if (Test-Path -LiteralPath $modelsWxs) {
+        Remove-Item -LiteralPath $modelsWxs -Force
+    }
+    @(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">'
+        '  <Fragment>'
+        '    <ComponentGroup Id="ModelsComponents"/>'
+        '  </Fragment>'
+        '</Wix>'
+    ) -join "`n" | Set-Content -LiteralPath $modelsWxs -Encoding UTF8
 }
 
 Write-Host "==> heat rules fragment"

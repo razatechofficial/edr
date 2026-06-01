@@ -96,16 +96,25 @@ if (-not (Test-Path -LiteralPath $agentExe)) {
 
 $configYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.yml'))
 $configHardenedYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.hardened.yml'))
+$configEnterpriseYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.enterprise.yml'))
 $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wxs'))
+$modelsWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wxs'))
 $rulesStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-rules'))
+$modelsStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-models'))
 if (-not (Test-Path -LiteralPath $configYml)) {
     throw "Missing staged config: $configYml"
 }
 if (-not (Test-Path -LiteralPath $configHardenedYml)) {
     throw "Missing staged hardened config: $configHardenedYml"
 }
+if (-not (Test-Path -LiteralPath $configEnterpriseYml)) {
+    throw "Missing staged enterprise config: $configEnterpriseYml"
+}
 if (-not (Test-Path -LiteralPath $rulesWxs)) {
     throw "Missing rules WiX fragment: $rulesWxs"
+}
+if (-not (Test-Path -LiteralPath $modelsWxs)) {
+    throw "Missing models WiX fragment: $modelsWxs"
 }
 
 New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
@@ -114,6 +123,7 @@ New-Item -ItemType Directory -Force -Path 'build/windows' | Out-Null
 $wxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/installer.wxs'))
 $wixobj = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/installer.wixobj'))
 $rulesWixobj = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wixobj'))
+$modelsWixobj = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wixobj'))
 $msi = [System.IO.Path]::GetFullPath((Join-Path $root "dist/edr-agent_${Version}_amd64.msi"))
 
 $candleLog = Join-Path $root 'build/windows/candle.log'
@@ -125,7 +135,9 @@ $candleArgList = @(
     "-dEdrAgentExe=$agentExe",
     "-dEdrConfigYml=$configYml",
     "-dEdrConfigHardenedYml=$configHardenedYml",
+    "-dEdrConfigEnterpriseYml=$configEnterpriseYml",
     "-dRulesStage=$rulesStage",
+    "-dModelsStage=$modelsStage",
     $wxs,
     '-out', (Join-Path $root 'build/windows/')
 )
@@ -139,9 +151,18 @@ $candleRulesArgList = @(
 )
 Invoke-WiXTool -Label 'candle rules.wxs' -ExePath $candleExe -ArgList $candleRulesArgList -LogPath $candleLog
 
+$candleModelsArgList = @(
+    '-nologo', '-arch', 'x64',
+    "-dModelsStage=$modelsStage",
+    $modelsWxs,
+    '-out', (Join-Path $root 'build/windows/')
+)
+Invoke-WiXTool -Label 'candle models.wxs' -ExePath $candleExe -ArgList $candleModelsArgList -LogPath $candleLog
+
 $wixobj = Join-Path $root 'build/windows/installer.wixobj'
 $rulesWixobj = Join-Path $root 'build/windows/rules.wixobj'
-$lightInputs = @($wixobj, $rulesWixobj)
+$modelsWixobj = Join-Path $root 'build/windows/models.wixobj'
+$lightInputs = @($wixobj, $rulesWixobj, $modelsWixobj)
 
 $agentDist = Join-Path $root 'dist/windows-amd64'
 $yaraDlls = @(Get-ChildItem -LiteralPath $agentDist -Filter 'libyara*.dll' -ErrorAction SilentlyContinue)
@@ -192,6 +213,7 @@ if ($yaraDlls.Count -gt 0) {
 $lightArgList = @(
     '-nologo', '-sval', '-sw1076',
     "-dRulesStage=$rulesStage",
+    "-dModelsStage=$modelsStage",
     $lightInputs,
     '-o', $msi
 )
