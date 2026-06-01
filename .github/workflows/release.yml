@@ -226,18 +226,15 @@ jobs:
           cache: true
       - name: Setup Windows YARA toolchain
         shell: pwsh
-        continue-on-error: true
         run: |
-          try {
-            & "${{ github.workspace }}/scripts/ci/setup_windows_yara.ps1"
-          } catch {
-            Write-Host "YARA toolchain unavailable; building agent with CGO disabled"
-            Add-Content -LiteralPath $env:GITHUB_ENV -Value "EDR_WINDOWS_YARA=0"
-            Add-Content -LiteralPath $env:GITHUB_ENV -Value "CGO_ENABLED=0"
-          }
+          & "${{ github.workspace }}/scripts/ci/setup_windows_yara.ps1"
       - name: Build Windows binaries
         shell: bash
         run: bash scripts/ci/build_windows_binaries.sh
+      - name: Verify Windows YARA bundle
+        shell: pwsh
+        run: |
+          & "${{ github.workspace }}/scripts/ci/verify_windows_yara.ps1"
       # Single pwsh session: ensure_wix_path mutates PATH; avoids any runner PATH ordering issues between steps.
       - name: WiX toolchain and MSI
         shell: pwsh

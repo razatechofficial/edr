@@ -1,0 +1,23 @@
+title: Rundll32 Without Expected DLL Path
+id: win-rundll32-suspicious-001
+status: stable
+description: Detects rundll32 executing with unusual command-line patterns
+tags:
+  - attack.execution
+  - attack.t1218.011
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith:
+      - '\rundll32.exe'
+    CommandLine|contains:
+      - 'javascript:'
+      - 'http://'
+      - 'https://'
+      - '..\\'
+      - 'Temp\\'
+      - 'AppData\\'
+  condition: selection
+level: medium

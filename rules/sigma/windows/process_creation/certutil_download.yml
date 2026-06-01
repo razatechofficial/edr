@@ -1,0 +1,23 @@
+title: Certutil Download or Decode
+id: win-certutil-download-001
+status: stable
+description: Detects certutil used to download or decode payloads
+tags:
+  - attack.command_and_control
+  - attack.t1105
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith:
+      - '\certutil.exe'
+    CommandLine|contains:
+      - ' -urlcache '
+      - ' -decode '
+      - ' -decodehex '
+      - ' -split '
+      - 'http://'
+      - 'https://'
+  condition: selection
+level: high

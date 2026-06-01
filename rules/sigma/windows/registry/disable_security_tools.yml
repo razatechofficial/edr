@@ -1,0 +1,19 @@
+title: Security Tool Registry Disable
+id: win-disable-security-tools-001
+status: stable
+description: Detects registry changes that disable Defender or firewall components
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  category: registry_event
+  product: windows
+detection:
+  selection:
+    TargetObject|contains:
+      - '\Policies\Microsoft\Windows Defender\'
+      - '\Windows Defender\Real-Time Protection\'
+      - '\Windows Defender\DisableAntiSpyware'
+      - '\System\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\'
+  condition: selection
+level: high

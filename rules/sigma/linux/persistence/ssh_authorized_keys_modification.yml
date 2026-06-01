@@ -1,0 +1,17 @@
+title: SSH Authorized Keys Modification
+id: linux-ssh-authkeys-001
+status: stable
+description: Detects writes to user or root SSH authorized_keys files used for persistence
+tags:
+  - attack.persistence
+  - attack.t1098.004
+logsource:
+  category: file_event
+  product: linux
+detection:
+  selection:
+    TargetFilename|contains:
+      - "/.ssh/authorized_keys"
+      - "/.ssh/authorized_keys2"
+  condition: selection
+level: high

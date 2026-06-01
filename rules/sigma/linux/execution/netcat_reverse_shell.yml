@@ -1,0 +1,24 @@
+title: Netcat Reverse Shell Patterns
+id: linux-netcat-revsh-001
+status: stable
+description: Detects netcat/ncat patterns associated with reverse shells
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith:
+      - "/nc"
+      - "/ncat"
+      - "/netcat"
+    CommandLine|contains:
+      - "-e /bin"
+      - "-e /bin/bash"
+      - "-e /bin/sh"
+      - " -c "
+      - "/dev/tcp/"
+  condition: selection
+level: high

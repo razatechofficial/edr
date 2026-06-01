@@ -1,0 +1,22 @@
+title: Curl or Wget Remote Download
+id: linux-curl-wget-001
+status: stable
+description: Detects curl/wget fetching remote content, common in post-exploitation staging
+tags:
+  - attack.command_and_control
+  - attack.t1105
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection_proc:
+    Image|endswith:
+      - "/curl"
+      - "/wget"
+  selection_remote:
+    CommandLine|contains:
+      - "http://"
+      - "https://"
+      - "ftp://"
+  condition: selection_proc and selection_remote
+level: medium

@@ -1,0 +1,21 @@
+title: Nmap Port Scan Execution
+id: linux-nmap-scan-001
+status: stable
+description: Detects nmap execution commonly used for internal reconnaissance
+tags:
+  - attack.discovery
+  - attack.t1046
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith:
+      - "/nmap"
+    CommandLine|contains:
+      - "-p"
+      - "--top-ports"
+      - "-sS"
+      - "-sT"
+  condition: selection
+level: medium

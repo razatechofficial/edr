@@ -1,0 +1,19 @@
+title: WMIC Process Creation
+id: win-wmic-process-001
+status: stable
+description: Detects wmic used to spawn processes, a common lateral movement pattern
+tags:
+  - attack.execution
+  - attack.t1047
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith:
+      - '\wmic.exe'
+    CommandLine|contains:
+      - 'process call create'
+      - ' /node:'
+  condition: selection
+level: medium

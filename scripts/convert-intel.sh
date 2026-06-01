@@ -17,8 +17,44 @@ for f in hashes.json ips.csv domains.csv; do
 	fi
 done
 
-echo "==> IOC hashes (baseline)"
-cp "${BASE}/hashes.json" "${OUT}/hashes.json"
+echo "==> IOC hashes (baseline + KEV)"
+tmp_hashes_kev="$(mktemp)"
+tmp_hashes_out="$(mktemp)"
+cp "${BASE}/hashes.json" "${tmp_hashes_out}"
+
+if [[ -f "${RAW}/cisa_kev.json" ]]; then
+	echo "  merge cisa kev"
+	python3 "${ROOT}/scripts/merge_kev_intel.py" \
+		--kev "${RAW}/cisa_kev.json" \
+		--hashes-out "${tmp_hashes_kev}" \
+		--kev-out "${OUT}/kev.json"
+	if [[ -s "${tmp_hashes_kev}" ]]; then
+		python3 - "${tmp_hashes_out}" "${tmp_hashes_kev}" <<'PY'
+import json, sys
+base_path, kev_path = sys.argv[1], sys.argv[2]
+with open(base_path, encoding="utf-8") as f:
+    merged = json.load(f)
+with open(kev_path, encoding="utf-8") as f:
+    kev = json.load(f)
+seen = {str(e.get("hash", "")).lower() for e in merged if e.get("hash")}
+for entry in kev:
+    h = str(entry.get("hash", "")).lower()
+    if not h or h in seen:
+        continue
+    seen.add(h)
+    merged.append(entry)
+with open(base_path, "w", encoding="utf-8") as f:
+    json.dump(merged, f, indent=2)
+    f.write("\n")
+print(f"  merged {len(merged)} hash IOC entries")
+PY
+	fi
+else
+	echo "  skip cisa kev (raw file missing)"
+fi
+
+cp "${tmp_hashes_out}" "${OUT}/hashes.json"
+rm -f "${tmp_hashes_kev}" "${tmp_hashes_out}"
 
 tmp_ips="$(mktemp)"
 trap 'rm -f "${tmp_ips}" "${tmp_domains:-}"' EXIT

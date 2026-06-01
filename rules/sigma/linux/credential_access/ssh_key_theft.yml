@@ -1,0 +1,18 @@
+title: SSH Private Key Access
+id: linux-ssh-key-theft-001
+status: stable
+description: Detects access to SSH private key material
+tags:
+  - attack.credential_access
+  - attack.t1552.004
+logsource:
+  category: file_event
+  product: linux
+detection:
+  selection:
+    TargetFilename|contains:
+      - "/.ssh/id_rsa"
+      - "/.ssh/id_ecdsa"
+      - "/.ssh/id_ed25519"
+  condition: selection
+level: high

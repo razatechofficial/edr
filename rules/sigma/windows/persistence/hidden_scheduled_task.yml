@@ -1,0 +1,23 @@
+title: Hidden Scheduled Task Creation
+id: win-hidden-schtask-001
+status: stable
+description: Detects schtasks creation with hidden window flags
+tags:
+  - attack.persistence
+  - attack.t1053.005
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith:
+      - '\schtasks.exe'
+    CommandLine|contains:
+      - '/create'
+      - '/sc '
+    CommandLine|contains:
+      - '/ru system'
+      - '/tn '
+      - '/tr '
+  condition: selection
+level: medium

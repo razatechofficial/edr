@@ -1,0 +1,21 @@
+title: MSHTA Proxy Execution
+id: win-mshta-lolbin-001
+status: stable
+description: Detects mshta executing remote HTA or script content
+tags:
+  - attack.execution
+  - attack.t1218.005
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith:
+      - '\mshta.exe'
+    CommandLine|contains:
+      - 'http://'
+      - 'https://'
+      - 'javascript:'
+      - 'vbscript:'
+  condition: selection
+level: high

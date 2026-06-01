@@ -1,0 +1,24 @@
+title: PowerShell IEX Download Cradle
+id: win-powershell-iex-001
+status: stable
+description: Detects PowerShell invoke-expression download cradles
+tags:
+  - attack.execution
+  - attack.t1059.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_image:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+  selection_iex:
+    CommandLine|contains:
+      - 'IEX'
+      - 'Invoke-Expression'
+      - 'DownloadString'
+      - 'DownloadFile'
+      - 'FromBase64String'
+  condition: selection_image and selection_iex
+level: high

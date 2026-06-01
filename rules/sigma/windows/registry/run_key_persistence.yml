@@ -1,0 +1,17 @@
+title: Run Key Persistence
+id: win-run-key-persistence-001
+status: stable
+description: Detects modifications to Run/RunOnce registry keys
+tags:
+  - attack.persistence
+  - attack.t1547.001
+logsource:
+  category: registry_event
+  product: windows
+detection:
+  selection:
+    TargetObject|contains:
+      - '\Software\Microsoft\Windows\CurrentVersion\Run'
+      - '\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+  condition: selection
+level: medium

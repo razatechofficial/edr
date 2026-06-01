@@ -1,0 +1,23 @@
+title: Linux Auth Log Deletion
+id: linux-log-delete-001
+status: stable
+description: Detects deletion or truncation of common Linux authentication logs
+tags:
+  - attack.defense_evasion
+  - attack.t1070.002
+logsource:
+  category: file_event
+  product: linux
+detection:
+  selection:
+    event.action:
+      - delete
+      - unlink
+      - rename
+    TargetFilename|contains:
+      - "/var/log/auth.log"
+      - "/var/log/secure"
+      - "/var/log/wtmp"
+      - "/var/log/btmp"
+  condition: selection
+level: high

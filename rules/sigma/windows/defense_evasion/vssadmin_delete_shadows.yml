@@ -1,0 +1,23 @@
+title: Volume Shadow Copy Deletion
+id: win-vssadmin-delete-shadows-001
+status: stable
+description: Detects vssadmin or wmic deleting shadow copies, common in ransomware
+tags:
+  - attack.impact
+  - attack.t1490
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_vssadmin:
+    Image|endswith:
+      - '\vssadmin.exe'
+    CommandLine|contains:
+      - 'delete shadows'
+  selection_wmic:
+    Image|endswith:
+      - '\wmic.exe'
+    CommandLine|contains:
+      - 'shadowcopy delete'
+  condition: selection_vssadmin or selection_wmic
+level: high

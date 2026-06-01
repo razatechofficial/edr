@@ -1,0 +1,21 @@
+title: Bitsadmin Transfer
+id: win-bitsadmin-download-001
+status: stable
+description: Detects bitsadmin used to download or persist payloads
+tags:
+  - attack.command_and_control
+  - attack.t1197
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith:
+      - '\bitsadmin.exe'
+    CommandLine|contains:
+      - '/transfer'
+      - '/download'
+      - 'http://'
+      - 'https://'
+  condition: selection
+level: high

@@ -1,0 +1,22 @@
+title: Executable Created in Temporary Directory
+id: linux-tmp-exec-001
+status: stable
+description: Detects executable files dropped in /tmp or /dev/shm before execution
+tags:
+  - attack.execution
+  - attack.t1204.002
+logsource:
+  category: file_event
+  product: linux
+detection:
+  selection:
+    TargetFilename|startswith:
+      - "/tmp/"
+      - "/var/tmp/"
+      - "/dev/shm/"
+    TargetFilename|endswith:
+      - ".sh"
+      - ".bin"
+      - ".elf"
+  condition: selection
+level: medium

@@ -1,0 +1,21 @@
+title: Shell Profile Persistence
+id: linux-profile-rc-001
+status: stable
+description: Detects modification of global or user shell startup files for persistence
+tags:
+  - attack.persistence
+  - attack.t1546.004
+logsource:
+  category: file_event
+  product: linux
+detection:
+  selection:
+    TargetFilename|endswith:
+      - "/.bashrc"
+      - "/.bash_profile"
+      - "/.profile"
+      - "/.zshrc"
+      - "/etc/profile"
+      - "/etc/bash.bashrc"
+  condition: selection
+level: medium

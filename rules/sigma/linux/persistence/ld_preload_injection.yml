@@ -1,0 +1,17 @@
+title: LD_PRELOAD Injection
+id: linux-ld-preload-001
+status: stable
+description: Detects modification of LD preload configuration used for code injection
+tags:
+  - attack.persistence
+  - attack.t1574.006
+logsource:
+  category: file_event
+  product: linux
+detection:
+  selection:
+    TargetFilename|endswith:
+      - "/etc/ld.so.preload"
+      - "/etc/ld.so.conf"
+  condition: selection
+level: high

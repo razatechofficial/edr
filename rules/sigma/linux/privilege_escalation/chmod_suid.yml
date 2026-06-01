@@ -1,0 +1,22 @@
+title: SUID Bit Set on Binary
+id: linux-chmod-suid-001
+status: stable
+description: Detects chmod commands setting setuid/setgid bits
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.001
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith:
+      - "/chmod"
+    CommandLine|contains:
+      - "+s"
+      - "4755"
+      - "4777"
+      - "u+s"
+      - "g+s"
+  condition: selection
+level: high

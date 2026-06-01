@@ -1,0 +1,21 @@
+title: Regsvr32 Squiblydoo Pattern
+id: win-regsvr32-squiblydoo-001
+status: stable
+description: Detects regsvr32 executing scriptlets from remote or suspicious locations
+tags:
+  - attack.execution
+  - attack.t1218.010
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith:
+      - '\regsvr32.exe'
+    CommandLine|contains:
+      - '/i:'
+      - 'scrobj.dll'
+      - 'http://'
+      - 'https://'
+  condition: selection
+level: high
