@@ -28,3 +28,28 @@ func TestAlertQueueEnqueueDrain(t *testing.T) {
 		t.Fatalf("expected empty queue, got %+v", again)
 	}
 }
+
+func TestAlertQueuePendingCount(t *testing.T) {
+	t.Parallel()
+	q := NewAlertQueue(t.TempDir())
+	count, err := q.PendingCount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("count = %d", count)
+	}
+	if err := q.Enqueue(schema.Alert{AlertID: "a1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Enqueue(schema.Alert{AlertID: "a2"}); err != nil {
+		t.Fatal(err)
+	}
+	count, err = q.PendingCount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d want 2", count)
+	}
+}

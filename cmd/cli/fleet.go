@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -66,6 +67,12 @@ func newFleetLocalCmd() *cobra.Command {
 			}
 			if peek.Server.CACertPath != "" {
 				fmt.Fprintf(w, "CA Cert:\t%s\n", peek.Server.CACertPath)
+			}
+			if peek.Agent.DataDir != "" {
+				queuePath := filepath.Join(peek.Agent.DataDir, "controlplane-pending-alerts.jsonl")
+				if pending, err := countJSONLLines(queuePath); err == nil && pending > 0 {
+					fmt.Fprintf(w, "CP Alert Queue:\t%d pending (%s)\n", pending, queuePath)
+				}
 			}
 			return w.Flush()
 		},
@@ -211,4 +218,21 @@ func readFleetConfigPeek(path string) (fleetConfigPeek, error) {
 		return peek, fmt.Errorf("parse config: %w", err)
 	}
 	return peek, nil
+}
+
+func countJSONLLines(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	if len(data) == 0 {
+		return 0, nil
+	}
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count, nil
 }

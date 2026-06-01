@@ -2,6 +2,7 @@ package comms
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -92,6 +93,33 @@ func (q *AlertQueue) Drain(limit int) ([]schema.Alert, error) {
 		return alerts, os.Remove(q.path)
 	}
 	return alerts, rewriteQueue(q.path, pending)
+}
+
+// PendingCount returns the number of queued alerts waiting for delivery.
+func (q *AlertQueue) PendingCount() (int, error) {
+	if q == nil {
+		return 0, nil
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	f, err := os.Open(q.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer f.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		if len(bytes.TrimSpace(scanner.Bytes())) > 0 {
+			count++
+		}
+	}
+	return count, scanner.Err()
 }
 
 func rewriteQueue(path string, alerts []schema.Alert) error {

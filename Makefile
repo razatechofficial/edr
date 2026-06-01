@@ -183,7 +183,10 @@ prepare-windows-signing-secrets:
 run-fleet-pilot:
 	@bash scripts/pilot/run_fleet_pilot.sh $(HOST) $(EXPECTED)
 
-.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot
+verify-detection-pilot:
+	@bash scripts/pilot/verify_detection_pipeline.sh $(HOST)
+
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot
 
 # ============================================================================
 # eBPF targets (Linux only)
