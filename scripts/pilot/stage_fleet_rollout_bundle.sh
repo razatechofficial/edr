@@ -8,7 +8,13 @@ TLS_SRC="${EDR_CONTROLPLANE_TLS_DIR:-/etc/edr-controlplane/tls}"
 PKG_SRC="${EDR_ROLLOUT_PACKAGE_DIR:-${ROOT}/dist/release}"
 
 rm -rf "${OUT}"
-mkdir -p "${OUT}/packages" "${OUT}/tls" "${OUT}/scripts/pilot" "${OUT}/scripts/deploy" "${OUT}/scripts/linux" "${OUT}/scripts/macos" "${OUT}/scripts/windows"
+mkdir -p "${OUT}/packages" "${OUT}/tls" "${OUT}/scripts/pilot" "${OUT}/scripts/deploy" "${OUT}/scripts/linux" "${OUT}/scripts/macos" "${OUT}/scripts/windows" "${OUT}/configs/reference"
+
+for ref in configs/agent.gov.yaml configs/agent.airgap.yaml; do
+	if [[ -f "${ROOT}/${ref}" ]]; then
+		cp "${ROOT}/${ref}" "${OUT}/configs/reference/"
+	fi
+done
 
 shopt -s nullglob
 copied=0
@@ -46,6 +52,9 @@ for script in \
 	scripts/pilot/check_prod_release.sh \
 	scripts/pilot/wait_for_prod_release.sh \
 	scripts/pilot/prepare_fleet_rollout.sh \
+	scripts/pilot/preflight_rollout.sh \
+	scripts/pilot/verify_fleet_rollout.sh \
+	scripts/pilot/list_fleet_endpoints.sh \
 	scripts/pilot/run_rollout_validation.sh \
 	scripts/pilot/upgrade_linux_agent.sh \
 	scripts/pilot/upgrade_macos_agent.sh \
@@ -87,12 +96,14 @@ Contents:
   packages/   Linux .deb/.rpm, macOS .pkg, Windows .msi
   tls/        Control plane CA + agent client cert (mTLS)
   scripts/    Pilot apply + verify helpers
+  configs/reference/  Government and airgap profile references
 
 Control plane host (already deployed):
+  bash scripts/pilot/preflight_rollout.sh <cp-host>
   export EDR_CONTROLPLANE_HTTPS=1
   export EDR_CONTROLPLANE_API_TOKEN=<from /etc/edr-controlplane/env>
-  bash scripts/pilot/rollout_status.sh <cp-host> <expected-agents>
-  bash scripts/pilot/run_rollout_validation.sh <cp-host> <expected-agents>
+  bash scripts/pilot/list_fleet_endpoints.sh <cp-host>
+  bash scripts/pilot/verify_fleet_rollout.sh <cp-host> <expected-agents>
 
 Remote mTLS distribution (from control plane, over SSH):
   scripts/deploy/distribute_agent_tls.sh tls <agent-host> linux

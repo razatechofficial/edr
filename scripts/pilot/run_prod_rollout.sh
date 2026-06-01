@@ -13,10 +13,14 @@ if [[ -z "${HOST}" ]]; then
 	echo "       EDR_PILOT_WAIT_AGENTS=1, EDR_PILOT_VERIFY_ENROLLMENT=1, EDR_PILOT_VERIFY_DETECTION=1" >&2
 	echo "       EDR_ROLLOUT_VALIDATE=1" >&2
 	echo "       EDR_ROLLOUT_FETCH_ARTIFACTS=1, EDR_ROLLOUT_STAGE_BUNDLE=1" >&2
+	echo "       EDR_ROLLOUT_VERIFY=1 (final fleet verification)" >&2
 	exit 1
 fi
 
 export EDR_CONTROL_PLANE_HOST="${HOST}"
+
+echo "==> preflight"
+bash "${ROOT}/scripts/pilot/preflight_rollout.sh" "${HOST}"
 
 if [[ "${EDR_ROLLOUT_DEPLOY_CP:-0}" == "1" || "${EDR_ROLLOUT_DEPLOY_CP:-0}" == "true" ]]; then
 	echo "==> deploy control plane"
@@ -52,6 +56,12 @@ if [[ "${EDR_ROLLOUT_STAGE_BUNDLE:-0}" == "1" || "${EDR_ROLLOUT_STAGE_BUNDLE:-0}
 	echo "==> stage offline fleet rollout bundle"
 	EDR_ROLLOUT_PACKAGE_DIR="${EDR_ROLLOUT_PACKAGE_DIR:-${ROOT}/dist/release}" \
 		bash "${ROOT}/scripts/pilot/stage_fleet_rollout_bundle.sh" "${EDR_ROLLOUT_BUNDLE_DIR:-${ROOT}/dist/fleet-rollout-bundle}"
+fi
+
+if [[ "${EDR_ROLLOUT_VERIFY:-0}" == "1" || "${EDR_ROLLOUT_VERIFY:-0}" == "true" ]]; then
+	echo
+	echo "==> fleet rollout verification"
+	bash "${ROOT}/scripts/pilot/verify_fleet_rollout.sh" "${HOST}" "${EXPECTED}"
 fi
 
 echo
