@@ -320,6 +320,45 @@ func TestLoadWindowsTenantProfile(t *testing.T) {
 	}
 }
 
+func TestLoadLinuxTenantProfile(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("ML_MODELS_DIR", t.TempDir())
+	cfg, err := Load("../../configs/linux/config.tenant.yml")
+	if err != nil {
+		t.Fatalf("Load tenant profile: %v", err)
+	}
+	if cfg.Detection.Behavioral.SensitivityLevel != "high" {
+		t.Fatalf("tenant sensitivity = %q, want high", cfg.Detection.Behavioral.SensitivityLevel)
+	}
+	if !cfg.ML.Enabled {
+		t.Fatal("tenant profile should enable ML")
+	}
+	if !cfg.SelfProtect.Enabled {
+		t.Fatal("tenant profile should enable self_protect")
+	}
+	if cfg.Server.Endpoint != "YOUR_CONTROL_PLANE_HOST" {
+		t.Fatalf("tenant endpoint = %q", cfg.Server.Endpoint)
+	}
+}
+
+func TestLoadMacOSTenantProfile(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("ML_MODELS_DIR", t.TempDir())
+	cfg, err := Load("../../configs/macos/config.tenant.yml")
+	if err != nil {
+		t.Fatalf("Load tenant profile: %v", err)
+	}
+	if !cfg.Monitoring.DarwinUnifiedLogSecurity {
+		t.Fatal("tenant profile should enable darwin_unified_log_security")
+	}
+	if !cfg.ML.Enabled {
+		t.Fatal("tenant profile should enable ML")
+	}
+	if !cfg.SelfProtect.Enabled {
+		t.Fatal("tenant profile should enable self_protect")
+	}
+}
+
 func TestApplyLoggingPathDefaults(t *testing.T) {
 	cfg := testConfig()
 	cfg.Agent.DataDir = "/tmp/edr-logging-test"

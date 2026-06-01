@@ -1,0 +1,79 @@
+# Enterprise tenant profile with mTLS to the control plane.
+agent:
+  log_level: info
+  data_dir: /var/lib/edr-agent
+  temp_dir: /tmp/edr-agent
+rules_file: /etc/edr-agent/rules/baseline.yaml
+server:
+  endpoint: "YOUR_CONTROL_PLANE_HOST"
+  grpc_port: 50051
+  mutual_tls: true
+  tls_cert: /etc/edr-agent/tls/agent-client.crt
+  tls_key: /etc/edr-agent/tls/agent-client.key
+  ca_cert: /etc/edr-agent/tls/ca.crt
+  heartbeat_sec: 30
+  reconnect_sec: 5
+logging:
+  level: info
+  alert_file: /var/lib/edr-agent/alerts.jsonl
+  audit_file: /var/lib/edr-agent/audit.jsonl
+detection:
+  sigma:
+    enabled: true
+    rules_dir: /etc/edr-agent/rules/sigma
+  yara:
+    enabled: true
+    rules_dir: /etc/edr-agent/rules/yara
+  custom_rules:
+    enabled: true
+    rules_path: /etc/edr-agent/rules/custom
+  ioc:
+    enabled: true
+    hash_db_path: /etc/edr-agent/rules/ioc/hashes.json
+    ip_db_path: /etc/edr-agent/rules/ioc/ips.csv
+    domain_db_path: /etc/edr-agent/rules/ioc/domains.csv
+  behavioral:
+    sensitivity: high
+monitoring:
+  mode: auto
+  kernel_enabled: true
+  fim_preset: standard
+  linux_auth_auto_journal: true
+  linux_rootcheck_enabled: false
+compliance:
+  enabled: true
+  rules_dir: /etc/edr-agent/rules/compliance/sca
+  scan_on_start: true
+  interval_hours: 12
+  enable_posture: true
+  enable_rootcheck: true
+  emit_passed_findings: false
+ml:
+  enabled: true
+  require_runtime: false
+  models_dir: /usr/share/edr-agent/models
+  auto_update: false
+  models:
+    pe_classifier: pe_classifier.onnx
+    behavior_lstm: behavior_lstm.onnx
+    network_anomaly: network_anomaly.onnx
+    ransomware: ransomware.onnx
+  thresholds:
+    pe_malicious: 0.80
+    behavior_anomaly: 0.75
+    ransomware_score: 0.85
+    network_anomaly: 0.70
+self_protect:
+  enabled: true
+  watchdog: true
+  anti_debug: true
+  integrity_check: true
+  protected_process: false
+response:
+  auto_response: true
+  playbooks_path: /etc/edr-agent/rules/playbooks/playbooks.yml
+  playbooks_dir: /etc/edr-agent/rules/playbooks
+  forensics_dir: /var/lib/edr-agent/forensics
+  quarantine_dir: /var/lib/edr-agent/quarantine
+  approval:
+    mode: auto

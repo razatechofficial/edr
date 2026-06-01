@@ -50,6 +50,15 @@ fi
 if [ -f configs/linux/config.fleet.yml ]; then
     cp configs/linux/config.fleet.yml pkg/deb/etc/edr-agent/config.fleet.yml
 fi
+if [ -f configs/linux/config.fleet.tls.yml ]; then
+    cp configs/linux/config.fleet.tls.yml pkg/deb/etc/edr-agent/config.fleet.tls.yml
+fi
+if [ -f configs/linux/config.tenant.yml ]; then
+    cp configs/linux/config.tenant.yml pkg/deb/etc/edr-agent/config.tenant.yml
+fi
+if [ -f configs/linux/config.tenant.tls.yml ]; then
+    cp configs/linux/config.tenant.tls.yml pkg/deb/etc/edr-agent/config.tenant.tls.yml
+fi
 if [ ! -d "${RULES_SRC}" ]; then
     echo "rules directory not found: ${RULES_SRC}" >&2
     exit 1
