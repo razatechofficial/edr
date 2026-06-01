@@ -11,6 +11,7 @@ if [[ -z "${HOST}" ]]; then
 	echo "  env: EDR_ROLLOUT_DEPLOY_CP=1, EDR_ROLLOUT_ENABLE_TLS=1" >&2
 	echo "       EDR_PILOT_MTLS=1, EDR_CONTROLPLANE_HTTPS=1, EDR_CONTROLPLANE_API_TOKEN=..." >&2
 	echo "       EDR_PILOT_WAIT_AGENTS=1, EDR_PILOT_VERIFY_ENROLLMENT=1, EDR_PILOT_VERIFY_DETECTION=1" >&2
+	echo "       EDR_ROLLOUT_VALIDATE=1" >&2
 	exit 1
 fi
 
@@ -32,6 +33,12 @@ fi
 
 export EDR_PILOT_MTLS="${EDR_PILOT_MTLS:-1}"
 bash "${ROOT}/scripts/pilot/run_fleet_pilot.sh" "${HOST}" "${EXPECTED}"
+
+if [[ "${EDR_ROLLOUT_VALIDATE:-0}" == "1" || "${EDR_ROLLOUT_VALIDATE:-0}" == "true" ]]; then
+	echo
+	echo "==> rollout validation gate"
+	bash "${ROOT}/scripts/pilot/run_rollout_validation.sh" "${HOST}" "${EXPECTED}"
+fi
 
 echo
 echo "Endpoint enrollment check:"

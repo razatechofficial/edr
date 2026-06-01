@@ -67,6 +67,7 @@ if expected:
         print(f"  expected agents ({want}): OK")
     else:
         print(f"  expected agents ({want}): SHORT ({len(agents)}/{want})")
+        sys.exit(1)
 
 if agents:
     print("  recent agents:")

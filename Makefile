@@ -210,7 +210,22 @@ rollout-status:
 stage-fleet-rollout-bundle:
 	@bash scripts/pilot/stage_fleet_rollout_bundle.sh $(OUT)
 
-.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-prod-rollout fetch-release-artifacts rollout-status stage-fleet-rollout-bundle
+backup-controlplane:
+	@bash scripts/deploy/backup_controlplane.sh $(OUT)
+
+validate-rollout:
+	@bash scripts/pilot/run_rollout_validation.sh $(HOST) $(EXPECTED)
+
+upgrade-linux-agent:
+	@bash scripts/pilot/upgrade_linux_agent.sh $(PKG)
+
+upgrade-macos-agent:
+	@bash scripts/pilot/upgrade_macos_agent.sh $(PKG)
+
+upgrade-windows-agent:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pilot/upgrade_windows_agent.ps1 $(PKG)
+
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-prod-rollout fetch-release-artifacts rollout-status stage-fleet-rollout-bundle backup-controlplane validate-rollout upgrade-linux-agent upgrade-macos-agent upgrade-windows-agent
 
 # ============================================================================
 # eBPF targets (Linux only)

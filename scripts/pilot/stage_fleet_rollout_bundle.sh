@@ -42,7 +42,10 @@ for script in \
 	scripts/pilot/verify_installed_agent.sh \
 	scripts/pilot/verify_detection_pipeline.sh \
 	scripts/pilot/pilot_mtls_check.sh \
-	scripts/pilot/pilot_fleet_check.sh \
+	scripts/pilot/run_rollout_validation.sh \
+	scripts/pilot/upgrade_linux_agent.sh \
+	scripts/pilot/upgrade_macos_agent.sh \
+	scripts/deploy/backup_controlplane.sh \
 	scripts/deploy/copy_agent_tls.sh \
 	scripts/linux/apply_tenant_tls_config.sh \
 	scripts/macos/apply_tenant_tls_config.sh \
@@ -61,8 +64,14 @@ fi
 if [[ -f "${ROOT}/scripts/pilot/verify_detection_pipeline.ps1" ]]; then
 	cp "${ROOT}/scripts/pilot/verify_detection_pipeline.ps1" "${OUT}/scripts/pilot/"
 fi
+if [[ -f "${ROOT}/scripts/pilot/upgrade_windows_agent.ps1" ]]; then
+	cp "${ROOT}/scripts/pilot/upgrade_windows_agent.ps1" "${OUT}/scripts/pilot/"
+fi
 if [[ -f "${ROOT}/scripts/pilot/verify_installed_agent.ps1" ]]; then
 	cp "${ROOT}/scripts/pilot/verify_installed_agent.ps1" "${OUT}/scripts/pilot/"
+fi
+if [[ -f "${ROOT}/scripts/pilot/pilot_fleet_check.sh" ]]; then
+	cp "${ROOT}/scripts/pilot/pilot_fleet_check.sh" "${OUT}/scripts/pilot/"
 fi
 
 cat > "${OUT}/ROLLOUT.txt" <<'TXT'
@@ -77,6 +86,7 @@ Control plane host (already deployed):
   export EDR_CONTROLPLANE_HTTPS=1
   export EDR_CONTROLPLANE_API_TOKEN=<from /etc/edr-controlplane/env>
   bash scripts/pilot/rollout_status.sh <cp-host> <expected-agents>
+  bash scripts/pilot/run_rollout_validation.sh <cp-host> <expected-agents>
 
 Linux endpoint:
   sudo dpkg -i packages/edr-agent_*_amd64.deb
@@ -95,6 +105,14 @@ Windows endpoint (Admin):
   copy tls\*.crt tls\*.key to C:\ProgramData\EDR Agent\tls\
   apply_tenant_tls_config.bat <cp-host>
   powershell -File scripts\pilot\verify_windows_tenant.ps1
+
+Upgrade (preserve agent_id/config):
+  sudo scripts/pilot/upgrade_linux_agent.sh packages/edr-agent_*_amd64.deb
+  sudo scripts/pilot/upgrade_macos_agent.sh packages/edr-agent_*.pkg
+  powershell -File scripts\pilot\upgrade_windows_agent.ps1 packages\edr-agent_*.msi
+
+Control plane backup:
+  sudo scripts/deploy/backup_controlplane.sh /var/backups/edr-controlplane.tar.gz
 TXT
 
 ARCHIVE="${OUT}.tar.gz"
