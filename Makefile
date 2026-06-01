@@ -28,7 +28,14 @@ MODELS_DIR  := models
 PACKAGE_DIR := dist
 HOST_OS := $(shell uname -s)
 ifeq ($(HOST_OS),Linux)
+# YARA via go-yara needs libyara at link time; default off when pkg-config cannot find it
+# (e.g. make build-all on GitHub ubuntu-latest). Release/test jobs install libyara-dev and
+# pass LINUX_CGO=1 explicitly.
+ifeq ($(shell pkg-config --exists yara 2>/dev/null && echo 1),1)
 LINUX_CGO ?= 1
+else
+LINUX_CGO ?= 0
+endif
 else
 LINUX_CGO ?= 0
 endif
@@ -103,9 +110,9 @@ BPF_INCLUDES := $(LIBBPF_SYSTEM) $(LIBBPF_VENDOR) $(LIBBPF_DEFAULT) -Iplatform/l
 
 build-linux:
 	@echo "==> Building Linux amd64 binaries"
-	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-linux-amd64 ./cmd/agent
-	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-installer-linux-amd64 ./cmd/installer
-	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-linux-amd64 ./cmd/cli
+	CGO_ENABLED=$(LINUX_CGO) GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-linux-amd64 ./cmd/agent
+	CGO_ENABLED=$(LINUX_CGO) GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-installer-linux-amd64 ./cmd/installer
+	CGO_ENABLED=$(LINUX_CGO) GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-linux-amd64 ./cmd/cli
 	@mkdir -p dist/linux-amd64 dist/linux-arm64
 	CGO_ENABLED=$(LINUX_CGO) GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/linux-amd64/edr-agent ./cmd/agent
 	CGO_ENABLED=$(LINUX_CGO_ARM64) GOOS=linux GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/linux-arm64/edr-agent ./cmd/agent
