@@ -237,3 +237,4 @@ forwarder:
 
 rules_file: "/usr/share/edr/rules/baseline.yaml"
 rules_verify_pubkey_path: "/etc/edr/certs/edr-rules.pub.pem"
+policy_verify_pubkey_path: "/etc/edr/certs/edr-policy.pub.pem"

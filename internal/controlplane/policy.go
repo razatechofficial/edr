@@ -13,11 +13,12 @@ import (
 )
 
 type policyBundleMeta struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Format  string `json:"format"`
-	File    string `json:"file"`
-	Hash    string `json:"hash"`
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	Format    string `json:"format"`
+	File      string `json:"file"`
+	Hash      string `json:"hash"`
+	Signature string `json:"signature,omitempty"`
 }
 
 type policyManifest struct {
@@ -117,11 +118,12 @@ func (p *PolicyStore) AdminSummary() map[string]any {
 	bundles := make([]map[string]string, 0, len(p.manifest.Bundles))
 	for _, bundle := range p.manifest.Bundles {
 		bundles = append(bundles, map[string]string{
-			"name":    bundle.Name,
-			"version": bundle.Version,
-			"format":  bundle.Format,
-			"hash":    bundle.Hash,
-			"file":    bundle.File,
+			"name":      bundle.Name,
+			"version":   bundle.Version,
+			"format":    bundle.Format,
+			"hash":      bundle.Hash,
+			"file":      bundle.File,
+			"signature": bundle.Signature,
 		})
 	}
 	return map[string]any{
@@ -157,7 +159,7 @@ func (p *PolicyStore) GetPolicy(currentHash string) *protocol.PolicyResponse {
 			Format:    bundle.Format,
 			Data:      append([]byte(nil), p.data[bundle.Name]...),
 			Hash:      bundle.Hash,
-			Signature: "",
+			Signature: bundle.Signature,
 		})
 	}
 

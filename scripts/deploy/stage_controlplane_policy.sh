@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 POLICY_DIR="${1:-${EDR_CONTROLPLANE_POLICY_DIR:-/var/lib/edr-controlplane/policy}}"
 RULES_ROOT="${2:-${ROOT}/rules}"
 VERSION="${EDR_POLICY_VERSION:-$(date -u +%Y.%m.%d)}"
+SIGN_KEY="${EDR_POLICY_SIGN_KEY:-}"
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
 	echo "ERROR: Run as root (sudo) when writing ${POLICY_DIR}." >&2
@@ -17,6 +18,17 @@ bundle_hash() {
 	local sum
 	sum="$(sha256sum "${file}" | awk '{print $1}')"
 	printf 'sha256:%s' "${sum}"
+}
+
+bundle_signature() {
+	local file="$1"
+	if [[ -z "${SIGN_KEY}" ]]; then
+		return 0
+	fi
+	(
+		cd "${ROOT}"
+		go run ./tools/sign_policy_bundle/main.go -key "${SIGN_KEY}" "${file}"
+	)
 }
 
 write_bundle() {
@@ -40,7 +52,11 @@ write_bundle() {
 
 	tar -czf "${out}" -C "${RULES_ROOT}" "${paths[@]}"
 	chmod 0640 "${out}"
-	printf '%s\n' "${name}|${VERSION}|tar.gz|${archive}|$(bundle_hash "${out}")"
+	local sig=""
+	if [[ -n "${SIGN_KEY}" ]]; then
+		sig="$(bundle_signature "${out}")"
+	fi
+	printf '%s\n' "${name}|${VERSION}|tar.gz|${archive}|$(bundle_hash "${out}")|${sig}"
 }
 
 install -d -m 0750 "${POLICY_DIR}"
@@ -50,6 +66,9 @@ trap 'rm -f "${TMP_MANIFEST}"' EXIT
 {
 	write_bundle "yara-exploits" "yara-exploits.tar.gz" "yara/exploits"
 	write_bundle "yara-malware-probes" "yara-malware-probes.tar.gz" "yara/malware/eicar.yar" "yara/malware/cobalt_strike.yar"
+	write_bundle "sigma-linux-core" "sigma-linux-core.tar.gz" "sigma/linux/execution" "sigma/linux/defense_evasion" "sigma/linux/discovery"
+	write_bundle "sigma-macos" "sigma-macos.tar.gz" "sigma/macos"
+	write_bundle "sigma-windows-process" "sigma-windows-process.tar.gz" "sigma/windows/process_creation"
 } > "${TMP_MANIFEST}"
 
 python3 - <<'PY' "${TMP_MANIFEST}" "${POLICY_DIR}/manifest.json"
@@ -61,14 +80,18 @@ with open(sys.argv[1], encoding="utf-8") as f:
         line = line.strip()
         if not line:
             continue
-        name, version, fmt, file_name, digest = line.split("|", 4)
-        bundles.append({
+        parts = line.split("|")
+        name, version, fmt, file_name, digest = parts[:5]
+        entry = {
             "name": name,
             "version": version,
             "format": fmt,
             "file": file_name,
             "hash": digest,
-        })
+        }
+        if len(parts) > 5 and parts[5]:
+            entry["signature"] = parts[5]
+        bundles.append(entry)
 
 with open(sys.argv[2], "w", encoding="utf-8") as out:
     json.dump({"bundles": bundles}, out, indent=2)
@@ -77,5 +100,10 @@ PY
 
 chmod 0640 "${POLICY_DIR}/manifest.json"
 echo "policy staged under ${POLICY_DIR}"
+if [[ -n "${SIGN_KEY}" ]]; then
+	echo "  bundles signed with EDR_POLICY_SIGN_KEY"
+else
+	echo "  bundles unsigned (set EDR_POLICY_SIGN_KEY to sign for production agents)"
+fi
 echo "  restart control plane: sudo systemctl restart edr-controlplane"
 echo "  verify: bash scripts/pilot/verify_controlplane_policy.sh"

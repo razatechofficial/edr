@@ -81,6 +81,15 @@ func (a *Agent) applyControlPlanePolicy(ctx context.Context, resp *protocol.Poli
 			)
 			continue
 		}
+		if err := comms.VerifyRuleBundle(
+			bundle.GetName(),
+			bundle.GetData(),
+			bundle.GetHash(),
+			bundle.GetSignature(),
+			a.cfg.PolicyVerifyPubKeyPath,
+		); err != nil {
+			return err
+		}
 		if err := comms.ApplyRuleBundleTarGz(bundle.GetName(), bundle.GetData(), rulesRoot); err != nil {
 			return err
 		}

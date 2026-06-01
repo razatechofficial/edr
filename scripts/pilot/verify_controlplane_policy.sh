@@ -38,8 +38,17 @@ if policy_hash in ("", "local-default"):
 
 print(f"policy hash: {policy_hash}")
 print(f"bundles: {len(bundles)}")
+signed = 0
 for bundle in bundles:
-    print(f"  - {bundle.get('name')} ({bundle.get('version')}) {bundle.get('hash')}")
+    sig = (bundle.get("signature") or "").strip()
+    if sig:
+        signed += 1
+    state = "signed" if sig else "unsigned"
+    print(f"  - {bundle.get('name')} ({bundle.get('version')}) {bundle.get('hash')} [{state}]")
+if bundles and signed == 0:
+    print("WARNING: bundles are unsigned; production agents with policy_verify_pubkey_path will reject them")
+elif signed and signed < len(bundles):
+    raise SystemExit("ERROR: mixed signed/unsigned policy bundles")
 PY
 
 echo "control plane policy OK"

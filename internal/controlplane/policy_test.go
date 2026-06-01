@@ -91,3 +91,35 @@ func TestPolicyStoreGetPolicy(t *testing.T) {
 		t.Fatalf("bundle name = %q", changed.GetRuleBundles()[0].GetName())
 	}
 }
+
+func TestPolicyStoreSignaturePassthrough(t *testing.T) {
+	t.Parallel()
+
+	dir := writeTestPolicyDir(t)
+	manifestPath := filepath.Join(dir, "manifest.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest policyManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Bundles[0].Signature = "deadbeef"
+	raw, err = json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, raw, 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewPolicyStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := store.GetPolicy("")
+	if resp.GetRuleBundles()[0].GetSignature() != "deadbeef" {
+		t.Fatalf("signature = %q want deadbeef", resp.GetRuleBundles()[0].GetSignature())
+	}
+}

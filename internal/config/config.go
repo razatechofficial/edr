@@ -584,6 +584,7 @@ type Config struct {
 
 	RulesFile             string `yaml:"rules_file"`
 	RulesVerifyPubKeyPath string `yaml:"rules_verify_pubkey_path"`
+	PolicyVerifyPubKeyPath string `yaml:"policy_verify_pubkey_path"`
 	ConfigVerifyPubKey    string `yaml:"config_verify_pubkey"`
 }
 

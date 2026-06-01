@@ -489,3 +489,4 @@ forwarder:
 
 rules_file: "rules/baseline.yaml"
 rules_verify_pubkey_path: ""
+policy_verify_pubkey_path: ""
