@@ -198,7 +198,13 @@ verify-release-packages:
 verify-post-install:
 	@bash scripts/pilot/verify_installed_agent.sh $(HOST)
 
-.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install
+run-prod-rollout:
+	@bash scripts/pilot/run_prod_rollout.sh $(HOST) $(EXPECTED)
+
+fetch-release-artifacts:
+	@bash scripts/pilot/fetch_release_artifacts.sh $(TAG) $(DIST)
+
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-prod-rollout fetch-release-artifacts
 
 # ============================================================================
 # eBPF targets (Linux only)

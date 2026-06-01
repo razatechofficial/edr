@@ -12,8 +12,15 @@ Linux)
 Darwin)
 	bash "${ROOT}/scripts/pilot/verify_macos_tenant.sh" "${CP_HOST}"
 	;;
+MINGW*|MSYS*|CYGWIN*)
+	powershell -NoProfile -ExecutionPolicy Bypass -File "${ROOT}/scripts/pilot/verify_installed_agent.ps1" ${CP_HOST:+-ControlPlaneHost "${CP_HOST}"}
+	;;
 *)
-	echo "ERROR: run scripts/pilot/verify_windows_tenant.ps1 on Windows" >&2
-	exit 1
+	if [[ "${OS:-}" == "Windows_NT" ]]; then
+		powershell -NoProfile -ExecutionPolicy Bypass -File "${ROOT}/scripts/pilot/verify_installed_agent.ps1" ${CP_HOST:+-ControlPlaneHost "${CP_HOST}"}
+	else
+		echo "ERROR: unsupported platform $(uname -s)" >&2
+		exit 1
+	fi
 	;;
 esac

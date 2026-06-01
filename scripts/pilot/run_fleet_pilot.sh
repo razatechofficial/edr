@@ -82,6 +82,9 @@ echo "Check fleet from control plane host:"
 echo "  edrctl fleet agents --host ${HOST} --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"
 echo "  edrctl fleet alerts --host ${HOST} --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"
 echo
+echo "Verify enrollment from an endpoint:"
+echo "  edrctl fleet check --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"
+echo
 echo "Verify a specific agent enrolled on control plane:"
 echo "  bash scripts/pilot/verify_agent_enrollment.sh ${HOST} \$(cat /var/lib/edr-agent/agent_id)"
 echo
