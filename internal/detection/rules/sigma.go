@@ -105,6 +105,8 @@ func (e *SigmaEngine) LoadRules() error {
 
 	evaluators := make([]*sigmaeval.RuleEvaluator, 0, len(files))
 	var parseErrors int
+	var skippedPlatform int
+	hostProduct := sigmaHostProduct()
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
@@ -117,6 +119,15 @@ func (e *SigmaEngine) LoadRules() error {
 		if err != nil {
 			e.logger.Warn("sigma: failed to parse rule", zap.String("path", f), zap.Error(err))
 			parseErrors++
+			continue
+		}
+
+		rel, relErr := filepath.Rel(e.rulesDir, f)
+		if relErr != nil {
+			rel = filepath.Base(f)
+		}
+		if !sigmaRuleAppliesToHost(rule, rel, hostProduct) {
+			skippedPlatform++
 			continue
 		}
 
@@ -159,6 +170,8 @@ func (e *SigmaEngine) LoadRules() error {
 	e.logger.Info("sigma: rules loaded",
 		zap.Int("loaded", len(evaluators)),
 		zap.Int("errors", parseErrors),
+		zap.Int("skipped_platform", skippedPlatform),
+		zap.String("host_product", hostProduct),
 	)
 	return nil
 }

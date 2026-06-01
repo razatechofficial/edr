@@ -61,13 +61,17 @@ func SigmaEvalMap(in map[string]interface{}) map[string]interface{} {
 	mergeFlatSchemaFields(out, in)
 	applySigmaAliases(out, env)
 	enrichDarwinSigmaFields(out)
+	enrichLinuxSigmaFields(out)
+	enrichWindowsSigmaFields(out)
 	return out
 }
 
 func mergeFlatSchemaFields(out, in map[string]interface{}) {
 	for k, v := range in {
 		if isOCSFRootKey(k) {
-			continue
+			if _, isMap := v.(map[string]interface{}); isMap {
+				continue
+			}
 		}
 		setIfAbsent(out, k, v)
 	}

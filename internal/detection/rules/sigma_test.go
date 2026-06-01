@@ -15,7 +15,6 @@ level: high
 description: Detects suspicious powershell.exe execution
 logsource:
     category: process_creation
-    product: windows
 detection:
     selection:
         process_name: powershell.exe
@@ -106,7 +105,6 @@ level: low
 description: Another rule
 logsource:
     category: process_creation
-    product: windows
 detection:
     selection:
         process_name: cmd.exe
