@@ -31,8 +31,12 @@ dpkg-deb -x "${DEB_PATH}" "${tmpdir}"
 required_paths=(
   "usr/bin/edr-agent"
   "etc/edr-agent/config.yml"
+  "etc/edr-agent/config.tenant.yml"
+  "etc/edr-agent/config.tenant.tls.yml"
+  "etc/edr-agent/config.fleet.tls.yml"
   "etc/edr-agent/rules/baseline.yaml"
   "etc/edr-agent/rules/playbooks/playbooks.yml"
+  "etc/edr-agent/rules/yara/exploits/cve_2021_44228_log4j.yar"
   "var/lib/edr/bpf/edr.bpf.o"
   "var/lib/edr/bpf/edr.bpf.version"
 )

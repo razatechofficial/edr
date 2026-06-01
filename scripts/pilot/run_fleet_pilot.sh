@@ -39,6 +39,9 @@ Windows (Admin):
   copy TLS files to C:\\ProgramData\\EDR Agent\\tls\\
   apply_tenant_tls_config.bat ${HOST}
   powershell -File scripts\\pilot\\verify_windows_tenant.ps1
+
+Post-install smoke (Linux/macOS):
+  make verify-post-install HOST=${HOST}
 EOF
 else
 	cat <<EOF

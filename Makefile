@@ -192,7 +192,13 @@ verify-agent-enrollment:
 verify-detection-pilot-windows:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pilot/verify_detection_pipeline.ps1 $(HOST)
 
-.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows
+verify-release-packages:
+	@bash scripts/ci/verify_release_packages.sh $(DIST)
+
+verify-post-install:
+	@bash scripts/pilot/verify_installed_agent.sh $(HOST)
+
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install
 
 # ============================================================================
 # eBPF targets (Linux only)
