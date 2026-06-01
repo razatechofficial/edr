@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <!--
-    One-click Windows sensor MSI (CrowdStrike-style):
+    One-click Windows sensor MSI:
       C:\Program Files\EDR Agent\edr-agent.exe
       C:\ProgramData\EDR Agent\config.yml + rules\
-    Post-install: edr-agent.exe --install (registers + starts EDRAgent service)
+    Post-install custom action runs edr-agent with the install flag (registers and starts EDRAgent).
   -->
   <Product Id="*"
            Name="EDR Agent"

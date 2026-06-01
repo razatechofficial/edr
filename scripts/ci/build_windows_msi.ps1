@@ -137,7 +137,11 @@ Invoke-WiXTool -Label 'candle rules.wxs' -ExePath $candleExe -ArgList $candleRul
 $wixobj = Join-Path $root 'build/windows/installer.wixobj'
 $rulesWixobj = Join-Path $root 'build/windows/rules.wixobj'
 
-$lightArgList = @('-nologo', '-sval', '-sw1076', $wixobj, $rulesWixobj, '-o', $msi)
+$lightArgList = @(
+    '-nologo', '-sval', '-sw1076',
+    "-dRulesStage=$rulesStage",
+    $wixobj, $rulesWixobj, '-o', $msi
+)
 Invoke-WiXTool -Label 'light (WiX)' -ExePath $lightExe -ArgList $lightArgList -LogPath $lightLog
 
 Write-Host "Built: $msi"
