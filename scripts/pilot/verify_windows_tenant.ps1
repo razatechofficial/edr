@@ -75,7 +75,11 @@ if ($cfgText -match '(?m)^\s*mutual_tls:\s*true\s*$') {
 	Write-Host 'mTLS material present'
 }
 
+$edrctlPath = Join-Path ${env:ProgramFiles} 'EDR Agent\edrctl.exe'
 $edrctl = Get-Command edrctl -ErrorAction SilentlyContinue
+if (-not $edrctl -and (Test-Path -LiteralPath $edrctlPath)) {
+	$edrctl = Get-Command $edrctlPath
+}
 if ($edrctl) {
 	Write-Host '==> edrctl fleet local'
 	& edrctl --config $active fleet local

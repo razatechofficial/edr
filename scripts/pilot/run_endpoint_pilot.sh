@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Post-install + optional detection pilot on the local endpoint.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+HOST="${1:-${EDR_CONTROL_PLANE_HOST:-}}"
+DETECT="${EDR_PILOT_VERIFY_DETECTION:-0}"
+
+if [[ -z "${HOST}" ]]; then
+	echo "usage: $0 <control-plane-host>" >&2
+	echo "  env: EDR_PILOT_VERIFY_DETECTION=1 to run Log4Shell YARA probe" >&2
+	exit 1
+fi
+
+export EDR_CONTROL_PLANE_HOST="${HOST}"
+
+echo "==> Step 1: post-install smoke"
+bash "${ROOT}/scripts/pilot/verify_installed_agent.sh" "${HOST}"
+
+if [[ "${DETECT}" == "1" || "${DETECT}" == "true" ]]; then
+	echo
+	echo "==> Step 2: detection pipeline"
+	case "$(uname -s)" in
+	MINGW*|MSYS*|CYGWIN*)
+		powershell -NoProfile -ExecutionPolicy Bypass -File "${ROOT}/scripts/pilot/verify_detection_pipeline.ps1" "${HOST}"
+		;;
+	*)
+		if [[ "${OS:-}" == "Windows_NT" ]]; then
+			powershell -NoProfile -ExecutionPolicy Bypass -File "${ROOT}/scripts/pilot/verify_detection_pipeline.ps1" "${HOST}"
+		else
+			bash "${ROOT}/scripts/pilot/verify_detection_pipeline.sh" "${HOST}"
+		fi
+		;;
+	esac
+fi
+
+echo "Endpoint pilot OK"

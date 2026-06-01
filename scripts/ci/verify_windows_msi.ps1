@@ -28,6 +28,7 @@ function Get-MsiFileNames {
 $files = Get-MsiFileNames -Path $MsiPath
 $required = @(
 	'edr-agent.exe',
+	'edrctl.exe',
 	'config.yml',
 	'config.tenant.yml',
 	'config.tenant.tls.yml',

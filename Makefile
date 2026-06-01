@@ -139,6 +139,7 @@ ifeq ($(WINDOWS_CGO),1)
 else
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
 endif
+	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edrctl.exe ./cmd/cli
 
 build-darwin-production:
 	@bash scripts/ci/build_macos_production.sh
@@ -198,6 +199,15 @@ verify-release-packages:
 verify-post-install:
 	@bash scripts/pilot/verify_installed_agent.sh $(HOST)
 
+run-endpoint-pilot:
+	@EDR_PILOT_VERIFY_DETECTION=$(DETECT) bash scripts/pilot/run_endpoint_pilot.sh $(HOST)
+
+check-prod-release:
+	@bash scripts/pilot/check_prod_release.sh $(BRANCH)
+
+distribute-agent-tls:
+	@bash scripts/deploy/distribute_agent_tls.sh $(TLS_SRC) $(HOST) $(PLATFORM)
+
 run-prod-rollout:
 	@bash scripts/pilot/run_prod_rollout.sh $(HOST) $(EXPECTED)
 
@@ -228,7 +238,7 @@ upgrade-macos-agent:
 upgrade-windows-agent:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pilot/upgrade_windows_agent.ps1 $(PKG)
 
-.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-prod-rollout fetch-release-artifacts rollout-status stage-fleet-rollout-bundle backup-controlplane restore-controlplane validate-rollout upgrade-linux-agent upgrade-macos-agent upgrade-windows-agent
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-endpoint-pilot check-prod-release distribute-agent-tls run-prod-rollout fetch-release-artifacts rollout-status stage-fleet-rollout-bundle backup-controlplane restore-controlplane validate-rollout upgrade-linux-agent upgrade-macos-agent upgrade-windows-agent
 
 # ============================================================================
 # eBPF targets (Linux only)

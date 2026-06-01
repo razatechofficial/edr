@@ -42,12 +42,15 @@ for script in \
 	scripts/pilot/verify_installed_agent.sh \
 	scripts/pilot/verify_detection_pipeline.sh \
 	scripts/pilot/pilot_mtls_check.sh \
+	scripts/pilot/run_endpoint_pilot.sh \
+	scripts/pilot/check_prod_release.sh \
 	scripts/pilot/run_rollout_validation.sh \
 	scripts/pilot/upgrade_linux_agent.sh \
 	scripts/pilot/upgrade_macos_agent.sh \
 	scripts/deploy/backup_controlplane.sh \
 	scripts/deploy/restore_controlplane.sh \
 	scripts/deploy/copy_agent_tls.sh \
+	scripts/deploy/distribute_agent_tls.sh \
 	scripts/linux/apply_tenant_tls_config.sh \
 	scripts/macos/apply_tenant_tls_config.sh \
 	scripts/windows/apply_tenant_tls_config.bat; do

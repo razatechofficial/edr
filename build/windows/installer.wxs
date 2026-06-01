@@ -2,7 +2,7 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <!--
     One-click Windows sensor MSI:
-      C:\Program Files\EDR Agent\edr-agent.exe
+      C:\Program Files\EDR Agent\edr-agent.exe + edrctl.exe
       C:\ProgramData\EDR Agent\config.yml + rules\
     Post-install custom action runs edr-agent with the install flag (registers and starts EDRAgent).
   -->
@@ -67,6 +67,12 @@
         <File Id="AgentExe"
               Source="$(var.EdrAgentExe)"
               Name="edr-agent.exe"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpEdrCtlExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="EdrCtlExe"
+              Source="$(var.EdrCtlExe)"
+              Name="edrctl.exe"
               KeyPath="yes"/>
       </Component>
       <Component Id="cmpConfigYml" Guid="*" Directory="DATAROOT" Win64="yes">

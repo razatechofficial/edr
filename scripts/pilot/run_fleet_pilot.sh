@@ -25,23 +25,22 @@ echo "==> Step 2: apply tenant profiles on endpoints"
 if [[ "${MTLS}" == "1" || "${MTLS}" == "true" ]]; then
 	cat <<EOF
 Linux:
-  sudo scripts/deploy/distribute_agent_tls.sh /etc/edr-controlplane/tls <agent-host>
+  sudo scripts/deploy/distribute_agent_tls.sh /etc/edr-controlplane/tls <agent-host> linux
   sudo scripts/linux/apply_tenant_tls_config.sh ${HOST}
   bash scripts/pilot/verify_linux_tenant.sh ${HOST}
 
 macOS:
-  sudo mkdir -p "/Library/Application Support/EDR/tls"
-  sudo cp /path/to/{ca.crt,agent-client.crt,agent-client.key} "/Library/Application Support/EDR/tls/"
+  EDR_SSH_USER=<user> scripts/deploy/distribute_agent_tls.sh /etc/edr-controlplane/tls <agent-host> macos
   sudo scripts/macos/apply_tenant_tls_config.sh ${HOST}
   bash scripts/pilot/verify_macos_tenant.sh ${HOST}
 
-Windows (Admin):
-  copy TLS files to C:\\ProgramData\\EDR Agent\\tls\\
+Windows (Admin, OpenSSH):
+  EDR_SSH_USER=Administrator scripts/deploy/distribute_agent_tls.sh /etc/edr-controlplane/tls <agent-host> windows
   apply_tenant_tls_config.bat ${HOST}
   powershell -File scripts\\pilot\\verify_windows_tenant.ps1
 
-Post-install smoke (Linux/macOS):
-  make verify-post-install HOST=${HOST}
+Post-install + detection (local endpoint):
+  EDR_PILOT_VERIFY_DETECTION=1 bash scripts/pilot/run_endpoint_pilot.sh ${HOST}
 EOF
 else
 	cat <<EOF

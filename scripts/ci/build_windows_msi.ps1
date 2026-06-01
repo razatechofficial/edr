@@ -88,8 +88,12 @@ if (-not [string]::IsNullOrWhiteSpace($env:EDR_WIX_BIN)) {
 }
 
 $agentExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edr-agent.exe'))
+$edrCtlExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edrctl.exe'))
 if (-not (Test-Path -LiteralPath $agentExe)) {
     throw "Missing Windows agent binary (build it first): $agentExe"
+}
+if (-not (Test-Path -LiteralPath $edrCtlExe)) {
+    throw "Missing Windows edrctl binary (build it first): $edrCtlExe"
 }
 
 & (Join-Path $PSScriptRoot 'stage_windows_msi.ps1') -Root $root
@@ -165,6 +169,7 @@ $candleArgList = @(
     '-nologo', '-arch', 'x64',
     "-dMsiProductVersion=$Version",
     "-dEdrAgentExe=$agentExe",
+    "-dEdrCtlExe=$edrCtlExe",
     "-dEdrConfigYml=$configYml",
     "-dEdrConfigHardenedYml=$configHardenedYml",
     "-dEdrConfigEnterpriseYml=$configEnterpriseYml",
