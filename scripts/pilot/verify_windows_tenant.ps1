@@ -63,6 +63,24 @@ if (-not (Test-Path -LiteralPath $agentID)) {
 }
 Write-Host "agent_id: $((Get-Content -LiteralPath $agentID -Raw).Trim())"
 
+if ($cfgText -match '(?m)^\s*mutual_tls:\s*true\s*$') {
+	$tlsDir = Join-Path $dataRoot 'tls'
+	Write-Host "==> mTLS client material ($tlsDir)"
+	foreach ($f in @('ca.crt', 'agent-client.crt', 'agent-client.key')) {
+		$path = Join-Path $tlsDir $f
+		if (-not (Test-Path -LiteralPath $path)) {
+			throw "missing mTLS file: $path"
+		}
+	}
+	Write-Host 'mTLS material present'
+}
+
+$edrctl = Get-Command edrctl -ErrorAction SilentlyContinue
+if ($edrctl) {
+	Write-Host '==> edrctl fleet local'
+	& edrctl --config $active fleet local
+}
+
 if ($ControlPlaneHost) {
 	Write-Host "==> control plane gRPC $ControlPlaneHost`:$grpcPort"
 	if (-not (Test-TcpPort $ControlPlaneHost $grpcPort)) {

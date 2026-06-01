@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ACTIVE="${EDR_CONFIG:-/etc/edr-agent/config.yml}"
 AGENT_ID="${EDR_AGENT_ID_FILE:-/var/lib/edr-agent/agent_id}"
 CP_HOST="${1:-${EDR_CONTROL_PLANE_HOST:-}}"
@@ -31,6 +32,8 @@ if [[ ! -f "${AGENT_ID}" ]]; then
 fi
 echo "agent_id: $(tr -d '[:space:]' < "${AGENT_ID}")"
 
+bash "${ROOT}/scripts/pilot/pilot_mtls_check.sh" "${ACTIVE}" "/etc/edr-agent/tls"
+
 if [[ -z "${CP_HOST}" && -n "${endpoint}" ]]; then
 	CP_HOST="${endpoint}"
 fi
@@ -45,6 +48,11 @@ if [[ -n "${CP_HOST}" ]]; then
 		fi
 		echo "gRPC port reachable"
 	fi
+fi
+
+if command -v edrctl >/dev/null 2>&1; then
+	echo "==> edrctl fleet local"
+	edrctl --config "${ACTIVE}" fleet local || true
 fi
 
 echo "Linux tenant pilot check OK"

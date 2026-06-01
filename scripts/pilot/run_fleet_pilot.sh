@@ -10,6 +10,7 @@ WAIT="${EDR_PILOT_WAIT_AGENTS:-0}"
 if [[ -z "${HOST}" ]]; then
 	echo "usage: $0 <control-plane-host> [expected-agents]" >&2
 	echo "  env: EDR_PILOT_MTLS=1, EDR_CONTROLPLANE_HTTPS=1, EDR_CONTROLPLANE_API_TOKEN=..." >&2
+	echo "       EDR_PILOT_WAIT_AGENTS=1, EDR_PILOT_VERIFY_ENROLLMENT=1, EDR_PILOT_VERIFY_DETECTION=1" >&2
 	exit 1
 fi
 
@@ -61,13 +62,29 @@ if [[ "${WAIT}" == "1" || "${WAIT}" == "true" ]]; then
 	bash "${ROOT}/scripts/pilot/wait_for_agents.sh" "${HOST}" "${EXPECTED}"
 fi
 
+if [[ "${EDR_PILOT_VERIFY_ENROLLMENT:-0}" == "1" || "${EDR_PILOT_VERIFY_ENROLLMENT:-0}" == "true" ]]; then
+	echo
+	echo "==> Step 4: verify endpoint enrollment on control plane"
+	bash "${ROOT}/scripts/pilot/verify_agent_enrollment.sh" "${HOST}"
+fi
+
+if [[ "${EDR_PILOT_VERIFY_DETECTION:-0}" == "1" || "${EDR_PILOT_VERIFY_DETECTION:-0}" == "true" ]]; then
+	echo
+	echo "==> Step 5: verify detection pipeline (run on enrolled Linux/macOS endpoint)"
+	make verify-detection-pilot HOST="${HOST}"
+fi
+
 echo
 echo "Check fleet from control plane host:"
 echo "  edrctl fleet agents --host ${HOST} --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"
 echo "  edrctl fleet alerts --host ${HOST} --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"
 echo
+echo "Verify a specific agent enrolled on control plane:"
+echo "  bash scripts/pilot/verify_agent_enrollment.sh ${HOST} \$(cat /var/lib/edr-agent/agent_id)"
+echo
 echo "Validate detection -> control plane forwarding on an enrolled endpoint:"
-echo "  EDR_ALERT_FILE=/var/lib/edr-agent/alerts.jsonl make verify-detection-pilot HOST=${HOST}"
+echo "  Linux/macOS: EDR_ALERT_FILE=/var/lib/edr-agent/alerts.jsonl make verify-detection-pilot HOST=${HOST}"
+echo "  Windows:     powershell -File scripts\\pilot\\verify_detection_pipeline.ps1 ${HOST}"
 
 echo
 echo "Fleet pilot checklist complete for ${HOST}"
