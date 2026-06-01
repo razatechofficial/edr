@@ -34,6 +34,7 @@ ml/training/.venv/
 cmd/installer/bundle/models/
 cmd/installer/bundle/rules/
 cmd/installer/bundle/bin/
+rules/ioc/raw/
 __pycache__/
 
 # Local / build outputs

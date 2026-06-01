@@ -1,0 +1,2 @@
+address,cidr,reputation,source,severity,country,asn,tags
+203.0.113.50,,malicious,edr-baseline,low,,,test;ioc-validation

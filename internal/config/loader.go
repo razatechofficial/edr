@@ -393,6 +393,9 @@ func applyResourcePathDefaults(cfg *Config, configPath string) {
 			}
 		}
 	}
+	if cfg.Detection.IOC.Enabled {
+		resolveIOCPaths(cfg, rulesRoots, tryFile)
+	}
 	if cfg.ML.Enabled && cfg.ML.ModelsDir == "" {
 		for _, p := range []string{
 			repoModels,
@@ -440,6 +443,36 @@ func applyResourcePathDefaults(cfg *Config, configPath string) {
 					break
 				}
 			}
+		}
+	}
+}
+
+func resolveIOCPaths(cfg *Config, rulesRoots []string, tryFile func(string) bool) {
+	type iocFile struct {
+		dest *string
+		name string
+	}
+	files := []iocFile{
+		{&cfg.Detection.IOC.HashDBPath, "hashes.json"},
+		{&cfg.Detection.IOC.IPDBPath, "ips.csv"},
+		{&cfg.Detection.IOC.DomainDBPath, "domains.csv"},
+	}
+	for _, root := range rulesRoots {
+		iocDir := filepath.Join(root, "ioc")
+		resolved := 0
+		for _, f := range files {
+			if *f.dest != "" {
+				resolved++
+				continue
+			}
+			p := filepath.Join(iocDir, f.name)
+			if tryFile(p) {
+				*f.dest = p
+				resolved++
+			}
+		}
+		if resolved == len(files) {
+			return
 		}
 	}
 }

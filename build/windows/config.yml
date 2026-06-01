@@ -21,6 +21,11 @@ detection:
   custom_rules:
     enabled: true
     rules_path: "C:\\ProgramData\\EDR Agent\\rules\\custom"
+  ioc:
+    enabled: true
+    hash_db_path: "C:\\ProgramData\\EDR Agent\\rules\\ioc\\hashes.json"
+    ip_db_path: "C:\\ProgramData\\EDR Agent\\rules\\ioc\\ips.csv"
+    domain_db_path: "C:\\ProgramData\\EDR Agent\\rules\\ioc\\domains.csv"
   behavioral:
     sensitivity: medium
 monitoring:

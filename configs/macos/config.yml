@@ -23,6 +23,11 @@ detection:
   custom_rules:
     enabled: true
     rules_path: "/Library/Application Support/EDR/config/rules/custom"
+  ioc:
+    enabled: true
+    hash_db_path: "/Library/Application Support/EDR/config/rules/ioc/hashes.json"
+    ip_db_path: "/Library/Application Support/EDR/config/rules/ioc/ips.csv"
+    domain_db_path: "/Library/Application Support/EDR/config/rules/ioc/domains.csv"
   behavioral:
     sensitivity: medium
 

@@ -392,7 +392,7 @@ rules-update:
 intel-update:
 	@echo "==> Updating threat intelligence feeds"
 	@./scripts/update-intel.sh
-	@echo "IOC update complete"
+	@echo "IOC update complete (see rules/ioc/*.json and rules/ioc/*.csv)"
 
 models-update:
 	@echo "==> Updating ML models"

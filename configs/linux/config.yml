@@ -17,6 +17,11 @@ detection:
   custom_rules:
     enabled: true
     rules_path: /etc/edr-agent/rules/custom
+  ioc:
+    enabled: true
+    hash_db_path: /etc/edr-agent/rules/ioc/hashes.json
+    ip_db_path: /etc/edr-agent/rules/ioc/ips.csv
+    domain_db_path: /etc/edr-agent/rules/ioc/domains.csv
   behavioral:
     sensitivity: medium
 monitoring:

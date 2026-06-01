@@ -1,0 +1,10 @@
+[
+  {
+    "hash": "275a021bbfb6489bfe5feb382ced258e27724617998c563019d3da38",
+    "type": "sha256",
+    "malware_family": "EICAR",
+    "source": "edr-baseline",
+    "severity": "medium",
+    "tags": ["test", "eicar"]
+  }
+]

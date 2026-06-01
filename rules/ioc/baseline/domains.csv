@@ -1,0 +1,2 @@
+domain,is_wildcard,reputation,source,severity,category,tags
+ioc-validation.test,false,malicious,edr-baseline,low,test,validation

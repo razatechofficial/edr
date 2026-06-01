@@ -31,6 +31,7 @@ function Copy-RuleTree {
 
 Copy-RuleTree 'rules/sigma' 'sigma'
 Copy-RuleTree 'rules/yara' 'yara'
+Copy-RuleTree 'rules/ioc' 'ioc'
 Copy-RuleTree 'rules/playbooks' 'playbooks'
 Copy-RuleTree 'rules/custom' 'custom'
 Copy-RuleTree 'rules/compliance/sca/windows' 'compliance/sca'
