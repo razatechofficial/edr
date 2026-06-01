@@ -76,6 +76,15 @@ trap 'rm -f "${TMP_MANIFEST}"' EXIT
 		fi
 		write_bundle "ioc-offline" "ioc-offline.tar.gz" "${ioc_paths[@]}"
 	fi
+	if [[ -d "${RULES_ROOT}/compliance/sca/linux" ]]; then
+		write_bundle "sca-linux" "sca-linux.tar.gz" "compliance/sca/linux"
+	fi
+	if [[ -d "${RULES_ROOT}/compliance/sca/windows" ]]; then
+		write_bundle "sca-windows" "sca-windows.tar.gz" "compliance/sca/windows"
+	fi
+	if [[ -d "${RULES_ROOT}/compliance/sca/darwin" ]]; then
+		write_bundle "sca-macos" "sca-macos.tar.gz" "compliance/sca/darwin"
+	fi
 } > "${TMP_MANIFEST}"
 
 python3 - <<'PY' "${TMP_MANIFEST}" "${POLICY_DIR}/manifest.json"

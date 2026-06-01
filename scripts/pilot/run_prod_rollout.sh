@@ -15,6 +15,7 @@ if [[ -z "${HOST}" ]]; then
 	echo "       EDR_ROLLOUT_FETCH_ARTIFACTS=1, EDR_ROLLOUT_STAGE_BUNDLE=1" >&2
 	echo "       EDR_ROLLOUT_VERIFY=1 (final fleet verification)" >&2
 	echo "       EDR_ROLLOUT_STAGE_POLICY=1, EDR_ROLLOUT_VERIFY_POLICY=1" >&2
+	echo "       EDR_ROLLOUT_PREPARE_IOC=1, EDR_ROLLOUT_SIGN_POLICY=1, EDR_ROLLOUT_BACKUP_CP=1" >&2
 	exit 1
 fi
 
@@ -37,9 +38,21 @@ if [[ "${EDR_ROLLOUT_ENABLE_TLS:-0}" == "1" || "${EDR_ROLLOUT_ENABLE_TLS:-0}" ==
 	fi
 fi
 
+if [[ "${EDR_ROLLOUT_PREPARE_IOC:-0}" == "1" || "${EDR_ROLLOUT_PREPARE_IOC:-0}" == "true" ]]; then
+	echo
+	echo "==> prepare offline IOC databases"
+	make -C "${ROOT}" prepare-offline-ioc
+fi
+
 if [[ "${EDR_ROLLOUT_STAGE_POLICY:-0}" == "1" || "${EDR_ROLLOUT_STAGE_POLICY:-0}" == "true" ]]; then
 	echo
 	echo "==> stage control plane policy bundles"
+	if [[ "${EDR_ROLLOUT_SIGN_POLICY:-0}" == "1" || "${EDR_ROLLOUT_SIGN_POLICY:-0}" == "true" ]]; then
+		if [[ -z "${EDR_POLICY_SIGN_KEY:-}" ]]; then
+			echo "ERROR: EDR_ROLLOUT_SIGN_POLICY=1 requires EDR_POLICY_SIGN_KEY" >&2
+			exit 1
+		fi
+	fi
 	sudo make -C "${ROOT}" stage-controlplane-policy
 	sudo systemctl restart edr-controlplane
 	sleep 2
@@ -73,6 +86,12 @@ if [[ "${EDR_ROLLOUT_VERIFY:-0}" == "1" || "${EDR_ROLLOUT_VERIFY:-0}" == "true" 
 	echo "==> fleet rollout verification"
 	export EDR_ROLLOUT_VERIFY_POLICY="${EDR_ROLLOUT_VERIFY_POLICY:-0}"
 	bash "${ROOT}/scripts/pilot/verify_fleet_rollout.sh" "${HOST}" "${EXPECTED}"
+fi
+
+if [[ "${EDR_ROLLOUT_BACKUP_CP:-0}" == "1" || "${EDR_ROLLOUT_BACKUP_CP:-0}" == "true" ]]; then
+	echo
+	echo "==> control plane backup"
+	sudo bash "${ROOT}/scripts/deploy/backup_controlplane.sh" "${EDR_ROLLOUT_BACKUP_PATH:-}"
 fi
 
 echo

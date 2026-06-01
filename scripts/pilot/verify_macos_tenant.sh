@@ -70,4 +70,9 @@ if [[ "${EDR_PILOT_VERIFY_IOC:-0}" == "1" || "${EDR_PILOT_VERIFY_IOC:-0}" == "tr
 	bash "${ROOT}/scripts/pilot/verify_agent_ioc.sh" macos
 fi
 
+if [[ "${EDR_PILOT_VERIFY_SCA:-0}" == "1" || "${EDR_PILOT_VERIFY_SCA:-0}" == "true" ]]; then
+	echo "==> SCA compliance policies"
+	bash "${ROOT}/scripts/pilot/verify_agent_sca.sh" macos
+fi
+
 echo "macOS tenant pilot check OK"

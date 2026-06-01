@@ -167,6 +167,16 @@ detection:
     exfil_detect: true
     lateral_movement_detect: true
 
+compliance:
+  enabled: true
+  rules_dir: "/etc/edr/rules/compliance/sca"
+  scan_on_start: true
+  interval_hours: 24
+  commands_enabled: true
+  command_timeout_sec: 120
+  enable_posture: true
+  enable_rootcheck: true
+
 response:
   auto_response: true
 

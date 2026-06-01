@@ -32,7 +32,7 @@ AGENTS_TMP="$(mktemp)"
 trap 'rm -f "${AGENTS_TMP}"' EXIT
 curl -fsS "${CURL_OPTS[@]}" "${SCHEME}://${HOST}:${HTTP_PORT}/v1/agents" > "${AGENTS_TMP}"
 
-export STALE_SEC EXPECTED
+export STALE_SEC EXPECTED EDR_ROLLOUT_VERIFY_POLICY
 python3 - <<'PY' "${AGENTS_TMP}"
 import json, os, sys
 from datetime import datetime, timezone, timedelta
@@ -65,3 +65,9 @@ if stale:
 
 print(f"rollout validation OK ({len(agents)} agent(s), heartbeats within {stale_sec}s)")
 PY
+
+if [[ "${EDR_ROLLOUT_VERIFY_POLICY:-0}" == "1" || "${EDR_ROLLOUT_VERIFY_POLICY:-0}" == "true" ]]; then
+	echo
+	echo "==> fleet policy rollout"
+	bash "${ROOT}/scripts/pilot/verify_fleet_policy_rollout.sh" "${HOST}" "${EXPECTED}"
+fi

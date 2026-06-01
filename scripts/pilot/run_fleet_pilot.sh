@@ -10,7 +10,7 @@ WAIT="${EDR_PILOT_WAIT_AGENTS:-0}"
 if [[ -z "${HOST}" ]]; then
 	echo "usage: $0 <control-plane-host> [expected-agents]" >&2
 	echo "  env: EDR_PILOT_MTLS=1, EDR_CONTROLPLANE_HTTPS=1, EDR_CONTROLPLANE_API_TOKEN=..." >&2
-	echo "       EDR_PILOT_WAIT_AGENTS=1, EDR_PILOT_VERIFY_ENROLLMENT=1, EDR_PILOT_VERIFY_DETECTION=1, EDR_PILOT_VERIFY_POLICY=1" >&2
+	echo "       EDR_PILOT_WAIT_AGENTS=1, EDR_PILOT_VERIFY_ENROLLMENT=1, EDR_PILOT_VERIFY_DETECTION=1, EDR_PILOT_VERIFY_POLICY=1, EDR_PILOT_VERIFY_IOC=1, EDR_PILOT_VERIFY_SCA=1" >&2
 	exit 1
 fi
 
@@ -46,6 +46,11 @@ Policy bundles (control plane + endpoints):
   sudo make stage-controlplane-policy && sudo systemctl restart edr-controlplane
   EDR_PILOT_VERIFY_POLICY=1 bash scripts/pilot/wait_for_policy_sync.sh ${HOST}
   make verify-fleet-policy-rollout HOST=${HOST} EXPECTED=${EXPECTED}
+
+Offline IOC + SCA (airgap endpoints):
+  sudo scripts/deploy/install_agent_ioc.sh ioc linux
+  sudo scripts/deploy/install_agent_sca.sh sca linux
+  EDR_PILOT_VERIFY_IOC=1 EDR_PILOT_VERIFY_SCA=1 bash scripts/pilot/run_endpoint_pilot.sh ${HOST}
 EOF
 else
 	cat <<EOF
@@ -85,6 +90,18 @@ if [[ "${EDR_PILOT_VERIFY_POLICY:-0}" == "1" || "${EDR_PILOT_VERIFY_POLICY:-0}" 
 	echo
 	echo "==> Step 6: verify fleet policy rollout"
 	bash "${ROOT}/scripts/pilot/verify_fleet_policy_rollout.sh" "${HOST}" "${EXPECTED}"
+fi
+
+if [[ "${EDR_PILOT_VERIFY_IOC:-0}" == "1" || "${EDR_PILOT_VERIFY_IOC:-0}" == "true" ]]; then
+	echo
+	echo "==> Step 7: verify offline IOC (run on endpoint with ioc/ installed)"
+	bash "${ROOT}/scripts/pilot/verify_agent_ioc.sh" || echo "WARNING: IOC verify failed (install ioc/ on endpoint first)" >&2
+fi
+
+if [[ "${EDR_PILOT_VERIFY_SCA:-0}" == "1" || "${EDR_PILOT_VERIFY_SCA:-0}" == "true" ]]; then
+	echo
+	echo "==> Step 8: verify SCA policies (run on endpoint with sca/ installed)"
+	bash "${ROOT}/scripts/pilot/verify_agent_sca.sh" || echo "WARNING: SCA verify failed (install sca/ on endpoint first)" >&2
 fi
 
 echo

@@ -125,4 +125,9 @@ if ($env:EDR_PILOT_VERIFY_IOC -eq '1' -or $env:EDR_PILOT_VERIFY_IOC -eq 'true') 
 	& bash "$PSScriptRoot/verify_agent_ioc.sh" windows
 }
 
+if ($env:EDR_PILOT_VERIFY_SCA -eq '1' -or $env:EDR_PILOT_VERIFY_SCA -eq 'true') {
+	Write-Host '==> SCA compliance policies'
+	& bash "$PSScriptRoot/verify_agent_sca.sh" windows
+}
+
 Write-Host "Windows tenant pilot check OK"

@@ -8,7 +8,7 @@ TLS_SRC="${EDR_CONTROLPLANE_TLS_DIR:-/etc/edr-controlplane/tls}"
 PKG_SRC="${EDR_ROLLOUT_PACKAGE_DIR:-${ROOT}/dist/release}"
 
 rm -rf "${OUT}"
-mkdir -p "${OUT}/packages" "${OUT}/tls" "${OUT}/ioc" "${OUT}/scripts/pilot" "${OUT}/scripts/deploy" "${OUT}/scripts/linux" "${OUT}/scripts/macos" "${OUT}/scripts/windows" "${OUT}/configs/reference"
+mkdir -p "${OUT}/packages" "${OUT}/tls" "${OUT}/ioc" "${OUT}/sca" "${OUT}/scripts/pilot" "${OUT}/scripts/deploy" "${OUT}/scripts/linux" "${OUT}/scripts/macos" "${OUT}/scripts/windows" "${OUT}/configs/reference"
 
 for ref in configs/agent.gov.yaml configs/agent.airgap.yaml; do
 	if [[ -f "${ROOT}/${ref}" ]]; then
@@ -55,6 +55,11 @@ if [[ ! -f "${OUT}/ioc/hashes.json" ]]; then
 	echo "WARNING: no IOC databases under rules/ioc/; run make intel-update on a connected host first" >&2
 fi
 
+if [[ -d "${ROOT}/rules/compliance/sca" ]]; then
+	echo "==> copying SCA compliance policies"
+	cp -R "${ROOT}/rules/compliance/sca/." "${OUT}/sca/"
+fi
+
 for script in \
 	scripts/pilot/run_prod_rollout.sh \
 	scripts/pilot/run_fleet_pilot.sh \
@@ -79,6 +84,7 @@ for script in \
 	scripts/pilot/run_policy_pilot.sh \
 	scripts/pilot/verify_fleet_policy_rollout.sh \
 	scripts/pilot/verify_agent_ioc.sh \
+	scripts/pilot/verify_agent_sca.sh \
 	scripts/pilot/run_rollout_validation.sh \
 	scripts/pilot/upgrade_linux_agent.sh \
 	scripts/pilot/upgrade_macos_agent.sh \
@@ -88,6 +94,8 @@ for script in \
 	scripts/deploy/distribute_agent_tls.sh \
 	scripts/deploy/stage_controlplane_policy.sh \
 	scripts/deploy/install_agent_ioc.sh \
+	scripts/deploy/install_agent_sca.sh \
+	scripts/deploy/generate_policy_signing_key.sh \
 	scripts/deploy/export_controlplane_env.sh \
 	scripts/linux/apply_tenant_tls_config.sh \
 	scripts/macos/apply_tenant_tls_config.sh \
@@ -129,6 +137,7 @@ Contents:
   packages/   Linux .deb/.rpm, macOS .pkg, Windows .msi
   tls/        Control plane CA + agent client cert (mTLS)
   ioc/        Offline hash/IP/domain IOC databases (sneakernet)
+  sca/        CIS compliance policies (linux/windows/darwin)
   scripts/    Pilot apply + verify helpers
   configs/reference/  Government and airgap profile references
 
@@ -153,6 +162,14 @@ Offline IOC (airgap endpoints, before or after agent install):
   sudo scripts/deploy/install_agent_ioc.sh ioc linux|macos|windows
   bash scripts/pilot/verify_agent_ioc.sh
 
+SCA compliance (airgap endpoints):
+  sudo scripts/deploy/install_agent_sca.sh sca linux|macos|windows
+  bash scripts/pilot/verify_agent_sca.sh
+
+Policy signing (production, connected staging host):
+  sudo scripts/deploy/generate_policy_signing_key.sh /etc/edr/certs
+  export EDR_POLICY_SIGN_KEY=/etc/edr/certs/edr-policy.seed
+
 Remote mTLS distribution (from control plane, over SSH):
   scripts/deploy/distribute_agent_tls.sh tls <agent-host> linux
   EDR_SSH_USER=<user> scripts/deploy/distribute_agent_tls.sh tls <agent-host> macos
@@ -161,6 +178,7 @@ Remote mTLS distribution (from control plane, over SSH):
 Linux endpoint:
   sudo dpkg -i packages/edr-agent_*_amd64.deb
   sudo scripts/deploy/install_agent_ioc.sh ioc linux
+  sudo scripts/deploy/install_agent_sca.sh sca linux
   sudo scripts/deploy/copy_agent_tls.sh tls linux
   sudo scripts/linux/apply_tenant_tls_config.sh <cp-host>
   bash scripts/pilot/verify_linux_tenant.sh <cp-host>
@@ -168,6 +186,7 @@ Linux endpoint:
 macOS endpoint:
   sudo installer -pkg packages/edr-agent_*.pkg -target /
   sudo scripts/deploy/install_agent_ioc.sh ioc macos
+  sudo scripts/deploy/install_agent_sca.sh sca macos
   sudo scripts/deploy/copy_agent_tls.sh tls macos
   sudo scripts/macos/apply_tenant_tls_config.sh <cp-host>
   bash scripts/pilot/verify_macos_tenant.sh <cp-host>
@@ -175,6 +194,7 @@ macOS endpoint:
 Windows endpoint (Admin):
   msiexec /i packages\edr-agent_*.msi /qn
   scripts\deploy\install_agent_ioc.sh ioc windows
+  scripts\deploy\install_agent_sca.sh sca windows
   copy tls\*.crt tls\*.key to C:\ProgramData\EDR Agent\tls\
   apply_tenant_tls_config.bat <cp-host>
   powershell -File scripts\pilot\verify_windows_tenant.ps1
