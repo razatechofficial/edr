@@ -63,12 +63,12 @@ func platformDefaults() {
 		defaultAlertFile = "/Library/Logs/EDR/alerts.jsonl"
 		defaultSocketPath = "/var/run/edr-agent.sock"
 	case "windows":
-		defaultConfigFile = `C:\ProgramData\EDR\config\agent.yaml`
-		defaultAlertFile = `C:\ProgramData\EDR\logs\alerts.jsonl`
+		defaultConfigFile = `C:\ProgramData\EDR Agent\config.yml`
+		defaultAlertFile = `C:\ProgramData\EDR Agent\alerts.jsonl`
 		defaultSocketPath = `\\.\pipe\edr-agent-control`
 	default:
-		defaultConfigFile = "/etc/edr/agent.yaml"
-		defaultAlertFile = "/var/log/edr/alerts.jsonl"
+		defaultConfigFile = "/etc/edr-agent/config.yml"
+		defaultAlertFile = "/var/lib/edr-agent/alerts.jsonl"
 		defaultSocketPath = "/var/run/edr-agent.sock"
 	}
 }
@@ -100,6 +100,7 @@ func main() {
 		newRulesCmd(),
 		newConfigCmd(),
 		newVersionCmd(),
+		newFleetCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

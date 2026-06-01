@@ -100,6 +100,18 @@
               Name="config.tenant.yml"
               KeyPath="yes"/>
       </Component>
+      <Component Id="cmpConfigFleetTlsYml" Guid="*" Directory="DATAROOT" Win64="yes">
+        <File Id="ConfigFleetTlsFile"
+              Source="$(var.EdrConfigFleetTlsYml)"
+              Name="config.fleet.tls.yml"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpConfigTenantTlsYml" Guid="*" Directory="DATAROOT" Win64="yes">
+        <File Id="ConfigTenantTlsFile"
+              Source="$(var.EdrConfigTenantTlsYml)"
+              Name="config.tenant.tls.yml"
+              KeyPath="yes"/>
+      </Component>
       <Component Id="cmpConfigPPLYml" Guid="*" Directory="DATAROOT" Win64="yes">
         <File Id="ConfigPPLFile"
               Source="$(var.EdrConfigPPLYml)"
@@ -110,6 +122,12 @@
         <File Id="ApplyTenantBat"
               Source="$(var.EdrApplyTenantBat)"
               Name="apply_tenant_config.bat"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpApplyTenantTlsBat" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="ApplyTenantTlsBat"
+              Source="$(var.EdrApplyTenantTlsBat)"
+              Name="apply_tenant_tls_config.bat"
               KeyPath="yes"/>
       </Component>
       <Component Id="cmpApplyPPLBat" Guid="*" Directory="INSTALLFOLDER" Win64="yes">

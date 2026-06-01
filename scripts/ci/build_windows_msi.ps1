@@ -99,8 +99,11 @@ $configHardenedYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windo
 $configEnterpriseYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.enterprise.yml'))
 $configFleetYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.fleet.yml'))
 $configTenantYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.tenant.yml'))
+$configFleetTlsYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.fleet.tls.yml'))
+$configTenantTlsYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.tenant.tls.yml'))
 $configPPLYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.ppl.yml'))
 $applyTenantBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_tenant_config.bat'))
+$applyTenantTlsBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_tenant_tls_config.bat'))
 $applyPPLBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_am_ppl_config.bat'))
 $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wxs'))
 $modelsWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wxs'))
@@ -121,11 +124,20 @@ if (-not (Test-Path -LiteralPath $configFleetYml)) {
 if (-not (Test-Path -LiteralPath $configTenantYml)) {
     throw "Missing staged tenant config: $configTenantYml"
 }
+if (-not (Test-Path -LiteralPath $configFleetTlsYml)) {
+    throw "Missing staged fleet TLS config: $configFleetTlsYml"
+}
+if (-not (Test-Path -LiteralPath $configTenantTlsYml)) {
+    throw "Missing staged tenant TLS config: $configTenantTlsYml"
+}
 if (-not (Test-Path -LiteralPath $configPPLYml)) {
     throw "Missing staged PPL config: $configPPLYml"
 }
 if (-not (Test-Path -LiteralPath $applyTenantBat)) {
     throw "Missing staged apply_tenant_config.bat: $applyTenantBat"
+}
+if (-not (Test-Path -LiteralPath $applyTenantTlsBat)) {
+    throw "Missing staged apply_tenant_tls_config.bat: $applyTenantTlsBat"
 }
 if (-not (Test-Path -LiteralPath $applyPPLBat)) {
     throw "Missing staged apply_am_ppl_config.bat: $applyPPLBat"
@@ -158,8 +170,11 @@ $candleArgList = @(
     "-dEdrConfigEnterpriseYml=$configEnterpriseYml",
     "-dEdrConfigFleetYml=$configFleetYml",
     "-dEdrConfigTenantYml=$configTenantYml",
+    "-dEdrConfigFleetTlsYml=$configFleetTlsYml",
+    "-dEdrConfigTenantTlsYml=$configTenantTlsYml",
     "-dEdrConfigPPLYml=$configPPLYml",
     "-dEdrApplyTenantBat=$applyTenantBat",
+    "-dEdrApplyTenantTlsBat=$applyTenantTlsBat",
     "-dEdrApplyPPLBat=$applyPPLBat",
     "-dRulesStage=$rulesStage",
     "-dModelsStage=$modelsStage",

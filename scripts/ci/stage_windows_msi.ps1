@@ -65,6 +65,18 @@ if (Test-Path -LiteralPath $configTenantSrc) {
     Copy-Item -LiteralPath $configTenantSrc -Destination $configTenantDest -Force
 }
 
+$configFleetTlsSrc = Join-Path $root 'configs/windows/config.fleet.tls.yml'
+$configFleetTlsDest = Join-Path $root 'build/windows/config.fleet.tls.yml'
+if (Test-Path -LiteralPath $configFleetTlsSrc) {
+    Copy-Item -LiteralPath $configFleetTlsSrc -Destination $configFleetTlsDest -Force
+}
+
+$configTenantTlsSrc = Join-Path $root 'configs/windows/config.tenant.tls.yml'
+$configTenantTlsDest = Join-Path $root 'build/windows/config.tenant.tls.yml'
+if (Test-Path -LiteralPath $configTenantTlsSrc) {
+    Copy-Item -LiteralPath $configTenantTlsSrc -Destination $configTenantTlsDest -Force
+}
+
 $configPPLSrc = Join-Path $root 'configs/windows/config.ppl.yml'
 $configPPLDest = Join-Path $root 'build/windows/config.ppl.yml'
 if (Test-Path -LiteralPath $configPPLSrc) {
@@ -73,6 +85,7 @@ if (Test-Path -LiteralPath $configPPLSrc) {
 
 foreach ($scriptName in @(
         'apply_tenant_config.bat',
+        'apply_tenant_tls_config.bat',
         'apply_am_ppl_config.bat',
         'apply_hardened_config.bat',
         'apply_enterprise_config.bat',
