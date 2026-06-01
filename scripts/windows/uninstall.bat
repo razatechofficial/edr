@@ -7,21 +7,18 @@ if errorlevel 1 (
 	exit /b 1
 )
 
-set "BINDIR=%ProgramFiles%\EDR\bin"
+set "INSTALLDIR=%ProgramFiles%\EDR Agent"
+set "AGENT_EXE=%INSTALLDIR%\edr-agent.exe"
 
-sc query EDRAgent >nul 2>&1
-if not errorlevel 1 (
-	net stop EDRAgent >nul 2>&1
-	sc delete EDRAgent >nul 2>&1
-	ping -n 3 127.0.0.1 >nul
+if exist "%AGENT_EXE%" (
+	"%AGENT_EXE%" --uninstall >nul 2>&1
 )
 
-if exist "%BINDIR%\edr-agent.exe" del /f /q "%BINDIR%\edr-agent.exe" >nul 2>&1
-if exist "%BINDIR%\edrctl.exe" del /f /q "%BINDIR%\edrctl.exe" >nul 2>&1
-if exist "%BINDIR%" rmdir "%BINDIR%" >nul 2>&1
-if exist "%ProgramFiles%\EDR" rmdir "%ProgramFiles%\EDR" >nul 2>&1
+if exist "%AGENT_EXE%" del /f /q "%AGENT_EXE%" >nul 2>&1
+if exist "%INSTALLDIR%\edrctl.exe" del /f /q "%INSTALLDIR%\edrctl.exe" >nul 2>&1
+if exist "%INSTALLDIR%" rmdir "%INSTALLDIR%" >nul 2>&1
 
 netsh advfirewall firewall delete rule name="EDR Agent" >nul 2>&1
 
-echo Uninstall complete. Configuration and data under "%ProgramData%\EDR" were not removed.
+echo Uninstall complete. Config and data remain under "%ProgramData%\EDR Agent".
 exit /b 0

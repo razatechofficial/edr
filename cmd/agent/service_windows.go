@@ -6,16 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
-)
-
-const (
-	windowsServiceName = "EDRAgent"
-	windowsControlPlaneIntentPath = `C:\ProgramData\EDR Agent\control_plane.intent`
 )
 
 func installService() error {
@@ -26,33 +22,50 @@ func installService() error {
 	defer m.Disconnect()
 
 	if existing, err := m.OpenService(windowsServiceName); err == nil {
+		_, _ = existing.Control(svc.Stop)
+		_ = existing.Delete()
 		_ = existing.Close()
-		return fmt.Errorf("%s service already exists", windowsServiceName)
+		time.Sleep(2 * time.Second)
 	}
 
 	exePath, err := os.Executable()
 	if err != nil {
 		return err
 	}
+	exePath, err = filepath.Abs(exePath)
+	if err != nil {
+		return err
+	}
+
+	cfgPath := WindowsConfigPath()
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.MkdirAll(WindowsDataRoot(), 0o755); err != nil {
+		return fmt.Errorf("create data root: %w", err)
+	}
+
 	s, err := m.CreateService(
 		windowsServiceName,
 		exePath,
 		mgr.Config{
-			StartType:   mgr.StartAutomatic,
-			DisplayName: "EDR Agent",
-			Description: "Endpoint Detection and Response Agent",
+			StartType:    mgr.StartAutomatic,
+			DisplayName:  "EDR Agent",
+			Description:  "Endpoint Detection and Response Agent",
+			DelayedAutoStart: false,
 		},
-		"--config", `C:\ProgramData\EDR Agent\config.yml`,
+		"--config", cfgPath,
 	)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
+
 	_ = eventlog.Remove(windowsServiceName)
 	if err := eventlog.InstallAsEventCreate(windowsServiceName, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
 		return err
 	}
-	cfgPath := `C:\ProgramData\EDR Agent\config.yml`
+
 	var posture map[string]any
 	if c, err := config.Load(cfgPath); err == nil {
 		posture = applyWindowsServiceHardening(s, exePath, c)
@@ -60,7 +73,13 @@ func installService() error {
 		posture = map[string]any{"applied": false, "reason": "config_unavailable", "error": err.Error()}
 	}
 	_ = writeServiceHardeningPosture(posture)
-	return installWindowsControlPlaneIntent()
+	if err := installWindowsControlPlaneIntent(); err != nil {
+		return err
+	}
+	if err := s.Start(); err != nil {
+		return fmt.Errorf("start service: %w", err)
+	}
+	return nil
 }
 
 func uninstallService() error {
@@ -84,14 +103,16 @@ func uninstallService() error {
 }
 
 func installWindowsControlPlaneIntent() error {
-	if err := os.MkdirAll(filepath.Dir(windowsControlPlaneIntentPath), 0o755); err != nil {
+	path := WindowsControlPlaneIntentPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(windowsControlPlaneIntentPath, []byte("wfp=minimal\nminifilter=optional\n"), 0o644)
+	return os.WriteFile(path, []byte("wfp=minimal\nminifilter=optional\n"), 0o644)
 }
 
 func uninstallWindowsControlPlaneIntent() error {
-	if err := os.Remove(windowsControlPlaneIntentPath); err != nil && !os.IsNotExist(err) {
+	path := WindowsControlPlaneIntentPath()
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil

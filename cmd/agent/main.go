@@ -38,6 +38,10 @@ var (
 )
 
 func main() {
+	if handled, code := tryRunWindowsService(); handled {
+		os.Exit(code)
+	}
+
 	root := &cobra.Command{
 		Use:   "edr-agent",
 		Short: "EDR endpoint detection and response agent",
@@ -49,7 +53,7 @@ func main() {
 		SilenceErrors: true,
 	}
 
-	root.PersistentFlags().StringVar(&configPath, "config", "configs/agent.example.yaml", "path to agent configuration file")
+	root.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath(), "path to agent configuration file")
 	root.PersistentFlags().StringVar(&dataDir, "data-dir", "", "override data directory")
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "", "override log level")
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging with console output")
@@ -145,6 +149,27 @@ func runAgent() error {
 	if removeSvc {
 		return uninstallService()
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 8)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	go func() {
+		sig := <-sigCh
+		// Logger may not exist yet; stderr is fine for interactive runs.
+		fmt.Fprintf(os.Stderr, "received signal %v, shutting down\n", sig)
+		cancel()
+		sig2 := <-sigCh
+		fmt.Fprintf(os.Stderr, "received second signal %v, exiting now\n", sig2)
+		os.Exit(0)
+	}()
+
+	return runAgentCore(ctx, configPath)
+}
+
+func runAgentCore(ctx context.Context, cfgPath string) error {
 	if dataDir != "" {
 		_ = os.Setenv("DATA_DIR", dataDir)
 	}
@@ -152,7 +177,7 @@ func runAgent() error {
 		_ = os.Setenv("LOG_LEVEL", logLevel)
 	}
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -169,40 +194,16 @@ func runAgent() error {
 		zap.String("built", BuildTime),
 		zap.String("os", runtime.GOOS),
 		zap.String("arch", runtime.GOARCH),
-		zap.String("config", configPath),
+		zap.String("config", cfgPath),
 	)
 
-	// P2-17: lock down the agent process before loading any third-
-	// party module. On Windows this enables PROCESS_MITIGATION_*
-	// policies (no dynamic code, no remote-image loads, no extension
-	// points). On other OSes this is a no-op stub. The boot posture
-	// surfaces success/failure per policy so an operator can verify.
 	_ = applyProcessMitigations(logger)
 
 	if err := validateWindowsPPLBoot(cfg, logger); err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Buffer so a second interrupt is not lost while graceful shutdown runs.
-	sigCh := make(chan os.Signal, 8)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-
-	go func() {
-		sig := <-sigCh
-		logger.Info("received signal, shutting down", zap.String("signal", sig.String()))
-		cancel()
-		// If something blocks during shutdown (alert I/O, detection engine Stop, etc.),
-		// a second SIGINT/SIGTERM exits the process immediately.
-		sig2 := <-sigCh
-		logger.Warn("received second signal, exiting now", zap.String("signal", sig2.String()))
-		os.Exit(0)
-	}()
-
-	a, err := agent.NewWithFiles(configPath)
+	a, err := agent.NewWithFiles(cfgPath)
 	if err != nil {
 		logger.Error("agent initialization failed", zap.Error(err))
 		return fmt.Errorf("agent init: %w", err)

@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <!-- Files-only MSI: WiX service rows + light.exe were failing reliably on GitHub-hosted
-       Windows runners across several layouts/quoting fixes. Install binaries + default
-       config; register/start the Windows service via sc.exe or a follow-up CustomAction. -->
+  <!--
+    One-click Windows sensor MSI (CrowdStrike-style):
+      C:\Program Files\EDR Agent\edr-agent.exe
+      C:\ProgramData\EDR Agent\config.yml + rules\
+    Post-install: edr-agent.exe --install (registers + starts EDRAgent service)
+  -->
   <Product Id="*"
            Name="EDR Agent"
            Language="1033"
@@ -15,12 +18,32 @@
              InstallPrivileges="elevated"/>
 
     <MajorUpgrade DowngradeErrorMessage=
-      "A newer version is already installed."/>
+      "A newer version of EDR Agent is already installed."/>
     <MediaTemplate EmbedCab="yes"/>
 
     <Feature Id="ProductFeature" Title="EDR Agent" Level="1">
       <ComponentGroupRef Id="ProductComponents"/>
+      <ComponentGroupRef Id="RulesComponents"/>
     </Feature>
+
+    <CustomAction Id="CaInstallService"
+                  FileKey="AgentExe"
+                  ExeCommand="--install"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check"/>
+
+    <CustomAction Id="CaUninstallService"
+                  FileKey="AgentExe"
+                  ExeCommand="--uninstall"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore"/>
+
+    <InstallExecuteSequence>
+      <Custom Action="CaUninstallService" Before="RemoveFiles">REMOVE="ALL"</Custom>
+      <Custom Action="CaInstallService" After="InstallFiles">NOT REMOVE</Custom>
+    </InstallExecuteSequence>
   </Product>
 
   <Fragment>
@@ -28,23 +51,28 @@
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="EDR Agent"/>
       </Directory>
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="DATAROOT" Name="EDR Agent">
+          <Directory Id="RULESROOT" Name="rules"/>
+        </Directory>
+      </Directory>
     </Directory>
   </Fragment>
 
   <Fragment>
-    <ComponentGroup Id="ProductComponents"
-                    Directory="INSTALLFOLDER">
-      <!-- One key path per component (WiX / MSI rules). -->
-      <Component Id="cmpAgentExe" Guid="*" Win64="yes">
+    <ComponentGroup Id="ProductComponents">
+      <Component Id="cmpAgentExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="AgentExe"
               Source="$(var.EdrAgentExe)"
+              Name="edr-agent.exe"
               KeyPath="yes"/>
       </Component>
-      <Component Id="cmpConfigYml" Guid="*" Win64="yes">
+      <Component Id="cmpConfigYml" Guid="*" Directory="DATAROOT" Win64="yes">
         <File Id="ConfigFile"
               Source="$(var.EdrConfigYml)"
               Name="config.yml"
               KeyPath="yes"/>
+        <CreateFolder/>
       </Component>
     </ComponentGroup>
   </Fragment>

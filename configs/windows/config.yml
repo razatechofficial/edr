@@ -6,6 +6,11 @@ logging:
   level: info
   alert_file: "C:\\ProgramData\\EDR Agent\\alerts.jsonl"
   audit_file: "C:\\ProgramData\\EDR Agent\\audit.jsonl"
+server:
+  endpoint: ""
+  mutual_tls: false
+  heartbeat_sec: 30
+  reconnect_sec: 5
 detection:
   sigma:
     enabled: true
@@ -21,6 +26,11 @@ detection:
 monitoring:
   mode: auto
   kernel_enabled: true
+  userland_fallback: true
+  require_kernel: false
+  windows_ppl_required: false
+  etw_threat_intel: false
+  security_profile: standard
 compliance:
   enabled: true
   rules_dir: "C:\\ProgramData\\EDR Agent\\rules\\compliance\\sca"
@@ -29,6 +39,8 @@ compliance:
   enable_posture: true
   enable_rootcheck: false
   emit_passed_findings: false
+self_protect:
+  enabled: false
 response:
   auto_response: true
   playbooks_dir: "C:\\ProgramData\\EDR Agent\\rules\\playbooks"

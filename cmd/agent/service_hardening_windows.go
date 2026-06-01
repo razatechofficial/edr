@@ -17,7 +17,9 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-const serviceHardeningPosturePath = `C:\ProgramData\EDR Agent\service_hardening_posture.json`
+func serviceHardeningPosturePath() string {
+	return filepath.Join(WindowsDataRoot(), "service_hardening_posture.json")
+}
 
 // SERVICE_LAUNCH_PROTECTED_WINDOWS_LIGHT (0x2) — SCM launch protection tier (legacy generic PPL).
 const serviceLaunchProtectedWindowsLight = 0x00000002
@@ -247,12 +249,12 @@ func hardenServiceInstallDirACL(dir string) error {
 }
 
 func writeServiceHardeningPosture(m map[string]any) error {
-	if err := os.MkdirAll(filepath.Dir(serviceHardeningPosturePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(serviceHardeningPosturePath()), 0o755); err != nil {
 		return err
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(serviceHardeningPosturePath, b, 0o644)
+	return os.WriteFile(serviceHardeningPosturePath(), b, 0o644)
 }
