@@ -300,6 +300,26 @@ func TestApplyPerformanceDefaultsWorkerZeroMeansNumCPU(t *testing.T) {
 	}
 }
 
+func TestLoadWindowsTenantProfile(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	cfg, err := Load("../../configs/windows/config.tenant.yml")
+	if err != nil {
+		t.Fatalf("Load tenant profile: %v", err)
+	}
+	if !cfg.Monitoring.ETWThreatIntel {
+		t.Fatal("tenant profile should enable etw_threat_intel")
+	}
+	if !cfg.Monitoring.WindowsServiceHardening {
+		t.Fatal("tenant profile should enable windows_service_hardening")
+	}
+	if !cfg.SelfProtect.Enabled {
+		t.Fatal("tenant profile should enable self_protect")
+	}
+	if cfg.Monitoring.WindowsPPLRequired {
+		t.Fatal("tenant profile should not require AM-PPL by default")
+	}
+}
+
 func TestApplyLoggingPathDefaults(t *testing.T) {
 	cfg := testConfig()
 	cfg.Agent.DataDir = "/tmp/edr-logging-test"

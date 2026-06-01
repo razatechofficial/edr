@@ -1,0 +1,72 @@
+# Enterprise tenant profile: hardened ETW + service self-protection + fleet-ready.
+# Standard MSI ships config.yml (sensor). Apply this profile after install:
+#   apply_tenant_config.bat
+# For Microsoft AM-PPL (MVI-signed binary required):
+#   apply_am_ppl_config.bat
+agent:
+  log_level: info
+  data_dir: "C:\\ProgramData\\EDR Agent"
+  temp_dir: "C:\\ProgramData\\EDR Agent\\tmp"
+server:
+  endpoint: "YOUR_CONTROL_PLANE_HOST"
+  grpc_port: 50051
+  mutual_tls: false
+  heartbeat_sec: 30
+  reconnect_sec: 5
+logging:
+  level: info
+  alert_file: "C:\\ProgramData\\EDR Agent\\alerts.jsonl"
+  audit_file: "C:\\ProgramData\\EDR Agent\\audit.jsonl"
+detection:
+  sigma:
+    enabled: true
+    rules_dir: "C:\\ProgramData\\EDR Agent\\rules\\sigma"
+  yara:
+    enabled: true
+    rules_dir: "C:\\ProgramData\\EDR Agent\\rules\\yara"
+  custom_rules:
+    enabled: true
+    rules_path: "C:\\ProgramData\\EDR Agent\\rules\\custom"
+  ioc:
+    enabled: true
+    hash_db_path: "C:\\ProgramData\\EDR Agent\\rules\\ioc\\hashes.json"
+    ip_db_path: "C:\\ProgramData\\EDR Agent\\rules\\ioc\\ips.csv"
+    domain_db_path: "C:\\ProgramData\\EDR Agent\\rules\\ioc\\domains.csv"
+  behavioral:
+    sensitivity: high
+monitoring:
+  mode: auto
+  kernel_enabled: true
+  userland_fallback: true
+  require_kernel: false
+  windows_ppl_required: false
+  etw_threat_intel: true
+  dns_client_etw_windows: true
+  etw_regulated_verbose: true
+  enrich_exec_image_sha256: true
+  security_profile: standard
+  windows_service_hardening: true
+  windows_service_hardening_acl: true
+  windows_service_dacl_hardened: true
+  windows_service_launch_protected: true
+compliance:
+  enabled: true
+  rules_dir: "C:\\ProgramData\\EDR Agent\\rules\\compliance\\sca"
+  scan_on_start: true
+  interval_hours: 12
+  enable_posture: true
+  enable_rootcheck: false
+  emit_passed_findings: false
+self_protect:
+  enabled: true
+  watchdog: true
+  anti_debug: true
+  integrity_check: true
+  protected_process: false
+response:
+  auto_response: true
+  playbooks_dir: "C:\\ProgramData\\EDR Agent\\rules\\playbooks"
+  forensics_dir: "C:\\ProgramData\\EDR Agent\\forensics"
+  quarantine_dir: "C:\\ProgramData\\EDR Agent\\quarantine"
+  approval:
+    mode: auto

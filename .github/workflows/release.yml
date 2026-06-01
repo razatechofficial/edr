@@ -11,6 +11,8 @@
 #   APPLE_SIGN_IDENTITY, APPLE_INSTALLER_SIGN_IDENTITY
 #   APPLE_CERTIFICATE_P12 (base64 .p12), APPLE_CERTIFICATE_PASSWORD
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_SPECIFIC_PASSWORD, NOTARY_KEYCHAIN_PROFILE
+# Windows Authenticode release secrets (optional):
+#   WINDOWS_SIGN_PFX_BASE64, WINDOWS_SIGN_PFX_PASSWORD, WINDOWS_SIGN_TIMESTAMP_URL
 
 name: Release
 
@@ -231,6 +233,14 @@ jobs:
       - name: Build Windows binaries
         shell: bash
         run: bash scripts/ci/build_windows_binaries.sh
+      - name: Sign Windows agent (Authenticode)
+        shell: pwsh
+        env:
+          WINDOWS_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+          WINDOWS_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+          WINDOWS_SIGN_TIMESTAMP_URL: ${{ secrets.WINDOWS_SIGN_TIMESTAMP_URL }}
+        run: |
+          & "${{ github.workspace }}/scripts/ci/sign_windows_authenticode.ps1" -Root "${{ github.workspace }}"
       - name: Verify Windows YARA bundle
         shell: pwsh
         run: |
@@ -245,6 +255,17 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($v)) { $v = '1.0.0.0' }
           # Invoke candle/light from PowerShell (no cmd.exe string); avoids path parsing bugs with D:\a\... on GHA.
           & "${{ github.workspace }}/scripts/ci/build_windows_msi.ps1" -Version $v
+      - name: Sign Windows MSI (Authenticode)
+        shell: pwsh
+        env:
+          WINDOWS_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+          WINDOWS_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+          WINDOWS_SIGN_TIMESTAMP_URL: ${{ secrets.WINDOWS_SIGN_TIMESTAMP_URL }}
+        run: |
+          & "${{ github.workspace }}/scripts/ci/sign_windows_authenticode.ps1" -Root "${{ github.workspace }}" -MsiOnly
+          if ($env:WINDOWS_SIGN_PFX_BASE64) {
+            & "${{ github.workspace }}/scripts/ci/sign_windows_authenticode.ps1" -Root "${{ github.workspace }}" -VerifyOnly
+          }
       - name: Show WiX logs on failure
         if: failure()
         shell: pwsh

@@ -98,6 +98,10 @@ $configYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/confi
 $configHardenedYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.hardened.yml'))
 $configEnterpriseYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.enterprise.yml'))
 $configFleetYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.fleet.yml'))
+$configTenantYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.tenant.yml'))
+$configPPLYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.ppl.yml'))
+$applyTenantBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_tenant_config.bat'))
+$applyPPLBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_am_ppl_config.bat'))
 $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wxs'))
 $modelsWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wxs'))
 $rulesStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-rules'))
@@ -113,6 +117,18 @@ if (-not (Test-Path -LiteralPath $configEnterpriseYml)) {
 }
 if (-not (Test-Path -LiteralPath $configFleetYml)) {
     throw "Missing staged fleet config: $configFleetYml"
+}
+if (-not (Test-Path -LiteralPath $configTenantYml)) {
+    throw "Missing staged tenant config: $configTenantYml"
+}
+if (-not (Test-Path -LiteralPath $configPPLYml)) {
+    throw "Missing staged PPL config: $configPPLYml"
+}
+if (-not (Test-Path -LiteralPath $applyTenantBat)) {
+    throw "Missing staged apply_tenant_config.bat: $applyTenantBat"
+}
+if (-not (Test-Path -LiteralPath $applyPPLBat)) {
+    throw "Missing staged apply_am_ppl_config.bat: $applyPPLBat"
 }
 if (-not (Test-Path -LiteralPath $rulesWxs)) {
     throw "Missing rules WiX fragment: $rulesWxs"
@@ -141,6 +157,10 @@ $candleArgList = @(
     "-dEdrConfigHardenedYml=$configHardenedYml",
     "-dEdrConfigEnterpriseYml=$configEnterpriseYml",
     "-dEdrConfigFleetYml=$configFleetYml",
+    "-dEdrConfigTenantYml=$configTenantYml",
+    "-dEdrConfigPPLYml=$configPPLYml",
+    "-dEdrApplyTenantBat=$applyTenantBat",
+    "-dEdrApplyPPLBat=$applyPPLBat",
     "-dRulesStage=$rulesStage",
     "-dModelsStage=$modelsStage",
     $wxs,

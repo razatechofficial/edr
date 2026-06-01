@@ -94,6 +94,30 @@
               Name="config.fleet.yml"
               KeyPath="yes"/>
       </Component>
+      <Component Id="cmpConfigTenantYml" Guid="*" Directory="DATAROOT" Win64="yes">
+        <File Id="ConfigTenantFile"
+              Source="$(var.EdrConfigTenantYml)"
+              Name="config.tenant.yml"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpConfigPPLYml" Guid="*" Directory="DATAROOT" Win64="yes">
+        <File Id="ConfigPPLFile"
+              Source="$(var.EdrConfigPPLYml)"
+              Name="config.ppl.yml"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpApplyTenantBat" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="ApplyTenantBat"
+              Source="$(var.EdrApplyTenantBat)"
+              Name="apply_tenant_config.bat"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpApplyPPLBat" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="ApplyPPLBat"
+              Source="$(var.EdrApplyPPLBat)"
+              Name="apply_am_ppl_config.bat"
+              KeyPath="yes"/>
+      </Component>
     </ComponentGroup>
   </Fragment>
 </Wix>

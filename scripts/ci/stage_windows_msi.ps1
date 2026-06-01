@@ -59,6 +59,32 @@ if (Test-Path -LiteralPath $configFleetSrc) {
     Copy-Item -LiteralPath $configFleetSrc -Destination $configFleetDest -Force
 }
 
+$configTenantSrc = Join-Path $root 'configs/windows/config.tenant.yml'
+$configTenantDest = Join-Path $root 'build/windows/config.tenant.yml'
+if (Test-Path -LiteralPath $configTenantSrc) {
+    Copy-Item -LiteralPath $configTenantSrc -Destination $configTenantDest -Force
+}
+
+$configPPLSrc = Join-Path $root 'configs/windows/config.ppl.yml'
+$configPPLDest = Join-Path $root 'build/windows/config.ppl.yml'
+if (Test-Path -LiteralPath $configPPLSrc) {
+    Copy-Item -LiteralPath $configPPLSrc -Destination $configPPLDest -Force
+}
+
+foreach ($scriptName in @(
+        'apply_tenant_config.bat',
+        'apply_am_ppl_config.bat',
+        'apply_hardened_config.bat',
+        'apply_enterprise_config.bat',
+        'apply_fleet_config.bat'
+    )) {
+    $src = Join-Path $root ("scripts/windows/$scriptName")
+    $dest = Join-Path $root ("build/windows/$scriptName")
+    if (Test-Path -LiteralPath $src) {
+        Copy-Item -LiteralPath $src -Destination $dest -Force
+    }
+}
+
 $heatExe = 'heat.exe'
 if (-not [string]::IsNullOrWhiteSpace($env:EDR_WIX_BIN)) {
     $heatExe = Join-Path $env:EDR_WIX_BIN 'heat.exe'
