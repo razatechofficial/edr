@@ -41,3 +41,4 @@ EOF
 mkdir -p "$(dirname "${OUT}")"
 tar -czf "${OUT}" -C "${TMP}" .
 echo "control plane backup written: ${OUT}"
+echo "  Restore: sudo EDR_RESTORE_CONFIRM=1 bash scripts/deploy/restore_controlplane.sh ${OUT}"

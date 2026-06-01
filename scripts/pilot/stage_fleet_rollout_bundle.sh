@@ -46,6 +46,7 @@ for script in \
 	scripts/pilot/upgrade_linux_agent.sh \
 	scripts/pilot/upgrade_macos_agent.sh \
 	scripts/deploy/backup_controlplane.sh \
+	scripts/deploy/restore_controlplane.sh \
 	scripts/deploy/copy_agent_tls.sh \
 	scripts/linux/apply_tenant_tls_config.sh \
 	scripts/macos/apply_tenant_tls_config.sh \
@@ -113,6 +114,9 @@ Upgrade (preserve agent_id/config):
 
 Control plane backup:
   sudo scripts/deploy/backup_controlplane.sh /var/backups/edr-controlplane.tar.gz
+
+Control plane restore:
+  sudo EDR_RESTORE_CONFIRM=1 scripts/deploy/restore_controlplane.sh /var/backups/edr-controlplane.tar.gz
 TXT
 
 ARCHIVE="${OUT}.tar.gz"
