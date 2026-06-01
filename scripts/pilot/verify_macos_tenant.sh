@@ -55,4 +55,6 @@ if command -v edrctl >/dev/null 2>&1; then
 	edrctl --config "${ACTIVE}" fleet local || true
 fi
 
+bash "${ROOT}/scripts/pilot/pilot_fleet_check.sh" "${ACTIVE}"
+
 echo "macOS tenant pilot check OK"

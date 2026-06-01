@@ -78,6 +78,9 @@ if [[ "${EDR_PILOT_VERIFY_DETECTION:-0}" == "1" || "${EDR_PILOT_VERIFY_DETECTION
 fi
 
 echo
+echo "Fleet status from control plane host:"
+echo "  make rollout-status HOST=${HOST} EXPECTED=${EXPECTED}"
+echo
 echo "Check fleet from control plane host:"
 echo "  edrctl fleet agents --host ${HOST} --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"
 echo "  edrctl fleet alerts --host ${HOST} --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"

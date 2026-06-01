@@ -36,3 +36,6 @@ bash "${ROOT}/scripts/pilot/run_fleet_pilot.sh" "${HOST}" "${EXPECTED}"
 echo
 echo "Endpoint enrollment check:"
 echo "  edrctl fleet check --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt"
+echo
+echo "Offline/airgap bundle (on control plane after fetch-release-artifacts):"
+echo "  sudo make stage-fleet-rollout-bundle OUT=dist/fleet-rollout-bundle"

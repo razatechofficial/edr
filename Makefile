@@ -204,7 +204,13 @@ run-prod-rollout:
 fetch-release-artifacts:
 	@bash scripts/pilot/fetch_release_artifacts.sh $(TAG) $(DIST)
 
-.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-prod-rollout fetch-release-artifacts
+rollout-status:
+	@bash scripts/pilot/rollout_status.sh $(HOST) $(EXPECTED)
+
+stage-fleet-rollout-bundle:
+	@bash scripts/pilot/stage_fleet_rollout_bundle.sh $(OUT)
+
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-prod-rollout fetch-release-artifacts rollout-status stage-fleet-rollout-bundle
 
 # ============================================================================
 # eBPF targets (Linux only)

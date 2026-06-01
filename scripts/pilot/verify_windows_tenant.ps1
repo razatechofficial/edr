@@ -81,6 +81,24 @@ if ($edrctl) {
 	& edrctl --config $active fleet local
 }
 
+if ($env:EDR_CONTROLPLANE_API_TOKEN) {
+	$ca = $env:EDR_CONTROLPLANE_CA
+	if (-not $ca -and $cfgText -match '(?m)^\s*ca_cert:\s*"?([^"\r\n]+)"?') {
+		$ca = $Matches[1].Trim()
+	}
+	$args = @('--config', $active, 'fleet', 'check', '--token', $env:EDR_CONTROLPLANE_API_TOKEN)
+	if ($env:EDR_CONTROLPLANE_HTTPS -eq '1' -or $env:EDR_CONTROLPLANE_HTTPS -eq 'true') {
+		$args += '--https'
+	}
+	if ($ca) {
+		$args += @('--ca-cert', $ca)
+	}
+	if ($edrctl) {
+		Write-Host '==> edrctl fleet check'
+		& edrctl @args
+	}
+}
+
 if ($ControlPlaneHost) {
 	Write-Host "==> control plane gRPC $ControlPlaneHost`:$grpcPort"
 	if (-not (Test-TcpPort $ControlPlaneHost $grpcPort)) {
