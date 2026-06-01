@@ -211,6 +211,9 @@ verify-post-install:
 run-endpoint-pilot:
 	@EDR_PILOT_VERIFY_DETECTION=$(DETECT) bash scripts/pilot/run_endpoint_pilot.sh $(HOST)
 
+verify-agent-policy-sync:
+	@bash scripts/pilot/verify_agent_policy_sync.sh $(DATA_DIR)
+
 check-prod-release:
 	@bash scripts/pilot/check_prod_release.sh $(BRANCH)
 
@@ -262,7 +265,7 @@ upgrade-macos-agent:
 upgrade-windows-agent:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pilot/upgrade_windows_agent.ps1 $(PKG)
 
-.PHONY: build-controlplane deploy-controlplane stage-controlplane-policy verify-controlplane-policy export-controlplane-env prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-endpoint-pilot check-prod-release wait-for-prod-release prepare-fleet-rollout distribute-agent-tls run-prod-rollout fetch-release-artifacts rollout-status list-fleet-endpoints preflight-rollout verify-fleet-rollout stage-fleet-rollout-bundle backup-controlplane restore-controlplane validate-rollout upgrade-linux-agent upgrade-macos-agent upgrade-windows-agent
+.PHONY: build-controlplane deploy-controlplane stage-controlplane-policy verify-controlplane-policy export-controlplane-env prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-endpoint-pilot verify-agent-policy-sync check-prod-release wait-for-prod-release prepare-fleet-rollout distribute-agent-tls run-prod-rollout fetch-release-artifacts rollout-status list-fleet-endpoints preflight-rollout verify-fleet-rollout stage-fleet-rollout-bundle backup-controlplane restore-controlplane validate-rollout upgrade-linux-agent upgrade-macos-agent upgrade-windows-agent
 
 # ============================================================================
 # eBPF targets (Linux only)

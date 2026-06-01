@@ -56,6 +56,7 @@ for script in \
 	scripts/pilot/verify_fleet_rollout.sh \
 	scripts/pilot/list_fleet_endpoints.sh \
 	scripts/pilot/verify_controlplane_policy.sh \
+	scripts/pilot/verify_agent_policy_sync.sh \
 	scripts/pilot/run_rollout_validation.sh \
 	scripts/pilot/upgrade_linux_agent.sh \
 	scripts/pilot/upgrade_macos_agent.sh \
@@ -113,6 +114,9 @@ Policy bundles (control plane):
   sudo systemctl restart edr-controlplane
   bash scripts/pilot/verify_controlplane_policy.sh <cp-host>
   edrctl fleet policy --https --token \$EDR_CONTROLPLANE_API_TOKEN --ca-cert /etc/edr-controlplane/tls/ca.crt
+
+Agent policy sync (endpoint, after CP policy staged):
+  bash scripts/pilot/verify_agent_policy_sync.sh
 
 Remote mTLS distribution (from control plane, over SSH):
   scripts/deploy/distribute_agent_tls.sh tls <agent-host> linux

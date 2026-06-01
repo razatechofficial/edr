@@ -32,6 +32,7 @@ type ControlPlaneConfig struct {
 	HeartbeatSec int
 	ReconnectSec int
 	AirGapMode   bool
+	PolicySyncSec int
 }
 
 // CommandDispatch executes a server-issued command on the agent.
@@ -49,6 +50,9 @@ type ControlPlane struct {
 
 	rulesLoaded func() int
 	dispatch    CommandDispatch
+	policyApply PolicyApplyFunc
+	policyHashFn PolicyHashFunc
+	policySyncSec time.Duration
 
 	startTime time.Time
 
@@ -87,6 +91,13 @@ func NewControlPlane(cfg ControlPlaneConfig, logger *zap.Logger) (*ControlPlane,
 	if cfg.ReconnectSec <= 0 {
 		cfg.ReconnectSec = 5
 	}
+	policySyncSec := time.Duration(cfg.PolicySyncSec) * time.Second
+	if policySyncSec <= 0 {
+		policySyncSec = time.Duration(cfg.HeartbeatSec*2) * time.Second
+		if policySyncSec < time.Minute {
+			policySyncSec = time.Minute
+		}
+	}
 
 	var tlsCfg *tls.Config
 	if cfg.MutualTLS || cfg.CACertPath != "" {
@@ -116,6 +127,7 @@ func NewControlPlane(cfg ControlPlaneConfig, logger *zap.Logger) (*ControlPlane,
 		},
 		reconnectSec: time.Duration(cfg.ReconnectSec) * time.Second,
 		heartbeatSec: time.Duration(cfg.HeartbeatSec) * time.Second,
+		policySyncSec: policySyncSec,
 	}
 
 	transport := &grpcHeartbeatTransport{
@@ -224,6 +236,7 @@ func (cp *ControlPlane) Start(ctx context.Context) error {
 	}
 
 	go cp.streamLoop(ctx)
+	go cp.policyLoop(ctx)
 	cp.logger.Info("control_plane started",
 		zap.String("server", cp.client.ServerAddr()),
 		zap.String("agent_id", cp.client.AgentID()),

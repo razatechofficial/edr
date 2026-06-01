@@ -35,9 +35,9 @@ func (a *Agent) initControlPlane() error {
 	if cp == nil {
 		return nil
 	}
-	cp.SetRulesLoaded(func() int {
-		return len(a.ruleSet.Rules)
-	})
+	cp.SetRulesLoaded(a.controlPlaneRulesLoaded)
+	cp.SetPolicyHashReader(a.readControlPlanePolicyHash)
+	cp.SetPolicyApply(a.applyControlPlanePolicy)
 	cp.SetCommandDispatch(func(ctx context.Context, cmd *protocol.Command) error {
 		if a.respEngine == nil {
 			return comms.ExecuteProtoCommand(ctx, nil, cmd, a.zapLogger)
