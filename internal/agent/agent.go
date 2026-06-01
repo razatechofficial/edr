@@ -96,7 +96,8 @@ type Agent struct {
 	noisyAlertMu       sync.Mutex
 	noisyAlertLastSeen map[string]time.Time
 
-	controlPlane *comms.ControlPlane
+	controlPlane      *comms.ControlPlane
+	controlPlaneQueue *comms.AlertQueue
 }
 
 // SetValidationSink registers a callback invoked for each detection surfaced by the agent.
@@ -724,11 +725,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	if a.controlPlane != nil {
-		if err := a.startControlPlane(ctx); err != nil {
-			a.logger.Error("control plane start failed", "error", err)
-		} else {
-			defer a.stopControlPlane()
-		}
+		go a.runControlPlane(ctx)
 	}
 
 	if a.telemetryRelay != nil {

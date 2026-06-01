@@ -97,6 +97,7 @@ if (-not (Test-Path -LiteralPath $agentExe)) {
 $configYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.yml'))
 $configHardenedYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.hardened.yml'))
 $configEnterpriseYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.enterprise.yml'))
+$configFleetYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.fleet.yml'))
 $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wxs'))
 $modelsWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wxs'))
 $rulesStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-rules'))
@@ -109,6 +110,9 @@ if (-not (Test-Path -LiteralPath $configHardenedYml)) {
 }
 if (-not (Test-Path -LiteralPath $configEnterpriseYml)) {
     throw "Missing staged enterprise config: $configEnterpriseYml"
+}
+if (-not (Test-Path -LiteralPath $configFleetYml)) {
+    throw "Missing staged fleet config: $configFleetYml"
 }
 if (-not (Test-Path -LiteralPath $rulesWxs)) {
     throw "Missing rules WiX fragment: $rulesWxs"
@@ -136,6 +140,7 @@ $candleArgList = @(
     "-dEdrConfigYml=$configYml",
     "-dEdrConfigHardenedYml=$configHardenedYml",
     "-dEdrConfigEnterpriseYml=$configEnterpriseYml",
+    "-dEdrConfigFleetYml=$configFleetYml",
     "-dRulesStage=$rulesStage",
     "-dModelsStage=$modelsStage",
     $wxs,

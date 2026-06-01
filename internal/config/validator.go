@@ -5,8 +5,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 // ValidationErrors collects multiple configuration validation failures and
@@ -38,7 +36,7 @@ func Validate(cfg *Config) error {
 	var errs ValidationErrors
 
 	if cfg.Agent.ID == "" {
-		cfg.Agent.ID = uuid.New().String()
+		errs.add("agent.id is required (should be set by EnsureAgentIdentity)")
 	}
 
 	validateEnum(&errs, "agent.log_level", cfg.Agent.LogLevel,

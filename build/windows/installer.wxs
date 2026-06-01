@@ -88,6 +88,12 @@
               Name="config.enterprise.yml"
               KeyPath="yes"/>
       </Component>
+      <Component Id="cmpConfigFleetYml" Guid="*" Directory="DATAROOT" Win64="yes">
+        <File Id="ConfigFleetFile"
+              Source="$(var.EdrConfigFleetYml)"
+              Name="config.fleet.yml"
+              KeyPath="yes"/>
+      </Component>
     </ComponentGroup>
   </Fragment>
 </Wix>

@@ -11,6 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
+func testConfig() Config {
+	cfg := Defaults()
+	cfg.Agent.ID = "test-agent-id"
+	return cfg
+}
+
 func TestDefaults(t *testing.T) {
 	t.Parallel()
 	cfg := Defaults()
@@ -138,7 +144,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestValidateLoggingAndProfileModes(t *testing.T) {
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Performance.Profile = "not-real"
 	cfg.Logging.Mode = "not-real"
 	err := Validate(&cfg)
@@ -148,7 +154,7 @@ func TestValidateLoggingAndProfileModes(t *testing.T) {
 }
 
 func TestValidateMonitoringSecurityProfileModes(t *testing.T) {
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Monitoring.SecurityProfile = "strict_complete"
 	if err := Validate(&cfg); err != nil {
 		t.Fatalf("strict_complete should validate: %v", err)
@@ -160,7 +166,7 @@ func TestValidateMonitoringSecurityProfileModes(t *testing.T) {
 }
 
 func TestValidateMonitoringWindowsControlPlaneRequired(t *testing.T) {
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Monitoring.WindowsControlPlaneRequired = true
 	cfg.Monitoring.WindowsWFPCtlProbe = false
 	cfg.Monitoring.WindowsMinifilterPort = ""
@@ -168,7 +174,7 @@ func TestValidateMonitoringWindowsControlPlaneRequired(t *testing.T) {
 		t.Fatal("expected validation error when windows_control_plane_required is true without WFP/minifilter settings")
 	}
 
-	cfg = Defaults()
+	cfg = testConfig()
 	cfg.Monitoring.WindowsControlPlaneRequired = true
 	cfg.Monitoring.WindowsWFPCtlProbe = true
 	cfg.Monitoring.WindowsServiceHardening = true
@@ -176,7 +182,7 @@ func TestValidateMonitoringWindowsControlPlaneRequired(t *testing.T) {
 		t.Fatalf("expected valid config when WFP probe enabled: %v", err)
 	}
 
-	cfg = Defaults()
+	cfg = testConfig()
 	cfg.Monitoring.WindowsControlPlaneRequired = true
 	cfg.Monitoring.WindowsWFPCtlProbe = true
 	cfg.Monitoring.WindowsServiceHardening = false
@@ -186,14 +192,14 @@ func TestValidateMonitoringWindowsControlPlaneRequired(t *testing.T) {
 }
 
 func TestValidateMonitoringWindowsServiceDACLRequiresHardening(t *testing.T) {
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Monitoring.WindowsServiceDaclHardened = true
 	cfg.Monitoring.WindowsServiceHardening = false
 	if err := Validate(&cfg); err == nil {
 		t.Fatal("expected validation error when windows_service_dacl_hardened is true without windows_service_hardening")
 	}
 
-	cfg = Defaults()
+	cfg = testConfig()
 	cfg.Monitoring.WindowsServiceHardening = true
 	cfg.Monitoring.WindowsServiceDaclHardened = true
 	if err := Validate(&cfg); err != nil {
@@ -202,13 +208,13 @@ func TestValidateMonitoringWindowsServiceDACLRequiresHardening(t *testing.T) {
 }
 
 func TestValidateMonitoringWindowsPPLRequired(t *testing.T) {
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Monitoring.WindowsPPLRequired = true
 	if err := Validate(&cfg); err == nil {
 		t.Fatal("expected validation error when windows_ppl_required without hardening/tier")
 	}
 
-	cfg = Defaults()
+	cfg = testConfig()
 	cfg.Monitoring.WindowsServiceHardening = true
 	cfg.Monitoring.WindowsPPLRequired = true
 	cfg.Monitoring.WindowsServiceLaunchProtectedTier = "antimalware_light"
@@ -218,14 +224,14 @@ func TestValidateMonitoringWindowsPPLRequired(t *testing.T) {
 }
 
 func TestValidateLogTargetsOSCompatibility(t *testing.T) {
-	cfg := Defaults()
+	cfg := testConfig()
 	if runtime.GOOS != "windows" {
 		cfg.Monitoring.LogTargets = []LogTarget{{Type: "eventchannel", Path: "Security"}}
 		if err := Validate(&cfg); err == nil {
 			t.Fatal("expected eventchannel validation error on non-windows")
 		}
 	}
-	cfg = Defaults()
+	cfg = testConfig()
 	if runtime.GOOS != "linux" {
 		cfg.Monitoring.LogTargets = []LogTarget{{Type: "journald"}}
 		if err := Validate(&cfg); err == nil {
@@ -236,7 +242,7 @@ func TestValidateLogTargetsOSCompatibility(t *testing.T) {
 
 func TestValidateMLRequireRuntimeRequiresMLEnabled(t *testing.T) {
 	t.Parallel()
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.ML.RequireRuntime = true
 	cfg.ML.Enabled = false
 	if err := Validate(&cfg); err == nil {
@@ -245,6 +251,7 @@ func TestValidateMLRequireRuntimeRequiresMLEnabled(t *testing.T) {
 }
 
 func TestLoadYAML(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
 	cfg, err := Load("../../configs/agent.example.yaml")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -281,7 +288,7 @@ func TestLoadYAML(t *testing.T) {
 }
 
 func TestApplyPerformanceDefaultsWorkerZeroMeansNumCPU(t *testing.T) {
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Performance.WorkerCount = 0
 	applyPerformanceDefaults(&cfg)
 	want := runtime.NumCPU()
@@ -294,7 +301,7 @@ func TestApplyPerformanceDefaultsWorkerZeroMeansNumCPU(t *testing.T) {
 }
 
 func TestApplyLoggingPathDefaults(t *testing.T) {
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Agent.DataDir = "/tmp/edr-logging-test"
 	cfg.Logging.AlertFile = ""
 	cfg.Logging.AuditFile = ""
@@ -308,7 +315,7 @@ func TestApplyLoggingPathDefaults(t *testing.T) {
 }
 
 func TestApplyDarwinDataDirDefault(t *testing.T) {
-	cfg := Defaults()
+	cfg := testConfig()
 	applyDarwinDataDirDefault(&cfg)
 	if runtime.GOOS == "darwin" {
 		if cfg.Agent.DataDir == "/var/lib/edr" {
@@ -325,6 +332,7 @@ func TestApplyDarwinDataDirDefault(t *testing.T) {
 func TestLoadWithEnvOverride(t *testing.T) {
 	t.Setenv("AGENT_ID", "test-agent-override")
 	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("DATA_DIR", t.TempDir())
 
 	cfg, err := Load("../../configs/agent.example.yaml")
 	if err != nil {
@@ -340,7 +348,7 @@ func TestLoadWithEnvOverride(t *testing.T) {
 
 func TestValidateValidConfig(t *testing.T) {
 	t.Parallel()
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Agent.ID = "preset-agent-id"
 	if err := Validate(&cfg); err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -349,7 +357,7 @@ func TestValidateValidConfig(t *testing.T) {
 
 func TestValidateInvalidLogLevel(t *testing.T) {
 	t.Parallel()
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Agent.ID = "test"
 	cfg.Agent.LogLevel = "INVALID"
 
@@ -375,7 +383,7 @@ func TestValidateInvalidLogLevel(t *testing.T) {
 
 func TestValidateInvalidPort(t *testing.T) {
 	t.Parallel()
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Agent.ID = "test"
 	cfg.Server.GRPCPort = 70000
 
@@ -401,7 +409,7 @@ func TestValidateInvalidPort(t *testing.T) {
 
 func TestValidateInvalidProvider(t *testing.T) {
 	t.Parallel()
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Agent.ID = "test"
 	cfg.LLM.PrimaryProvider = "nonexistent_provider"
 
@@ -429,7 +437,11 @@ func TestValidateAutoGeneratesAgentID(t *testing.T) {
 	t.Parallel()
 	cfg := Defaults()
 	cfg.Agent.ID = ""
+	cfg.Agent.DataDir = t.TempDir()
 
+	if err := EnsureAgentIdentity(&cfg); err != nil {
+		t.Fatal(err)
+	}
 	if err := Validate(&cfg); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -443,7 +455,7 @@ func TestValidateAutoGeneratesAgentID(t *testing.T) {
 
 func TestValidateMultiError(t *testing.T) {
 	t.Parallel()
-	cfg := Defaults()
+	cfg := testConfig()
 	cfg.Agent.ID = "keep-this"
 	cfg.Agent.LogLevel = "INVALID"
 	cfg.LLM.PrimaryProvider = "bad_provider"

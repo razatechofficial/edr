@@ -252,8 +252,11 @@ func (cp *ControlPlane) Stop() {
 
 // SendAlert transmits a high-priority alert to the control plane.
 func (cp *ControlPlane) SendAlert(ctx context.Context, al schema.Alert, productVersion string) error {
-	if cp == nil || !cp.Connected() {
+	if cp == nil {
 		return nil
+	}
+	if !cp.Connected() {
+		return fmt.Errorf("control_plane: not connected")
 	}
 	ev := alertpkg.EventsFromSchema(al)
 	return cp.client.SendAlert(ctx, ev, productVersion)

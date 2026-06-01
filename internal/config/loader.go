@@ -47,11 +47,7 @@ func Load(path string) (Config, error) {
 	applyLoggingPathDefaults(&cfg)
 	ApplyComplianceDefaults(&cfg)
 
-	if err := Validate(&cfg); err != nil {
-		return Config{}, err
-	}
-
-	return cfg, nil
+	return finalizeConfig(cfg)
 }
 
 // LoadEncrypted decrypts an AES-256-GCM encrypted configuration file using
@@ -92,10 +88,17 @@ func LoadEncrypted(path string, key []byte) (Config, error) {
 	applyLoggingPathDefaults(&cfg)
 	ApplyComplianceDefaults(&cfg)
 
+	return finalizeConfig(cfg)
+}
+
+func finalizeConfig(cfg Config) (Config, error) {
+	NormalizeServerEndpoint(&cfg)
+	if err := EnsureAgentIdentity(&cfg); err != nil {
+		return Config{}, err
+	}
 	if err := Validate(&cfg); err != nil {
 		return Config{}, err
 	}
-
 	return cfg, nil
 }
 

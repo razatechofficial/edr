@@ -53,6 +53,12 @@ if (Test-Path -LiteralPath $configEnterpriseSrc) {
     Copy-Item -LiteralPath $configEnterpriseSrc -Destination $configEnterpriseDest -Force
 }
 
+$configFleetSrc = Join-Path $root 'configs/windows/config.fleet.yml'
+$configFleetDest = Join-Path $root 'build/windows/config.fleet.yml'
+if (Test-Path -LiteralPath $configFleetSrc) {
+    Copy-Item -LiteralPath $configFleetSrc -Destination $configFleetDest -Force
+}
+
 $heatExe = 'heat.exe'
 if (-not [string]::IsNullOrWhiteSpace($env:EDR_WIX_BIN)) {
     $heatExe = Join-Path $env:EDR_WIX_BIN 'heat.exe'

@@ -70,6 +70,9 @@ fi
 if [[ -f configs/macos/config.enterprise.yml ]]; then
 	cp configs/macos/config.enterprise.yml "${PKG_ROOT}/Library/Application Support/EDR/config/config.enterprise.yml"
 fi
+if [[ -f configs/macos/config.fleet.yml ]]; then
+	cp configs/macos/config.fleet.yml "${PKG_ROOT}/Library/Application Support/EDR/config/config.fleet.yml"
+fi
 
 CONFIG_DST="${PKG_ROOT}/Library/Application Support/EDR/config/agent.yaml"
 sed \

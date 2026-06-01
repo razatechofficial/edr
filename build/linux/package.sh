@@ -47,6 +47,9 @@ cp configs/linux/config.yml pkg/deb/etc/edr-agent/config.yml
 if [ -f configs/linux/config.enterprise.yml ]; then
     cp configs/linux/config.enterprise.yml pkg/deb/etc/edr-agent/config.enterprise.yml
 fi
+if [ -f configs/linux/config.fleet.yml ]; then
+    cp configs/linux/config.fleet.yml pkg/deb/etc/edr-agent/config.fleet.yml
+fi
 if [ ! -d "${RULES_SRC}" ]; then
     echo "rules directory not found: ${RULES_SRC}" >&2
     exit 1
