@@ -7,6 +7,9 @@ if errorlevel 1 (
 	exit /b 1
 )
 
+set "HOST=%~1"
+if not defined HOST set "HOST=%EDR_CONTROL_PLANE_HOST%"
+
 set "INSTALLDIR=%ProgramFiles%\EDR Agent"
 set "AGENT=%INSTALLDIR%\edr-agent.exe"
 set "DATAROOT=%ProgramData%\EDR Agent"
@@ -23,6 +26,14 @@ if not exist "%AGENT%" (
 )
 
 copy /Y "%TENANT%" "%ACTIVE%" >nul || exit /b 1
+
+if defined HOST (
+	powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+		"$p='%ACTIVE%'; $h='%HOST%'; $c=Get-Content -LiteralPath $p -Raw; $u=$c -replace 'YOUR_CONTROL_PLANE_HOST',$h; if ($u -eq $c) { Write-Warning 'placeholder YOUR_CONTROL_PLANE_HOST not found' }; Set-Content -LiteralPath $p -Value $u -NoNewline" || exit /b 1
+	echo Patched server.endpoint=%HOST%
+) else (
+	echo WARNING: No control plane host set. Pass host as arg or set EDR_CONTROL_PLANE_HOST.
+)
 
 net stop EDRAgent >nul 2>&1
 "%AGENT%" --install || exit /b 1

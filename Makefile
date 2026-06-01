@@ -164,6 +164,18 @@ edrctl:
 	@echo "==> Building edrctl"
 	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl ./cmd/cli
 
+build-controlplane:
+	@echo "==> Building edr-controlplane"
+	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-controlplane ./cmd/controlplane
+
+deploy-controlplane: build-controlplane
+	@bash scripts/deploy/install_controlplane.sh "$(BIN_DIR)/edr-controlplane"
+
+prepare-windows-signing-secrets:
+	@bash scripts/ci/prepare_github_windows_signing_secrets.sh $(PFX)
+
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets
+
 # ============================================================================
 # eBPF targets (Linux only)
 # Sources include lsm_fim.c (LSM hooks); requires CONFIG_BPF_LSM for attach.

@@ -182,6 +182,24 @@ func (r *Registry) AgentCount() int {
 	return len(r.agents)
 }
 
+// ListAgents returns a snapshot of enrolled agents (newest heartbeat first).
+func (r *Registry) ListAgents() []AgentRecord {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]AgentRecord, 0, len(r.agents))
+	for _, rec := range r.agents {
+		out = append(out, *rec)
+	}
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].LastHeartbeat.After(out[i].LastHeartbeat) {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out
+}
+
 func (r *Registry) loadAgents() error {
 	data, err := os.ReadFile(r.agentsPath)
 	if err != nil {

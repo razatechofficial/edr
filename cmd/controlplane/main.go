@@ -46,7 +46,7 @@ func main() {
 		log.Fatalf("grpc listen: %v", err)
 	}
 
-	httpSrv := controlplane.NewServer()
+	httpSrv := controlplane.NewServerWithRegistry(registry)
 	go func() {
 		log.Printf("controlplane HTTP listening on %s", *httpAddr)
 		if err := http.ListenAndServe(*httpAddr, httpSrv.Routes()); err != nil && err != http.ErrServerClosed {

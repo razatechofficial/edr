@@ -8,6 +8,8 @@ import (
 )
 
 type Server struct {
+	registry *Registry
+
 	mu          sync.RWMutex
 	enrolledAt  map[string]time.Time
 	lastBeatAt  map[string]time.Time
@@ -15,7 +17,12 @@ type Server struct {
 }
 
 func NewServer() *Server {
+	return NewServerWithRegistry(nil)
+}
+
+func NewServerWithRegistry(registry *Registry) *Server {
 	return &Server{
+		registry:    registry,
 		enrolledAt:  map[string]time.Time{},
 		lastBeatAt:  map[string]time.Time{},
 		latestRules: map[string]string{},
@@ -24,11 +31,39 @@ func NewServer() *Server {
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/v1/agents", s.handleAgents)
 	mux.HandleFunc("/v1/enroll", s.handleEnroll)
 	mux.HandleFunc("/v1/heartbeat", s.handleHeartbeat)
 	mux.HandleFunc("/v1/ingest", s.handleIngest)
 	mux.HandleFunc("/v1/rules/evaluate", s.handleRuleEvaluate)
 	return mux
+}
+
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	payload := map[string]any{"status": "ok"}
+	if s.registry != nil {
+		payload["agents"] = s.registry.AgentCount()
+	}
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.registry == nil {
+		http.Error(w, "registry unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"agents": s.registry.ListAgents(),
+	})
 }
 
 type enrollRequest struct {

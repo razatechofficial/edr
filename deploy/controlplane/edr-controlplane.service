@@ -1,0 +1,21 @@
+[Unit]
+Description=EDR Control Plane (gRPC + HTTP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/edr-controlplane/env
+ExecStart=/usr/local/bin/edr-controlplane
+Restart=on-failure
+RestartSec=5
+User=edr-controlplane
+Group=edr-controlplane
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/edr-controlplane
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

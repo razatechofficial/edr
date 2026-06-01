@@ -11,8 +11,15 @@ func TestEnrollAndHeartbeat(t *testing.T) {
 	srv := NewServer()
 	h := srv.Routes()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/enroll", bytes.NewBufferString(`{"endpoint_id":"ep-1"}`))
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("healthz status = %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/enroll", bytes.NewBufferString(`{"endpoint_id":"ep-1"}`))
+	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("enroll status = %d", rec.Code)
