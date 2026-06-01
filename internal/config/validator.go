@@ -56,12 +56,14 @@ func Validate(cfg *Config) error {
 	if cfg.Server.ReconnectSec != 0 {
 		validateMin(&errs, "server.reconnect_sec", cfg.Server.ReconnectSec, 1)
 	}
-	if cfg.Server.MutualTLS && (cfg.Server.TLSCertPath != "" || cfg.Server.TLSKeyPath != "") {
-		validateFileReadable(&errs, "server.tls_cert", cfg.Server.TLSCertPath)
-		validateFileReadable(&errs, "server.tls_key", cfg.Server.TLSKeyPath)
-	}
-	if cfg.Server.CACertPath != "" {
-		validateFileReadable(&errs, "server.ca_cert", cfg.Server.CACertPath)
+	if cfg.Server.Endpoint != "" {
+		if cfg.Server.MutualTLS {
+			validateFileReadable(&errs, "server.tls_cert", cfg.Server.TLSCertPath)
+			validateFileReadable(&errs, "server.tls_key", cfg.Server.TLSKeyPath)
+			validateFileReadable(&errs, "server.ca_cert", cfg.Server.CACertPath)
+		} else if cfg.Server.CACertPath != "" {
+			validateFileReadable(&errs, "server.ca_cert", cfg.Server.CACertPath)
+		}
 	}
 
 	llmProviders := []string{

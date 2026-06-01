@@ -171,10 +171,16 @@ build-controlplane:
 deploy-controlplane: build-controlplane
 	@bash scripts/deploy/install_controlplane.sh "$(BIN_DIR)/edr-controlplane"
 
+enable-controlplane-tls:
+	@bash scripts/deploy/enable_controlplane_tls.sh $(HOST)
+
+generate-controlplane-tls:
+	@bash scripts/deploy/generate_controlplane_tls.sh $(TLS_DIR)
+
 prepare-windows-signing-secrets:
 	@bash scripts/ci/prepare_github_windows_signing_secrets.sh $(PFX)
 
-.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets
+.PHONY: build-controlplane deploy-controlplane prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls
 
 # ============================================================================
 # eBPF targets (Linux only)

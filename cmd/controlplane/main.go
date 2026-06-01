@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/razatechofficial/edr/internal/controlplane"
 	"github.com/razatechofficial/edr/pkg/protocol"
@@ -21,6 +22,10 @@ func main() {
 	httpAddr := flag.String("http-addr", envOr("EDR_CONTROLPLANE_HTTP", ":8080"), "HTTP listen address")
 	dataDir := flag.String("data-dir", envOr("EDR_CONTROLPLANE_DATA", "./controlplane-data"), "registry and alert storage directory")
 	heartbeatSec := flag.Int("heartbeat-sec", 30, "default agent heartbeat interval")
+	tlsCert := flag.String("tls-cert", envOr("EDR_CONTROLPLANE_TLS_CERT", ""), "server TLS certificate (PEM)")
+	tlsKey := flag.String("tls-key", envOr("EDR_CONTROLPLANE_TLS_KEY", ""), "server TLS private key (PEM)")
+	tlsClientCA := flag.String("tls-client-ca", envOr("EDR_CONTROLPLANE_TLS_CLIENT_CA", ""), "client CA for mutual TLS (PEM)")
+	mutualTLS := flag.Bool("mutual-tls", envBool("EDR_CONTROLPLANE_MUTUAL_TLS", false), "require agent client certificates")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -28,6 +33,16 @@ func main() {
 		log.Fatalf("logger: %v", err)
 	}
 	defer func() { _ = logger.Sync() }()
+
+	tlsCfg, err := controlplane.LoadServerTLS(controlplane.ServerTLSConfig{
+		CertPath:     *tlsCert,
+		KeyPath:      *tlsKey,
+		ClientCAPath: *tlsClientCA,
+		MutualTLS:    *mutualTLS,
+	})
+	if err != nil {
+		log.Fatalf("tls: %v", err)
+	}
 
 	registry, err := controlplane.NewRegistry(controlplane.RegistryConfig{
 		DataDir:      *dataDir,
@@ -38,7 +53,11 @@ func main() {
 	}
 
 	grpcSvc := controlplane.NewGRPCService(registry, logger)
-	grpcServer := grpc.NewServer()
+	var grpcOpts []grpc.ServerOption
+	if tlsCfg != nil {
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+	}
+	grpcServer := grpc.NewServer(grpcOpts...)
 	protocol.RegisterEDRServiceServer(grpcServer, grpcSvc)
 
 	lis, err := net.Listen("tcp", *grpcAddr)
@@ -48,14 +67,31 @@ func main() {
 
 	httpSrv := controlplane.NewServerWithRegistry(registry)
 	go func() {
+		handler := httpSrv.Routes()
+		if tlsCfg != nil {
+			log.Printf("controlplane HTTPS listening on %s (mutual_tls=%v)", *httpAddr, *mutualTLS)
+			srv := &http.Server{
+				Addr:      *httpAddr,
+				Handler:   handler,
+				TLSConfig: tlsCfg.Clone(),
+			}
+			if err := srv.ListenAndServeTLS(*tlsCert, *tlsKey); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("https server: %v", err)
+			}
+			return
+		}
 		log.Printf("controlplane HTTP listening on %s", *httpAddr)
-		if err := http.ListenAndServe(*httpAddr, httpSrv.Routes()); err != nil && err != http.ErrServerClosed {
+		if err := http.ListenAndServe(*httpAddr, handler); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http server: %v", err)
 		}
 	}()
 
 	go func() {
-		log.Printf("controlplane gRPC listening on %s (data dir: %s)", *grpcAddr, *dataDir)
+		mode := "plaintext"
+		if tlsCfg != nil {
+			mode = "tls"
+		}
+		log.Printf("controlplane gRPC listening on %s (%s, data dir: %s)", *grpcAddr, mode, *dataDir)
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Fatalf("grpc server: %v", err)
 		}
@@ -72,4 +108,19 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "TRUE", "yes", "YES", "on", "ON":
+		return true
+	case "0", "false", "FALSE", "no", "NO", "off", "OFF":
+		return false
+	default:
+		return fallback
+	}
 }

@@ -5,11 +5,19 @@ set -euo pipefail
 HOST="${1:-localhost}"
 HTTP_PORT="${EDR_CONTROLPLANE_HTTP_PORT:-8080}"
 GRPC_PORT="${EDR_CONTROLPLANE_GRPC_PORT:-50051}"
-HTTP_URL="http://${HOST}:${HTTP_PORT}/healthz"
-AGENTS_URL="http://${HOST}:${HTTP_PORT}/v1/agents"
+HTTPS="${EDR_CONTROLPLANE_HTTPS:-0}"
+SCHEME="http"
+CURL_OPTS=()
+if [[ "${HTTPS}" == "1" || "${HTTPS}" == "true" ]]; then
+	SCHEME="https"
+	CURL_OPTS+=(--cacert "${EDR_CONTROLPLANE_CA:-/etc/edr-controlplane/tls/ca.crt}")
+fi
 
-echo "==> HTTP health: ${HTTP_URL}"
-if ! curl -fsS "${HTTP_URL}"; then
+HEALTH_URL="${SCHEME}://${HOST}:${HTTP_PORT}/healthz"
+AGENTS_URL="${SCHEME}://${HOST}:${HTTP_PORT}/v1/agents"
+
+echo "==> HTTP health: ${HEALTH_URL}"
+if ! curl -fsS "${CURL_OPTS[@]}" "${HEALTH_URL}"; then
 	echo
 	echo "ERROR: control plane HTTP health check failed" >&2
 	exit 1
@@ -30,6 +38,6 @@ fi
 
 echo
 echo "==> enrolled agents: ${AGENTS_URL}"
-curl -fsS "${AGENTS_URL}" | python3 -m json.tool 2>/dev/null || curl -fsS "${AGENTS_URL}"
+curl -fsS "${CURL_OPTS[@]}" "${AGENTS_URL}" | python3 -m json.tool 2>/dev/null || curl -fsS "${CURL_OPTS[@]}" "${AGENTS_URL}"
 echo
 echo "control plane pilot check OK"
