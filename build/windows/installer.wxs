@@ -74,6 +74,12 @@
               KeyPath="yes"/>
         <CreateFolder/>
       </Component>
+      <Component Id="cmpConfigHardenedYml" Guid="*" Directory="DATAROOT" Win64="yes">
+        <File Id="ConfigHardenedFile"
+              Source="$(var.EdrConfigHardenedYml)"
+              Name="config.hardened.yml"
+              KeyPath="yes"/>
+      </Component>
     </ComponentGroup>
   </Fragment>
 </Wix>

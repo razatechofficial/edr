@@ -41,6 +41,12 @@ $configDest = Join-Path $root 'build/windows/config.yml'
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configDest) | Out-Null
 Copy-Item -LiteralPath $configSrc -Destination $configDest -Force
 
+$configHardenedSrc = Join-Path $root 'configs/windows/config.hardened.yml'
+$configHardenedDest = Join-Path $root 'build/windows/config.hardened.yml'
+if (Test-Path -LiteralPath $configHardenedSrc) {
+    Copy-Item -LiteralPath $configHardenedSrc -Destination $configHardenedDest -Force
+}
+
 $heatExe = 'heat.exe'
 if (-not [string]::IsNullOrWhiteSpace($env:EDR_WIX_BIN)) {
     $heatExe = Join-Path $env:EDR_WIX_BIN 'heat.exe'

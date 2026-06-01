@@ -95,10 +95,14 @@ if (-not (Test-Path -LiteralPath $agentExe)) {
 & (Join-Path $PSScriptRoot 'stage_windows_msi.ps1') -Root $root
 
 $configYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.yml'))
+$configHardenedYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/config.hardened.yml'))
 $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wxs'))
 $rulesStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-rules'))
 if (-not (Test-Path -LiteralPath $configYml)) {
     throw "Missing staged config: $configYml"
+}
+if (-not (Test-Path -LiteralPath $configHardenedYml)) {
+    throw "Missing staged hardened config: $configHardenedYml"
 }
 if (-not (Test-Path -LiteralPath $rulesWxs)) {
     throw "Missing rules WiX fragment: $rulesWxs"
@@ -120,6 +124,7 @@ $candleArgList = @(
     "-dMsiProductVersion=$Version",
     "-dEdrAgentExe=$agentExe",
     "-dEdrConfigYml=$configYml",
+    "-dEdrConfigHardenedYml=$configHardenedYml",
     "-dRulesStage=$rulesStage",
     $wxs,
     '-out', (Join-Path $root 'build/windows/')
@@ -136,11 +141,59 @@ Invoke-WiXTool -Label 'candle rules.wxs' -ExePath $candleExe -ArgList $candleRul
 
 $wixobj = Join-Path $root 'build/windows/installer.wixobj'
 $rulesWixobj = Join-Path $root 'build/windows/rules.wixobj'
+$lightInputs = @($wixobj, $rulesWixobj)
+
+$agentDist = Join-Path $root 'dist/windows-amd64'
+$yaraDlls = @(Get-ChildItem -LiteralPath $agentDist -Filter 'libyara*.dll' -ErrorAction SilentlyContinue)
+if ($yaraDlls.Count -gt 0) {
+    $yaraWxs = Join-Path $root 'build/windows/yara_dll.wxs'
+    $yaraLines = @(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">'
+        '  <Fragment>'
+        '    <DirectoryRef Id="INSTALLFOLDER">'
+    )
+    $groupRefs = @()
+    $idx = 0
+    foreach ($dll in $yaraDlls) {
+        $idx++
+        $cmpId = "cmpLibYara$idx"
+        $fileId = "LibYaraDll$idx"
+        $full = [System.IO.Path]::GetFullPath($dll.FullName)
+        $yaraLines += @(
+            "      <Component Id=""$cmpId"" Guid=""*"" Directory=""INSTALLFOLDER"" Win64=""yes"">"
+            "        <File Id=""$fileId"" Source=""$full"" Name=""$($dll.Name)"" KeyPath=""yes""/>"
+            '      </Component>'
+        )
+        $groupRefs += "      <ComponentRef Id=""$cmpId""/>"
+    }
+    $yaraLines += @(
+        '    </DirectoryRef>'
+        '    <ComponentGroup Id="YaraDllComponents">'
+    )
+    $yaraLines += $groupRefs
+    $yaraLines += @(
+        '    </ComponentGroup>'
+        '    <Feature Id="ProductFeature" Level="1">'
+        '      <ComponentGroupRef Id="YaraDllComponents"/>'
+        '    </Feature>'
+        '  </Fragment>'
+        '</Wix>'
+    )
+    Set-Content -LiteralPath $yaraWxs -Value ($yaraLines -join "`n") -Encoding UTF8
+    $yaraWixobj = Join-Path $root 'build/windows/yara_dll.wixobj'
+    Invoke-WiXTool -Label 'candle yara_dll.wxs' -ExePath $candleExe -ArgList @(
+        '-nologo', '-arch', 'x64', $yaraWxs, '-out', (Join-Path $root 'build/windows/')
+    ) -LogPath $candleLog
+    $lightInputs += $yaraWixobj
+    Write-Host "Including $($yaraDlls.Count) libyara DLL(s) in MSI"
+}
 
 $lightArgList = @(
     '-nologo', '-sval', '-sw1076',
     "-dRulesStage=$rulesStage",
-    $wixobj, $rulesWixobj, '-o', $msi
+    $lightInputs,
+    '-o', $msi
 )
 Invoke-WiXTool -Label 'light (WiX)' -ExePath $lightExe -ArgList $lightArgList -LogPath $lightLog
 

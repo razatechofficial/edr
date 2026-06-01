@@ -31,6 +31,7 @@ xcopy /E /I /Y "%REPO%\rules\sigma" "%DATAROOT%\rules\sigma\" >nul 2>&1
 xcopy /E /I /Y "%REPO%\rules\yara" "%DATAROOT%\rules\yara\" >nul 2>&1
 xcopy /E /I /Y "%REPO%\rules\playbooks" "%DATAROOT%\rules\playbooks\" >nul 2>&1
 xcopy /E /I /Y "%REPO%\rules\custom" "%DATAROOT%\rules\custom\" >nul 2>&1
+xcopy /E /I /Y "%REPO%\rules\ioc" "%DATAROOT%\rules\ioc\" >nul 2>&1
 xcopy /E /I /Y "%REPO%\rules\compliance\sca\windows" "%DATAROOT%\rules\compliance\sca\" >nul 2>&1
 
 "%AGENT_EXE%" --install || exit /b 1

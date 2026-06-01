@@ -122,6 +122,9 @@ func runMonitoringValidation(ctx context.Context, cfg *config.Config, harness bo
 		assertWindowsNetworkContract(rep.Sources)...,
 	)
 	rep.Assertions = append(rep.Assertions,
+		assertWindowsETWThreatIntelContract(rep.Sources, cfg)...,
+	)
+	rep.Assertions = append(rep.Assertions,
 		assertHeapBudget(rep.HeapAllocMiB)...,
 	)
 	rep.Assertions = append(rep.Assertions,
@@ -333,6 +336,55 @@ func assertNoDrops(sources []map[string]any, cfg *config.Config) []monitoringAss
 		}
 	}
 	return out
+}
+
+func assertWindowsETWThreatIntelContract(sources []map[string]any, cfg *config.Config) []monitoringAssertion {
+	if cfg == nil || runtime.GOOS != "windows" || !cfg.Monitoring.ETWThreatIntel {
+		return nil
+	}
+	var kernelRow map[string]any
+	for _, s := range sources {
+		if name, _ := s["name"].(string); name == "kernel" {
+			kernelRow = s
+			break
+		}
+	}
+	if kernelRow == nil {
+		return []monitoringAssertion{{
+			Name:   "kernel.windows.etw_threat_intel",
+			Detail: "kernel source missing while monitoring.etw_threat_intel=true",
+			Failed: true,
+		}}
+	}
+	requested, _ := kernelRow["etw_threat_intel_requested"].(bool)
+	if !requested {
+		return []monitoringAssertion{{
+			Name:   "kernel.windows.etw_threat_intel",
+			Detail: "etw_threat_intel_requested not true on kernel health row",
+			Failed: true,
+		}}
+	}
+	probed, hasProbed := kernelRow["etw_threat_intel_probed"].(bool)
+	if !hasProbed || !probed {
+		return []monitoringAssertion{{
+			Name:   "kernel.windows.etw_threat_intel",
+			Detail: "ETW Threat Intelligence probe did not run",
+			Failed: true,
+		}}
+	}
+	tiOK, _ := kernelRow["etw_threat_intel_ok"].(bool)
+	status, _ := kernelRow["etw_threat_intel_status"].(string)
+	reason, _ := kernelRow["etw_threat_intel_reason"].(string)
+	if tiOK {
+		return []monitoringAssertion{{
+			Name:   "kernel.windows.etw_threat_intel",
+			Detail: fmt.Sprintf("active status=%s", status),
+		}}
+	}
+	return []monitoringAssertion{{
+		Name:   "kernel.windows.etw_threat_intel",
+		Detail: fmt.Sprintf("probed degraded status=%s reason=%s (full TI may require PPL or vendor signing)", status, reason),
+	}}
 }
 
 func assertWindowsNetworkContract(sources []map[string]any) []monitoringAssertion {
