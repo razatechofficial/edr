@@ -27,6 +27,7 @@ func TestParseAlertLineOCSFRoundTrip(t *testing.T) {
 		DestIP:        "10.0.0.5",
 		DestPort:      443,
 		Domain:        "evil.example",
+		FileSHA256:    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
 	}
 	line, err := MarshalOCSF(src, "test")
 	if err != nil {
@@ -56,6 +57,9 @@ func TestParseAlertLineOCSFRoundTrip(t *testing.T) {
 	}
 	if got.Domain != src.Domain {
 		t.Fatalf("Domain=%q", got.Domain)
+	}
+	if got.FileSHA256 != src.FileSHA256 {
+		t.Fatalf("FileSHA256=%q", got.FileSHA256)
 	}
 	if int(got.OCSF["class_uid"].(float64)) != ocsf.ClassUIDDetectionFinding {
 		t.Fatalf("class_uid=%v", got.OCSF["class_uid"])
