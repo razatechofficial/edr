@@ -27,7 +27,8 @@ function Find-LibYaraArtifact([string]$Root) {
 		(Join-Path $Root 'debug\lib'),
 		(Join-Path $Root 'lib\manual-link')
 	)
-	$names = @('libyara.a', 'libyara.dll.a', 'libyara.lib', 'yara.lib')
+	# vcpkg CMake target is "libyara" -> MinGW archive is liblibyara.a (not libyara.a).
+	$names = @('liblibyara.a', 'libyara.a', 'libyara.dll.a', 'libyara.lib', 'yara.lib')
 	foreach ($dir in $libDirs) {
 		if (-not (Test-Path -LiteralPath $dir)) { continue }
 		foreach ($name in $names) {
@@ -35,12 +36,29 @@ function Find-LibYaraArtifact([string]$Root) {
 			if (Test-Path -LiteralPath $p) { return $p }
 		}
 	}
-	# Fallback: any libyara archive/import lib under the triplet tree.
 	$found = Get-ChildItem -LiteralPath $Root -Recurse -File -ErrorAction SilentlyContinue |
-		Where-Object { $_.Name -match '^(lib)?yara\.(a|lib|dll\.a)$' } |
+		Where-Object { $_.Name -match '^lib(lib)?yara\.(a|lib|dll\.a)$' } |
 		Select-Object -First 1
 	if ($found) { return $found.FullName }
 	return $null
+}
+
+function Ensure-MingwYaraLinkName([string]$LibFile) {
+	$dir = Split-Path -Parent $LibFile
+	$linkPath = Join-Path $dir 'libyara.a'
+	if ((Split-Path -Leaf $LibFile) -eq 'libyara.a') {
+		return $linkPath
+	}
+	if (Test-Path -LiteralPath $linkPath) {
+		return $linkPath
+	}
+	try {
+		New-Item -ItemType HardLink -Path $linkPath -Target $LibFile | Out-Null
+	} catch {
+		Copy-Item -LiteralPath $LibFile -Destination $linkPath -Force
+	}
+	Write-Host "Created libyara.a link for go-yara (-lyara): $linkPath"
+	return $linkPath
 }
 
 function Find-YaraHeaderDir([string]$Root) {
@@ -92,10 +110,13 @@ if (-not $includeDir) {
 }
 
 $libDir = Split-Path -Parent $libYara
+Ensure-MingwYaraLinkName $libYara | Out-Null
+
 $prefix = $installed -replace '\\', '/'
 $includePrefix = $includeDir -replace '\\', '/'
 $libPrefix = $libDir -replace '\\', '/'
 $cgoCflags = "-I$includePrefix"
+# go-yara (yara_no_pkg_config) links with -lyara; alias libyara.a is created from liblibyara.a.
 $cgoLdflags = "-L$libPrefix -lyara -lssl -lcrypto -lws2_32 -lcrypt32"
 
 Set-GhEnv 'EDR_WINDOWS_YARA' '1'
