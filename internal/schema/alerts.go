@@ -47,6 +47,23 @@ type Alert struct {
 	AuthType string `json:"auth_type,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`
 
+	// MITRE ATT&CK context
+	TechniqueID   string `json:"technique_id,omitempty"`
+	TechniqueName string `json:"technique_name,omitempty"`
+	TacticID      string `json:"tactic_id,omitempty"`
+	TacticName    string `json:"tactic_name,omitempty"`
+
+	// Scoring / confidence
+	Confidence float64 `json:"confidence,omitempty"`
+	RiskScore  int     `json:"risk_score,omitempty"`
+	Disposition string `json:"disposition,omitempty"`
+
+	// Host context
+	Hostname string `json:"hostname,omitempty"`
+
+	// Detection layer source
+	DetectionLayer string `json:"detection_layer,omitempty"`
+
 	OCSF map[string]any `json:"ocsf,omitempty"`
 }
 

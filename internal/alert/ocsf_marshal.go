@@ -38,6 +38,16 @@ func OCSFMap(al schema.Alert, productVersion string) map[string]any {
 		User:          al.User,
 		AuthType:      al.AuthType,
 		Outcome:       al.Outcome,
+
+		TechniqueID:   al.TechniqueID,
+		TechniqueName: al.TechniqueName,
+		TacticID:      al.TacticID,
+		TacticName:    al.TacticName,
+		Confidence:    al.Confidence,
+		RiskScore:     al.RiskScore,
+		Disposition:   al.Disposition,
+		Hostname:      al.Hostname,
+		DetectionLayer: al.DetectionLayer,
 	}, ocsf.DefaultProduct(productVersion))
 	return ocsf.EnvelopeToMap(env)
 }
