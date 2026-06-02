@@ -72,6 +72,9 @@ if [ -d models ] && compgen -G "models/*.onnx" >/dev/null; then
     for sig in models/*.onnx.sig; do
         [ -f "${sig}" ] && cp "${sig}" pkg/deb/usr/share/edr-agent/models/
     done
+else
+    echo "ERROR: ML models not found in models/ directory. Run 'make models-bootstrap' first." >&2
+    exit 1
 fi
 mkdir -p pkg/deb/var/lib/edr/bpf
 cp "${EBPF_OBJ}" pkg/deb/var/lib/edr/bpf/edr.bpf.o

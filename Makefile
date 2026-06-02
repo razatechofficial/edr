@@ -555,6 +555,26 @@ models-sign:
 	@if [ -z "$(KEY)" ]; then echo "Usage: make models-sign KEY=path/to/key.pem"; exit 1; fi
 	python3 scripts/convert_pretrained.py sign --models-dir $(MODELS_DIR) --key $(KEY)
 
+models-verify:
+	@echo "==> Verifying ML model packaging completeness"
+	@REQUIRED_MODELS="pe_classifier.onnx behavior_lstm.onnx behavior_transformer.onnx network_anomaly.onnx ransomware.onnx"; \
+	MISSING=0; \
+	for m in $$REQUIRED_MODELS; do \
+		if [ ! -f "$(MODELS_DIR)/$$m" ]; then \
+			echo "MISSING: $(MODELS_DIR)/$$m" >&2; \
+			MISSING=$$((MISSING+1)); \
+		fi; \
+	done; \
+	if [ ! -f "$(MODELS_DIR)/manifest.json" ]; then \
+		echo "MISSING: $(MODELS_DIR)/manifest.json" >&2; \
+		MISSING=$$((MISSING+1)); \
+	fi; \
+	if [ $$MISSING -gt 0 ]; then \
+		echo "ERROR: $$MISSING required model file(s) missing. Run 'make models-bootstrap' first." >&2; \
+		exit 1; \
+	fi; \
+	echo "All required models present in $(MODELS_DIR)/"
+
 # ============================================================================
 # ML training targets
 # ============================================================================

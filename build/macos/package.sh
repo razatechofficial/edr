@@ -65,6 +65,9 @@ if [[ -d models ]] && compgen -G "models/*.onnx" >/dev/null; then
 	for sig in models/*.onnx.sig; do
 		[[ -f "${sig}" ]] && cp "${sig}" "${PKG_ROOT}/Library/Application Support/EDR/models/"
 	done
+else
+	echo "ERROR: ML models not found in models/ directory. Run 'make models-bootstrap' first." >&2
+	exit 1
 fi
 
 if [[ -f configs/macos/config.enterprise.yml ]]; then
