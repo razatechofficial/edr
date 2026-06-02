@@ -10,8 +10,9 @@ if (-not (Test-Path (Join-Path $dist 'edr-agent.exe'))) {
 	exit 0
 }
 
+$triplet = if ($env:EDR_VCPKG_TRIPLET) { $env:EDR_VCPKG_TRIPLET } else { 'x64-mingw-dynamic' }
 $searchRoots = @(
-	Join-Path $env:RUNNER_TEMP 'vcpkg-edr/installed/x64-windows/bin'
+	Join-Path $env:RUNNER_TEMP "vcpkg-edr/installed/$triplet/bin"
 )
 if (-not [string]::IsNullOrWhiteSpace($env:PKG_CONFIG_PATH)) {
 	$libRoot = Split-Path -Parent $env:PKG_CONFIG_PATH
