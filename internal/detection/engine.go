@@ -69,6 +69,12 @@ type EngineConfig struct {
 	MLONNXUseGPU      bool
 	MLONNXGPUDeviceID int
 
+	// LayerTimeout is the maximum duration each detection layer is allowed
+	// before its result is discarded. Default: 50ms. ML layer uses MLLayerTimeout.
+	LayerTimeout   time.Duration
+	// MLLayerTimeout is the extended timeout for ML inference. Default: 150ms.
+	MLLayerTimeout time.Duration
+
 	// Hex-encoded Ed25519 public key for verifying ML model signatures.
 	// Empty disables signature verification.
 	MLVerifyPubKey string
@@ -101,6 +107,7 @@ type Engine struct {
 	ragEngine   *rag.Engine
 	chain       *BehavioralEngine
 	scorer      *ScoringEngine
+	fusion      *ScoreFusionEngine
 	deduper     *AlertDeduper
 	rateLimiter *RuleRateLimiter
 	yaraAsyncCh chan rules.YARAScanResult
@@ -151,6 +158,7 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 		logger:      logger,
 		stopCh:      make(chan struct{}),
 		scorer:      NewScoringEngine(),
+		fusion:      NewScoreFusionEngine(DefaultScoreFusionConfig()),
 		deduper:     NewAlertDeduper(5*time.Minute, cfg.DataDir),
 		rateLimiter: NewRuleRateLimiter(ratePerMin, rateBurst, 4096),
 	}
@@ -393,14 +401,14 @@ func (e *Engine) Alerts() <-chan *events.Alert {
 }
 
 // Evaluate runs the event through all enabled detection layers concurrently
-// and returns the merged, deduplicated set of alerts.
+// with timeout-bounded fan-out and returns the fused, deduplicated set of alerts.
 //
-// Layer execution (1-5 concurrent, 6 async fire-and-forget):
+// Layer execution (1-5 concurrent with timeout, 6 async fire-and-forget):
 //   - Layer 1 (IOC): hash, IP, domain lookups (<1ms target)
 //   - Layer 2 (YARA): file scanning for file events (<5ms target)
 //   - Layer 3 (Sigma + Custom CEL): rule evaluation (<2ms target)
 //   - Layer 4 (Behavioral): 8 detectors + correlator + sequencer (<10ms target)
-//   - Layer 5 (ML): model inference when applicable (<15ms target)
+//   - Layer 5 (ML): model inference when applicable (<15ms target, extended timeout)
 //   - Layer 6 (LLM): async deep analysis if layers 1-5 produced medium+ severity
 func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Alert {
 	start := time.Now()
@@ -411,6 +419,18 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 	}
 	e.mu.RUnlock()
 	e.eventsProcessed.Add(1)
+
+	layerTimeout := e.cfg.LayerTimeout
+	if layerTimeout <= 0 {
+		layerTimeout = 50 * time.Millisecond
+	}
+	mlTimeout := e.cfg.MLLayerTimeout
+	if mlTimeout <= 0 {
+		mlTimeout = 150 * time.Millisecond
+	}
+
+	layerCtx, layerCancel := context.WithTimeout(ctx, layerTimeout)
+	defer layerCancel()
 
 	var (
 		resultMu sync.Mutex
@@ -425,6 +445,22 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		resultMu.Unlock()
 	}
 
+	// collectWithTimeout wraps a layer function, discarding results if the
+	// context deadline is exceeded.
+	collectWithTimeout := func(lctx context.Context, layerName string, fn func() []*events.Alert) {
+		done := make(chan []*events.Alert, 1)
+		go func() {
+			defer e.recoverLayer(layerName)
+			done <- fn()
+		}()
+		select {
+		case res := <-done:
+			collect(res)
+		case <-lctx.Done():
+			e.logger.Debug("engine: layer timeout exceeded", zap.String("layer", layerName))
+		}
+	}
+
 	var wg sync.WaitGroup
 
 	// Layer 1: IOC — hash, IP, domain lookups.
@@ -432,13 +468,14 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer e.recoverLayer("ioc")
-			matches := e.ioc.CheckEvent(event)
-			alerts := make([]*events.Alert, 0, len(matches))
-			for _, m := range matches {
-				alerts = append(alerts, iocMatchToAlert(m, event))
-			}
-			collect(alerts)
+			collectWithTimeout(layerCtx, "ioc", func() []*events.Alert {
+				matches := e.ioc.CheckEvent(event)
+				alerts := make([]*events.Alert, 0, len(matches))
+				for _, m := range matches {
+					alerts = append(alerts, iocMatchToAlert(m, event))
+				}
+				return alerts
+			})
 		}()
 	}
 
@@ -456,17 +493,20 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer e.recoverLayer("rules")
-			m := rules.EventToMap(event)
-			if m == nil {
-				return
-			}
-			if e.sigma != nil {
-				collect(e.sigma.Evaluate(m))
-			}
-			if e.custom != nil {
-				collect(e.custom.Evaluate(m))
-			}
+			collectWithTimeout(layerCtx, "rules", func() []*events.Alert {
+				m := rules.EventToMap(event)
+				if m == nil {
+					return nil
+				}
+				var out []*events.Alert
+				if e.sigma != nil {
+					out = append(out, e.sigma.Evaluate(m)...)
+				}
+				if e.custom != nil {
+					out = append(out, e.custom.Evaluate(m)...)
+				}
+				return out
+			})
 		}()
 	}
 
@@ -479,8 +519,9 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				defer e.recoverLayer(det.Name())
-				collect(det.Analyze(event, e.correlator))
+				collectWithTimeout(layerCtx, det.Name(), func() []*events.Alert {
+					return det.Analyze(event, e.correlator)
+				})
 			}()
 		}
 
@@ -488,8 +529,9 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				defer e.recoverLayer("sequencer")
-				collect(e.sequencer.Analyze(event, e.correlator))
+				collectWithTimeout(layerCtx, "sequencer", func() []*events.Alert {
+					return e.sequencer.Analyze(event, e.correlator)
+				})
 			}()
 		}
 	}
@@ -499,8 +541,7 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		}
 	}
 
-	// Wait for layers 1-4 so ML (layer 5) can use prior behavioral alerts
-	// (e.g. ransomware indicators) for scoring.
+	// Wait for layers 1-4 so ML (layer 5) can use prior behavioral alerts.
 	wg.Wait()
 
 	// Snapshot prior alerts for ML ransomware correlation.
@@ -509,15 +550,18 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 	copy(priorAlerts, results)
 	resultMu.Unlock()
 
-	// Layer 5: ML model scoring.
+	// Layer 5: ML model scoring (extended timeout).
 	if e.ml != nil {
-		defer e.recoverLayer("ml")
-		collect(e.scoreWithML(ctx, event, priorAlerts))
+		mlCtx, mlCancel := context.WithTimeout(ctx, mlTimeout)
+		collectWithTimeout(mlCtx, "ml", func() []*events.Alert {
+			return e.scoreWithML(mlCtx, event, priorAlerts)
+		})
+		mlCancel()
 	}
 
 	alerts := results
-	if merged := mergeScores(alerts); merged != nil {
-		alerts = append(alerts, merged)
+	if e.fusion != nil {
+		alerts = e.fusion.Fuse(alerts)
 	}
 	alerts = e.postProcessAlerts(alerts)
 
