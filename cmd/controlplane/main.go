@@ -36,7 +36,7 @@ func main() {
 		policyPath = filepath.Join(*dataDir, "policy")
 	}
 
-	logger, err := zap.NewProduction()
+	logger, err := zap.NewProduction(zap.WithCaller(false))
 	if err != nil {
 		log.Fatalf("logger: %v", err)
 	}

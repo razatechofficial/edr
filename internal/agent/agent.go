@@ -142,7 +142,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		return nil, err
 	}
 
-	zapLogger, _ := zap.NewProduction()
+	zapLogger, _ := zap.NewProduction(zap.WithCaller(false))
 
 	a := &Agent{
 		logger:             slog.Default(),

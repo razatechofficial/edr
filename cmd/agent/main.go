@@ -124,8 +124,7 @@ func newLogger(logMode string, cfg config.Config) (*zap.Logger, error) {
 		}
 	}
 
-	// Keep operator logs clean; avoid file:line noise in production output.
-	return zap.New(zapcore.NewTee(cores...)), nil
+	return zap.New(zapcore.NewTee(cores...), zap.WithCaller(false)), nil
 }
 
 func installSlog(logger *zap.Logger) {
