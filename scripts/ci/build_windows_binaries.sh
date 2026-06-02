@@ -27,6 +27,7 @@ if [[ "${EDR_WINDOWS_YARA:-0}" == "1" ]]; then
 	if [[ -n "${EDR_GO_BUILD_TAGS:-}" ]]; then
 		GOFLAGS="${GOFLAGS} -tags=${EDR_GO_BUILD_TAGS}"
 	fi
+	bash "${ROOT}/scripts/ci/patch_onnxruntime_getversion.sh"
 	echo "==> Building Windows amd64 agent with YARA (CGO_ENABLED=1, tags=${EDR_GO_BUILD_TAGS:-none})"
 else
 	export CGO_ENABLED=0
