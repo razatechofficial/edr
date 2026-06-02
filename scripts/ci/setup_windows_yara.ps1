@@ -1,5 +1,6 @@
 # Install libyara via vcpkg for Windows amd64 CGO builds (go-yara / YARA layer).
-# Sets GITHUB_ENV: EDR_WINDOWS_YARA, PKG_CONFIG, PKG_CONFIG_PATH, CGO_ENABLED, PATH.
+# vcpkg's yara port does not ship yara.pc; we use yara_no_pkg_config + explicit CGO flags.
+# Sets GITHUB_ENV: EDR_WINDOWS_YARA, CGO_CFLAGS, CGO_LDFLAGS, EDR_GO_BUILD_TAGS, PATH.
 param(
 	[switch]$SkipIfPresent
 )
@@ -7,7 +8,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $vcpkgRoot = Join-Path $env:RUNNER_TEMP 'vcpkg-edr'
-$triplet = 'x64-windows'
+# MinGW triplet: Go CGO on GHA Windows uses gcc; matches MSVC .lib less reliably.
+$triplet = 'x64-mingw-dynamic'
 $installed = Join-Path $vcpkgRoot "installed\$triplet"
 
 function Set-GhEnv([string]$Name, [string]$Value) {
@@ -15,10 +17,25 @@ function Set-GhEnv([string]$Name, [string]$Value) {
 		Set-Item -Path "env:$Name" -Value $Value
 		return
 	}
-	Add-Content -LiteralPath $env:GITHUB_ENV -Value "${Name}=${Value}"
+	# Multiline-safe for GITHUB_ENV (rarely needed here).
+	$escaped = $Value -replace "`r`n", '%0A'
+	Add-Content -LiteralPath $env:GITHUB_ENV -Value "${Name}=${escaped}"
 }
 
-if ($SkipIfPresent -and (Test-Path (Join-Path $installed 'lib\yara.lib'))) {
+function Find-LibYaraArtifact([string]$Root) {
+	$candidates = @(
+		(Join-Path $Root 'lib\libyara.a'),
+		(Join-Path $Root 'lib\libyara.dll.a'),
+		(Join-Path $Root 'lib\yara.lib'),
+		(Join-Path $Root 'lib\libyara.lib')
+	)
+	foreach ($p in $candidates) {
+		if (Test-Path -LiteralPath $p) { return $p }
+	}
+	return $null
+}
+
+if ($SkipIfPresent -and (Find-LibYaraArtifact $installed)) {
 	Write-Host "vcpkg yara already installed at $installed"
 } else {
 	if (-not (Test-Path $vcpkgRoot)) {
@@ -36,16 +53,32 @@ if ($SkipIfPresent -and (Test-Path (Join-Path $installed 'lib\yara.lib'))) {
 	if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed" }
 }
 
-$pkgconf = Join-Path $installed 'tools\pkgconf\pkgconf.exe'
-if (-not (Test-Path $pkgconf)) {
-	throw "pkgconf not found at $pkgconf"
+$libYara = Find-LibYaraArtifact $installed
+if (-not $libYara) {
+	throw "libyara library not found under $installed/lib"
 }
-$pkgConfigPath = Join-Path $installed 'lib\pkgconfig'
+
+$includeDir = Join-Path $installed 'include'
+$libDir = Join-Path $installed 'lib'
 $binDir = Join-Path $installed 'bin'
+if (-not (Test-Path (Join-Path $includeDir 'yara.h'))) {
+	throw "yara.h not found under $includeDir"
+}
+
+# go-yara: skip pkg-config (vcpkg does not install yara.pc) and link static libyara.
+$prefix = $installed -replace '\\', '/'
+$cgoCflags = "-I$prefix/include"
+$cgoLdflags = "-L$prefix/lib -lyara -lssl -lcrypto -lcrypt32 -lws2_32"
 
 Set-GhEnv 'EDR_WINDOWS_YARA' '1'
+Set-GhEnv 'EDR_VCPKG_TRIPLET' $triplet
+Set-GhEnv 'EDR_GO_BUILD_TAGS' 'yara_no_pkg_config,yara_static'
 Set-GhEnv 'CGO_ENABLED' '1'
-Set-GhEnv 'PKG_CONFIG' $pkgconf
-Set-GhEnv 'PKG_CONFIG_PATH' $pkgConfigPath
-Set-GhEnv 'PATH' "$binDir;$env:PATH"
-Write-Host "Windows YARA toolchain ready (PKG_CONFIG_PATH=$pkgConfigPath)"
+Set-GhEnv 'CGO_CFLAGS' $cgoCflags
+Set-GhEnv 'CGO_LDFLAGS' $cgoLdflags
+if (Test-Path -LiteralPath $binDir) {
+	Set-GhEnv 'PATH' "$binDir;$env:PATH"
+}
+Write-Host "Windows YARA toolchain ready (triplet=$triplet, lib=$libYara)"
+Write-Host "CGO_CFLAGS=$cgoCflags"
+Write-Host "CGO_LDFLAGS=$cgoLdflags"

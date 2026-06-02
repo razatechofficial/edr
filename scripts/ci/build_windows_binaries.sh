@@ -15,16 +15,19 @@ if [[ -z "${DATE}" ]]; then
 	DATE="$(date -u "+%Y-%m-%dT%H:%M:%SZ")"
 fi
 BUILD_TIME="${DATE}"
-GOFLAGS="-trimpath"
 LDFLAGS="-s -w \
 	-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${DATE} \
 	-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.Commit=${COMMIT}"
 
 mkdir -p bin dist/windows-amd64
 
+GOFLAGS="-trimpath"
 if [[ "${EDR_WINDOWS_YARA:-0}" == "1" ]]; then
 	export CGO_ENABLED=1
-	echo "==> Building Windows amd64 agent with YARA (CGO_ENABLED=1)"
+	if [[ -n "${EDR_GO_BUILD_TAGS:-}" ]]; then
+		GOFLAGS="${GOFLAGS} -tags=${EDR_GO_BUILD_TAGS}"
+	fi
+	echo "==> Building Windows amd64 agent with YARA (CGO_ENABLED=1, tags=${EDR_GO_BUILD_TAGS:-none})"
 else
 	export CGO_ENABLED=0
 	echo "==> Building Windows amd64 binaries (CGO_ENABLED=0, YARA stub)"
