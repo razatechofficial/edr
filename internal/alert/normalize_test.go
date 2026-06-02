@@ -37,6 +37,9 @@ func TestWithOCSFContextFillsFlatFields(t *testing.T) {
 	if got.FilePath != "/tmp/payload.bin" || got.DestIP != "203.0.113.1" {
 		t.Fatalf("file/network: path=%q dest=%q", got.FilePath, got.DestIP)
 	}
+	if got.FileSHA256 != "abc123" {
+		t.Fatalf("FileSHA256 = %q", got.FileSHA256)
+	}
 }
 
 func TestWithOCSFContextPreservesPrimaryFields(t *testing.T) {

@@ -3,6 +3,7 @@ package alert
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -130,7 +131,22 @@ func alertFromOCSFMap(raw map[string]any) (schema.Alert, error) {
 		if v := stringFromAny(file["path"]); v != "" {
 			al.FilePath = v
 		}
+		if v := hashFromFileMap(file); v != "" {
+			al.FileSHA256 = v
+		}
 	}
+	if v, ok := intFromAny(raw["risk_score"]); ok && v > 0 {
+		al.Score = v
+	}
+	if dev, ok := raw["device"].(map[string]any); ok {
+		if v := stringFromAny(dev["uid"]); v != "" {
+			al.EndpointID = v
+		}
+		if v := stringFromAny(dev["hostname"]); v != "" {
+			al.Hostname = v
+		}
+	}
+	applyObservablesFromOCSF(&al, raw["observables"])
 	if dst, ok := raw["dst_endpoint"].(map[string]any); ok {
 		if v := stringFromAny(dst["ip"]); v != "" {
 			al.DestIP = v
@@ -150,6 +166,66 @@ func alertFromOCSFMap(raw map[string]any) (schema.Alert, error) {
 		}
 	}
 	return al, nil
+}
+
+func hashFromFileMap(file map[string]any) string {
+	hashes, ok := file["hashes"].([]any)
+	if !ok {
+		return ""
+	}
+	for _, h := range hashes {
+		entry, ok := h.(map[string]any)
+		if !ok {
+			continue
+		}
+		algo := strings.ToLower(stringFromAny(entry["algorithm"]))
+		if algo != "sha-256" && algo != "sha256" {
+			if id, ok := intFromAny(entry["algorithm_id"]); !ok || id != ocsf.HashAlgorithmSHA256 {
+				continue
+			}
+		}
+		if v := stringFromAny(entry["value"]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func applyObservablesFromOCSF(al *schema.Alert, obs any) {
+	list, ok := obs.([]any)
+	if !ok {
+		return
+	}
+	for _, item := range list {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		val := stringFromAny(entry["value"])
+		if val == "" {
+			continue
+		}
+		switch strings.ToLower(stringFromAny(entry["type"])) {
+		case "hash":
+			if al.FileSHA256 == "" {
+				al.FileSHA256 = val
+			}
+		case "domain name":
+			if al.Domain == "" {
+				al.Domain = val
+			}
+		case "url":
+			if al.URL == "" {
+				al.URL = val
+			}
+		case "ip address":
+			if al.DestIP == "" && net.ParseIP(val) != nil {
+				al.DestIP = val
+			} else if al.SourceIP == "" && net.ParseIP(val) != nil {
+				al.SourceIP = val
+			}
+		}
+	}
 }
 
 func ruleIDFromFindingTypes(types []any) string {

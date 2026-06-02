@@ -88,6 +88,9 @@ func mergeAlertFields(primary, fallback schema.Alert) schema.Alert {
 	if out.Outcome == "" {
 		out.Outcome = fallback.Outcome
 	}
+	if out.Hostname == "" {
+		out.Hostname = fallback.Hostname
+	}
 	if len(out.OCSF) == 0 {
 		out.OCSF = fallback.OCSF
 	}
