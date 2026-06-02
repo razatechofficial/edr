@@ -16,6 +16,7 @@ if [[ -z "${HOST}" ]]; then
 	echo "       EDR_ROLLOUT_VERIFY=1 (final fleet verification)" >&2
 	echo "       EDR_ROLLOUT_STAGE_POLICY=1, EDR_ROLLOUT_VERIFY_POLICY=1" >&2
 	echo "       EDR_ROLLOUT_PREPARE_IOC=1, EDR_ROLLOUT_SIGN_POLICY=1, EDR_ROLLOUT_BACKUP_CP=1" >&2
+	echo "  or: bash scripts/pilot/run_prod_rollout_full.sh <host> [expected-agents]" >&2
 	exit 1
 fi
 
@@ -45,6 +46,9 @@ if [[ "${EDR_ROLLOUT_PREPARE_IOC:-0}" == "1" || "${EDR_ROLLOUT_PREPARE_IOC:-0}" 
 fi
 
 if [[ "${EDR_ROLLOUT_STAGE_POLICY:-0}" == "1" || "${EDR_ROLLOUT_STAGE_POLICY:-0}" == "true" ]]; then
+	if [[ -z "${EDR_ROLLOUT_VERIFY_POLICY+x}" ]]; then
+		export EDR_ROLLOUT_VERIFY_POLICY=1
+	fi
 	echo
 	echo "==> stage control plane policy bundles"
 	if [[ "${EDR_ROLLOUT_SIGN_POLICY:-0}" == "1" || "${EDR_ROLLOUT_SIGN_POLICY:-0}" == "true" ]]; then
@@ -60,6 +64,9 @@ if [[ "${EDR_ROLLOUT_STAGE_POLICY:-0}" == "1" || "${EDR_ROLLOUT_STAGE_POLICY:-0}
 fi
 
 export EDR_PILOT_MTLS="${EDR_PILOT_MTLS:-1}"
+if [[ "${EDR_ROLLOUT_VERIFY_POLICY:-0}" == "1" || "${EDR_ROLLOUT_VERIFY_POLICY:-0}" == "true" ]]; then
+	export EDR_PILOT_VERIFY_POLICY=1
+fi
 bash "${ROOT}/scripts/pilot/run_fleet_pilot.sh" "${HOST}" "${EXPECTED}"
 
 if [[ "${EDR_ROLLOUT_VALIDATE:-0}" == "1" || "${EDR_ROLLOUT_VALIDATE:-0}" == "true" ]]; then

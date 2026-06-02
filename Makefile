@@ -250,8 +250,14 @@ prepare-fleet-rollout:
 distribute-agent-tls:
 	@bash scripts/deploy/distribute_agent_tls.sh $(TLS_SRC) $(HOST) $(PLATFORM)
 
+distribute-policy-pubkey:
+	@bash scripts/deploy/distribute_policy_pubkey.sh $(PUBKEY_SRC) $(HOST) $(PLATFORM)
+
 run-prod-rollout:
 	@bash scripts/pilot/run_prod_rollout.sh $(HOST) $(EXPECTED)
+
+run-prod-rollout-full:
+	@bash scripts/pilot/run_prod_rollout_full.sh $(HOST) $(EXPECTED)
 
 fetch-release-artifacts:
 	@bash scripts/pilot/fetch_release_artifacts.sh $(TAG) $(DIST)
@@ -289,7 +295,7 @@ upgrade-macos-agent:
 upgrade-windows-agent:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pilot/upgrade_windows_agent.ps1 $(PKG)
 
-.PHONY: build-controlplane deploy-controlplane stage-controlplane-policy verify-controlplane-policy export-controlplane-env prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-endpoint-pilot verify-agent-policy-sync verify-policy-sync wait-for-policy-sync run-policy-pilot verify-fleet-policy-rollout verify-agent-ioc verify-agent-sca prepare-offline-ioc generate-policy-signing-key check-prod-release wait-for-prod-release prepare-fleet-rollout distribute-agent-tls run-prod-rollout fetch-release-artifacts rollout-status list-fleet-endpoints preflight-rollout verify-fleet-rollout stage-fleet-rollout-bundle backup-controlplane restore-controlplane validate-rollout upgrade-linux-agent upgrade-macos-agent upgrade-windows-agent
+.PHONY: build-controlplane deploy-controlplane stage-controlplane-policy verify-controlplane-policy export-controlplane-env prepare-windows-signing-secrets enable-controlplane-tls generate-controlplane-tls run-fleet-pilot verify-detection-pilot verify-agent-enrollment verify-detection-pilot-windows verify-release-packages verify-post-install run-endpoint-pilot verify-agent-policy-sync verify-policy-sync wait-for-policy-sync run-policy-pilot verify-fleet-policy-rollout verify-agent-ioc verify-agent-sca prepare-offline-ioc generate-policy-signing-key check-prod-release wait-for-prod-release prepare-fleet-rollout distribute-agent-tls distribute-policy-pubkey run-prod-rollout run-prod-rollout-full fetch-release-artifacts rollout-status list-fleet-endpoints preflight-rollout verify-fleet-rollout stage-fleet-rollout-bundle backup-controlplane restore-controlplane validate-rollout upgrade-linux-agent upgrade-macos-agent upgrade-windows-agent
 
 # ============================================================================
 # eBPF targets (Linux only)
