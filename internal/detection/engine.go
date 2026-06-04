@@ -59,10 +59,14 @@ type EngineConfig struct {
 	MLModelRansomware     string
 
 	// ML detection thresholds (0.0–1.0). Zero values fall back to defaults.
-	MLThresholdPE         float64
-	MLThresholdNetwork    float64
-	MLThresholdBehavior   float64
-	MLThresholdRansomware float64
+	MLThresholdPE           float64
+	MLThresholdNetwork      float64
+	MLThresholdBehavior     float64
+	MLThresholdRansomware   float64
+	MLThresholdLOLBin       float64
+	MLThresholdSupplyChain  float64
+	MLThresholdAIGen        float64
+	MLThresholdIdentity     float64
 
 	// ONNX Runtime settings.
 	MLONNXNumThreads  int
@@ -871,6 +875,34 @@ func (e *Engine) mlThresholdRansomware() float64 {
 	return 0.85
 }
 
+func (e *Engine) mlThresholdLOLBin() float64 {
+	if e.cfg.MLThresholdLOLBin > 0 {
+		return e.cfg.MLThresholdLOLBin
+	}
+	return 0.75
+}
+
+func (e *Engine) mlThresholdSupplyChain() float64 {
+	if e.cfg.MLThresholdSupplyChain > 0 {
+		return e.cfg.MLThresholdSupplyChain
+	}
+	return 0.75
+}
+
+func (e *Engine) mlThresholdAIGen() float64 {
+	if e.cfg.MLThresholdAIGen > 0 {
+		return e.cfg.MLThresholdAIGen
+	}
+	return 0.75
+}
+
+func (e *Engine) mlThresholdIdentity() float64 {
+	if e.cfg.MLThresholdIdentity > 0 {
+		return e.cfg.MLThresholdIdentity
+	}
+	return 0.75
+}
+
 func (e *Engine) scoreWithML(ctx context.Context, event interface{}, priorAlerts []*events.Alert) []*events.Alert {
 	var alerts []*events.Alert
 
@@ -880,21 +912,48 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}, priorAlerts
 		if path == "" {
 			return nil
 		}
-		score, err := e.ml.ScoreFile(ctx, path)
-		if err != nil {
-			e.logger.Debug("engine: ml file scoring failed", zap.Error(err))
-			return nil
-		}
-		if score.Score >= e.mlThresholdPE() {
+
+		// PE classifier
+		if peScore, err := e.ml.ScoreFile(ctx, path); err == nil && peScore.Score >= e.mlThresholdPE() {
 			alerts = append(alerts, &events.Alert{
 				ID:          uuid.New().String(),
 				RuleID:      "ml-pe-classifier",
 				RuleName:    "ML PE Classifier",
-				Severity:    mlScoreToSeverity(score.Score),
-				Title:       fmt.Sprintf("ML: malicious file detected (%.2f)", score.Score),
-				Description: fmt.Sprintf("Category %s, confidence %.2f", score.Category, score.Confidence),
+				Severity:    mlScoreToSeverity(peScore.Score),
+				Title:       fmt.Sprintf("ML: malicious file detected (%.2f)", peScore.Score),
+				Description: fmt.Sprintf("Category %s, confidence %.2f", peScore.Category, peScore.Confidence),
 				Timestamp:   time.Now().UTC(),
-				Tags:        []string{"ml", score.Category},
+				Tags:        []string{"ml", peScore.Category},
+				RawEvent:    event,
+			})
+		}
+
+		// Supply Chain detector
+		if scScore, err := e.ml.ScoreSupplyChain(ctx, event); err == nil && scScore.Score >= e.mlThresholdSupplyChain() {
+			alerts = append(alerts, &events.Alert{
+				ID:          uuid.New().String(),
+				RuleID:      "ml-supply-chain",
+				RuleName:    "ML Supply Chain Detector",
+				Severity:    mlScoreToSeverity(scScore.Score),
+				Title:       fmt.Sprintf("ML: supply chain anomaly (%.2f)", scScore.Score),
+				Description: fmt.Sprintf("Category %s, confidence %.2f", scScore.Category, scScore.Confidence),
+				Timestamp:   time.Now().UTC(),
+				Tags:        []string{"ml", "supply_chain", scScore.Category},
+				RawEvent:    event,
+			})
+		}
+
+		// AI-Gen detector
+		if agScore, err := e.ml.ScoreAIGen(ctx, event); err == nil && agScore.Score >= e.mlThresholdAIGen() {
+			alerts = append(alerts, &events.Alert{
+				ID:          uuid.New().String(),
+				RuleID:      "ml-aigen",
+				RuleName:    "ML AI-Generated Malware Detector",
+				Severity:    mlScoreToSeverity(agScore.Score),
+				Title:       fmt.Sprintf("ML: AI-generated malware indicators (%.2f)", agScore.Score),
+				Description: fmt.Sprintf("Category %s, confidence %.2f", agScore.Category, agScore.Confidence),
+				Timestamp:   time.Now().UTC(),
+				Tags:        []string{"ml", "aigen", agScore.Category},
 				RawEvent:    event,
 			})
 		}
@@ -928,10 +987,14 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}, priorAlerts
 		if len(window) == 0 {
 			return nil
 		}
-		score, err := e.ml.ScoreProcess(ctx, window)
+		score, err := e.ml.ScoreProcessEnsemble(ctx, window)
 		if err != nil {
-			e.logger.Debug("engine: ml behavior scoring failed", zap.Error(err))
-			return nil
+			// fall back to LSTM-only if ensemble fails
+			score, err = e.ml.ScoreProcess(ctx, window)
+			if err != nil {
+				e.logger.Debug("engine: ml behavior scoring failed", zap.Error(err))
+				return nil
+			}
 		}
 		if score.Score >= e.mlThresholdBehavior() {
 			alerts = append(alerts, &events.Alert{
@@ -943,6 +1006,36 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}, priorAlerts
 				Description: fmt.Sprintf("Category %s, confidence %.2f", score.Category, score.Confidence),
 				Timestamp:   time.Now().UTC(),
 				Tags:        []string{"ml", score.Category},
+				RawEvent:    event,
+			})
+		}
+
+		// LOLBin detector
+		if lbScore, err := e.ml.ScoreLOLBin(ctx, event); err == nil && lbScore.Score >= e.mlThresholdLOLBin() {
+			alerts = append(alerts, &events.Alert{
+				ID:          uuid.New().String(),
+				RuleID:      "ml-lolbin",
+				RuleName:    "ML LOLBin Detector",
+				Severity:    mlScoreToSeverity(lbScore.Score),
+				Title:       fmt.Sprintf("ML: LOLBin abuse detected (%.2f)", lbScore.Score),
+				Description: fmt.Sprintf("Category %s, confidence %.2f", lbScore.Category, lbScore.Confidence),
+				Timestamp:   time.Now().UTC(),
+				Tags:        []string{"ml", "lolbin", lbScore.Category},
+				RawEvent:    event,
+			})
+		}
+
+	case *schema.AuthEvent, schema.AuthEvent:
+		if idScore, err := e.ml.ScoreIdentity(ctx, event); err == nil && idScore.Score >= e.mlThresholdIdentity() {
+			alerts = append(alerts, &events.Alert{
+				ID:          uuid.New().String(),
+				RuleID:      "ml-identity",
+				RuleName:    "ML Identity Threat Detector",
+				Severity:    mlScoreToSeverity(idScore.Score),
+				Title:       fmt.Sprintf("ML: identity threat detected (%.2f)", idScore.Score),
+				Description: fmt.Sprintf("Category %s, confidence %.2f", idScore.Category, idScore.Confidence),
+				Timestamp:   time.Now().UTC(),
+				Tags:        []string{"ml", "identity", idScore.Category},
 				RawEvent:    event,
 			})
 		}
