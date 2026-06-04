@@ -76,8 +76,22 @@ def cmd_train(args: argparse.Namespace) -> None:
             sys.argv.append("--synthetic")
         train_ransomware()
 
+    elif model == "memory_injection":
+        from train_memory_injection import main as train_mem_inj
+        sys.argv = [
+            "train_memory_injection.py",
+            "--output-dir", str(output),
+            "--epochs", str(args.epochs),
+            "--n-samples", str(args.n_samples or 5000),
+            "--synthetic-injection", "2000",
+            "--n-benign", "8000",
+        ]
+        if data_dir:
+            sys.argv.extend(["--malmem-zip", data_dir])
+        train_mem_inj()
+
     else:
-        log.error("Unknown model: %s (choices: pe, behavior, network, ransomware)", model)
+        log.error("Unknown model: %s (choices: pe, behavior, network, ransomware, memory_injection)", model)
         sys.exit(1)
 
     log.info("Training complete for model '%s'", model)
@@ -139,7 +153,7 @@ def main() -> None:
 
     t = sub.add_parser("train", help="Train a model from scratch")
     t.add_argument("--model", required=True,
-                   choices=["pe", "behavior", "network", "ransomware"])
+                   choices=["pe", "behavior", "network", "ransomware", "memory_injection"])
     t.add_argument("--data", default="./data")
     t.add_argument("--output", default="./models")
     t.add_argument("--epochs", type=int, default=50)

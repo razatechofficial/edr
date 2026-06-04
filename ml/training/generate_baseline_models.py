@@ -34,6 +34,7 @@ BEHAVIOR_SEQ_LEN = 50
 BEHAVIOR_FEAT_DIM = 48
 NETWORK_FEAT_DIM = 15
 RANSOMWARE_FEAT_DIM = 10
+MEMORY_INJECTION_FEAT_DIM = 32
 
 
 # ===================================================================
@@ -272,6 +273,53 @@ def _synthetic_ransomware_data(
     return X, y
 
 
+def _synthetic_memory_injection_data(
+    n_benign: int = 500, n_malicious: int = 500, seed: int = 42
+) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.RandomState(seed)
+    n = n_benign + n_malicious
+    X = rng.beta(2, 5, (n, MEMORY_INJECTION_FEAT_DIM)).astype(np.float32)
+    y = np.zeros(n, dtype=np.int32)
+
+    for i in range(n_benign, n):
+        X[i, 0] = rng.uniform(0.3, 1.0)
+        X[i, 1] = rng.uniform(0.4, 1.0)
+        X[i, 2] = rng.uniform(0.5, 1.0)
+        X[i, 3] = rng.uniform(0.4, 1.0)
+        X[i, 4] = rng.uniform(0.3, 0.9)
+        X[i, 5] = rng.uniform(0.2, 0.8)
+        X[i, 6] = rng.uniform(0.3, 0.8)
+        X[i, 7] = rng.uniform(0.4, 0.9)
+        X[i, 8] = rng.uniform(0.3, 0.8)
+        X[i, 9] = rng.uniform(0.3, 0.8)
+        X[i, 10] = rng.uniform(0.2, 0.7)
+        X[i, 11] = rng.uniform(0.3, 0.8)
+        X[i, 12] = rng.uniform(0.3, 0.8)
+        X[i, 13] = rng.uniform(0.3, 0.7)
+        X[i, 14] = rng.uniform(0.4, 0.9)
+        X[i, 15] = rng.uniform(0.4, 0.8)
+        X[i, 16] = rng.uniform(0.3, 0.8)
+        X[i, 17] = rng.uniform(0.4, 0.9)
+        X[i, 18] = rng.uniform(0.4, 0.9)
+        X[i, 19] = rng.uniform(0.3, 0.8)
+        X[i, 20] = rng.uniform(0.3, 0.8)
+        X[i, 21] = rng.uniform(0.3, 0.7)
+        X[i, 22] = rng.uniform(0.3, 0.7)
+        X[i, 23] = rng.uniform(0.2, 0.6)
+        X[i, 24] = rng.uniform(0.3, 0.8)
+        X[i, 25] = rng.uniform(0.3, 0.8)
+        X[i, 26] = rng.uniform(0.3, 0.7)
+        X[i, 27] = rng.uniform(0.3, 0.7)
+        X[i, 28] = np.clip(X[i, 0] * X[i, 1] * 10.0 + X[i, 2] * X[i, 3] * 5.0, 0, 1)
+        X[i, 29] = np.clip(X[i, 4] + X[i, 5] + X[i, 6] + X[i, 7], 0, 1)
+        X[i, 30] = np.clip(X[i, 8] + X[i, 9] + X[i, 10] + X[i, 11], 0, 1)
+        X[i, 31] = np.clip((X[i, 28] * 0.4 + X[i, 29] * 0.3 + X[i, 30] * 0.3) * 2.0, 0, 1)
+        y[i] = 1
+
+    np.clip(X, 0.0, 1.0, out=X)
+    return X, y
+
+
 # ===================================================================
 # 2. Model builders & ONNX export
 # ===================================================================
@@ -497,6 +545,71 @@ def build_ransomware(output_dir: Path) -> Path:
     return out_path
 
 
+def build_memory_injection(output_dir: Path) -> Path:
+    """Train PyTorch MLP on synthetic injection data → memory_injection.onnx."""
+    import torch
+    import torch.nn as nn
+    from train_memory_injection import generate_synthetic_injection_data
+
+    log.info("--- Memory Injection (PyTorch, %d features) ---", MEMORY_INJECTION_FEAT_DIM)
+
+    class MemInjectNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Linear(MEMORY_INJECTION_FEAT_DIM, 64),
+                nn.BatchNorm1d(64),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(64, 32),
+                nn.BatchNorm1d(32),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(32, 1),
+                nn.Sigmoid(),
+            )
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return self.net(x)
+
+    X, y = generate_synthetic_injection_data(n_benign=2000, n_per_technique=1000, seed=42)
+    log.info("  Synthetic data: %d samples", len(y))
+
+    torch.manual_seed(42)
+    split = len(X) // 2
+    X_t = torch.from_numpy(X[:split])
+    y_t = torch.from_numpy(y[:split]).float().unsqueeze(1)
+    X_v = torch.from_numpy(X[split:])
+    y_v = torch.from_numpy(y[split:]).float().unsqueeze(1)
+
+    model = MemInjectNet()
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    criterion = nn.BCELoss()
+
+    for epoch in range(20):
+        model.train()
+        opt.zero_grad()
+        loss = criterion(model(X_t), y_t)
+        loss.backward()
+        opt.step()
+        if (epoch + 1) % 10 == 0:
+            model.eval()
+            with torch.no_grad():
+                acc = ((model(X_v) > 0.5).float() == y_v).float().mean().item()
+            log.info("  Epoch %2d  acc=%.4f", epoch + 1, acc)
+
+    model.eval()
+    out_path = output_dir / "memory_injection.onnx"
+    dummy = torch.randn(1, MEMORY_INJECTION_FEAT_DIM)
+    torch.onnx.export(
+        model, dummy, str(out_path),
+        input_names=["input"], output_names=["score"],
+        dynamic_axes={"input": {0: "batch"}, "score": {0: "batch"}},
+        opset_version=15,
+    )
+    _validate_onnx(out_path, X[:2])
+    return out_path
+
+
 # ===================================================================
 # 3. ONNX validation helper
 # ===================================================================
@@ -585,6 +698,7 @@ def main() -> None:
     paths.append(build_behavior_lstm(output_dir))
     paths.append(build_network_anomaly(output_dir))
     paths.append(build_ransomware(output_dir))
+    paths.append(build_memory_injection(output_dir))
 
     log.info("=== Signing models ===")
     pubkey = sign_models(output_dir)
@@ -621,6 +735,9 @@ def generate_network_model(out_path: str) -> None:
 
 def generate_ransomware_model(out_path: str) -> None:
     build_ransomware(Path(out_path).parent)
+
+def generate_memory_injection_model(out_path: str) -> None:
+    build_memory_injection(Path(out_path).parent)
 
 
 if __name__ == "__main__":
