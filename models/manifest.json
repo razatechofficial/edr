@@ -1,52 +1,168 @@
 {
+  "schema_version": "2.0",
+  "signing_pubkey": "d34cb81cd1bec312cb54bf9f974b58156d775aa220fffc8bbbf113d918a99460",
+  "updated_at": "2026-06-04T14:01:49Z",
   "models": [
     {
-      "name": "behavior_lstm",
-      "file": "behavior_lstm.onnx",
-      "sha256": "e421cabe54f1994bd26983c73e197c7cb3f70217b8997b51b4df44417597b172",
-      "source": "trained_synthetic_v2",
-      "version": "2.0.0",
-      "size_bytes": 2448258,
-      "trained_at": "2026-04-09T14:26:50Z"
-    },
-    {
-      "name": "behavior_transformer",
-      "file": "behavior_transformer.onnx",
-      "sha256": "2a5254305b06cbe0b859b1c1595675c21b910e995a958ca76391e2362492b912",
-      "source": "trained_synthetic_v2",
-      "version": "2.0.0",
-      "size_bytes": 530559,
-      "trained_at": "2026-04-09T14:26:50Z"
+      "name": "pe_classifier",
+      "version": "3.0.0",
+      "file": "pe_classifier.onnx",
+      "source": "ember2018",
+      "sha256": "b9803eec778fbd7cf7c2e0751de7d03489b633a18662a5dadcbbadcfaef02430",
+      "size_bytes": 2405750,
+      "status": "active",
+      "metrics": {
+        "accuracy": 0.9319,
+        "precision": 0.9369,
+        "recall": 0.9261,
+        "f1": 0.9315,
+        "roc_auc": 0.9831
+      },
+      "created_at": "2026-06-02T13:59:17Z"
     },
     {
       "name": "network_anomaly",
+      "version": "3.0.0",
       "file": "network_anomaly.onnx",
-      "sha256": "731c7e0e695efd66654b16012f5a289d998a3d2e69d723996930b02e53f1e271",
-      "source": "trained_synthetic_v2",
-      "version": "2.0.0",
+      "source": "unsw-nb15",
+      "sha256": "9842cb2dac58a2224383d8af5c657be1a0e1610bdb10f2983d226996df9451f1",
       "size_bytes": 12046,
-      "trained_at": "2026-04-09T14:26:50Z"
+      "status": "active",
+      "metrics": {
+        "accuracy": 0.9441,
+        "precision": 0.434,
+        "recall": 0.8474,
+        "f1": 0.574,
+        "roc_auc": 0.9711
+      },
+      "created_at": "2026-06-02T13:59:17Z"
     },
     {
-      "name": "pe_classifier",
-      "file": "pe_classifier.onnx",
-      "sha256": "ea7b17a50f91dfb5ff5da38d84dbfa83d167901906f7dd81f5f11d6251c04007",
-      "source": "trained_synthetic_v2",
-      "version": "2.0.0",
-      "size_bytes": 207377,
-      "trained_at": "2026-04-09T14:26:50Z"
+      "name": "behavior_lstm",
+      "version": "3.0.0",
+      "file": "behavior_lstm.onnx",
+      "source": "synthetic_v3",
+      "sha256": "e1107df6bcb992788b1f9b570b0729910bd605433c64103321c64ab8a6f30896",
+      "size_bytes": 2448258,
+      "status": "active",
+      "metrics": {
+        "f1": 1.0,
+        "roc_auc": 1.0
+      },
+      "created_at": "2026-06-02T13:59:17Z"
     },
     {
       "name": "ransomware",
+      "version": "3.0.0",
       "file": "ransomware.onnx",
-      "sha256": "1d784aac7c508ad53bfca43853ae3c8090e35cfe0ace385b03ed1f2f5bd7f14f",
-      "source": "trained_synthetic_v2",
+      "source": "synthetic_v3",
+      "sha256": "f68436adf79b56327131d9694be325f40df0a1cf76006928fecf0f29267c9d6e",
+      "size_bytes": 17396,
+      "status": "active",
+      "metrics": {
+        "f1": 1.0,
+        "roc_auc": 1.0
+      },
+      "created_at": "2026-06-02T13:59:17Z"
+    },
+    {
+      "name": "behavior_transformer",
+      "version": "3.0.0",
+      "file": "behavior_transformer.onnx",
+      "source": "enhanced_synthetic_v1",
+      "sha256": "04bb8d40373afce24ae0433ae7bc6013eaea8e3fa1bebd374e99900330ba5cf9",
+      "size_bytes": 495742,
+      "status": "active",
+      "created_at": "2026-06-02T14:24:53Z",
+      "metrics": {
+        "accuracy": 1.0,
+        "roc_auc": 1.0
+      }
+    },
+    {
+      "name": "lolbin_detector",
+      "version": "1.0.0",
+      "file": "lolbin_detector.onnx",
+      "source": "enhanced_synthetic_v1",
+      "sha256": "f1faf5c73c6ae1f0110ac389cd4cc7acddcdb597c699723c1065dd582cd5d07d",
+      "size_bytes": 67466,
+      "status": "active",
+      "metrics": {
+        "accuracy": 1.0,
+        "roc_auc": 1.0
+      },
+      "created_at": "2026-06-02T14:24:53Z"
+    },
+    {
+      "name": "supply_chain_detector",
+      "version": "1.0.0",
+      "file": "supply_chain_detector.onnx",
+      "source": "enhanced_synthetic_v1",
+      "sha256": "ca1399aef8744b644833fb39323d8a1412679351915b74c577cff9410a46105a",
+      "size_bytes": 17795,
+      "status": "active",
+      "metrics": {
+        "accuracy": 0.8605,
+        "roc_auc": 0.91
+      },
+      "created_at": "2026-06-02T14:24:53Z"
+    },
+    {
+      "name": "aigen_detector",
+      "version": "1.0.0",
+      "file": "aigen_detector.onnx",
+      "source": "enhanced_synthetic_v1",
+      "sha256": "ec384a0e521356cdad0afe02be0b6f17cea1d55615b121033b36459fccbeb2ea",
+      "size_bytes": 38535,
+      "status": "active",
+      "metrics": {
+        "accuracy": 1.0,
+        "roc_auc": 1.0
+      },
+      "created_at": "2026-06-02T14:24:53Z"
+    },
+    {
+      "name": "identity_threat",
+      "version": "1.0.0",
+      "file": "identity_threat.onnx",
+      "source": "enhanced_synthetic_v1",
+      "sha256": "18c316cd566af13196b8409fa150fc1a46dc55c3071f49209b44aced95d8585a",
+      "size_bytes": 10494,
+      "status": "active",
+      "metrics": {
+        "accuracy": 0.8742,
+        "roc_auc": 0.93
+      },
+      "created_at": "2026-06-02T14:24:53Z"
+    },
+    {
+      "name": "memory_injection",
+      "version": "1.0.0",
+      "file": "memory_injection.onnx",
+      "sha256": "9148847dd3ded7cd127bc14b569c744cfe43d86d3f592a0c3d1a6afe73e01dee",
+      "source": "cic-malmem-2022",
+      "status": "retired",
+      "size_bytes": 0,
+      "created_at": "2026-06-04T14:01:25Z",
+      "metrics": {
+        "accuracy": 0.9899,
+        "auc": 0.998
+      }
+    },
+    {
+      "name": "memory_injection",
       "version": "2.0.0",
-      "size_bytes": 19938,
-      "trained_at": "2026-04-09T14:26:50Z"
+      "file": "memory_injection.onnx",
+      "sha256": "1957d0637933cbb33c3e3ccf4ff76de6a0ddfeb541acb973f54e4893a2e4838e",
+      "source": "cic-malmem-2022+synthetic:5techniques",
+      "status": "active",
+      "size_bytes": 20061,
+      "created_at": "2026-06-04T14:09:39Z",
+      "metrics": {
+        "accuracy": 0.9663,
+        "benign_fp_rate": 0.001
+      }
     }
   ],
-  "schema_version": "1.0",
-  "signing_pubkey": "d369b170e88336bc4ee800f03c824545bc33c6b0e951e93652e39266b188b882",
-  "updated_at": "2026-04-09T14:26:50Z"
+  "generated_at": "2026-06-04T14:09:39Z"
 }
