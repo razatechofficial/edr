@@ -24,6 +24,7 @@ const (
 	modelSupplyChain         = "supply_chain_detector"
 	modelAIGen               = "aigen_detector"
 	modelIdentity            = "identity_threat"
+	modelMemoryInjection    = "memory_injection"
 
 	defaultPEMaliciousThreshold = 0.80
 
@@ -36,6 +37,7 @@ const (
 	defaultFileSupplyChain         = "supply_chain_detector.onnx"
 	defaultFileAIGen               = "aigen_detector.onnx"
 	defaultFileIdentity            = "identity_threat.onnx"
+	defaultFileMemoryInjection    = "memory_injection.onnx"
 )
 
 // Config holds settings for constructing a new ML Engine.
@@ -52,6 +54,8 @@ type Config struct {
 	SupplyChainFile         string
 	AIGenFile               string
 	IdentityFile            string
+
+	MemoryInjectionFile string
 
 	// Hex-encoded Ed25519 public key for signature verification. Empty = off.
 	VerifyPubKeyHex string
@@ -122,6 +126,13 @@ type IdentityScore struct {
 	Category   string  `json:"category"`
 }
 
+// MemoryInjectionScore contains the ML score for memory injection detection.
+type MemoryInjectionScore struct {
+	Score      float64 `json:"score"`
+	Confidence float64 `json:"confidence"`
+	Category   string  `json:"category"`
+}
+
 // ABTestMode controls how shadow/canary models are evaluated.
 type ABTestMode int
 
@@ -151,6 +162,7 @@ type Engine struct {
 	supplyChainExtract  *features.SupplyChainFeatureExtractor
 	aigenExtractor      *features.AIGenFeatureExtractor
 	identityExtractor   *features.IdentityFeatureExtractor
+	memInjectExtractor  *features.MemoryInjectionFeatureExtractor
 	logger              *zap.Logger
 	enabled             bool
 	peThreshold         float64
@@ -190,6 +202,7 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 		modelSupplyChain:         or(cfg.SupplyChainFile, defaultFileSupplyChain),
 		modelAIGen:               or(cfg.AIGenFile, defaultFileAIGen),
 		modelIdentity:            or(cfg.IdentityFile, defaultFileIdentity),
+		modelMemoryInjection:    or(cfg.MemoryInjectionFile, defaultFileMemoryInjection),
 	}
 	for name, file := range modelFiles {
 		p := filepath.Join(cfg.ModelsDir, file)
@@ -226,6 +239,7 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 		supplyChainExtract: &features.SupplyChainFeatureExtractor{},
 		aigenExtractor:     &features.AIGenFeatureExtractor{},
 		identityExtractor:  &features.IdentityFeatureExtractor{},
+		memInjectExtractor: &features.MemoryInjectionFeatureExtractor{},
 		logger:             logger,
 		enabled:            true,
 		peThreshold:        peThr,
@@ -564,6 +578,40 @@ func (e *Engine) ScoreIdentity(ctx context.Context, evt interface{}) (*IdentityS
 	}, nil
 }
 
+// ScoreMemoryInjection evaluates memory scan data for process injection
+// indicators such as RWX regions, PE headers in non-module memory, high entropy
+// executable regions, and unbacked memory mappings.
+func (e *Engine) ScoreMemoryInjection(ctx context.Context, evt interface{}) (*MemoryInjectionScore, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !e.enabled {
+		return nil, fmt.Errorf("ml: engine is disabled")
+	}
+
+	feats := e.memInjectExtractor.Extract(evt)
+
+	session, err := e.models.Get(modelMemoryInjection)
+	if err != nil {
+		return nil, fmt.Errorf("ml: %w", err)
+	}
+
+	output, err := session.Predict(feats)
+	if err != nil {
+		return nil, fmt.Errorf("ml: memory_injection inference: %w", err)
+	}
+	if len(output) < 1 {
+		return nil, fmt.Errorf("ml: memory_injection model returned empty output")
+	}
+
+	score := float64(output[0])
+	return &MemoryInjectionScore{
+		Score:      score,
+		Confidence: outputConfidence(output),
+		Category:   classifyMemoryInjectionCategory(score),
+	}, nil
+}
+
 // Enabled reports whether the ML engine is currently active.
 func (e *Engine) Enabled() bool { return e.enabled }
 
@@ -780,6 +828,19 @@ func classifyIdentityCategory(score float64) string {
 		return "suspicious_authentication"
 	case score >= 0.4:
 		return "authentication_anomaly"
+	default:
+		return "normal"
+	}
+}
+
+func classifyMemoryInjectionCategory(score float64) string {
+	switch {
+	case score >= 0.9:
+		return "active_injection"
+	case score >= 0.7:
+		return "suspicious_memory"
+	case score >= 0.4:
+		return "anomalous_allocation"
 	default:
 		return "normal"
 	}
