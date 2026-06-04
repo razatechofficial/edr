@@ -46,25 +46,128 @@ class IdentityThreatModel(nn.Module):
         return self.net(x)
 
 
-def generate_synthetic_data(n: int = 5000, seed: int = 42) -> tuple[np.ndarray, np.ndarray]:
+IDENTITY_ATTACK_SCENARIOS = {
+    "kerberoast": {
+        "desc": "Service account SPN enumeration + TGS-REP cracking",
+        "auth_velocity": [0.2, 0.3, 0.1, 0.2],
+        "priv_esc": [0.3, 0.4, 0.2, 0.3],
+        "ticket_anomaly": [0.85, 0.9, 0.8, 0.7],
+        "mfa": [0.1, 0.2, 0.1, 0.1],
+        "session": [0.3, 0.4, 0.5, 0.2],
+        "context": [0.2, 0.3, 0.1, 0.2],
+    },
+    "golden_ticket": {
+        "desc": "KRBTGT hash exfil → forged TGT with arbitrary privilege",
+        "auth_velocity": [0.2, 0.3, 0.1, 0.2],
+        "priv_esc": [0.9, 0.95, 0.85, 0.8],
+        "ticket_anomaly": [0.7, 0.85, 0.9, 0.8],
+        "mfa": [0.1, 0.15, 0.1, 0.2],
+        "session": [0.6, 0.8, 0.7, 0.5],
+        "context": [0.3, 0.4, 0.2, 0.3],
+    },
+    "silver_ticket": {
+        "desc": "Service NTLM hash → forged TGS for specific service",
+        "auth_velocity": [0.2, 0.3, 0.2, 0.2],
+        "priv_esc": [0.6, 0.7, 0.5, 0.4],
+        "ticket_anomaly": [0.75, 0.8, 0.85, 0.7],
+        "mfa": [0.15, 0.2, 0.15, 0.1],
+        "session": [0.4, 0.5, 0.6, 0.3],
+        "context": [0.2, 0.3, 0.2, 0.3],
+    },
+    "dcom_lateral": {
+        "desc": "DCOM lateral movement with privileged user token",
+        "auth_velocity": [0.3, 0.4, 0.2, 0.3],
+        "priv_esc": [0.7, 0.6, 0.8, 0.5],
+        "ticket_anomaly": [0.3, 0.4, 0.5, 0.3],
+        "mfa": [0.2, 0.1, 0.15, 0.2],
+        "session": [0.6, 0.7, 0.5, 0.4],
+        "context": [0.5, 0.3, 0.4, 0.2],
+    },
+    "mfa_bypass": {
+        "desc": "MFA fatigue bombing or token relay bypass",
+        "auth_velocity": [0.6, 0.7, 0.5, 0.4],
+        "priv_esc": [0.4, 0.5, 0.3, 0.2],
+        "ticket_anomaly": [0.2, 0.3, 0.1, 0.2],
+        "mfa": [0.85, 0.9, 0.95, 0.8],
+        "session": [0.5, 0.4, 0.6, 0.3],
+        "context": [0.6, 0.5, 0.7, 0.4],
+    },
+    "impossible_travel": {
+        "desc": "Login from geographically impossible locations in short time",
+        "auth_velocity": [0.9, 0.95, 0.85, 0.8],
+        "priv_esc": [0.2, 0.3, 0.1, 0.2],
+        "ticket_anomaly": [0.1, 0.2, 0.1, 0.15],
+        "mfa": [0.3, 0.2, 0.4, 0.2],
+        "session": [0.4, 0.5, 0.3, 0.2],
+        "context": [0.7, 0.8, 0.6, 0.5],
+    },
+    "dcsync": {
+        "desc": "DRSUAPI directory replication for credential harvesting",
+        "auth_velocity": [0.2, 0.3, 0.3, 0.4],
+        "priv_esc": [0.8, 0.7, 0.9, 0.6],
+        "ticket_anomaly": [0.5, 0.6, 0.4, 0.3],
+        "mfa": [0.1, 0.15, 0.1, 0.2],
+        "session": [0.3, 0.4, 0.2, 0.1],
+        "context": [0.4, 0.5, 0.3, 0.2],
+    },
+    "pass_the_hash": {
+        "desc": "NTLM hash relay for lateral movement",
+        "auth_velocity": [0.4, 0.5, 0.3, 0.4],
+        "priv_esc": [0.5, 0.6, 0.4, 0.3],
+        "ticket_anomaly": [0.3, 0.4, 0.2, 0.3],
+        "mfa": [0.2, 0.15, 0.25, 0.1],
+        "session": [0.5, 0.7, 0.4, 0.3],
+        "context": [0.3, 0.4, 0.2, 0.3],
+    },
+}
+
+
+def generate_synthetic_data(n: int = 20000, seed: int = 42) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.RandomState(seed)
-    X = rng.randn(n, IDENTITY_FEATURE_DIM).astype(np.float32) * 0.2 + 0.3
+
+    # -- Benign baseline: normal authentication patterns --
+    X = rng.beta(2, 6, (n, IDENTITY_FEATURE_DIM)).astype(np.float32)
     y = np.zeros(n, dtype=np.float32)
 
-    n_mal = int(n * 0.2)
-    for i in rng.choice(n, n_mal, replace=False):
-        attack = rng.choice(["kerberoast", "golden_ticket", "mfa_bypass", "impossible_travel"])
-        if attack == "kerberoast":
-            X[i, 8:12] = rng.uniform(0.7, 1.0, 4)
-        elif attack == "golden_ticket":
-            X[i, 4:8] = rng.uniform(0.8, 1.0, 4)
-            X[i, 8:10] = rng.uniform(0.6, 0.9, 2)
-        elif attack == "mfa_bypass":
-            X[i, 12:16] = rng.uniform(0.6, 1.0, 4)
-        elif attack == "impossible_travel":
-            X[i, 0:4] = rng.uniform(0.8, 1.0, 4)
+    n_mal = int(n * 0.20)
+    mal_idx = rng.choice(n, n_mal, replace=False)
+
+    for i in mal_idx:
+        attack = rng.choice(list(IDENTITY_ATTACK_SCENARIOS.keys()))
+        scenario = IDENTITY_ATTACK_SCENARIOS[attack]
+
+        # 1) Authentication velocity (features 0-3)
+        for j, v in enumerate(scenario["auth_velocity"]):
+            X[i, j] = rng.uniform(v * 0.85, v * 1.15)
+
+        # 2) Privilege escalation (features 4-7)
+        for j, v in enumerate(scenario["priv_esc"]):
+            X[i, 4 + j] = rng.uniform(v * 0.85, v * 1.15)
+
+        # 3) Service ticket anomaly (features 8-11)
+        for j, v in enumerate(scenario["ticket_anomaly"]):
+            X[i, 8 + j] = rng.uniform(v * 0.85, v * 1.15)
+
+        # 4) MFA patterns (features 12-15)
+        for j, v in enumerate(scenario["mfa"]):
+            X[i, 12 + j] = rng.uniform(v * 0.85, v * 1.15)
+
+        # 5) Session features (features 16-19)
+        for j, v in enumerate(scenario["session"]):
+            X[i, 16 + j] = rng.uniform(v * 0.85, v * 1.15)
+
+        # 6) Context features (features 20-23)
+        for j, v in enumerate(scenario["context"]):
+            X[i, 20 + j] = rng.uniform(v * 0.85, v * 1.15)
+
         y[i] = 1.0
 
+    # Correlations: high ticket anomaly + high priv esc = credential theft
+    for i in range(n):
+        if X[i, 8] > 0.6 and X[i, 4] > 0.6:
+            X[i, 16:18] += rng.uniform(0.05, 0.15, 2)
+
+    np.clip(X, 0.0, 1.0, out=X)
     return X, y
 
 
