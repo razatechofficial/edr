@@ -46,17 +46,92 @@ class SupplyChainDetector(nn.Module):
         return self.net(x)
 
 
-def generate_synthetic_data(n: int = 5000, seed: int = 42) -> tuple[np.ndarray, np.ndarray]:
+SUPPLY_CHAIN_SCENARIOS = {
+    "solarwinds": {
+        "desc": "Trojanized Orion update with C2 backdoor and delayed activation",
+        "entropy_dev":  [0.2, 0.6, 0.8, 0.5],   # section entropy deviation
+        "cert_anomaly": [0.7, 0.3, 0.5, 0.6],   # cert chain anomaly (low=bad)
+        "import_dev":   [0.6, 0.7, 0.5, 0.8, 0.4, 0.3, 0.2, 0.5],
+        "network_callouts": [0.8, 0.9, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2],
+        "update_channel":   [0.3, 0.7, 0.2, 0.4, 0.8, 0.5, 0.6, 0.7],
+    },
+    "3cx_compromise": {
+        "desc": "Trojanized 3CXDesktopApp with signed installer but beaconing behavior",
+        "entropy_dev":  [0.3, 0.5, 0.2, 0.7],
+        "cert_anomaly": [0.2, 0.1, 0.1, 0.1],   # cert looked valid
+        "import_dev":   [0.5, 0.4, 0.6, 0.3, 0.7, 0.5, 0.4, 0.6],
+        "network_callouts": [0.9, 0.8, 0.6, 0.7, 0.5, 0.6, 0.4, 0.5],
+        "update_channel":   [0.5, 0.3, 0.6, 0.2, 0.1, 0.3, 0.2, 0.1],
+    },
+    "xz_utils_backdoor": {
+        "desc": "SSH backdoor injected into liblzma via multi-year maintainer social engineering",
+        "entropy_dev":  [0.7, 0.4, 0.3, 0.2],
+        "cert_anomaly": [0.9, 0.9, 0.8, 0.7],   # no cert (OSS project)
+        "import_dev":   [0.8, 0.6, 0.7, 0.5, 0.9, 0.4, 0.3, 0.2],
+        "network_callouts": [0.1, 0.2, 0.1, 0.3, 0.2, 0.1, 0.1, 0.2],
+        "update_channel":   [0.8, 0.7, 0.9, 0.6, 0.7, 0.5, 0.4, 0.3],
+    },
+    "codecov_bash": {
+        "desc": "Bash uploader compromise leaking CI/CD secrets",
+        "entropy_dev":  [0.4, 0.3, 0.2, 0.1],
+        "cert_anomaly": [0.1, 0.1, 0.1, 0.1],
+        "import_dev":   [0.2, 0.3, 0.1, 0.2, 0.1, 0.1, 0.2, 0.1],
+        "network_callouts": [0.7, 0.8, 0.9, 0.7, 0.6, 0.8, 0.5, 0.7],
+        "update_channel":   [0.6, 0.8, 0.5, 0.7, 0.9, 0.6, 0.5, 0.4],
+    },
+    "notepad_plusplus": {
+        "desc": "NppCrypt plugin compromise with clipboard exfiltration",
+        "entropy_dev":  [0.5, 0.7, 0.6, 0.8],
+        "cert_anomaly": [0.5, 0.4, 0.6, 0.3],
+        "import_dev":   [0.4, 0.6, 0.5, 0.7, 0.3, 0.5, 0.4, 0.2],
+        "network_callouts": [0.3, 0.4, 0.5, 0.6, 0.7, 0.5, 0.4, 0.3],
+        "update_channel":   [0.2, 0.4, 0.3, 0.5, 0.2, 0.1, 0.3, 0.2],
+    },
+}
+
+
+def generate_synthetic_data(n: int = 20000, seed: int = 42) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.RandomState(seed)
-    X = rng.randn(n, SUPPLY_CHAIN_FEATURE_DIM).astype(np.float32) * 0.2 + 0.3
+
+    # -- Benign baseline: normal software distributions --
+    X = rng.beta(2, 5, (n, SUPPLY_CHAIN_FEATURE_DIM)).astype(np.float32)
     y = np.zeros(n, dtype=np.float32)
 
-    n_mal = int(n * 0.15)
-    for i in rng.choice(n, n_mal, replace=False):
-        X[i, 0:4] += rng.uniform(0.3, 0.7, 4)   # entropy deviation
-        X[i, 4:8] -= rng.uniform(0.2, 0.5, 4)    # cert anomalies
-        X[i, 16:24] += rng.uniform(0.4, 0.8, 8)  # suspicious network callouts
+    n_mal = int(n * 0.20)
+    mal_idx = rng.choice(n, n_mal, replace=False)
+
+    for i in mal_idx:
+        scenario = rng.choice(list(SUPPLY_CHAIN_SCENARIOS.keys()))
+        s = SUPPLY_CHAIN_SCENARIOS[scenario]
+
+        # 1) Binary entropy deviation (features 0-3)
+        for j, v in enumerate(s["entropy_dev"]):
+            X[i, j] = rng.uniform(v * 0.8, v * 1.2)
+
+        # 2) Signature/certificate features (features 4-7)
+        # Low values = anomalous (missing cert, invalid chain, unusual issuer)
+        for j, v in enumerate(s["cert_anomaly"]):
+            X[i, 4 + j] = rng.uniform(max(0, v - 0.2), min(1, v + 0.2))
+
+        # 3) Import table features (features 8-15)
+        for j, v in enumerate(s["import_dev"]):
+            X[i, 8 + j] = rng.uniform(v * 0.8, v * 1.2)
+
+        # 4) Network callout features (features 16-23)
+        for j, v in enumerate(s["network_callouts"]):
+            X[i, 16 + j] = rng.uniform(v * 0.8, v * 1.2)
+
+        # 5) Update channel features (features 24-31)
+        for j, v in enumerate(s["update_channel"]):
+            X[i, 24 + j] = rng.uniform(v * 0.8, v * 1.2)
+
         y[i] = 1.0
+
+    # Feature correlation: high entropy deviation often correlates with network callouts
+    for i in range(n):
+        if X[i, 0] > 0.6 and X[i, 1] > 0.5:
+            X[i, 16:20] += rng.uniform(0.1, 0.25, 4)
+    np.clip(X, 0.0, 1.0, out=X)
 
     return X, y
 
