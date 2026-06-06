@@ -130,7 +130,7 @@ ml:
     use_gpu: false
     gpu_device_id: 0
 
-  verify_pubkey: ""
+  verify_pubkey: "d2b13851edb43b234a1d56cb18f87b7a8fe768070475f826a0775819f0f504c6"
 
 # All detection engines enabled with local-only data sources.
 detection:

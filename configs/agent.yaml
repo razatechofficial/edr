@@ -233,7 +233,7 @@ ml:
 
   # Hex-encoded Ed25519 public key for verifying model signatures.
   # When set, all model loads and hot-swaps require a valid .sig file.
-  verify_pubkey: ""
+  verify_pubkey: "d2b13851edb43b234a1d56cb18f87b7a8fe768070475f826a0775819f0f504c6"
 
 # -----------------------------------------------------------------------------
 # Detection engines
