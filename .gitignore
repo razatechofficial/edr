@@ -46,6 +46,10 @@ dist/*.pkg
 ml/datasets/
 ml/training/keys/
 ml/training/output/
+ml/models/
+models/keys/
+models/behavior_lstm_beth_v5/
+output/
 models/model_signing.key
 models/*.pt
 models/*.npy
