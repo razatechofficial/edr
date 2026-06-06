@@ -4,21 +4,28 @@
 Detects abuse of legitimate system tools (PowerShell, WMI, certutil, mshta,
 regsvr32, etc.) for malicious purposes -- a dominant 2025+ attack vector.
 
-Features (64-dim):
-  - Command-line token frequencies (20): suspicious flags, base64 patterns
-  - Process ancestry encoding (12): depth, known-good parent deviation
-  - Child process spawn metrics (8): fan-out, rate, diversity
-  - Script interpreter patterns (8): invocation flags, pipe chains
-  - Registry modification features (8): frequency, key sensitivity
-  - WMI/COM indicators (8): object creation, method calls
-
-Training data: LOLBAS Project + Atomic Red Team telemetry.
+Features (64-dim) matching Go runtime feature extractor:
+  - [0:19]  Command-line suspicious flags (19 flags)
+  - [19]    Base64 character run score
+  - [20]    Ancestor count / 10
+  - [21]    Process name LOLBin risk score
+  - [22]    Parent process name LOLBin risk score
+  - [23:31] Ancestor LOLBin risk scores (up to 8)
+  - [32]    Child process count / 20
+  - [33:39] Unused (child spawn)
+  - [40]    Is script interpreter
+  - [41]    Pipe count / 5
+  - [42:47] Unused (script interp)
+  - [48]    Registry ops / 50
+  - [49:55] Unused (registry)
+  - [56:63] Unused (WMI/COM)
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +36,173 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(me
 log = logging.getLogger("train_lolbin")
 
 LOLBIN_FEATURE_DIM = 64
+
+# Go suspiciousFlags indices (0-18)
+SUSP_FLAGS = [
+    "-enc", "-encodedcommand", "-nop", "-noprofile", "-w hidden",
+    "-windowstyle hidden", "-bypass", "-exec bypass", "-noninteractive",
+    "downloadstring", "downloadfile", "invoke-expression", "iex",
+    "frombase64string", "new-object", "net.webclient", "bitstransfer",
+    "start-process", "invoke-webrequest",
+]
+
+# Go knownLOLBins risk scores
+KNOWN_LOLBINS = {
+    "powershell.exe": 0.7, "pwsh.exe": 0.7, "cmd.exe": 0.4,
+    "wscript.exe": 0.8, "cscript.exe": 0.8, "mshta.exe": 0.9,
+    "regsvr32.exe": 0.8, "rundll32.exe": 0.7, "certutil.exe": 0.8,
+    "msiexec.exe": 0.6, "installutil.exe": 0.8, "wmic.exe": 0.7,
+    "bitsadmin.exe": 0.7, "schtasks.exe": 0.5, "at.exe": 0.5,
+}
+
+SCRIPT_INTERPRETERS = {"powershell", "pwsh", "wscript", "cscript", "mshta", "python", "perl", "ruby"}
+
+# Go feature indices
+IDX_BASE64 = 19
+IDX_ANCESTOR_DEPTH = 20
+IDX_PROC_RISK = 21
+IDX_PARENT_RISK = 22
+IDX_ANCESTOR_RISK_START = 23
+IDX_CHILD_COUNT = 32
+IDX_SCRIPT_INTERP = 40
+IDX_PIPE_COUNT = 41
+IDX_REG_OPS = 48
+
+# Per-LOLBin category profiles mapping to Go runtime feature layout
+LOLBIN_CATEGORIES = {
+    "powershell": {
+        "flags": [0, 1, 2, 3, 4, 5, 6, 7, 11, 12],
+        "base64": True,
+        "proc_risk": 0.7,
+        "parent_risk": 0.0,
+        "ancestor_risks": [0.0, 0.0, 0.0, 0.0],
+        "script_interp": True,
+        "pipe_chain": True,
+        "child_spawn": True,
+        "reg_ops": True,
+    },
+    "wmic": {
+        "flags": [0, 1, 8, 9],
+        "base64": False,
+        "proc_risk": 0.7,
+        "parent_risk": 0.0,
+        "ancestor_risks": [0.0, 0.0, 0.0, 0.0],
+        "script_interp": False,
+        "pipe_chain": False,
+        "child_spawn": True,
+        "reg_ops": False,
+    },
+    "certutil": {
+        "flags": [0, 6],
+        "base64": True,
+        "proc_risk": 0.8,
+        "parent_risk": 0.0,
+        "ancestor_risks": [0.0, 0.0, 0.0, 0.0],
+        "script_interp": False,
+        "pipe_chain": False,
+        "child_spawn": True,
+        "reg_ops": False,
+    },
+    "mshta": {
+        "flags": [0, 1, 14],
+        "base64": False,
+        "proc_risk": 0.9,
+        "parent_risk": 0.0,
+        "ancestor_risks": [0.0, 0.0, 0.0, 0.0],
+        "script_interp": True,
+        "pipe_chain": False,
+        "child_spawn": True,
+        "reg_ops": False,
+    },
+    "regsvr32": {
+        "flags": [0, 6, 14],
+        "base64": True,
+        "proc_risk": 0.8,
+        "parent_risk": 0.4,
+        "ancestor_risks": [0.7, 0.0, 0.0, 0.0],
+        "script_interp": False,
+        "pipe_chain": False,
+        "child_spawn": False,
+        "reg_ops": True,
+    },
+    "bitsadmin": {
+        "flags": [0, 6, 15],
+        "base64": False,
+        "proc_risk": 0.7,
+        "parent_risk": 0.0,
+        "ancestor_risks": [0.0, 0.0, 0.0, 0.0],
+        "script_interp": False,
+        "pipe_chain": False,
+        "child_spawn": True,
+        "reg_ops": False,
+    },
+    "rundll32": {
+        "flags": [0, 6, 14],
+        "base64": True,
+        "proc_risk": 0.7,
+        "parent_risk": 0.4,
+        "ancestor_risks": [0.7, 0.0, 0.0, 0.0],
+        "script_interp": False,
+        "pipe_chain": False,
+        "child_spawn": True,
+        "reg_ops": False,
+    },
+    "cscript": {
+        "flags": [0, 2, 3, 7],
+        "base64": False,
+        "proc_risk": 0.8,
+        "parent_risk": 0.0,
+        "ancestor_risks": [0.0, 0.0, 0.0, 0.0],
+        "script_interp": True,
+        "pipe_chain": False,
+        "child_spawn": True,
+        "reg_ops": False,
+    },
+    "wscript": {
+        "flags": [0, 2, 3, 7],
+        "base64": False,
+        "proc_risk": 0.8,
+        "parent_risk": 0.0,
+        "ancestor_risks": [0.0, 0.0, 0.0, 0.0],
+        "script_interp": True,
+        "pipe_chain": False,
+        "child_spawn": True,
+        "reg_ops": False,
+    },
+    "installutil": {
+        "flags": [0, 2, 3],
+        "base64": False,
+        "proc_risk": 0.8,
+        "parent_risk": 0.0,
+        "ancestor_risks": [0.0, 0.0, 0.0, 0.0],
+        "script_interp": False,
+        "pipe_chain": False,
+        "child_spawn": True,
+        "reg_ops": False,
+    },
+    "cmd_abuse": {
+        "flags": [0, 2, 3, 6, 7],
+        "base64": False,
+        "proc_risk": 0.4,
+        "parent_risk": 0.7,
+        "ancestor_risks": [0.7, 0.7, 0.4, 0.0],
+        "script_interp": False,
+        "pipe_chain": True,
+        "child_spawn": True,
+        "reg_ops": False,
+    },
+    "schtasks": {
+        "flags": [0, 2],
+        "base64": False,
+        "proc_risk": 0.5,
+        "parent_risk": 0.0,
+        "ancestor_risks": [0.0, 0.0, 0.0, 0.0],
+        "script_interp": False,
+        "pipe_chain": False,
+        "child_spawn": False,
+        "reg_ops": True,
+    },
+}
 
 
 class LOLBinDetector(nn.Module):
@@ -49,114 +223,92 @@ class LOLBinDetector(nn.Module):
         return self.net(x)
 
 
-LOLBIN_CATEGORIES = {
-    "powershell":  {"idx": 0,  "susp_flags": [0,1,2,3,4],   "base64": [5,6,7],   "desc": "-EncodedCommand, -Exec bypass, download cradle"},
-    "wmic":        {"idx": 1,  "susp_flags": [0,1,8,9],     "base64": [5,6],     "desc": "process call create, /node:, /user:"},
-    "certutil":    {"idx": 2,  "susp_flags": [0,10,11,12],  "base64": [5,6,7],   "desc": "-urlcache -f -split, decode/encode"},
-    "mshta":       {"idx": 3,  "susp_flags": [0,13,14],     "base64": [5],       "desc": "JavaScript URL, VBScript inline"},
-    "regsvr32":    {"idx": 4,  "susp_flags": [0,15,16],     "base64": [5],       "desc": "/s /u /i:http://, scrobj.dll"},
-    "bitsadmin":   {"idx": 5,  "susp_flags": [0,17,18],     "base64": [5,6],     "desc": "/transfer /download /upload"},
-    "rundll32":    {"idx": 6,  "susp_flags": [0,19,20],     "base64": [5],       "desc": "JavaScript URL, Powerlurk"},
-    "cscript":     {"idx": 7,  "susp_flags": [0,21,22],     "base64": [5,6,7],   "desc": ".js/.vbs/.jse execution, /e:jscript"},
-    "wscript":     {"idx": 8,  "susp_flags": [0,21,22,23],  "base64": [5,6,7],   "desc": ".js/.vbs/.jse execution"},
-    "msbuild":     {"idx": 9,  "susp_flags": [0,24,25],     "base64": [5],       "desc": "inline tasks, .csproj execution"},
-    "installutil": {"idx": 10, "susp_flags": [0,24,26],     "base64": [5],       "desc": "InstallUtil unmanaged activator"},
-    "csc":         {"idx": 11, "susp_flags": [0,24,27],     "base64": [5],       "desc": "in-memory compilation"},
-    "mshta_alt":   {"idx": 12, "susp_flags": [0,13,14,28],  "base64": [5],       "desc": "HTML Application with embedded script"},
-}
+def _gen_benign(rng: np.random.RandomState) -> np.ndarray:
+    x = np.zeros(LOLBIN_FEATURE_DIM, dtype=np.float32)
+    x[:20] = rng.uniform(0.0, 0.05, size=20)
+    x[20] = rng.uniform(0.0, 0.3)
+    x[21] = 0.0
+    x[22] = 0.0
+    x[23:31] = 0.0
+    x[32] = rng.uniform(0.0, 0.3)
+    x[40] = 0.0
+    x[41] = 0.0
+    x[48] = rng.uniform(0.0, 0.2)
+    return x
 
 
-def generate_synthetic_data(n: int = 20000, seed: int = 42) -> tuple[np.ndarray, np.ndarray]:
+def _gen_from_category(cat_name: str, rng: np.random.RandomState) -> np.ndarray:
+    cat = LOLBIN_CATEGORIES[cat_name]
+    x = np.zeros(LOLBIN_FEATURE_DIM, dtype=np.float32)
+
+    noise = rng.normal(0, 0.08, size=LOLBIN_FEATURE_DIM).astype(np.float32)
+
+    for fi in cat["flags"]:
+        x[fi] = rng.uniform(0.8, 1.0)
+
+    if cat["base64"]:
+        x[IDX_BASE64] = rng.uniform(0.4, 1.0)
+
+    x[IDX_ANCESTOR_DEPTH] = rng.uniform(0.2, 1.0)
+    x[IDX_PROC_RISK] = cat["proc_risk"] + rng.uniform(-0.1, 0.1)
+
+    parent_risk = cat["parent_risk"]
+    if parent_risk > 0:
+        x[IDX_PARENT_RISK] = parent_risk + rng.uniform(-0.1, 0.1)
+
+    for i, ar in enumerate(cat["ancestor_risks"]):
+        if ar > 0 and i < 8:
+            x[IDX_ANCESTOR_RISK_START + i] = ar + rng.uniform(-0.1, 0.1)
+
+    if cat["child_spawn"]:
+        x[IDX_CHILD_COUNT] = rng.uniform(0.2, 1.0)
+
+    if cat["script_interp"]:
+        x[IDX_SCRIPT_INTERP] = 1.0
+
+    if cat["pipe_chain"]:
+        x[IDX_PIPE_COUNT] = rng.uniform(0.2, 0.8)
+
+    if cat["reg_ops"]:
+        x[IDX_REG_OPS] = rng.uniform(0.3, 1.0)
+
+    x = np.clip(x + noise, 0.0, 1.0)
+    return x
+
+
+def generate_training_data(
+    n_benign: int = 30000,
+    n_malicious: int = 10000,
+    seed: int = 42,
+) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.RandomState(seed)
 
-    # -- Benign baseline: enterprise process executions --
-    X = rng.randn(n, LOLBIN_FEATURE_DIM).astype(np.float32) * 0.2 + 0.1
-    X = np.clip(X, 0.0, 1.0)
-    y = np.zeros(n, dtype=np.float32)
+    X_benign = np.array([_gen_benign(rng) for _ in range(n_benign)], dtype=np.float32)
+    y_benign = np.zeros(n_benign, dtype=np.float32)
 
-    n_mal = int(n * 0.30)
-    mal_idx = rng.choice(n, n_mal, replace=False)
+    X_mal = np.array([
+        _gen_from_category(rng.choice(list(LOLBIN_CATEGORIES.keys())), rng)
+        for _ in range(n_malicious)
+    ], dtype=np.float32)
+    y_mal = np.ones(n_malicious, dtype=np.float32)
 
-    for i in mal_idx:
-        # Pick a LOLBin attack category
-        cat_name = rng.choice(list(LOLBIN_CATEGORIES.keys()))
-        cat = LOLBIN_CATEGORIES[cat_name]
+    X = np.concatenate([X_benign, X_mal], axis=0)
+    y = np.concatenate([y_benign, y_mal], axis=0)
 
-        # 1) Suspicious command-line flags (features 0-28)
-        for f in cat["susp_flags"]:
-            X[i, f] = rng.uniform(0.7, 1.0)
+    perm = rng.permutation(len(X))
+    X, y = X[perm], y[perm]
 
-        # 2) Base64 / encoded command patterns (features 5-7)
-        for f in cat["base64"]:
-            X[i, f] = rng.uniform(0.6, 0.95)
-
-        # 3) Pipe chain / multi-stage patterns (features 29-31)
-        X[i, 29] = rng.uniform(0.5, 0.9)  # pipe to IEX
-        X[i, 30] = rng.uniform(0.3, 0.8)  # nested encoding
-        X[i, 31] = rng.uniform(0.4, 0.7)  # multi-stage
-
-        # 4) Process ancestry depth (features 20-25)
-        depth = rng.randint(0, 5)
-        for d in range(depth):
-            X[i, 20 + d] = rng.uniform(0.6, 1.0)
-        if cat["idx"] in (0, 1, 2, 3):  # deeper for remote downloads
-            X[i, 24:26] = rng.uniform(0.7, 1.0, 2)
-
-        # 5) Child process spawn metrics (features 32-39)
-        spawn_count = rng.randint(3, 12)
-        X[i, 32] = min(spawn_count / 15.0, 1.0)  # fan-out
-        X[i, 33] = rng.uniform(0.5, 0.9)          # rate
-        X[i, 34] = rng.uniform(0.4, 0.8)          # diversity
-        X[i, 35] = rng.uniform(0.5, 0.9)          # non-browser children
-        X[i, 36] = rng.uniform(0.3, 0.7)          # short-lived children
-        X[i, 37] = rng.uniform(0.4, 0.8)          # network-connected children
-        X[i, 38] = rng.uniform(0.3, 0.6)          # child with DLL injection
-        X[i, 39] = rng.uniform(0.5, 0.9)          # high inter-arrival variance
-
-        # 6) Registry modification features (features 40-47)
-        X[i, 40] = rng.uniform(0.4, 0.8)          # Run key modification
-        X[i, 41] = rng.uniform(0.3, 0.7)          # AppCertDLL modification
-        X[i, 42] = rng.uniform(0.5, 0.9)          # Debugger key modification
-        X[i, 43] = rng.uniform(0.4, 0.7)          # Image hijack
-        X[i, 44] = rng.uniform(0.3, 0.6)          # Service key modification
-        X[i, 45] = rng.uniform(0.2, 0.5)          # COM hijack
-        X[i, 46] = rng.uniform(0.6, 0.9)          # reg modification rate
-        X[i, 47] = rng.uniform(0.3, 0.7)          # protected key access
-
-        # 7) WMI/COM indicators (features 48-55)
-        X[i, 48] = rng.uniform(0.6, 0.95)         # WMI process creation
-        X[i, 49] = rng.uniform(0.4, 0.8)          # WMI remote execution
-        X[i, 50] = rng.uniform(0.5, 0.9)          # COM object creation
-        X[i, 51] = rng.uniform(0.3, 0.7)          # ActiveX object creation
-        X[i, 52] = rng.uniform(0.4, 0.8)          # WMI event subscription
-        X[i, 53] = rng.uniform(0.5, 0.9)          # WMI persistence
-        X[i, 54] = rng.uniform(0.6, 0.9)          # high WMI query rate
-        X[i, 55] = rng.uniform(0.3, 0.6)          # suspicious WMI namespace
-
-        # 8) Script interpreter patterns (features 56-63)
-        X[i, 56] = rng.uniform(0.6, 0.95)         # download cradle
-        X[i, 57] = rng.uniform(0.5, 0.9)          # reflection/assembly load
-        X[i, 58] = rng.uniform(0.4, 0.8)          # WinAPI invocation
-        X[i, 59] = rng.uniform(0.5, 0.9)          # obfuscation indicator
-        X[i, 60] = rng.uniform(0.3, 0.7)          # suspended process
-        X[i, 61] = rng.uniform(0.4, 0.8)          # memory injection APIs
-        X[i, 62] = rng.uniform(0.5, 0.85)         # AMSI bypass attempts
-        X[i, 63] = rng.uniform(0.6, 0.9)          # ETW patching
-
-        y[i] = 1.0
-
-    # Add feature correlations: base64 patterns correlate with download cradle
-    for i in range(n):
-        if X[i, 5] > 0.6:
-            X[i, 56] = max(X[i, 56], X[i, 5] * rng.uniform(0.7, 1.0))
-        if X[i, 1] > 0.6:
-            X[i, 48] = max(X[i, 48], X[i, 1] * rng.uniform(0.7, 1.0))
-
+    log.info("Training data: %d samples (%d benign, %d malicious, %d categories)",
+             len(X), n_benign, n_malicious, len(LOLBIN_CATEGORIES))
     return X, y
 
 
 def train(args: argparse.Namespace) -> None:
-    X_np, y_np = generate_synthetic_data(args.n_samples)
+    X_np, y_np = generate_training_data(
+        n_benign=args.n_benign,
+        n_malicious=args.n_malicious,
+        seed=args.seed,
+    )
     split = int(len(X_np) * 0.8)
 
     X_train = torch.from_numpy(X_np[:split])
@@ -203,7 +355,9 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--output-dir", default="./output")
     p.add_argument("--epochs", type=int, default=50)
-    p.add_argument("--n-samples", type=int, default=5000)
+    p.add_argument("--n-benign", type=int, default=30000, help="Number of benign samples")
+    p.add_argument("--n-malicious", type=int, default=10000, help="Number of malicious samples")
+    p.add_argument("--seed", type=int, default=42, help="Random seed")
     train(p.parse_args())
 
 
