@@ -25,11 +25,14 @@ ADAPTER_MODULES = {
     "ember": "adapters.ember_adapter",
     "sorel": "adapters.sorel_adapter",
     "malwarebazaar": "adapters.malwarebazaar_adapter",
-    "cape": "adapters.cape_adapter",
     "nsrl": "adapters.nsrl_adapter",
+    "cape": "adapters.cape_adapter",
     "network": "adapters.network_adapter",
     "cic-ids2017": "adapters.network_adapter",
     "unsw-nb15": "adapters.network_adapter",
+    "ctu13": "adapters.ctu13_adapter",
+    "beth": "adapters.beth_adapter",
+    "lolbas": "adapters.lolbas_adapter",
 }
 
 
