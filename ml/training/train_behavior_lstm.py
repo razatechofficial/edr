@@ -92,6 +92,8 @@ class BehaviorLSTM(nn.Module):
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train behavioral LSTM model")
     p.add_argument("--data-path", type=str, default=None, help="Path to real behavioral data CSV")
+    p.add_argument("--beth-path", type=str, default=None, help="Path to BETH dataset CSV (auto-converts)")
+    p.add_argument("--beth-max", type=int, default=20000, help="Max BETH sequences to use")
     p.add_argument("--n-benign", type=int, default=5000, help="Synthetic benign sequences")
     p.add_argument("--n-malicious", type=int, default=5000, help="Synthetic malicious sequences")
     p.add_argument("--window-size", type=int, default=DEFAULT_WINDOW_SIZE)
@@ -107,6 +109,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_data(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray]:
+    if args.beth_path:
+        from adapters.beth_adapter import load_beth_dataset
+        logger.info("Loading BETH dataset from %s ...", args.beth_path)
+        X, y = load_beth_dataset(args.beth_path, max_sequences=args.beth_max)
+        logger.info("BETH loaded: %d sequences (dim %s)", len(y), X.shape[1:])
+        return X, y
+
     if args.data_path:
         logger.info("Loading real behavioral data from %s …", args.data_path)
         import pandas as pd
@@ -136,7 +145,12 @@ def train(args: argparse.Namespace) -> None:
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
     logger.info("Device: %s", device)
 
     X, y = load_data(args)
