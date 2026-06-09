@@ -114,10 +114,11 @@ ml:
   update_interval_hours: 0
 
   models:
-    pe_classifier: "pe_classifier_v3.onnx"
-    behavior_lstm: "behavior_lstm_v2.onnx"
-    network_anomaly: "network_anomaly_v2.onnx"
-    ransomware: "ransomware_v3.onnx"
+    pe_classifier: "pe_classifier.onnx"
+    behavior_lstm: "behavior_lstm.onnx"
+    network_anomaly: "network_anomaly.onnx"
+    ransomware: "ransomware.onnx"
+    network_lgbm: "network_lgbm.onnx"
 
   thresholds:
     pe_malicious: 0.80

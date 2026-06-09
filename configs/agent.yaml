@@ -218,6 +218,7 @@ ml:
     behavior_lstm: "behavior_lstm.onnx"
     network_anomaly: "network_anomaly.onnx"
     ransomware: "ransomware.onnx"
+    network_lgbm: "network_lgbm.onnx"
 
   # Detection confidence thresholds (0.0-1.0).
   thresholds:
