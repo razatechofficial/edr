@@ -283,8 +283,8 @@ func (e *Engine) ScoreFile(ctx context.Context, path string) (*FileScore, error)
 	if err != nil {
 		return nil, fmt.Errorf("ml: pe inference: %w", err)
 	}
-	if len(output) < 2 {
-		return nil, fmt.Errorf("ml: pe model returned %d outputs, expected >= 2", len(output))
+	if len(output) < 1 {
+		return nil, fmt.Errorf("ml: pe model returned empty output")
 	}
 
 	hash, err := fileSHA256(path)
@@ -292,11 +292,11 @@ func (e *Engine) ScoreFile(ctx context.Context, path string) (*FileScore, error)
 		return nil, fmt.Errorf("ml: hashing file: %w", err)
 	}
 
-	malScore := float64(output[1])
+	malScore := float64(output[0])
 	return &FileScore{
 		SHA256:     hash,
 		Score:      malScore,
-		Confidence: softmaxConfidence(output),
+		Confidence: outputConfidence(output),
 		Category:   classifyFileCategory(malScore),
 		Malicious:  malScore >= e.peThreshold,
 	}, nil
