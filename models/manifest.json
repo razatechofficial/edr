@@ -1,14 +1,14 @@
 {
   "schema_version": "2.0",
   "signing_pubkey": "d2b13851edb43b234a1d56cb18f87b7a8fe768070475f826a0775819f0f504c6",
-  "updated_at": "2026-06-09T13:00:00Z",
+  "updated_at": "2026-06-09T14:00:00Z",
   "models": [
     {
       "name": "pe_classifier",
       "version": "2.0.0",
       "file": "pe_classifier.onnx",
-      "sha256": "e1acb445558559628fa7971792d4eaffa87092fc12ed9a3a0070b1f6049c5614",
-      "size_bytes": 2405750,
+      "sha256": "1ba8a81d2b75e8b53285cda7322c3dbd9d5f02cd7517c1af02af5b9317ddbc9d",
+      "size_bytes": 2405805,
       "status": "active",
       "created_at": "2026-06-09T13:00:00Z",
       "metrics": {
@@ -18,7 +18,8 @@
         "recall": 0.9261,
         "f1": 0.9315
       },
-      "source": "ember2018_v1"
+      "source": "ember2018_v1",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "behavior_lstm",
@@ -35,7 +36,8 @@
         "recall": 0.889,
         "f1": 0.939
       },
-      "source": "beth_v1"
+      "source": "beth_v1",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "network_anomaly",
@@ -52,7 +54,8 @@
         "recall": 0.2817,
         "f1": 0.2115
       },
-      "source": "cic_ids2017_autoencoder_v1"
+      "source": "cic_ids2017_autoencoder_v1",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "network_lgbm",
@@ -69,21 +72,23 @@
         "recall": 0.9853,
         "f1": 0.7557
       },
-      "source": "cic_ids2017_ctu13_v1"
+      "source": "cic_ids2017_ctu13_v1",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "ransomware",
       "version": "2.0.0",
       "file": "ransomware.onnx",
-      "sha256": "314a785c2ed61bf04695fced69dbf4fb106d51b85eca274806606b887fb29075",
-      "size_bytes": 26332,
+      "sha256": "137c5e5c3cd9869ad1b6c180aade357a364f47d81e24f3107dcc54ab910309cf",
+      "size_bytes": 26421,
       "status": "active",
       "created_at": "2026-06-09T13:00:00Z",
       "metrics": {
         "accuracy": 1.0,
         "roc_auc": 1.0
       },
-      "source": "synthetic_v2"
+      "source": "synthetic_v2",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "memory_injection",
@@ -96,7 +101,8 @@
       "metrics": {
         "accuracy": 0.9769
       },
-      "source": "cic_malmem2022_v1"
+      "source": "cic_malmem2022_v1",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "lolbin_detector",
@@ -109,7 +115,8 @@
       "metrics": {
         "accuracy": 1.0
       },
-      "source": "synthetic_v2"
+      "source": "synthetic_v2",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "behavior_transformer",
@@ -122,7 +129,8 @@
       "metrics": {
         "accuracy": 1.0
       },
-      "source": "synthetic_v2"
+      "source": "synthetic_v2",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "supply_chain_detector",
@@ -135,7 +143,8 @@
       "metrics": {
         "accuracy": 0.814
       },
-      "source": "synthetic_v2"
+      "source": "synthetic_v2",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "identity_threat",
@@ -148,7 +157,8 @@
       "metrics": {
         "accuracy": 0.791
       },
-      "source": "synthetic_v2"
+      "source": "synthetic_v2",
+      "updated_at": "2026-06-09T14:00:00Z"
     },
     {
       "name": "aigen_detector",
@@ -161,7 +171,8 @@
       "metrics": {
         "accuracy": 1.0
       },
-      "source": "synthetic_v2"
+      "source": "synthetic_v2",
+      "updated_at": "2026-06-09T14:00:00Z"
     }
   ]
 }
