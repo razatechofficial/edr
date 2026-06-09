@@ -44,6 +44,8 @@ __pycache__/
 /edrctl
 dist/*.pkg
 ml/datasets/
+.cache/
+.huggingface/
 ml/training/keys/
 ml/training/output/
 ml/models/
