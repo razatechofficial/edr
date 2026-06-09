@@ -139,6 +139,7 @@ type Config struct {
 			PEClassifier   string `yaml:"pe_classifier"`
 			BehaviorLSTM   string `yaml:"behavior_lstm"`
 			NetworkAnomaly string `yaml:"network_anomaly"`
+			NetworkLGBM    string `yaml:"network_lgbm"`
 			Ransomware     string `yaml:"ransomware"`
 		} `yaml:"models"`
 
