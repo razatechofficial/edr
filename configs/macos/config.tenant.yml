@@ -57,6 +57,7 @@ ml:
     behavior_lstm: behavior_lstm.onnx
     network_anomaly: network_anomaly.onnx
     ransomware: ransomware.onnx
+    network_lgbm: network_lgbm.onnx
   thresholds:
     pe_malicious: 0.80
     behavior_anomaly: 0.75
