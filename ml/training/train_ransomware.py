@@ -143,11 +143,51 @@ def train(args: argparse.Namespace) -> None:
     )
 
     onnx_model.graph.input[0].name = "input"
-    if len(onnx_model.graph.output) >= 2:
-        onnx_model.graph.output[0].name = "label"
-        onnx_model.graph.output[1].name = "probabilities"
-    elif len(onnx_model.graph.output) == 1:
-        onnx_model.graph.output[0].name = "score"
+
+    # Remove label output, keep only probabilities tensor,
+    # add Gather node to extract class 1 as 'score'
+    import onnx
+    from onnx import helper, TensorProto
+
+    prob_name = None
+    for o in onnx_model.graph.output:
+        if o.name != "label":
+            prob_name = o.name
+            break
+    if prob_name is None:
+        prob_name = onnx_model.graph.output[0].name
+
+    original_prob_name = prob_name + "_raw"
+    for o in onnx_model.graph.output:
+        if o.name == prob_name:
+            o.name = original_prob_name
+    for node in onnx_model.graph.node:
+        for i, o in enumerate(node.output):
+            if o == prob_name:
+                node.output[i] = original_prob_name
+
+    indices_init = helper.make_tensor(
+        name="gather_indices",
+        data_type=TensorProto.INT64,
+        dims=[1],
+        vals=[1],
+    )
+    onnx_model.graph.initializer.append(indices_init)
+
+    gather_node = helper.make_node(
+        "Gather",
+        inputs=[original_prob_name, "gather_indices"],
+        outputs=["score"],
+        name="extract_class1_proba",
+        axis=1,
+    )
+    onnx_model.graph.node.append(gather_node)
+
+    score_output = helper.make_tensor_value_info(
+        "score", TensorProto.FLOAT, [None, 1],
+    )
+    del onnx_model.graph.output[:]
+    onnx_model.graph.output.extend([score_output])
 
     onnx.save(onnx_model, str(onnx_path))
     logger.info("ONNX model saved (%d bytes)", onnx_path.stat().st_size)
