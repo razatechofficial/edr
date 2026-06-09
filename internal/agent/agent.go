@@ -319,10 +319,11 @@ func (a *Agent) initAdvancedDetection() error {
 		WorkerCount:             a.cfg.Performance.WorkerCount,
 		PerformanceProfile:      a.cfg.Performance.Profile,
 
-		MLModelPEClassifier:   a.cfg.ML.Models.PEClassifier,
-		MLModelBehaviorLSTM:   a.cfg.ML.Models.BehaviorLSTM,
-		MLModelNetworkAnomaly: a.cfg.ML.Models.NetworkAnomaly,
-		MLModelRansomware:     a.cfg.ML.Models.Ransomware,
+		MLModelPEClassifier:    a.cfg.ML.Models.PEClassifier,
+		MLModelBehaviorLSTM:    a.cfg.ML.Models.BehaviorLSTM,
+		MLModelNetworkAnomaly:  a.cfg.ML.Models.NetworkAnomaly,
+		MLModelNetworkLGBM:     a.cfg.ML.Models.NetworkLGBM,
+		MLModelRansomware:      a.cfg.ML.Models.Ransomware,
 
 		MLThresholdPE:         float64(a.cfg.ML.Thresholds.PEMalicious),
 		MLThresholdNetwork:    float64(a.cfg.ML.Thresholds.NetworkAnomaly),

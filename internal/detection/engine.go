@@ -53,10 +53,11 @@ type EngineConfig struct {
 
 	// ML model filenames (basename only, resolved under MLModelsDir).
 	// Empty strings fall back to built-in defaults in ml.NewEngine.
-	MLModelPEClassifier   string
-	MLModelBehaviorLSTM   string
-	MLModelNetworkAnomaly string
-	MLModelRansomware     string
+	MLModelPEClassifier    string
+	MLModelBehaviorLSTM    string
+	MLModelNetworkAnomaly  string
+	MLModelNetworkLGBM     string
+	MLModelRansomware      string
 
 	// ML detection thresholds (0.0–1.0). Zero values fall back to defaults.
 	MLThresholdPE           float64
@@ -259,6 +260,7 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 				PEClassifierFile:     cfg.MLModelPEClassifier,
 				BehaviorLSTMFile:     cfg.MLModelBehaviorLSTM,
 				NetworkAnomalyFile:   cfg.MLModelNetworkAnomaly,
+				NetworkLGBMFile:     cfg.MLModelNetworkLGBM,
 				RansomwareFile:       cfg.MLModelRansomware,
 				VerifyPubKeyHex:      cfg.MLVerifyPubKey,
 				PEMaliciousThreshold: peThr,
@@ -896,6 +898,13 @@ func (e *Engine) mlThresholdAIGen() float64 {
 	return 0.75
 }
 
+func (e *Engine) mlThresholdNetworkLGBM() float64 {
+	if e.cfg.MLThresholdNetwork > 0 {
+		return e.cfg.MLThresholdNetwork
+	}
+	return 0.70
+}
+
 func (e *Engine) mlThresholdIdentity() float64 {
 	if e.cfg.MLThresholdIdentity > 0 {
 		return e.cfg.MLThresholdIdentity
@@ -959,7 +968,7 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}, priorAlerts
 		}
 
 	case *schema.NetworkEvent, schema.NetworkEvent:
-		score, err := e.ml.ScoreNetwork(ctx, event)
+		score, err := e.ml.ScoreNetworkEnsemble(ctx, event)
 		if err != nil {
 			e.logger.Debug("engine: ml network scoring failed", zap.Error(err))
 			return nil
