@@ -65,6 +65,12 @@ models/network_train_out/
 /alerts/
 platform/linux/ebpf/vmlinux.h
 
+# Python build/test artifacts
+*.pyc
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
 # Editor/IDE
 # .idea/
 # .vscode/
