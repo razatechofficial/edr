@@ -25,6 +25,7 @@ const (
 	modelAIGen               = "aigen_detector"
 	modelIdentity            = "identity_threat"
 	modelMemoryInjection    = "memory_injection"
+	modelNetworkLGBM        = "network_lgbm"
 
 	defaultPEMaliciousThreshold = 0.80
 
@@ -38,6 +39,7 @@ const (
 	defaultFileAIGen               = "aigen_detector.onnx"
 	defaultFileIdentity            = "identity_threat.onnx"
 	defaultFileMemoryInjection    = "memory_injection.onnx"
+	defaultFileNetworkLGBM        = "network_lgbm.onnx"
 )
 
 // Config holds settings for constructing a new ML Engine.
@@ -56,6 +58,7 @@ type Config struct {
 	IdentityFile            string
 
 	MemoryInjectionFile string
+	NetworkLGBMFile     string
 
 	// Hex-encoded Ed25519 public key for signature verification. Empty = off.
 	VerifyPubKeyHex string
@@ -163,6 +166,7 @@ type Engine struct {
 	aigenExtractor      *features.AIGenFeatureExtractor
 	identityExtractor   *features.IdentityFeatureExtractor
 	memInjectExtractor  *features.MemoryInjectionFeatureExtractor
+	netLGBMExtractor    *features.NetworkFeatureExtractor
 	logger              *zap.Logger
 	enabled             bool
 	peThreshold         float64
@@ -203,6 +207,7 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 		modelAIGen:               or(cfg.AIGenFile, defaultFileAIGen),
 		modelIdentity:            or(cfg.IdentityFile, defaultFileIdentity),
 		modelMemoryInjection:    or(cfg.MemoryInjectionFile, defaultFileMemoryInjection),
+		modelNetworkLGBM:        or(cfg.NetworkLGBMFile, defaultFileNetworkLGBM),
 	}
 	for name, file := range modelFiles {
 		p := filepath.Join(cfg.ModelsDir, file)
@@ -240,6 +245,7 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 		aigenExtractor:     &features.AIGenFeatureExtractor{},
 		identityExtractor:  &features.IdentityFeatureExtractor{},
 		memInjectExtractor: &features.MemoryInjectionFeatureExtractor{},
+		netLGBMExtractor:   &features.NetworkFeatureExtractor{},
 		logger:             logger,
 		enabled:            true,
 		peThreshold:        peThr,
@@ -415,6 +421,60 @@ func (e *Engine) ScoreNetwork(ctx context.Context, conn interface{}) (*NetworkSc
 		Confidence: outputConfidence(output),
 		Category:   classifyNetworkCategory(score),
 	}, nil
+}
+
+// ScoreNetworkLGBM evaluates a network connection using the supervised
+// LightGBM model. Returns 0 if the model is not loaded (non-fatal).
+func (e *Engine) ScoreNetworkLGBM(ctx context.Context, conn interface{}) (*NetworkScore, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !e.enabled {
+		return nil, fmt.Errorf("ml: engine is disabled")
+	}
+
+	feats := e.netLGBMExtractor.Extract(conn)
+
+	session, err := e.models.Get(modelNetworkLGBM)
+	if err != nil {
+		return nil, fmt.Errorf("ml: %w", err)
+	}
+
+	output, err := session.Predict(feats)
+	if err != nil {
+		return nil, fmt.Errorf("ml: network_lgbm inference: %w", err)
+	}
+	if len(output) < 1 {
+		return nil, fmt.Errorf("ml: network_lgbm model returned empty output")
+	}
+
+	score := float64(output[0])
+	return &NetworkScore{
+		Score:      score,
+		Confidence: outputConfidence(output),
+		Category:   classifyNetworkCategory(score),
+	}, nil
+}
+
+// ScoreNetworkEnsemble scores using both autoencoder and supervised LGBM
+// models, returning the higher-confidence result. Falls back to autoencoder
+// only if LGBM is not loaded.
+func (e *Engine) ScoreNetworkEnsemble(ctx context.Context, conn interface{}) (*NetworkScore, error) {
+	autoScore, autoErr := e.ScoreNetwork(ctx, conn)
+	lgbmScore, lgbmErr := e.ScoreNetworkLGBM(ctx, conn)
+	if lgbmErr != nil {
+		if autoErr != nil {
+			return nil, autoErr
+		}
+		return autoScore, nil
+	}
+	if autoErr != nil {
+		return lgbmScore, nil
+	}
+	if lgbmScore.Confidence >= autoScore.Confidence {
+		return lgbmScore, nil
+	}
+	return autoScore, nil
 }
 
 // ScoreRansomware evaluates ransomware-specific indicators. The indicators map
