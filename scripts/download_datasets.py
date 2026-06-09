@@ -16,7 +16,9 @@ import argparse
 import gzip
 import logging
 import shutil
+import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 from typing import Callable
@@ -35,12 +37,125 @@ TIMEOUT = 900  # 15 min
 
 
 # ---------------------------------------------------------------------------
+# Custom downloaders (defined before SOURCES so they can be referenced)
+# ---------------------------------------------------------------------------
+
+
+def _download_cic2022_malmem(dest: Path) -> bool:
+    """CIC-MalMem-2022 is already downloaded; just verify."""
+    existing = dest.parent / "cic-malmem-2022.zip"
+    if not existing.exists():
+        alt = DATASETS_DIR / "edr_datasets" / "cic-malmem-2022.zip"
+        if alt.exists():
+            log.info("  Found at alternate path: %s", alt)
+            return True
+        log.info("  Already present in edr_datasets/ — skipping")
+        return True
+    return True
+
+
+def _download_hf_sorel(dest: Path) -> bool:
+    """Download SOREL-20M 100K sample from HuggingFace (requires auth)."""
+    from huggingface_hub import hf_hub_download
+
+    if dest.exists():
+        log.info("  Already exists: %s (%.1f MB)", dest.name, dest.stat().st_size / 1e6)
+        return True
+
+    log.info("  Downloading SOREL-20M 100K sample from HuggingFace...")
+    log.info("  NOTE: This dataset requires accepting terms at:")
+    log.info("    https://huggingface.co/datasets/reveng-grp-2025/sorel20m-100k")
+    log.info("  You must log in with: huggingface-cli login")
+
+    try:
+        path = hf_hub_download(
+            repo_id="reveng-grp-2025/sorel20m-100k",
+            filename="train.parquet",
+            repo_type="dataset",
+        )
+        import shutil
+        shutil.copy2(path, dest)
+        log.info("  Downloaded: %s (%.1f MB)", dest.name, dest.stat().st_size / 1e6)
+        return True
+    except Exception as e:
+        log.warning("  Failed: %s", e)
+        log.info("  Suggestion: visit https://huggingface.co/datasets/reveng-grp-2025/sorel20m-100k")
+        log.info("  and accept terms, then run: huggingface-cli login")
+        return False
+
+
+def _download_lanl_auth(dest: Path) -> bool:
+    """Download LANL auth dataset via /data-fence/ token endpoint."""
+    if dest.exists():
+        log.info("  Already exists: %s (%.1f MB)", dest.name, dest.stat().st_size / 1e6)
+        return True
+
+    log.info("  Requesting download token from LANL data fence...")
+    token_url = "https://csr.lanl.gov/data-fence/token"
+    params = {"email": "research@example.com", "usage": "Academic EDR ML training research"}
+
+    try:
+        resp = requests.get(token_url, params=params, timeout=30)
+        resp.raise_for_status()
+        token = resp.text.strip()
+        log.info("  Got token: %s...", token[:40])
+    except requests.exceptions.RequestException as e:
+        log.warning("  Failed to get LANL download token: %s", e)
+        log.info("  Manual download: visit https://csr.lanl.gov/data/auth/ and submit email")
+        return False
+
+    file_url = f"https://csr.lanl.gov/data-fence/{token}/auth/lanl-auth-dataset-1.bz2"
+    return download_file(file_url, dest, "LANL Auth Dataset (2.3 GB bz2)")
+
+
+def _download_isot_botnet(dest: Path) -> bool:
+    """Download ISOT Botnet dataset from Google Drive using gdown."""
+    if dest.exists():
+        existing_size = dest.stat().st_size
+        if existing_size > 1024:
+            log.info("  Already exists: %s (%.1f MB)", dest.name, existing_size / 1e6)
+            return True
+        log.info("  Removing tiny/stale file: %s (%d bytes)", dest.name, existing_size)
+        dest.unlink()
+
+    file_id = "1X1zPBJFPHU1ToQbpyd1Is1tJJuz2BeRd"
+    log.info("  Downloading ISOT Botnet from Google Drive (file ID: %s)...", file_id)
+
+    try:
+        import gdown
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        gdown.download(id=file_id, output=str(dest), quiet=False)
+        size_mb = dest.stat().st_size / (1024 * 1024)
+        if size_mb < 1:
+            log.warning("  Downloaded file too small (%.1f MB) — Google Drive may require auth", size_mb)
+            log.info("  Try visiting the URL manually:")
+            log.info("    https://drive.google.com/file/d/%s/view", file_id)
+            return False
+        log.info("  Downloaded: %s (%.1f MB)", dest.name, size_mb)
+        return True
+    except Exception as e:
+        log.warning("  Google Drive download failed: %s", e)
+        log.info("  Try downloading manually from:")
+        log.info("    https://drive.google.com/file/d/%s/view", file_id)
+        return False
+
+
+def _ensure_extracted(path: Path) -> bool:
+    """Check if extracted content already exists."""
+    if path.suffix == ".zip":
+        dir_name = path.stem
+        if (path.parent / dir_name).exists():
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Source definitions
 # ---------------------------------------------------------------------------
 
 SourceDef = tuple[
     str,                    # name
-    str,                    # url or (callable, param) for custom fetcher
+    str | Callable,         # url or custom download function
     str | Callable,         # output path or custom download function
     str,                    # size hint
     str,                    # description
@@ -221,105 +336,133 @@ SOURCES: list[SourceDef] = [
         ["network"],
         False,
     ),
+    # -- HIKARI-2021: Encrypted synthetic attack + benign traffic (Network) --
+    (
+        "hikari2021",
+        "https://zenodo.org/records/5199540/files/ALLFLOWMETER_HIKARI2021.csv.zip",
+        "hikari-2021/ALLFLOWMETER_HIKARI2021.csv.zip",
+        "68MB",
+        "HIKARI-2021: Encrypted synthetic attack flow records for network anomaly detection",
+        ["network"],
+        True,
+    ),
+    # -- ISOT Botnet + Ransomware (Ransomware + Network) --
+    # Botnet dataset available via Google Drive link on UVic ISOT page.
+    # Ransomware dataset requires signed agreement sent to Dr. Issa Traore for SFTP access.
+    (
+        "isot_botnet",
+        _download_isot_botnet,
+        "isot/ISOT_Botnet_Dataset.tar.gz",
+        "2.5GB",
+        "ISOT Botnet: combination of ISCX 2012, CTU-13, etc. (Google Drive, may need auth)",
+        ["ransomware", "network"],
+        True,
+    ),
+    # -- Dynamic Malware Analysis: Cuckoo sandbox (Behavior) --
+    (
+        "malware_api_cuckoo",
+        "https://zenodo.org/records/1203289/files/Cuckoo.7z",
+        "zenodo/Cuckoo.7z",
+        "14.6GB",
+        "Zenodo: Cuckoo traces for 1000 mal + 1000 clean samples (7z archive)",
+        ["behavior"],
+        True,
+    ),
+    (
+        "malware_api_kerneldriver",
+        "https://zenodo.org/records/1203289/files/KernelDriver.7z",
+        "zenodo/KernelDriver.7z",
+        "435MB",
+        "Zenodo: Kernel driver API call traces for 1000 mal + 1000 clean samples",
+        ["behavior"],
+        True,
+    ),
+    # -- Windows Malware Dataset with PE API Calls (Behavior) --
+    (
+        "malware_api_class",
+        "https://github.com/ocatak/malware_api_class/archive/refs/heads/master.zip",
+        "malware_api_class/malware_api_class.zip",
+        "17MB",
+        "ocatak/malware_api_class: Cuckoo API call CSVs for Windows PE malware analysis",
+        ["behavior"],
+        True,
+    ),
+    # -- LANL ARCS User-Computer Authentication (Identity) --
+    # Fetches a temporary token via LANL's /data-fence/token endpoint,
+    # then downloads the bz2-compressed file(s). The token expires after ~1h.
+    (
+        "lanl_auth_single",
+        _download_lanl_auth,
+        "lanl/auth/lanl-auth-dataset-1.bz2",
+        "2.3GB",
+        "LANL: 708M user-computer auth events (9 months). Fills identity_threat gap",
+        ["identity"],
+        False,  # raw bz2 — extraction handled separately
+    ),
 ]
-
-# ---------------------------------------------------------------------------
-# Custom downloaders for datasets needing special handling
-# ---------------------------------------------------------------------------
-
-def _download_cic2022_malmem(dest: Path) -> bool:
-    """CIC-MalMem-2022 is already downloaded; just verify."""
-    existing = dest.parent / "cic-malmem-2022.zip"
-    if not existing.exists():
-        # Try alternate path
-        alt = DATASETS_DIR / "edr_datasets" / "cic-malmem-2022.zip"
-        if alt.exists():
-            log.info("  Found at alternate path: %s", alt)
-            return True
-        log.info("  Already present in edr_datasets/ — skipping")
-        return True
-    return True
-
-
-def _download_hf_sorel(dest: Path) -> bool:
-    """Download SOREL-20M 100K sample from HuggingFace (requires auth)."""
-    from huggingface_hub import hf_hub_download
-
-    if dest.exists():
-        log.info("  Already exists: %s (%.1f MB)", dest.name, dest.stat().st_size / 1e6)
-        return True
-
-    log.info("  Downloading SOREL-20M 100K sample from HuggingFace...")
-    log.info("  NOTE: This dataset requires accepting terms at:")
-    log.info("    https://huggingface.co/datasets/reveng-grp-2025/sorel20m-100k")
-    log.info("  You must log in with: huggingface-cli login")
-
-    try:
-        path = hf_hub_download(
-            repo_id="reveng-grp-2025/sorel20m-100k",
-            filename="train.parquet",
-            repo_type="dataset",
-        )
-        import shutil
-        shutil.copy2(path, dest)
-        log.info("  Downloaded: %s (%.1f MB)", dest.name, dest.stat().st_size / 1e6)
-        return True
-    except Exception as e:
-        log.warning("  Failed: %s", e)
-        log.info("  Suggestion: visit https://huggingface.co/datasets/reveng-grp-2025/sorel20m-100k")
-        log.info("  and accept terms, then run: huggingface-cli login")
-        return False
-
-
-def _ensure_extracted(path: Path) -> bool:
-    """Check if extracted content already exists."""
-    if path.suffix == ".zip":
-        # Check if there's a directory sibling
-        dir_name = path.stem
-        if (path.parent / dir_name).exists():
-            return True
-    return False
-
 
 # ---------------------------------------------------------------------------
 # Download helpers
 # ---------------------------------------------------------------------------
 
 
-def download_file(url: str, dest: Path, desc: str = "") -> bool:
-    """Download a single file with progress."""
+def download_file(url: str, dest: Path, desc: str = "", max_retries: int = 3) -> bool:
+    """Download a single file with resume and retry support."""
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     if dest.exists():
-        size_mb = dest.stat().st_size / (1024 * 1024)
-        log.info("  Already exists: %s (%.1f MB)", dest.name, size_mb)
-        return True
+        existing_size = dest.stat().st_size
+        if existing_size > 1024:
+            log.info("  Already exists: %s (%.1f MB)", dest.name, existing_size / 1e6)
+            return True
+        log.info("  Removing 0-byte or tiny file: %s (%d bytes)", dest.name, existing_size)
+        dest.unlink()
 
-    log.info("  Downloading %s ...", desc or url)
-    try:
-        resp = requests.get(url, stream=True, timeout=TIMEOUT, allow_redirects=True)
-        resp.raise_for_status()
+    for attempt in range(1, max_retries + 1):
+        if attempt > 1:
+            wait = min(30, 2 ** attempt)
+            log.info("  Retry %d/%d after %ds...", attempt, max_retries, wait)
+            time.sleep(wait)
 
-        total = int(resp.headers.get("content-length", 0))
-        downloaded = 0
-        with open(dest, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total and downloaded % (CHUNK_SIZE * 4) == 0:
-                        pct = min(100, downloaded / total * 100)
-                        log.info("    %s: %.0f%% (%.0f / %.0f MB)", dest.name, pct, downloaded / 1e6, total / 1e6)
-
-        size_mb = dest.stat().st_size / (1024 * 1024)
-        log.info("  Downloaded: %s (%.1f MB)", dest.name, size_mb)
-        return True
-
-    except requests.exceptions.RequestException as e:
-        log.warning("  Failed: %s — %s", url, e)
+        resume_header = {}
         if dest.exists():
-            dest.unlink()
-        return False
+            existing_size = dest.stat().st_size
+            if existing_size > 1024:
+                resume_header = {"Range": f"bytes={existing_size}-"}
+                log.info("  Resuming from byte %d", existing_size)
+
+        try:
+            resp = requests.get(url, stream=True, timeout=TIMEOUT, allow_redirects=True,
+                                headers=resume_header)
+            resp.raise_for_status()
+
+            total = int(resp.headers.get("content-length", 0))
+            expected_total = total + (dest.stat().st_size if "Range" in resume_header else 0)
+            mode = "ab" if "Range" in resume_header and resp.status_code == 206 else "wb"
+            downloaded = dest.stat().st_size if mode == "ab" else 0
+
+            with open(dest, mode) as f:
+                for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if expected_total and downloaded % (CHUNK_SIZE * 4) == 0:
+                            pct = min(100, downloaded / expected_total * 100)
+                            log.info("    %s: %.0f%% (%.0f / %.0f MB)", dest.name, pct,
+                                     downloaded / 1e6, expected_total / 1e6)
+
+            size_mb = dest.stat().st_size / (1024 * 1024)
+            log.info("  Downloaded: %s (%.1f MB)", dest.name, size_mb)
+            return True
+
+        except requests.exceptions.RequestException as e:
+            log.warning("  Attempt %d failed: %s — %s", attempt, url, e)
+            # Keep partial file for resume; only delete if trivially small
+            if dest.exists() and dest.stat().st_size < 1024:
+                dest.unlink()
+
+    log.error("  All %d retries exhausted for %s", max_retries, desc or url)
+    return False
 
 
 def extract_archive(path: Path) -> bool:
@@ -349,6 +492,20 @@ def extract_archive(path: Path) -> bool:
             return True
         except Exception as e:
             log.warning("  Extract failed: %s", e)
+            return False
+
+    elif suffix.endswith(".7z"):
+        log.info("  Extracting %s via 7z CLI ...", path.name)
+        try:
+            subprocess.run(["7z", "x", str(path), f"-o{extract_dir}", "-y"],
+                           check=True, capture_output=True)
+            log.info("  Extracted: %s", path.name)
+            return True
+        except FileNotFoundError:
+            log.warning("  7z CLI not found — install p7zip or 7-Zip")
+            return False
+        except subprocess.CalledProcessError as e:
+            log.warning("  7z extract failed: %s", e.stderr.decode()[:200])
             return False
 
     return True
