@@ -519,6 +519,28 @@ func extractDomain(event interface{}) string {
 	return ""
 }
 
+func extractTimestamp(event interface{}) time.Time {
+	switch ev := event.(type) {
+	case *schema.ProcessEvent:
+		return ev.Timestamp
+	case schema.ProcessEvent:
+		return ev.Timestamp
+	case *schema.FileEvent:
+		return ev.Timestamp
+	case schema.FileEvent:
+		return ev.Timestamp
+	case *schema.NetworkEvent:
+		return ev.Timestamp
+	case schema.NetworkEvent:
+		return ev.Timestamp
+	case *schema.AuthEvent:
+		return ev.Timestamp
+	case schema.AuthEvent:
+		return ev.Timestamp
+	}
+	return time.Now()
+}
+
 func extractOS(event interface{}) string {
 	switch ev := event.(type) {
 	case *schema.ProcessEvent:
