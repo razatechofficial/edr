@@ -26,6 +26,7 @@ const (
 	modelIdentity            = "identity_threat"
 	modelMemoryInjection    = "memory_injection"
 	modelNetworkLGBM        = "network_lgbm"
+	modelRATC2              = "rat_c2_detector"
 
 	defaultPEMaliciousThreshold = 0.80
 
@@ -40,6 +41,7 @@ const (
 	defaultFileIdentity            = "identity_threat.onnx"
 	defaultFileMemoryInjection    = "memory_injection.onnx"
 	defaultFileNetworkLGBM        = "network_lgbm.onnx"
+	defaultFileRATC2              = "rat_c2_detector.onnx"
 )
 
 // Config holds settings for constructing a new ML Engine.
@@ -59,6 +61,7 @@ type Config struct {
 
 	MemoryInjectionFile string
 	NetworkLGBMFile     string
+	RATC2File           string
 
 	// Hex-encoded Ed25519 public key for signature verification. Empty = off.
 	VerifyPubKeyHex string
@@ -167,6 +170,7 @@ type Engine struct {
 	identityExtractor   *features.IdentityFeatureExtractor
 	memInjectExtractor  *features.MemoryInjectionFeatureExtractor
 	netLGBMExtractor    *features.NetworkFeatureExtractor
+	ratc2Extractor      *features.RatC2FeatureExtractor
 	logger              *zap.Logger
 	enabled             bool
 	peThreshold         float64
@@ -208,6 +212,7 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 		modelIdentity:            or(cfg.IdentityFile, defaultFileIdentity),
 		modelMemoryInjection:    or(cfg.MemoryInjectionFile, defaultFileMemoryInjection),
 		modelNetworkLGBM:        or(cfg.NetworkLGBMFile, defaultFileNetworkLGBM),
+		modelRATC2:              or(cfg.RATC2File, defaultFileRATC2),
 	}
 	for name, file := range modelFiles {
 		p := filepath.Join(cfg.ModelsDir, file)
@@ -246,6 +251,7 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 		identityExtractor:  &features.IdentityFeatureExtractor{},
 		memInjectExtractor: &features.MemoryInjectionFeatureExtractor{},
 		netLGBMExtractor:   &features.NetworkFeatureExtractor{},
+		ratc2Extractor:     &features.RatC2FeatureExtractor{},
 		logger:             logger,
 		enabled:            true,
 		peThreshold:        peThr,
@@ -638,6 +644,39 @@ func (e *Engine) ScoreIdentity(ctx context.Context, evt interface{}) (*IdentityS
 	}, nil
 }
 
+// ScoreNetworkRATC2 evaluates a network connection for RAT C2 beacon
+// indicators using the dedicated rat_c2_detector model.
+func (e *Engine) ScoreNetworkRATC2(ctx context.Context, conn interface{}) (*NetworkScore, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !e.enabled {
+		return nil, fmt.Errorf("ml: engine is disabled")
+	}
+
+	feats := e.ratc2Extractor.Extract(conn)
+
+	session, err := e.models.Get(modelRATC2)
+	if err != nil {
+		return nil, fmt.Errorf("ml: %w", err)
+	}
+
+	output, err := session.Predict(feats)
+	if err != nil {
+		return nil, fmt.Errorf("ml: rat_c2 inference: %w", err)
+	}
+	if len(output) < 1 {
+		return nil, fmt.Errorf("ml: rat_c2 model returned empty output")
+	}
+
+	score := float64(output[0])
+	return &NetworkScore{
+		Score:      score,
+		Confidence: outputConfidence(output),
+		Category:   classifyRATC2Category(score),
+	}, nil
+}
+
 // ScoreMemoryInjection evaluates memory scan data for process injection
 // indicators such as RWX regions, PE headers in non-module memory, high entropy
 // executable regions, and unbacked memory mappings.
@@ -810,6 +849,19 @@ func classifyBehaviorCategory(score float64) string {
 		return "suspicious_behavior"
 	case score >= 0.4:
 		return "anomalous_behavior"
+	default:
+		return "normal"
+	}
+}
+
+func classifyRATC2Category(score float64) string {
+	switch {
+	case score >= 0.9:
+		return "rat_c2_beacon"
+	case score >= 0.7:
+		return "suspicious_c2_traffic"
+	case score >= 0.4:
+		return "anomalous_connection"
 	default:
 		return "normal"
 	}

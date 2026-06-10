@@ -58,6 +58,7 @@ type EngineConfig struct {
 	MLModelNetworkAnomaly  string
 	MLModelNetworkLGBM     string
 	MLModelRansomware      string
+	MLModelRATC2           string
 
 	// ML detection thresholds (0.0–1.0). Zero values fall back to defaults.
 	MLThresholdPE           float64
@@ -234,6 +235,7 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 			NewInjectionDetector(logger),
 			NewRATDetector(logger),
 			NewRansomwareDetector(logger),
+			NewRootkitDetector(logger),
 		}
 		chainPath := cfg.BehavioralChainsPath
 		if strings.TrimSpace(chainPath) == "" {
@@ -262,6 +264,7 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 				NetworkAnomalyFile:   cfg.MLModelNetworkAnomaly,
 				NetworkLGBMFile:     cfg.MLModelNetworkLGBM,
 				RansomwareFile:       cfg.MLModelRansomware,
+				RATC2File:           cfg.MLModelRATC2,
 				VerifyPubKeyHex:      cfg.MLVerifyPubKey,
 				PEMaliciousThreshold: peThr,
 			}, logger)
@@ -983,6 +986,27 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}, priorAlerts
 				Description: fmt.Sprintf("Category %s, confidence %.2f", score.Category, score.Confidence),
 				Timestamp:   time.Now().UTC(),
 				Tags:        []string{"ml", score.Category},
+				RawEvent:    event,
+			})
+		}
+
+		// Dedicated RAT C2 beacon detector
+		if c2Score, c2Err := e.ml.ScoreNetworkRATC2(ctx, event); c2Err == nil && c2Score.Score >= e.mlThresholdNetwork() {
+			c2RuleID := "ml-rat-c2"
+			c2Sev := mlScoreToSeverity(c2Score.Score)
+			if score.Score >= e.mlThresholdNetwork() {
+				c2Sev = events.SeverityCritical
+				c2RuleID = "ml-rat-c2-beacon"
+			}
+			alerts = append(alerts, &events.Alert{
+				ID:          uuid.New().String(),
+				RuleID:      c2RuleID,
+				RuleName:    "ML RAT C2 Detector",
+				Severity:    c2Sev,
+				Title:       fmt.Sprintf("ML: RAT C2 beacon pattern (%.2f)", c2Score.Score),
+				Description: fmt.Sprintf("Category %s, confidence %.2f", c2Score.Category, c2Score.Confidence),
+				Timestamp:   time.Now().UTC(),
+				Tags:        []string{"ml", "rat", "c2_beacon", c2Score.Category},
 				RawEvent:    event,
 			})
 		}
