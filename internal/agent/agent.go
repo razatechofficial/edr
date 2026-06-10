@@ -324,6 +324,7 @@ func (a *Agent) initAdvancedDetection() error {
 		MLModelNetworkAnomaly:  a.cfg.ML.Models.NetworkAnomaly,
 		MLModelNetworkLGBM:     a.cfg.ML.Models.NetworkLGBM,
 		MLModelRansomware:      a.cfg.ML.Models.Ransomware,
+		MLModelRATC2:           a.cfg.ML.Models.RATC2,
 
 		MLThresholdPE:         float64(a.cfg.ML.Thresholds.PEMalicious),
 		MLThresholdNetwork:    float64(a.cfg.ML.Thresholds.NetworkAnomaly),

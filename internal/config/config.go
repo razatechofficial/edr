@@ -141,6 +141,7 @@ type Config struct {
 			NetworkAnomaly string `yaml:"network_anomaly"`
 			NetworkLGBM    string `yaml:"network_lgbm"`
 			Ransomware     string `yaml:"ransomware"`
+			RATC2          string `yaml:"rat_c2_detector"`
 		} `yaml:"models"`
 
 		Thresholds struct {
