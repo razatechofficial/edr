@@ -103,7 +103,7 @@ func (d *RATDetector) checkBeacon(event interface{}, pid uint32) *events.Alert {
 		d.beacons[key] = be
 	}
 
-	be.times = append(be.times, time.Now())
+	be.times = append(be.times, extractTimestamp(event))
 	if len(be.times) > maxBeaconSamples {
 		be.times = be.times[len(be.times)-maxBeaconSamples:]
 	}

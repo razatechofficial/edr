@@ -22,20 +22,23 @@ func TestRATBeaconDetection(t *testing.T) {
 	t.Parallel()
 	d, c := newTestRATDetector(t)
 	const pid = 1001
+	now := time.Now()
 
 	var alerts []*events.Alert
 	for i := 0; i < 8; i++ {
 		ev := &schema.NetworkEvent{
-			BaseEvent: schema.BaseEvent{EventType: schema.EventNetwork},
-			PID:       pid,
-			DestIP:    "203.0.113.50",
-			DestPt:    443,
+			BaseEvent: schema.BaseEvent{
+				EventType: schema.EventNetwork,
+				Timestamp: now.Add(time.Duration(i) * 5 * time.Millisecond),
+			},
+			PID:    pid,
+			DestIP: "203.0.113.50",
+			DestPt: 443,
 		}
 		result := d.Analyze(ev, c)
 		if len(result) > 0 {
 			alerts = result
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 
 	if len(alerts) == 0 {
@@ -68,20 +71,24 @@ func TestRATRandomIntervals(t *testing.T) {
 		10 * time.Millisecond,
 	}
 
+	now := time.Now()
 	for _, delay := range delays {
 		ev := &schema.NetworkEvent{
-			BaseEvent: schema.BaseEvent{EventType: schema.EventNetwork},
-			PID:       pid,
-			DestIP:    "198.51.100.10",
-			DestPt:    8080,
+			BaseEvent: schema.BaseEvent{
+				EventType: schema.EventNetwork,
+				Timestamp: now,
+			},
+			PID:    pid,
+			DestIP: "198.51.100.10",
+			DestPt: 8080,
 		}
+		now = now.Add(delay)
 		alerts := d.Analyze(ev, c)
 		for _, a := range alerts {
 			if a.RuleID == "RAT-001" {
 				t.Error("false positive: beacon alert for irregular intervals")
 			}
 		}
-		time.Sleep(delay)
 	}
 }
 
