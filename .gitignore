@@ -1,6 +1,3 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -35,7 +32,13 @@ cmd/installer/bundle/models/
 cmd/installer/bundle/rules/
 cmd/installer/bundle/bin/
 rules/ioc/raw/
+
+# Python build/test artifacts
 __pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
 
 # Local / build outputs
 .DS_Store
@@ -59,17 +62,16 @@ models/*.png
 models/network_cic_train_out/
 models/network_train_out/
 
+# Manual download directories (user-provided datasets)
+ml/datasets/rat/cic_bell_dns_2021/
+ml/datasets/rat/malware_bazaar/
+ml/datasets/rat/iscx_botnet_2014/
+
 *.md
 !docs/*.md
 /bin/
 /alerts/
 platform/linux/ebpf/vmlinux.h
-
-# Python build/test artifacts
-*.pyc
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
 
 # Editor/IDE
 # .idea/
