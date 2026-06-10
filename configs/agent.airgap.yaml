@@ -119,6 +119,7 @@ ml:
     network_anomaly: "network_anomaly.onnx"
     ransomware: "ransomware.onnx"
     network_lgbm: "network_lgbm.onnx"
+    rat_c2_detector: "rat_c2_detector.onnx"
 
   thresholds:
     pe_malicious: 0.80

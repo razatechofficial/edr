@@ -219,6 +219,7 @@ ml:
     network_anomaly: "network_anomaly.onnx"
     ransomware: "ransomware.onnx"
     network_lgbm: "network_lgbm.onnx"
+    rat_c2_detector: "rat_c2_detector.onnx"
 
   # Detection confidence thresholds (0.0-1.0).
   thresholds:
