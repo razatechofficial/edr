@@ -236,6 +236,7 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 			NewRATDetector(logger),
 			NewRansomwareDetector(logger),
 			NewRootkitDetector(logger),
+			NewPrivacyDetector(logger),
 		}
 		chainPath := cfg.BehavioralChainsPath
 		if strings.TrimSpace(chainPath) == "" {

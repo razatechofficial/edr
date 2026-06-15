@@ -307,6 +307,12 @@ func (c *Correlator) extract(event interface{}) timedEvent {
 		te.user, te.timestamp = ev.User, ev.Timestamp
 	case schema.AuthEvent:
 		te.user, te.timestamp = ev.User, ev.Timestamp
+	case *schema.PrivacyEvent:
+		te.pid, te.timestamp = ev.AccessingPID, ev.Timestamp
+		te.user = ev.AccessingProcess
+	case schema.PrivacyEvent:
+		te.pid, te.timestamp = ev.AccessingPID, ev.Timestamp
+		te.user = ev.AccessingProcess
 	}
 	return te
 }
@@ -416,6 +422,10 @@ func extractPID(event interface{}) uint32 {
 		return uint32(ev.PID)
 	case schema.NetworkEvent:
 		return uint32(ev.PID)
+	case *schema.PrivacyEvent:
+		return ev.AccessingPID
+	case schema.PrivacyEvent:
+		return ev.AccessingPID
 	}
 	return 0
 }
