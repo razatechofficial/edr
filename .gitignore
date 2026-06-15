@@ -84,3 +84,7 @@ pkg/deb/
 pkg/macos/sign_manifest
 pkg/macos/root/usr/local/libexec/
 pkg/macos/root/Library/Application Support/
+
+# Training outputs and backups
+ml/training/output_*/
+models/backup_*/
