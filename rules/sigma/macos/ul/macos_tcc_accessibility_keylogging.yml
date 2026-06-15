@@ -1,0 +1,40 @@
+title: macOS TCC Accessibility Access for Keylogging
+id: 6d8e4a2c-9f1b-4e7d-8c3a-5b2d6f1a9e0c
+status: experimental
+description: 'Detects TCC authorization events for Accessibility and Input Monitoring
+  services which are required for keylogging on macOS. While legitimate accessibility
+  apps use these, unexpected access from untrusted or suspicious processes may indicate
+  keylogging activity (T1056.001).
+
+  '
+author: EDR Agent Team
+date: 2026-04-06
+modified: 2026-04-06
+references:
+- https://attack.mitre.org/techniques/T1056/001/
+- https://developer.apple.com/documentation/security/tcc
+logsource:
+  product: macos
+  service: unifiedlog
+detection:
+  selection_tcc_accessibility:
+    subsystem: com.apple.TCC
+    message|contains:
+    - 'kTCCServiceAccessibility'
+    - 'kTCCServiceInputMonitoring'
+  condition: selection_tcc_accessibility
+  timeframe: 60s
+falsepositives:
+- Legitimate accessibility tools (VoiceOver, Switch Control, Zoom)
+- Password managers using accessibility API for auto-fill
+- Legitimate input monitoring for gaming or macro software
+fields:
+- event_type
+- event_name
+- ProcessName
+- message
+tags:
+- attack.collection
+- attack.credential_access
+- attack.t1056.001
+level: medium

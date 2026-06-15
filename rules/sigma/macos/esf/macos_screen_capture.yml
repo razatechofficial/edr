@@ -1,0 +1,58 @@
+title: macOS Screen Capture Detection
+id: 3f7a2b1e-8c5d-4a9f-b6e2-1d3c5f7a9b0c
+status: experimental
+description: 'Detects screen capture activity through AUTH_GET_TASK events
+  on WindowServer and XPC connections to display compositing services.
+  Screen capture is a common technique for data exfiltration and credential
+  harvesting (T1113).
+
+  '
+author: EDR Agent Team
+date: 2026-04-06
+modified: 2026-04-06
+references:
+- https://attack.mitre.org/techniques/T1113/
+- https://developer.apple.com/documentation/endpointsecurity
+logsource:
+  product: macos
+  service: endpointsecurity
+detection:
+  selection_gettask:
+    esf.event_type: 101
+    event.action: get_task
+    TargetImage|endswith:
+    - '/WindowServer'
+    - '/Dock'
+    - '/SystemUIServer'
+  selection_xpc:
+    esf.event_type: 65
+    event.action: xpc_connect
+    XpcServiceName|contains:
+    - 'com.apple.CGXWindowServer'
+    - 'com.apple.windowserver'
+    - 'com.apple.coregraphics'
+  selection_screensharing:
+    esf.event_type:
+      - 135
+      - 136
+    event.action:
+      - screensharing_attach
+      - screensharing_detach
+  condition: selection_gettask or selection_xpc
+  timeframe: 30s
+falsepositives:
+- Legitimate screen sharing for remote assistance
+- System UI rendering processes
+- Accessibility tools with screen capture permission
+fields:
+- event_type
+- event_name
+- ProcessId
+- Image
+- User
+- TargetImage
+- XpcServiceName
+tags:
+- attack.collection
+- attack.t1113
+level: high

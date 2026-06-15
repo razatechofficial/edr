@@ -1,0 +1,60 @@
+title: macOS Keyboard Input Monitoring Detection
+id: 8a1c3e5f-7b2d-4a9c-8e6f-3d1b5c7a9e0d
+status: experimental
+description: 'Detects keyboard input monitoring through TCC accessibility
+  authorization events and suspicious IOKit HID device access. Keylogging
+  enables credential harvesting and sensitive data capture (T1056.001).
+
+  '
+author: EDR Agent Team
+date: 2026-04-06
+modified: 2026-04-06
+references:
+- https://attack.mitre.org/techniques/T1056/001/
+- https://developer.apple.com/documentation/endpointsecurity
+logsource:
+  product: macos
+  service: endpointsecurity
+detection:
+  selection_file_open:
+    esf.event_type: 10
+    event.action: open
+    TargetFilePath|contains:
+    - '/dev/input/'
+    - '/dev/uinput'
+  selection_xpc:
+    esf.event_type: 65
+    event.action: xpc_connect
+    XpcServiceName|contains:
+    - 'com.apple.coregraphics.eventtap'
+    - 'chtapting'
+    - 'eventtap'
+  selection_proc_cmd:
+    esf.event_type: 9
+    event.action: exec
+    Command|contains:
+    - 'SetWindowsHookEx'
+    - 'GetAsyncKeyState'
+    - 'RegisterRawInputDevices'
+    - 'keylogger'
+    - 'keystroke'
+  condition: selection_file_open or selection_xpc or selection_proc_cmd
+  timeframe: 60s
+falsepositives:
+- Gaming software using HID devices
+- Legitimate accessibility tools (voiceover, switch control)
+- Macro recording software
+fields:
+- event_type
+- event_name
+- ProcessId
+- Image
+- User
+- TargetFilePath
+- XpcServiceName
+- Command
+tags:
+- attack.collection
+- attack.credential_access
+- attack.t1056.001
+level: high
