@@ -152,7 +152,7 @@ def train(args: argparse.Namespace) -> None:
     )
 
     # --- Export to ONNX ---
-    onnx_path = output_dir / "network_anomaly.onnx"
+    onnx_path = output_dir / "network_lgbm.onnx"
     logger.info("Exporting to ONNX → %s", onnx_path)
 
     initial_type = [("input", FloatTensorType([None, NETWORK_FEATURE_COUNT]))]
@@ -196,7 +196,7 @@ def train(args: argparse.Namespace) -> None:
         gather_node = helper.make_node(
             "Gather",
             inputs=[original_prob_name, "gather_indices"],
-            outputs=["anomaly_score"],
+            outputs=["score"],
             name="extract_class1_proba",
             axis=1,
         )
@@ -204,14 +204,28 @@ def train(args: argparse.Namespace) -> None:
 
         # Create new output for the anomaly score
         score_output = helper.make_tensor_value_info(
-            "anomaly_score", TensorProto.FLOAT, [None, 1],
+            "score", TensorProto.FLOAT, [None, 1],
         )
-        # Replace probabilities output with anomaly_score
+        # Replace probabilities output with score
         del m.graph.output[:]
         m.graph.output.extend([score_output])
 
     onnx.save(m, str(onnx_path))
-    logger.info("ONNX graph modified: outputs -> anomaly_score")
+    logger.info("ONNX graph modified: outputs -> score")
+
+    # Save optimal threshold
+    from sklearn.metrics import roc_curve, f1_score
+    y_prob_val = model.predict_proba(splits["X_val"])[:, 1]
+    fpr, tpr, ths = roc_curve(splits["y_val"], y_prob_val)
+    best_f1 = 0; best_th = 0.5
+    for th in ths:
+        p = (y_prob_val >= th).astype(int)
+        f1 = f1_score(splits["y_val"], p, zero_division=0)
+        if f1 > best_f1:
+            best_f1 = f1; best_th = th
+    th_path = Path(args.output_dir) / "network_lgbm_threshold.npy"
+    np.save(str(th_path), np.array([best_th]))
+    logger.info("Best F1=%.4f @ threshold=%.4f", best_f1, best_th)
 
     # Validate
     import onnxruntime as ort
