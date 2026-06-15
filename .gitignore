@@ -88,3 +88,20 @@ pkg/macos/root/Library/Application Support/
 # Training outputs and backups
 ml/training/output_*/
 models/backup_*/
+
+# Large data files
+*.parquet
+*.arrow
+
+# IDE workspace
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Training environment
+ml/training/.venv/
+.mlflow/
+mlruns/
+ml/training/wandb/
