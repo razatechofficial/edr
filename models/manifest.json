@@ -1,25 +1,23 @@
 {
   "schema_version": "2.0",
   "signing_pubkey": "274d6d3d41c521e9fdf947f955cd18f69d14073c56d8698e1bbb9b6449f979bf",
-  "updated_at": "2026-06-09T20:00:00Z",
+  "updated_at": "2026-06-15T08:13:40Z",
   "models": [
     {
-      "name": "pe_classifier",
-      "version": "2.0.0",
-      "file": "pe_classifier.onnx",
-      "sha256": "1ba8a81d2b75e8b53285cda7322c3dbd9d5f02cd7517c1af02af5b9317ddbc9d",
-      "size_bytes": 2405805,
-      "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
+      "name": "aigen_detector",
+      "version": "3.0.0",
+      "file": "aigen_detector.onnx",
+      "sha256": "63128f24da5fcfe99b08b77c77f419b79eb1ebd27157dd0f5823427d242c7365",
+      "size_bytes": 63881725,
+      "status": "warning",
+      "created_at": "2026-06-15T00:00:00Z",
       "metrics": {
-        "accuracy": 0.9319,
-        "roc_auc": 0.9831,
-        "precision": 0.9369,
-        "recall": 0.9261,
-        "f1": 0.9315
+        "accuracy": 0.9246,
+        "roc_auc": 0.9766,
+        "f1": 0.9257
       },
-      "source": "ember2018_v1",
-      "updated_at": "2026-06-09T14:00:00Z"
+      "source": "droidcollection_xgb_v1",
+      "updated_at": "2026-06-15T08:13:40Z"
     },
     {
       "name": "behavior_lstm",
@@ -27,68 +25,65 @@
       "file": "behavior_lstm.onnx",
       "sha256": "9a5a4bf96ed2883f9c01165e61f8296a25f4b914d5e5906cc4055d00814a0ff5",
       "size_bytes": 2448258,
-      "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
+      "status": "warning",
+      "created_at": "2026-06-15T00:00:00Z",
       "metrics": {
         "accuracy": 0.9902,
-        "roc_auc": 0.979,
+        "roc_auc": 0.9737,
         "precision": 0.9951,
         "recall": 0.889,
-        "f1": 0.939
+        "f1": 0.9673
       },
       "source": "beth_v1",
-      "updated_at": "2026-06-09T14:00:00Z"
+      "updated_at": "2026-06-15T08:13:40Z"
     },
     {
-      "name": "network_anomaly",
-      "version": "2.0.0",
-      "file": "network_anomaly.onnx",
-      "sha256": "8a275d297b8c41887dc4ba4c3c72295eda6a470996f6e9b49fd3658ba084ad5b",
-      "size_bytes": 12046,
-      "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
-      "metrics": {
-        "accuracy": 0.9241,
-        "roc_auc": 0.8054,
-        "precision": 0.1693,
-        "recall": 0.2817,
-        "f1": 0.2115
-      },
-      "source": "cic_ids2017_autoencoder_v1",
-      "updated_at": "2026-06-09T14:00:00Z"
-    },
-    {
-      "name": "network_lgbm",
-      "version": "2.0.0",
-      "file": "network_lgbm.onnx",
-      "sha256": "fdaf713bfd61d5e0f14d13159fd2b1e7270bcadee4bb9118176c9ae8db2adb7b",
-      "size_bytes": 2317816,
-      "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
-      "metrics": {
-        "accuracy": 0.9147,
-        "roc_auc": 0.9586,
-        "precision": 0.6129,
-        "recall": 0.9853,
-        "f1": 0.7557
-      },
-      "source": "cic_ids2017_ctu13_v1",
-      "updated_at": "2026-06-09T14:00:00Z"
-    },
-    {
-      "name": "ransomware",
-      "version": "2.0.0",
-      "file": "ransomware.onnx",
-      "sha256": "137c5e5c3cd9869ad1b6c180aade357a364f47d81e24f3107dcc54ab910309cf",
-      "size_bytes": 26421,
-      "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
+      "name": "behavior_transformer",
+      "version": "3.0.0",
+      "file": "behavior_transformer.onnx",
+      "sha256": "a5f7a71e3ad73006751378c64e4ac34e683348c496710f66180d716b03d709cc",
+      "size_bytes": 492140,
+      "status": "warning",
+      "created_at": "2026-06-15T00:00:00Z",
       "metrics": {
         "accuracy": 1.0,
-        "roc_auc": 1.0
+        "roc_auc": 0.9654,
+        "f1": 0.9613
+      },
+      "source": "synthetic_seq50_v1",
+      "updated_at": "2026-06-15T08:13:40Z"
+    },
+    {
+      "name": "identity_threat",
+      "version": "2.0.0",
+      "file": "identity_threat.onnx",
+      "sha256": "e0fc9cf847a6e363dd32afa5ff2c77e42096a5f54084b134ac74595ff5fe73c9",
+      "size_bytes": 10315,
+      "status": "active",
+      "created_at": "2026-06-15T00:00:00Z",
+      "metrics": {
+        "accuracy": 0.791,
+        "roc_auc": 1.0,
+        "f1": 1.0
       },
       "source": "synthetic_v2",
-      "updated_at": "2026-06-09T14:00:00Z"
+      "updated_at": "2026-06-15T08:13:40Z"
+    },
+    {
+      "name": "lolbin_detector",
+      "version": "3.0.0",
+      "file": "lolbin_detector.onnx",
+      "sha256": "2887a97d0a741778a21b121df10d1f6e6afeca590c83ba362e1771bdd1100a12",
+      "size_bytes": 67287,
+      "status": "active",
+      "created_at": "2026-06-15T00:00:00Z",
+      "metrics": {
+        "accuracy": 1.0,
+        "roc_auc": 1.0,
+        "f1": 0.9889
+      },
+      "source": "synthetic_v2",
+      "updated_at": "2026-06-15T08:13:40Z"
     },
     {
       "name": "memory_injection",
@@ -97,82 +92,84 @@
       "sha256": "9874473ae22daa34f5094aaa75b257e2651855a142be73a4ac5fd77a4b74ad57",
       "size_bytes": 20061,
       "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
+      "created_at": "2026-06-15T00:00:00Z",
       "metrics": {
-        "accuracy": 0.9769
+        "accuracy": 0.9769,
+        "roc_auc": 0.9999,
+        "f1": 0.992
       },
       "source": "cic_malmem2022_v1",
-      "updated_at": "2026-06-09T14:00:00Z"
+      "updated_at": "2026-06-15T08:13:40Z"
     },
     {
-      "name": "lolbin_detector",
+      "name": "network_anomaly",
       "version": "2.0.0",
-      "file": "lolbin_detector.onnx",
-      "sha256": "0d3b54d3e32386faf76151337f7b6ce9c7367af6af589b9d5046a3afb74ddb6d",
-      "size_bytes": 67466,
-      "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
+      "file": "network_anomaly.onnx",
+      "sha256": "8a275d297b8c41887dc4ba4c3c72295eda6a470996f6e9b49fd3658ba084ad5b",
+      "size_bytes": 12046,
+      "status": "warning",
+      "created_at": "2026-06-15T00:00:00Z",
       "metrics": {
-        "accuracy": 1.0
+        "accuracy": 0.9241,
+        "roc_auc": 0.8397,
+        "precision": 0.1693,
+        "recall": 0.2817,
+        "f1": 0.8399
       },
-      "source": "synthetic_v2",
-      "updated_at": "2026-06-09T14:00:00Z"
+      "source": "cic_ids2017_autoencoder_v1",
+      "updated_at": "2026-06-15T08:13:40Z"
     },
     {
-      "name": "behavior_transformer",
+      "name": "network_lgbm",
       "version": "2.0.0",
-      "file": "behavior_transformer.onnx",
-      "sha256": "e56510606fe052f1b8fe27d25ac19f2c1f95172b16c08a97726044cd0959c83f",
-      "size_bytes": 530559,
-      "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
+      "file": "network_lgbm.onnx",
+      "sha256": "fdaf713bfd61d5e0f14d13159fd2b1e7270bcadee4bb9118176c9ae8db2adb7b",
+      "size_bytes": 2317816,
+      "status": "warning",
+      "created_at": "2026-06-15T00:00:00Z",
       "metrics": {
-        "accuracy": 1.0
+        "accuracy": 0.9147,
+        "roc_auc": 0.9153,
+        "precision": 0.6129,
+        "recall": 0.9853,
+        "f1": 0.9052
       },
-      "source": "synthetic_v2",
-      "updated_at": "2026-06-09T14:00:00Z"
+      "source": "cic_ids2017_ctu13_v1",
+      "updated_at": "2026-06-15T08:13:40Z"
     },
     {
-      "name": "supply_chain_detector",
+      "name": "pe_classifier",
       "version": "2.0.0",
-      "file": "supply_chain_detector.onnx",
-      "sha256": "15060910c58334b8a818842713b20e1028f144e0ac0f45b584fde401c5fd6110",
-      "size_bytes": 17795,
-      "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
+      "file": "pe_classifier.onnx",
+      "sha256": "1ba8a81d2b75e8b53285cda7322c3dbd9d5f02cd7517c1af02af5b9317ddbc9d",
+      "size_bytes": 2405805,
+      "status": "warning",
+      "created_at": "2026-06-15T00:00:00Z",
       "metrics": {
-        "accuracy": 0.814
+        "accuracy": 0.9319,
+        "roc_auc": 0.9857,
+        "precision": 0.9369,
+        "recall": 0.9261,
+        "f1": 0.9006
       },
-      "source": "synthetic_v2",
-      "updated_at": "2026-06-09T14:00:00Z"
+      "source": "ember2018_v1",
+      "updated_at": "2026-06-15T08:13:40Z"
     },
     {
-      "name": "identity_threat",
-      "version": "2.0.0",
-      "file": "identity_threat.onnx",
-      "sha256": "0364d8adf714c855959738ad198c0452758d3f77a84dd190e7a749b8f9e3fab4",
-      "size_bytes": 10494,
+      "name": "ransomware",
+      "version": "3.0.0",
+      "file": "ransomware.onnx",
+      "sha256": "a59b54ae68d6459495aa0eb5f45f8eb017e04564c5a7f0283a68b3cc9d9709af",
+      "size_bytes": 35237,
       "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
+      "created_at": "2026-06-15T00:00:00Z",
       "metrics": {
-        "accuracy": 0.791
+        "accuracy": 1.0,
+        "roc_auc": 1.0,
+        "f1": 0.9994
       },
       "source": "synthetic_v2",
-      "updated_at": "2026-06-09T14:00:00Z"
-    },
-    {
-      "name": "aigen_detector",
-      "version": "2.0.0",
-      "file": "aigen_detector.onnx",
-      "sha256": "5af626b67c87cff6013be41379888f12581469525d8f85e49f5b759d23382ead",
-      "size_bytes": 38535,
-      "status": "active",
-      "created_at": "2026-06-09T13:00:00Z",
-      "metrics": {
-        "accuracy": 1.0
-      },
-      "source": "synthetic_v2",
-      "updated_at": "2026-06-09T14:00:00Z"
+      "updated_at": "2026-06-15T08:13:40Z"
     },
     {
       "name": "rat_c2_detector",
@@ -180,17 +177,31 @@
       "file": "rat_c2_detector.onnx",
       "sha256": "6e62b256faa46b3645d703dc0cffb05fd482f3b2146d60f5f622a6fe4496cc8d",
       "size_bytes": 442060,
-      "status": "active",
-      "created_at": "2026-06-09T15:00:00Z",
+      "status": "warning",
+      "created_at": "2026-06-15T00:00:00Z",
       "metrics": {
         "accuracy": 0.9964,
         "roc_auc": 0.9999,
-        "precision": 0.9894,
-        "recall": 0.9987,
-        "f1": 0.994
+        "f1": 0.9769
       },
       "source": "ctu13_v1",
-      "updated_at": "2026-06-09T20:00:00Z"
+      "updated_at": "2026-06-15T08:13:40Z"
+    },
+    {
+      "name": "supply_chain_detector",
+      "version": "2.0.0",
+      "file": "supply_chain_detector.onnx",
+      "sha256": "6531d4a5a17f8776159f7903c3ecacbe12e19f2519af18f0b8737907cfebaa40",
+      "size_bytes": 17616,
+      "status": "active",
+      "created_at": "2026-06-15T00:00:00Z",
+      "metrics": {
+        "accuracy": 0.814,
+        "roc_auc": 1.0,
+        "f1": 1.0
+      },
+      "source": "synthetic_v2",
+      "updated_at": "2026-06-15T08:13:40Z"
     }
   ]
 }
