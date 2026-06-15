@@ -1,124 +1,43 @@
 package features
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
-type mockAIGenEvent struct {
-	funcLengths        []int
-	maxNesting         int
-	repetitionScore    float64
-	uniqueStrRatio     float64
-	avgStrLength       float64
-	strEntropyScore    float64
-	uniqueAPICount     int
-	totalAPICalls      int
-	unusualAPICombos   int
-	encodingLayers     int
-	varNameEntropy     float64
-	ctrlFlowComplexity float64
+type mockAIGenCode struct {
+	code string
 }
 
-func (m mockAIGenEvent) GetFunctionLengths() []int       { return m.funcLengths }
-func (m mockAIGenEvent) GetMaxNestingDepth() int         { return m.maxNesting }
-func (m mockAIGenEvent) GetRepetitionScore() float64     { return m.repetitionScore }
-func (m mockAIGenEvent) GetUniqueStringRatio() float64   { return m.uniqueStrRatio }
-func (m mockAIGenEvent) GetAvgStringLength() float64     { return m.avgStrLength }
-func (m mockAIGenEvent) GetStringEntropyScore() float64  { return m.strEntropyScore }
-func (m mockAIGenEvent) GetUniqueAPICount() int          { return m.uniqueAPICount }
-func (m mockAIGenEvent) GetTotalAPICalls() int           { return m.totalAPICalls }
-func (m mockAIGenEvent) GetUnusualAPICombinations() int  { return m.unusualAPICombos }
-func (m mockAIGenEvent) GetEncodingLayers() int          { return m.encodingLayers }
-func (m mockAIGenEvent) GetVariableNameEntropy() float64 { return m.varNameEntropy }
-func (m mockAIGenEvent) GetControlFlowComplexity() float64 { return m.ctrlFlowComplexity }
+func (m mockAIGenCode) GetCommandLine() string {
+	return m.code
+}
+
+func writeTestCode(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test_code.py")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+type mockPath struct {
+	path string
+}
+
+func (m mockPath) GetPath() string {
+	return m.path
+}
 
 func TestAIGenExtractor_FeatureCount(t *testing.T) {
 	ext := &AIGenFeatureExtractor{}
-	feats := ext.Extract(mockAIGenEvent{})
+	feats := ext.Extract(mockAIGenCode{code: "print('hello')"})
 	if len(feats) != AIGenFeatureCount {
 		t.Fatalf("expected %d features, got %d", AIGenFeatureCount, len(feats))
-	}
-}
-
-func TestAIGenExtractor_CodeStructure(t *testing.T) {
-	ext := &AIGenFeatureExtractor{}
-	feats := ext.Extract(mockAIGenEvent{
-		funcLengths:     []int{50, 60, 70},
-		maxNesting:      5,
-		repetitionScore: 0.8,
-	})
-
-	if feats[0] <= 0 {
-		t.Error("mean function length feature should be positive")
-	}
-	if feats[1] <= 0 {
-		t.Error("function length stddev feature should be positive")
-	}
-	if feats[2] != float32(3.0/100.0) {
-		t.Errorf("function count expected %f, got %f", float32(3.0/100.0), feats[2])
-	}
-	if feats[3] != float32(5.0/10.0) {
-		t.Errorf("max nesting expected %f, got %f", float32(5.0/10.0), feats[3])
-	}
-	if feats[4] != 0.8 {
-		t.Errorf("repetition score expected 0.8, got %f", feats[4])
-	}
-}
-
-func TestAIGenExtractor_StringProfile(t *testing.T) {
-	ext := &AIGenFeatureExtractor{}
-	feats := ext.Extract(mockAIGenEvent{
-		uniqueStrRatio:  0.6,
-		avgStrLength:    25.0,
-		strEntropyScore: 0.9,
-	})
-
-	if feats[12] != 0.6 {
-		t.Errorf("unique string ratio expected 0.6, got %f", feats[12])
-	}
-	if feats[13] != float32(25.0/50.0) {
-		t.Errorf("avg string length expected %f, got %f", float32(25.0/50.0), feats[13])
-	}
-	if feats[14] != 0.9 {
-		t.Errorf("string entropy expected 0.9, got %f", feats[14])
-	}
-}
-
-func TestAIGenExtractor_APIDiversity(t *testing.T) {
-	ext := &AIGenFeatureExtractor{}
-	feats := ext.Extract(mockAIGenEvent{
-		uniqueAPICount:   50,
-		totalAPICalls:    200,
-		unusualAPICombos: 5,
-	})
-
-	if feats[24] != float32(50.0/200.0) {
-		t.Errorf("API diversity ratio expected %f, got %f", float32(50.0/200.0), feats[24])
-	}
-	if feats[25] != float32(50.0/200.0) {
-		t.Errorf("unique API count expected %f, got %f", float32(50.0/200.0), feats[25])
-	}
-	if feats[26] != float32(5.0/10.0) {
-		t.Errorf("unusual combos expected %f, got %f", float32(5.0/10.0), feats[26])
-	}
-}
-
-func TestAIGenExtractor_Obfuscation(t *testing.T) {
-	ext := &AIGenFeatureExtractor{}
-	feats := ext.Extract(mockAIGenEvent{
-		encodingLayers:     3,
-		varNameEntropy:     4.0,
-		ctrlFlowComplexity: 50.0,
-	})
-
-	if feats[32] != float32(3.0/5.0) {
-		t.Errorf("encoding layers expected %f, got %f", float32(3.0/5.0), feats[32])
-	}
-	if feats[33] != float32(4.0/5.0) {
-		t.Errorf("variable name entropy expected %f, got %f", float32(4.0/5.0), feats[33])
-	}
-	if feats[34] != float32(50.0/100.0) {
-		t.Errorf("control flow complexity expected %f, got %f", float32(50.0/100.0), feats[34])
 	}
 }
 
@@ -132,13 +51,113 @@ func TestAIGenExtractor_EmptyEvent(t *testing.T) {
 	}
 }
 
-func TestAIGenExtractor_ZeroAPICalls(t *testing.T) {
+func TestAIGenExtractor_FromCommandLine(t *testing.T) {
 	ext := &AIGenFeatureExtractor{}
-	feats := ext.Extract(mockAIGenEvent{
-		uniqueAPICount: 10,
-		totalAPICalls:  0,
-	})
-	if feats[24] != 0.0 {
-		t.Errorf("zero total calls should yield 0 ratio, got %f", feats[24])
+	code := `def hello():
+    print("hello world")
+`
+	feats := ext.Extract(mockAIGenCode{code: code})
+	if len(feats) != AIGenFeatureCount {
+		t.Fatalf("expected %d features, got %d", AIGenFeatureCount, len(feats))
+	}
+	// Feature 0: std of line lengths (should be small for 2 lines)
+	if feats[0] < 0 || feats[0] > 1 {
+		t.Errorf("line length std out of range [0,1]: %f", feats[0])
+	}
+	// Feature 1: mean line length
+	if feats[1] <= 0 {
+		t.Errorf("mean line length should be > 0, got %f", feats[1])
+	}
+}
+
+func TestAIGenExtractor_FromFilePath(t *testing.T) {
+	ext := &AIGenFeatureExtractor{}
+	code := `for i in range(10):
+    if i % 2 == 0:
+        print(i)
+`
+	path := writeTestCode(t, code)
+	feats := ext.Extract(mockPath{path: path})
+	if len(feats) != AIGenFeatureCount {
+		t.Fatalf("expected %d features, got %d", AIGenFeatureCount, len(feats))
+	}
+	// Should have non-zero features from parsing the Python code
+	if feats[16] <= 0 {
+		t.Errorf("branch count feature should be positive for code with for/if, got %f", feats[16])
+	}
+}
+
+func TestAIGenExtractor_CodeComplexity(t *testing.T) {
+	ext := &AIGenFeatureExtractor{}
+	code := `def process(data):
+    result = []
+    for i in range(len(data)):
+        if data[i] > 0:
+            val = transform(data[i])
+            if val is not None:
+                result.append(val)
+    return result
+`
+	feats := ext.Extract(mockAIGenCode{code: code})
+	// Branch count (for, if, if)
+	if feats[16] <= 0 {
+		t.Errorf("branch count expected > 0, got %f", feats[16])
+	}
+	// Function definitions
+	if feats[17] <= 0 {
+		t.Errorf("func def count expected > 0, got %f", feats[17])
+	}
+	// Naming conventions - check func calls
+	if feats[28] <= 0 {
+		t.Errorf("func call ratio expected > 0, got %f", feats[28])
+	}
+}
+
+func TestAIGenExtractor_BinaryFileFallsBack(t *testing.T) {
+	ext := &AIGenFeatureExtractor{}
+	binContent := []byte{0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD, 0xFC}
+	path := filepath.Join(t.TempDir(), "test.bin")
+	if err := os.WriteFile(path, binContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	feats := ext.Extract(mockPath{path: path})
+	// Binary files without text should return near-zero features
+	if len(feats) != AIGenFeatureCount {
+		t.Fatalf("expected %d features, got %d", AIGenFeatureCount, len(feats))
+	}
+}
+
+func TestAIGenExtractor_NonExistentFile(t *testing.T) {
+	ext := &AIGenFeatureExtractor{}
+	feats := ext.Extract(mockPath{path: "/nonexistent/file.py"})
+	for i, v := range feats {
+		if v != 0 {
+			t.Fatalf("expected all zeros for non-existent file, got non-zero at [%d]=%f", i, v)
+		}
+	}
+}
+
+func TestAIGenExtractor_ObfuscationFeatures(t *testing.T) {
+	code := strings.Repeat("a ", 300)
+	feats := (&AIGenFeatureExtractor{}).Extract(mockAIGenCode{code: code})
+	// Repetitive content should have no obfuscation patterns
+	if feats[32] != 0 {
+		t.Errorf("expected no base64 patterns, got %f", feats[32])
+	}
+}
+
+func TestAIGenExtractor_CommentProfile(t *testing.T) {
+	code := `# this is a comment
+# another comment
+# yet another comment
+code_line = 1
+`
+	feats := (&AIGenFeatureExtractor{}).Extract(mockAIGenCode{code: code})
+	// comment ratio (feature 8): 3 comment lines / 4 non-blank lines
+	if feats[8] <= 0 {
+		t.Errorf("comment ratio expected > 0, got %f", feats[8])
+	}
+	if feats[11] <= 0 {
+		t.Errorf("comment-to-code ratio expected > 0, got %f", feats[11])
 	}
 }
