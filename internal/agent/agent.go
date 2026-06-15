@@ -1118,6 +1118,9 @@ func (a *Agent) ProcessCycle(ctx context.Context) error {
 				if err := a.handleAlerts(a.detector.EvaluateProcess(pe)); err != nil {
 					return err
 				}
+				if a.advEngine != nil {
+					a.advEngine.Evaluate(ctx, tel.Privacy)
+				}
 			}
 			if tel.Gatekeeper != nil {
 				pe := schema.ProcessEvent{
