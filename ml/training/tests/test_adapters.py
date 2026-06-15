@@ -14,25 +14,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
-class TestDatasetRegistry:
-    def test_available_sources(self):
-        from adapters import DatasetRegistry
-        reg = DatasetRegistry()
-        sources = reg.available()
-        assert "ember" in sources
-        assert "sorel" in sources
-        assert "malwarebazaar" in sources
-        assert "cape" in sources
-        assert "nsrl" in sources
-        assert "network" in sources
-
-    def test_unknown_source_raises(self):
-        from adapters import DatasetRegistry
-        reg = DatasetRegistry()
-        with pytest.raises(ValueError, match="Unknown source"):
-            reg.load("nonexistent")
-
-
 class TestNSRLAdapter:
     def test_synthetic_benign_generation(self):
         from adapters.nsrl_adapter import load

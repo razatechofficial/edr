@@ -232,6 +232,17 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 		logger.Info("ml: manifest loaded",
 			zap.String("version", mgr.manifest.Version),
 			zap.Int("model_count", len(mgr.manifest.Models)))
+		for _, m := range mgr.manifest.Models {
+			if m.Status == "warning" {
+				f1 := 0.0
+				if m.Metrics != nil {
+					f1 = m.Metrics["f1"]
+				}
+				logger.Warn("ml: sub-target model loaded",
+					zap.String("model", m.Name),
+					zap.Float64("f1", f1))
+			}
+		}
 	}
 
 	peThr := cfg.PEMaliciousThreshold
