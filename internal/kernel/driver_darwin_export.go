@@ -109,6 +109,17 @@ func processESFNotifyPayload(d *ESFDriver, p *ESFNotifyPayload) {
 	if p.SignalNumber != 0 {
 		envelope["signal_number"] = p.SignalNumber
 	}
+	// P2-10: TCC_MODIFY (ESF type 147, macOS 15+) carries TCC privacy
+	// authorization events (kTCCServiceScreenCapture, kTCCServiceAccessibility,
+	// etc.) that map to PrivacyEvent telemetry.
+	if esfOperationNameFallback(p.EventType) == "tcc_modify" {
+		envelope["type"] = "privacy"
+		envelope["operation"] = "tcc_authorize"
+		envelope["service"] = p.Detail
+		envelope["auth_value"] = p.SignalNumber
+		envelope["accessing_pid"] = p.PID
+		envelope["accessing_process"] = p.Comm
+	}
 	if p.Detail != "" {
 		envelope["xpc_service"] = p.Detail
 	}

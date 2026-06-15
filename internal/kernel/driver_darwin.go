@@ -319,6 +319,7 @@ static void esf_extra_fields(const es_message_t *msg, int *extra_int, char **det
     case ES_EVENT_TYPE_NOTIFY_TCC_MODIFY:
         free(*detail_out);
         *detail_out = esf_copy_string(msg->event.tcc_modify.service);
+        *extra_int = (int)msg->event.tcc_modify.auth_value;
         break;
 #endif
     default:
