@@ -39,19 +39,21 @@
     },
     {
       "name": "behavior_transformer",
-      "version": "3.0.0",
+      "version": "4.0.0",
       "file": "behavior_transformer.onnx",
-      "sha256": "a5f7a71e3ad73006751378c64e4ac34e683348c496710f66180d716b03d709cc",
-      "size_bytes": 492140,
+      "sha256": "4a7d49655e1ec54e8a91059af6f2d9eeb0b3f9ca63af3010055e4e29b3541e05",
+      "size_bytes": 174940,
       "status": "warning",
-      "created_at": "2026-06-15T00:00:00Z",
+      "created_at": "2026-06-16T00:00:00Z",
       "metrics": {
-        "accuracy": 1.0,
-        "roc_auc": 0.9654,
-        "f1": 0.9613
+        "accuracy": 0.9482,
+        "roc_auc": 0.9699,
+        "precision": 0.9995,
+        "recall": 0.939,
+        "f1": 0.9683
       },
-      "source": "synthetic_seq50_v1",
-      "updated_at": "2026-06-15T08:13:40Z"
+      "source": "beth_v1_32dim_15ep",
+      "updated_at": "2026-06-16T14:25:00Z"
     },
     {
       "name": "identity_threat",
@@ -103,21 +105,21 @@
     },
     {
       "name": "network_anomaly",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "file": "network_anomaly.onnx",
-      "sha256": "8a275d297b8c41887dc4ba4c3c72295eda6a470996f6e9b49fd3658ba084ad5b",
-      "size_bytes": 12046,
+      "sha256": "ed155a0f4480c1d6f0d6b919d406a4dc5b4d6785c9ae6de6a2d350dc0bf4e12a",
+      "size_bytes": 517595,
       "status": "warning",
-      "created_at": "2026-06-15T00:00:00Z",
+      "created_at": "2026-06-16T00:00:00Z",
       "metrics": {
-        "accuracy": 0.9241,
-        "roc_auc": 0.8397,
-        "precision": 0.1693,
-        "recall": 0.2817,
-        "f1": 0.8399
+        "accuracy": 0.7228,
+        "roc_auc": 0.9674,
+        "precision": 0.9867,
+        "recall": 0.4518,
+        "f1": 0.6198
       },
-      "source": "cic_ids2017_autoencoder_v1",
-      "updated_at": "2026-06-15T08:13:40Z"
+      "source": "cic_ids2017_lgbm_v3_19dim",
+      "updated_at": "2026-06-16T14:30:00Z"
     },
     {
       "name": "network_lgbm",
