@@ -213,6 +213,15 @@ func (s *ONNXSession) Predict(input []float32) ([]float32, error) {
 		return nil, fmt.Errorf("onnx: session is closed")
 	}
 
+	expectedDims := 1
+	for _, d := range s.inputShape {
+		expectedDims *= int(d)
+	}
+	if len(input) != expectedDims {
+		return nil, fmt.Errorf("onnx: input size mismatch for %s: got %d floats, expected %d",
+			s.inputName, len(input), expectedDims)
+	}
+
 	s.inputTensor.ZeroContents()
 	data := s.inputTensor.GetData()
 	copy(data, input)

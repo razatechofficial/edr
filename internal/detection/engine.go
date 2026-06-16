@@ -53,22 +53,31 @@ type EngineConfig struct {
 
 	// ML model filenames (basename only, resolved under MLModelsDir).
 	// Empty strings fall back to built-in defaults in ml.NewEngine.
-	MLModelPEClassifier    string
-	MLModelBehaviorLSTM    string
-	MLModelNetworkAnomaly  string
-	MLModelNetworkLGBM     string
-	MLModelRansomware      string
-	MLModelRATC2           string
+	MLModelPEClassifier        string
+	MLModelBehaviorLSTM        string
+	MLModelNetworkAnomaly      string
+	MLModelNetworkLGBM         string
+	MLModelRansomware          string
+	MLModelRATC2               string
+	MLModelBehaviorTransformer string
+	MLModelLOLBin              string
+	MLModelSupplyChain         string
+	MLModelAIGen               string
+	MLModelIdentity            string
+	MLModelMemoryInjection     string
 
 	// ML detection thresholds (0.0–1.0). Zero values fall back to defaults.
-	MLThresholdPE           float64
-	MLThresholdNetwork      float64
-	MLThresholdBehavior     float64
-	MLThresholdRansomware   float64
-	MLThresholdLOLBin       float64
-	MLThresholdSupplyChain  float64
-	MLThresholdAIGen        float64
-	MLThresholdIdentity     float64
+	MLThresholdPE                float64
+	MLThresholdNetwork           float64
+	MLThresholdBehavior          float64
+	MLThresholdRansomware        float64
+	MLThresholdLOLBin            float64
+	MLThresholdSupplyChain       float64
+	MLThresholdAIGen             float64
+	MLThresholdIdentity          float64
+	MLThresholdMemoryInjection   float64
+	MLThresholdNetworkLGBM       float64
+	MLThresholdBehaviorTransformer float64
 
 	// ONNX Runtime settings.
 	MLONNXNumThreads  int
@@ -259,15 +268,21 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 				peThr = 0.80
 			}
 			me, err := ml.NewEngine(ml.Config{
-				ModelsDir:            cfg.MLModelsDir,
-				PEClassifierFile:     cfg.MLModelPEClassifier,
-				BehaviorLSTMFile:     cfg.MLModelBehaviorLSTM,
-				NetworkAnomalyFile:   cfg.MLModelNetworkAnomaly,
-				NetworkLGBMFile:     cfg.MLModelNetworkLGBM,
-				RansomwareFile:       cfg.MLModelRansomware,
-				RATC2File:           cfg.MLModelRATC2,
-				VerifyPubKeyHex:      cfg.MLVerifyPubKey,
-				PEMaliciousThreshold: peThr,
+				ModelsDir:                cfg.MLModelsDir,
+				PEClassifierFile:         cfg.MLModelPEClassifier,
+				BehaviorLSTMFile:         cfg.MLModelBehaviorLSTM,
+				NetworkAnomalyFile:       cfg.MLModelNetworkAnomaly,
+				NetworkLGBMFile:         cfg.MLModelNetworkLGBM,
+				RansomwareFile:           cfg.MLModelRansomware,
+				RATC2File:               cfg.MLModelRATC2,
+				BehaviorTransformerFile:  cfg.MLModelBehaviorTransformer,
+				LOLBinFile:              cfg.MLModelLOLBin,
+				SupplyChainFile:          cfg.MLModelSupplyChain,
+				AIGenFile:               cfg.MLModelAIGen,
+				IdentityFile:            cfg.MLModelIdentity,
+				MemoryInjectionFile:     cfg.MLModelMemoryInjection,
+				VerifyPubKeyHex:          cfg.MLVerifyPubKey,
+				PEMaliciousThreshold:     peThr,
 			}, logger)
 			if err != nil {
 				logger.Warn("engine: ml layer init failed, disabling", zap.Error(err))
@@ -903,10 +918,30 @@ func (e *Engine) mlThresholdAIGen() float64 {
 }
 
 func (e *Engine) mlThresholdNetworkLGBM() float64 {
+	if e.cfg.MLThresholdNetworkLGBM > 0 {
+		return e.cfg.MLThresholdNetworkLGBM
+	}
 	if e.cfg.MLThresholdNetwork > 0 {
 		return e.cfg.MLThresholdNetwork
 	}
 	return 0.70
+}
+
+func (e *Engine) mlThresholdMemoryInjection() float64 {
+	if e.cfg.MLThresholdMemoryInjection > 0 {
+		return e.cfg.MLThresholdMemoryInjection
+	}
+	return 0.75
+}
+
+func (e *Engine) mlThresholdBehaviorTransformer() float64 {
+	if e.cfg.MLThresholdBehaviorTransformer > 0 {
+		return e.cfg.MLThresholdBehaviorTransformer
+	}
+	if e.cfg.MLThresholdBehavior > 0 {
+		return e.cfg.MLThresholdBehavior
+	}
+	return 0.75
 }
 
 func (e *Engine) mlThresholdIdentity() float64 {
@@ -1070,6 +1105,21 @@ func (e *Engine) scoreWithML(ctx context.Context, event interface{}, priorAlerts
 				Description: fmt.Sprintf("Category %s, confidence %.2f", idScore.Category, idScore.Confidence),
 				Timestamp:   time.Now().UTC(),
 				Tags:        []string{"ml", "identity", idScore.Category},
+				RawEvent:    event,
+			})
+		}
+
+	case *schema.MemoryEvent, schema.MemoryEvent:
+		if memScore, err := e.ml.ScoreMemoryInjection(ctx, event); err == nil && memScore.Score >= e.mlThresholdMemoryInjection() {
+			alerts = append(alerts, &events.Alert{
+				ID:          uuid.New().String(),
+				RuleID:      "ml-memory-injection",
+				RuleName:    "ML Memory Injection Detector",
+				Severity:    mlScoreToSeverity(memScore.Score),
+				Title:       fmt.Sprintf("ML: memory injection indicators (%.2f)", memScore.Score),
+				Description: fmt.Sprintf("Category %s, confidence %.2f", memScore.Category, memScore.Confidence),
+				Timestamp:   time.Now().UTC(),
+				Tags:        []string{"ml", "memory_injection", memScore.Category},
 				RawEvent:    event,
 			})
 		}

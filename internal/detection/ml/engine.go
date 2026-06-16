@@ -230,7 +230,7 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 		logger.Warn("ml: manifest not loaded (non-fatal)", zap.Error(err))
 	} else if mgr.manifest != nil {
 		logger.Info("ml: manifest loaded",
-			zap.String("version", mgr.manifest.Version),
+			zap.String("version", mgr.manifest.SchemaVersion),
 			zap.Int("model_count", len(mgr.manifest.Models)))
 		for _, m := range mgr.manifest.Models {
 			if m.Status == "warning" {

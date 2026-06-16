@@ -19,14 +19,16 @@ type ManifestEntry struct {
 	Status    string             `json:"status"`
 	SizeBytes int64              `json:"size_bytes"`
 	CreatedAt string             `json:"created_at"`
+	UpdatedAt string             `json:"updated_at"`
 	Metrics   map[string]float64 `json:"metrics,omitempty"`
 }
 
 // Manifest is the top-level structure of manifest.json.
 type Manifest struct {
-	Version     string          `json:"version"`
-	GeneratedAt string          `json:"generated_at"`
-	Models      []ManifestEntry `json:"models"`
+	SchemaVersion string          `json:"schema_version"`
+	SigningPubkey string          `json:"signing_pubkey"`
+	UpdatedAt     string          `json:"updated_at"`
+	Models        []ManifestEntry `json:"models"`
 }
 
 // ModelManager handles model lifecycle including hot-swapping with optional
