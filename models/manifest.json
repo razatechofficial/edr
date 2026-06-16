@@ -173,19 +173,21 @@
     },
     {
       "name": "rat_c2_detector",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "file": "rat_c2_detector.onnx",
-      "sha256": "6e62b256faa46b3645d703dc0cffb05fd482f3b2146d60f5f622a6fe4496cc8d",
-      "size_bytes": 442060,
-      "status": "warning",
-      "created_at": "2026-06-15T00:00:00Z",
+      "sha256": "1ab3a0a2bc8c644f5faa6f5f0acb1ec4c9fe4d57ed4c22b96aae70e6711076ed",
+      "size_bytes": 7260033,
+      "status": "active",
+      "created_at": "2026-06-16T00:00:00Z",
       "metrics": {
-        "accuracy": 0.9964,
-        "roc_auc": 0.9999,
-        "f1": 0.9769
+        "accuracy": 0.9962,
+        "roc_auc": 1.0,
+        "precision": 0.9682,
+        "recall": 1.0,
+        "f1": 0.9839
       },
-      "source": "ctu13_v1",
-      "updated_at": "2026-06-15T08:13:40Z"
+      "source": "ctu13_v2_1000est",
+      "updated_at": "2026-06-16T12:15:00Z"
     },
     {
       "name": "supply_chain_detector",
