@@ -27,8 +27,9 @@ from utils.features import NETWORK_FEATURE_COUNT
 
 logger = logging.getLogger(__name__)
 
-NET_FEATURE_DIM = NETWORK_FEATURE_COUNT  # 15
+NET_FEATURE_DIM = NETWORK_FEATURE_COUNT  # 19
 LOG_MAX = float(math.log1p(65535))
+LOG_BYTE_MAX = float(math.log1p(1 << 30))
 
 
 def _to_port_int(val: Any) -> int:
@@ -138,6 +139,23 @@ def _load_ctu13_scenario(scenario_dir: Path, max_samples: int) -> tuple[np.ndarr
                 minutes = ts.dt.minute.values[mask]
                 seconds = ts.dt.second.values[mask]
                 X[mask, 3] = (hours * 3600 + minutes * 60 + seconds).astype(np.float32) / 86400.0
+
+        # [15..18] - byte volume and duration
+        log_byte_max = np.float32(LOG_BYTE_MAX)
+        if "TotBytes" in df.columns and "SrcBytes" in df.columns:
+            tot_bytes = pd.to_numeric(df["TotBytes"], errors="coerce").fillna(0).values.astype(np.int64)
+            src_bytes = pd.to_numeric(df["SrcBytes"], errors="coerce").fillna(0).values.astype(np.int64)
+            in_bytes = np.maximum(src_bytes, 0)
+            out_bytes = np.maximum(tot_bytes - src_bytes, 0)
+            total_bytes = in_bytes + out_bytes
+            X[:, 15] = np.log1p(in_bytes.astype(np.float64)).astype(np.float32) / log_byte_max
+            X[:, 16] = np.log1p(out_bytes.astype(np.float64)).astype(np.float32) / log_byte_max
+            X[:, 17] = np.log1p(total_bytes.astype(np.float64)).astype(np.float32) / log_byte_max
+
+        if "Dur" in df.columns:
+            dur_sec = pd.to_numeric(df["Dur"], errors="coerce").fillna(0).values.astype(np.float64)
+            dur_ms = np.maximum((dur_sec * 1000).astype(np.int64), 0)
+            X[:, 18] = np.where(dur_ms > 3600000, 1.0, dur_ms.astype(np.float32) / 3600000.0)
 
         X_list.append(X)
         y_list.append(y)

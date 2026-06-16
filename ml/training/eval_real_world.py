@@ -114,9 +114,16 @@ def load_cicids_test(max_samples=20000):
                             tod = (dt.hour*3600 + dt.minute*60 + dt.second) / 86400.0
                             break
                         except: pass
+                    # Extract bytes and duration for 19-dim features
+                    bytes_in = int(float(row.get(" Total Length of Bwd Packets", 0) or 0))
+                    bytes_out = int(float(row.get("Total Length of Fwd Packets", 0) or 0))
+                    flow_dur_us = int(float(row.get(" Flow Duration", row.get("Flow Duration", 0)) or 0))
+                    duration_ms = flow_dur_us // 1000
                     conn = {"src_port": sport, "dest_port": dport,
                             "protocol": proto, "timestamp": tod,
-                            "domain": "", "dest_ip": ""}
+                            "domain": "", "dest_ip": "",
+                            "bytes_in": bytes_in, "bytes_out": bytes_out,
+                            "duration_ms": duration_ms}
                     vec = encoder.encode(conn)
                     if label.lower().startswith("benign"):
                         benign_vecs.append(vec)
@@ -583,9 +590,9 @@ MODELS = [
      "✓ EMBER2018 + BODMAS (334K PE files)"),
     ("behavior_lstm", (1, 50, 48), True, 0.25, load_beth_test,
      "✓ BETH (real behavioral sequences)"),
-    ("network_anomaly", (1, 15), False, None, lambda ms=500000: load_cicids_test(ms),
+    ("network_anomaly", (1, 19), False, None, lambda ms=500000: load_cicids_test(ms),
      "✓ CIC-IDS2017 (300K network flows)"),
-    ("network_lgbm", (1, 15), False, 0.50, lambda ms=500000: load_cicids_test(ms),
+    ("network_lgbm", (1, 19), False, 0.50, lambda ms=500000: load_cicids_test(ms),
      "✓ CIC-IDS2017 (300K network flows)"),
     ("ransomware", (1, 10), False, 0.50, lambda ms=5000: load_ransomware_real(ms),
      "✓ MLRan (real Cuckoo sandbox reports → 10-dim features)"),

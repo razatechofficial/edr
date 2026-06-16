@@ -9,25 +9,27 @@ import (
 	"github.com/razatechofficial/edr/internal/schema"
 )
 
-const networkFeatureCount = 15
+const networkFeatureCount = 19
 
 // NetworkFeatureExtractor extracts per-connection features for anomaly detection.
 type NetworkFeatureExtractor struct{}
 
-// Extract produces a 15-dimensional feature vector from a network connection event.
-// Features: dest_port_category, src_port_norm, dest_port_norm, time_of_day,
-// is_port_{80,443,53,22}, protocol_{tcp,udp}, src_ephemeral, dest_port_linear,
-// has_domain, is_private_dest, is_loopback.
+// Extract produces a 19-dimensional feature vector from a network connection event.
+// Features [0..14] match the original 15-dim set. Features [15..18] add byte
+// volume and connection timing, mirroring the approach used by rat_c2.go.
 func (e *NetworkFeatureExtractor) Extract(conn interface{}) []float32 {
 	feats := make([]float32, networkFeatureCount)
 
 	var (
-		destPort int
-		srcPort  int
-		protocol string
-		domain   string
-		destIP   string
-		ts       time.Time
+		destPort   int
+		srcPort    int
+		protocol   string
+		domain     string
+		destIP     string
+		ts         time.Time
+		bytesIn    uint64
+		bytesOut   uint64
+		durationMs uint64
 	)
 
 	switch ev := conn.(type) {
@@ -38,6 +40,9 @@ func (e *NetworkFeatureExtractor) Extract(conn interface{}) []float32 {
 		domain = ev.Domain
 		destIP = ev.DestIP
 		ts = ev.Timestamp
+		bytesIn = ev.BytesIn
+		bytesOut = ev.BytesOut
+		durationMs = ev.DurationMs
 	case schema.NetworkEvent:
 		destPort = ev.DestPt
 		srcPort = ev.SourcePt
@@ -45,11 +50,15 @@ func (e *NetworkFeatureExtractor) Extract(conn interface{}) []float32 {
 		domain = ev.Domain
 		destIP = ev.DestIP
 		ts = ev.Timestamp
+		bytesIn = ev.BytesIn
+		bytesOut = ev.BytesOut
+		durationMs = ev.DurationMs
 	default:
 		return feats
 	}
 
 	logMax := float32(math.Log1p(65535))
+	logByteMax := float32(math.Log1p(1 << 30))
 
 	feats[0] = portCategory(destPort)
 	feats[1] = float32(math.Log1p(float64(srcPort))) / logMax
@@ -66,6 +75,19 @@ func (e *NetworkFeatureExtractor) Extract(conn interface{}) []float32 {
 	feats[12] = boolF32(domain != "")
 	feats[13] = boolF32(isPrivateIP(destIP))
 	feats[14] = boolF32(isLoopback(destIP))
+
+	// [15] – bytes_in_norm
+	feats[15] = float32(math.Log1p(float64(bytesIn))) / logByteMax
+	// [16] – bytes_out_norm
+	feats[16] = float32(math.Log1p(float64(bytesOut))) / logByteMax
+	// [17] – total_bytes_norm
+	feats[17] = float32(math.Log1p(float64(bytesIn+bytesOut))) / logByteMax
+	// [18] – duration_norm
+	if durationMs > 3600000 {
+		feats[18] = 1.0
+	} else {
+		feats[18] = float32(durationMs) / 3600000.0
+	}
 
 	return feats
 }

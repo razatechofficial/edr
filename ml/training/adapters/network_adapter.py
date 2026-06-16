@@ -25,8 +25,9 @@ from utils.features import NETWORK_FEATURE_COUNT
 
 logger = logging.getLogger(__name__)
 
-NET_FEATURE_DIM = NETWORK_FEATURE_COUNT  # 15
+NET_FEATURE_DIM = NETWORK_FEATURE_COUNT  # 19
 LOG_MAX = float(math.log1p(65535))
+LOG_BYTE_MAX = float(math.log1p(1 << 30))
 
 
 def _port_category(port: int) -> float:
@@ -99,6 +100,29 @@ def _load_cic_ids(csv_path: Path, max_samples: int) -> tuple[np.ndarray, np.ndar
             seconds = ts.dt.second.values[mask]
             X[mask, 3] = (hours * 3600 + minutes * 60 + seconds).astype(np.float32) / 86400.0
 
+    # [15..18] - byte volume and duration
+    log_byte_max = np.float32(LOG_BYTE_MAX)
+    for col_name in df.columns:
+        stripped = col_name.strip()
+        if stripped == "Total Length of Fwd Packets":
+            fwd_bytes = pd.to_numeric(df[col_name], errors="coerce").fillna(0).values.astype(np.int64)
+        elif stripped == "Total Length of Bwd Packets":
+            bwd_bytes = pd.to_numeric(df[col_name], errors="coerce").fillna(0).values.astype(np.int64)
+        elif stripped == "Flow Duration":
+            flow_dur_us = pd.to_numeric(df[col_name], errors="coerce").fillna(0).values.astype(np.int64)
+
+    if 'fwd_bytes' in dir():
+        out_bytes = np.maximum(fwd_bytes, 0)
+        in_bytes = np.maximum(bwd_bytes, 0)
+        tot = out_bytes + in_bytes
+        X[:, 15] = np.log1p(in_bytes.astype(np.float64)).astype(np.float32) / log_byte_max
+        X[:, 16] = np.log1p(out_bytes.astype(np.float64)).astype(np.float32) / log_byte_max
+        X[:, 17] = np.log1p(tot.astype(np.float64)).astype(np.float32) / log_byte_max
+
+    if 'flow_dur_us' in dir():
+        duration_ms = np.maximum(flow_dur_us // 1000, 0)
+        X[:, 18] = np.where(duration_ms > 3600000, 1.0, duration_ms.astype(np.float32) / 3600000.0)
+
     return X, y
 
 
@@ -151,6 +175,23 @@ def _load_unsw_nb15(csv_path: Path, max_samples: int) -> tuple[np.ndarray, np.nd
             minutes = ts.dt.minute.values[mask]
             seconds = ts.dt.second.values[mask]
             X[mask, 3] = (hours * 3600 + minutes * 60 + seconds).astype(np.float32) / 86400.0
+
+    # [15..18] - byte volume and duration
+    log_byte_max = np.float32(LOG_BYTE_MAX)
+    if "sbytes" in df.columns and "dbytes" in df.columns:
+        in_bytes = pd.to_numeric(df["sbytes"], errors="coerce").fillna(0).values.astype(np.int64)
+        out_bytes = pd.to_numeric(df["dbytes"], errors="coerce").fillna(0).values.astype(np.int64)
+        in_bytes = np.maximum(in_bytes, 0)
+        out_bytes = np.maximum(out_bytes, 0)
+        tot = (in_bytes + out_bytes).astype(np.int64)
+        X[:, 15] = np.log1p(in_bytes.astype(np.float64)).astype(np.float32) / log_byte_max
+        X[:, 16] = np.log1p(out_bytes.astype(np.float64)).astype(np.float32) / log_byte_max
+        X[:, 17] = np.log1p(tot.astype(np.float64)).astype(np.float32) / log_byte_max
+
+    if "dur" in df.columns:
+        dur_sec = pd.to_numeric(df["dur"], errors="coerce").fillna(0).values.astype(np.float64)
+        dur_ms = np.maximum((dur_sec * 1000).astype(np.int64), 0)
+        X[:, 18] = np.where(dur_ms > 3600000, 1.0, dur_ms.astype(np.float32) / 3600000.0)
 
     return X, y
 

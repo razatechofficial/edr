@@ -121,21 +121,21 @@
     },
     {
       "name": "network_lgbm",
-      "version": "3.0.0",
+      "version": "4.0.0",
       "file": "network_lgbm.onnx",
-      "sha256": "e929efdf203dfc9f1a7c157847c66d594da8c4ecbc5cf793adbe3bbdaca2a15f",
-      "size_bytes": 9606966,
-      "status": "warning",
-      "created_at": "2026-06-15T00:00:00Z",
+      "sha256": "3c7b78bfcc0e6ba4bdd92cf569febae1e63894d5f053f03260c33777f7e25d94",
+      "size_bytes": 4774404,
+      "status": "active",
+      "created_at": "2026-06-16T00:00:00Z",
       "metrics": {
-        "accuracy": 0.9150,
-        "roc_auc": 0.9224,
-        "precision": 0.8413,
-        "recall": 0.9612,
-        "f1": 0.8989
+        "accuracy": 0.9939,
+        "roc_auc": 0.9999,
+        "precision": 0.9909,
+        "recall": 0.997,
+        "f1": 0.9939
       },
-      "source": "cic_ids2017_2018_v2",
-      "updated_at": "2026-06-15T20:09:00Z"
+      "source": "cic_ids2017_v4_19dim",
+      "updated_at": "2026-06-16T12:53:00Z"
     },
     {
       "name": "pe_classifier",

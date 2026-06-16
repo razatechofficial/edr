@@ -82,7 +82,7 @@ PROCESS_CATEGORY_INDEX: dict[str, int] = {
     "unknown": 7,
 }
 
-NETWORK_FEATURE_COUNT = 15
+NETWORK_FEATURE_COUNT = 19
 RATC2_FEATURE_COUNT = 22
 
 RANSOMWARE_FEATURE_KEYS = [
@@ -404,13 +404,17 @@ class BehavioralFeatureEncoder:
 
 
 class NetworkFeatureEncoder:
-    """Encodes network connection events into 15-dim vectors.
+    """Encodes network connection events into 19-dim vectors.
+
+    Features [0..14] match the original 15-dim set. Features [15..18] add byte
+    volume and connection timing.
 
     Mirrors the Go ``NetworkFeatureExtractor`` in
     ``internal/detection/ml/features/network.go``.
     """
 
     FEATURE_DIM = NETWORK_FEATURE_COUNT
+    LOG_BYTE_MAX = math.log1p(1 << 30)
 
     def encode(self, conn: dict[str, Any]) -> np.ndarray:
         feats = np.zeros(NETWORK_FEATURE_COUNT, dtype=np.float32)
@@ -419,6 +423,10 @@ class NetworkFeatureEncoder:
         protocol = str(conn.get("protocol", "")).lower()
         domain = str(conn.get("domain", ""))
         dest_ip = str(conn.get("dest_ip", ""))
+
+        bytes_in = int(conn.get("bytes_in", 0))
+        bytes_out = int(conn.get("bytes_out", 0))
+        duration_ms = int(conn.get("duration_ms", 0))
 
         ts = conn.get("timestamp")
         time_of_day = 0.0
@@ -445,6 +453,15 @@ class NetworkFeatureEncoder:
         feats[13] = float(_is_private_ip(dest_ip))
         feats[14] = float(_is_loopback(dest_ip))
 
+        # [15] – bytes_in_norm
+        feats[15] = np.float32(math.log1p(bytes_in) / self.LOG_BYTE_MAX)
+        # [16] – bytes_out_norm
+        feats[16] = np.float32(math.log1p(bytes_out) / self.LOG_BYTE_MAX)
+        # [17] – total_bytes_norm
+        feats[17] = np.float32(math.log1p(bytes_in + bytes_out) / self.LOG_BYTE_MAX)
+        # [18] – duration_norm
+        feats[18] = np.float32(min(duration_ms / 3_600_000.0, 1.0))
+
         return feats
 
     @staticmethod
@@ -465,6 +482,10 @@ class NetworkFeatureEncoder:
             "has_domain",
             "is_private_dest",
             "is_loopback",
+            "bytes_in_norm",
+            "bytes_out_norm",
+            "total_bytes_norm",
+            "duration_norm",
         ]
 
 

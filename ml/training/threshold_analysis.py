@@ -175,7 +175,7 @@ def load_ctu13():
 # ---------- threshold optimization ----------
 MODEL_CONFIGS = [
     ("pe_classifier", load_ember, 0.80, 311, False),
-    ("network_lgbm", load_cicids, 0.50, 15, False),
+    ("network_lgbm", load_cicids, 0.50, 19, False),
     ("memory_injection", load_malmem, 0.70, 32, False),
     ("rat_c2_detector", load_ctu13, 0.50, 22, False),
 ]
