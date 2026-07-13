@@ -41,6 +41,7 @@ import (
 	"github.com/razatechofficial/edr/internal/telemetry"
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/threatintel"
+	"github.com/razatechofficial/edr/internal/xdrclient"
 	"github.com/razatechofficial/edr/pkg/events"
 )
 
@@ -88,6 +89,10 @@ type Agent struct {
 	telemetryRelay *forwarder.TelemetryRelay
 	// telemetrySealSender mirrors forwarder seal settings for diagnostics (no live transport).
 	telemetrySealSender *telemetry.Sender
+
+	xdrIngest *xdrclient.IngestClient
+	xdrStore  xdrclient.Store
+	xdrState  xdrclient.State
 
 	healthMu           sync.Mutex
 	lastHealthSnapshot time.Time
@@ -169,7 +174,12 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	if telEP == "" {
 		telEP = strings.TrimSpace(cfg.Forwarder.Endpoint)
 	}
-	if telEP != "" {
+	// Prefer XDR gRPC ingest when configured; otherwise keep HTTP telemetry relay.
+	if cfg.XDR.EnabledForEnrollment() {
+		if err := a.initXDR(); err != nil {
+			return nil, err
+		}
+	} else if telEP != "" {
 		qdir := filepath.Join(cfg.Agent.DataDir, "telemetry-queue")
 		qm, qerr := telemetryqueue.NewManager(qdir, 500<<20)
 		if qerr != nil {
@@ -737,6 +747,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	if a.controlPlane != nil {
 		go a.runControlPlane(ctx)
 	}
+
+	a.runXDRBackground(ctx)
 
 	if a.telemetryRelay != nil {
 		go a.telemetryRelay.Run(ctx)

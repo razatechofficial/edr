@@ -273,6 +273,37 @@ func (m *Manager) Start(ctx context.Context) {
 	})
 }
 
+// PurgeOlderThan removes closed segments whose mtime is older than maxAge
+// (industry: offline spool retention, typically 7 days).
+func (m *Manager) PurgeOlderThan(maxAge time.Duration) int {
+	if m == nil || maxAge <= 0 {
+		return 0
+	}
+	cutoff := time.Now().Add(-maxAge)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	removed := 0
+	for _, p := range m.listSegmentPaths() {
+		if p == m.currentPath {
+			continue
+		}
+		st, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if st.ModTime().Before(cutoff) {
+			_ = os.Remove(p)
+			m.dropCount.Add(1)
+			m.totalBytes -= st.Size()
+			removed++
+		}
+	}
+	if m.totalBytes < 0 {
+		m.totalBytes = 0
+	}
+	return removed
+}
+
 // Close stops the background fsync loop and fsyncs the active segment one
 // final time so no buffered writes leak.
 func (m *Manager) Close() error {

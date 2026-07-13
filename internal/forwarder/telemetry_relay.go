@@ -12,10 +12,16 @@ import (
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
 )
 
+// LineSender sends one telemetry JSON line upstream (HTTP or gRPC).
+type LineSender interface {
+	Send(ctx context.Context, line []byte) error
+}
+
 // TelemetryRelay POSTs JSON telemetry lines upstream and spills to disk on failure.
 type TelemetryRelay struct {
 	endpoint string
 	client   *http.Client
+	sender   LineSender
 	q        *telemetryqueue.Manager
 	log      *slog.Logger
 	sealer   func([]byte) ([]byte, error)
@@ -36,6 +42,19 @@ func NewTelemetryRelay(endpoint string, q *telemetryqueue.Manager, log *slog.Log
 	}
 }
 
+// NewTelemetryRelayWithSender builds a relay that uses sender instead of HTTP POST.
+func NewTelemetryRelayWithSender(sender LineSender, q *telemetryqueue.Manager, log *slog.Logger) *TelemetryRelay {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &TelemetryRelay{
+		sender: sender,
+		client: &http.Client{Timeout: 15 * time.Second},
+		q:      q,
+		log:    log,
+	}
+}
+
 // TrySend POSTs one telemetry JSON line; on error the caller may Enqueue.
 func (r *TelemetryRelay) TrySend(ctx context.Context, line []byte) error {
 	if r == nil || len(line) == 0 {
@@ -50,6 +69,9 @@ func (r *TelemetryRelay) TrySend(ctx context.Context, line []byte) error {
 		}
 		r.sealedOK.Add(1)
 		payload = sealed
+	}
+	if r.sender != nil {
+		return r.sender.Send(ctx, payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint, bytes.NewReader(payload))
 	if err != nil {

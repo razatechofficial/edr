@@ -5,6 +5,7 @@
 package config
 
 import (
+	"strings"
 	"time"
 )
 
@@ -35,6 +36,11 @@ type Config struct {
 		ReconnectSec int    `yaml:"reconnect_sec"`
 		AirGapMode   bool   `yaml:"airgap_mode" env:"AIRGAP_MODE"`
 	} `yaml:"server"`
+
+	// XDR wires the agent to xdr-enrollment + xdr-ingest (not the embedded edr control plane).
+	// When EnrollmentHost + EnrollmentToken are set, the agent enrolls via CSR, stores certs,
+	// and streams OCSF telemetry over TelemetryService/StreamTelemetry.
+	XDR XDRConfig `yaml:"xdr"`
 
 	LLM struct {
 		Enabled           bool    `yaml:"enabled" env:"LLM_ENABLED"`
@@ -590,6 +596,26 @@ type Config struct {
 	ConfigVerifyPubKey    string `yaml:"config_verify_pubkey"`
 }
 
+// XDRConfig configures integration with xdr-enrollment and xdr-ingest.
+type XDRConfig struct {
+	Enabled          bool     `yaml:"enabled" env:"XDR_ENABLED"`
+	EnrollmentHost   string   `yaml:"enrollment_host" env:"XDR_ENROLLMENT_HOST"` // host:port, e.g. localhost:50051
+	EnrollmentToken  string   `yaml:"enrollment_token" env:"XDR_ENROLLMENT_TOKEN"`
+	TenantID         string   `yaml:"tenant_id" env:"XDR_TENANT_ID"` // until RegisterResponse returns tenant_id
+	IngestHosts      []string `yaml:"ingest_hosts"`                  // optional override; else from Register
+	MachineID        string   `yaml:"machine_id" env:"XDR_MACHINE_ID"`
+	CertDir          string   `yaml:"cert_dir"` // default: {data_dir}/xdr-tls
+	RenewBeforeDays  int      `yaml:"renew_before_days"`
+	InsecureSkipTLS  bool     `yaml:"insecure_skip_tls"` // local/dev only for enrollment bootstrap
+	SpoolMaxBytes    int64    `yaml:"spool_max_bytes"`   // default 1GiB
+	SpoolMaxAgeDays  int      `yaml:"spool_max_age_days"` // default 7
+}
+
+// EnabledForEnrollment reports whether XDR enrollment should run at startup.
+func (c XDRConfig) EnabledForEnrollment() bool {
+	return c.Enabled || (strings.TrimSpace(c.EnrollmentHost) != "" && strings.TrimSpace(c.EnrollmentToken) != "")
+}
+
 // CustomFeed represents an external threat intelligence feed.
 type CustomFeed struct {
 	Name            string `yaml:"name"`
@@ -611,6 +637,10 @@ func Defaults() Config {
 	cfg.Server.HeartbeatSec = 30
 	cfg.Server.ReconnectSec = 5
 	cfg.Server.MutualTLS = true
+
+	cfg.XDR.RenewBeforeDays = 7
+	cfg.XDR.SpoolMaxBytes = 1 << 30 // 1 GiB
+	cfg.XDR.SpoolMaxAgeDays = 7
 
 	cfg.LLM.PrimaryProvider = "grok"
 	cfg.LLM.LocalProvider = "ollama"

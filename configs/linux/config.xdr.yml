@@ -1,0 +1,25 @@
+# XDR control + data plane (enrollment + ingest). Optional — leave disabled for
+# legacy embedded edr control plane / HTTP forwarder.
+#
+# Flow:
+#   1) Agent Register → xdr-enrollment:50051 (enrollment_token + CSR)
+#   2) Persist certs under cert_dir; use ingest_hosts from response
+#   3) Stream OCSF JSON via TelemetryService/StreamTelemetry to ingest
+#   4) Offline: disk spool under data_dir/telemetry-queue (size + 7d retention)
+#   5) Cert watch renews ≤ renew_before_days before expiry
+xdr:
+  enabled: true
+  enrollment_host: "127.0.0.1:50051"
+  enrollment_token: "REPLACE_WITH_TOKEN_FROM_GATEWAY"
+  # Required until RegisterResponse includes tenant_id
+  tenant_id: "550e8400-e29b-41d4-a716-446655440001"
+  # Optional override; normally taken from RegisterResponse.ingest_hosts
+  # ingest_hosts:
+  #   - "127.0.0.1:50052"
+  machine_id: ""
+  cert_dir: /var/lib/edr-agent/xdr-tls
+  renew_before_days: 7
+  # Local/dev: enrollment bootstrap and ingest often run without TLS
+  insecure_skip_tls: true
+  spool_max_bytes: 1073741824
+  spool_max_age_days: 7
