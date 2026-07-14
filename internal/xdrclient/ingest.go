@@ -16,24 +16,24 @@ import (
 )
 
 // IngestClient streams OCSF JSON lines as TelemetryBatch payloads.
+// Tenant is resolved server-side from the enrolled agent record (not sent by the agent).
 type IngestClient struct {
-	hosts      []string
-	agentID    string
-	tenantID   string
-	store      Store
-	insecure   bool
-	log        *slog.Logger
-	heartbeat  time.Duration
+	hosts     []string
+	agentID   string
+	store     Store
+	insecure  bool
+	log       *slog.Logger
+	heartbeat time.Duration
 
-	mu       sync.Mutex
-	conn     *grpc.ClientConn
-	stream   telemetryv1.TelemetryService_StreamTelemetryClient
-	seq      atomic.Int64
-	hostIdx  int
+	mu      sync.Mutex
+	conn    *grpc.ClientConn
+	stream  telemetryv1.TelemetryService_StreamTelemetryClient
+	seq     atomic.Int64
+	hostIdx int
 }
 
 // NewIngestClient builds a client. Call Connect before Send, or Send will connect lazily.
-func NewIngestClient(hosts []string, agentID, tenantID string, store Store, insecureSkip bool, heartbeatSec int32, log *slog.Logger) *IngestClient {
+func NewIngestClient(hosts []string, agentID string, store Store, insecureSkip bool, heartbeatSec int32, log *slog.Logger) *IngestClient {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -41,15 +41,20 @@ func NewIngestClient(hosts []string, agentID, tenantID string, store Store, inse
 	if heartbeatSec > 0 {
 		hb = time.Duration(heartbeatSec) * time.Second
 	}
-	return &IngestClient{
+	c := &IngestClient{
 		hosts:     append([]string(nil), hosts...),
 		agentID:   agentID,
-		tenantID:  tenantID,
 		store:     store,
 		insecure:  insecureSkip,
 		log:       log,
 		heartbeat: hb,
 	}
+	// Resume past Redis dedup window so reconnects don't storm duplicates.
+	if seq := store.LoadIngestSeq(); seq > 0 {
+		c.seq.Store(seq)
+		log.Info("ingest sequence resumed", "last_seq", seq)
+	}
+	return c
 }
 
 // Send implements a line sender for TelemetryRelay: one OCSF JSON line per batch.
@@ -69,7 +74,6 @@ func (c *IngestClient) Send(ctx context.Context, line []byte) error {
 	}
 	if err := stream.Send(&telemetryv1.TelemetryBatch{
 		AgentId:  c.agentID,
-		TenantId: c.tenantID,
 		Sequence: seq,
 		Payload:  line,
 	}); err != nil {
@@ -84,11 +88,20 @@ func (c *IngestClient) Send(ctx context.Context, line []byte) error {
 	if !ack.GetAccepted() {
 		return fmt.Errorf("ingest rejected seq=%d: %s", ack.GetSequence(), ack.GetMessage())
 	}
+	// Persist every 50 ACKs (and first) so restarts continue above Redis dedup keys.
+	if seq == 1 || seq%50 == 0 {
+		if err := c.store.SaveIngestSeq(seq); err != nil {
+			c.log.Debug("persist ingest seq failed", "seq", seq, "error", err)
+		}
+	}
 	return nil
 }
 
 // Close tears down the gRPC connection.
 func (c *IngestClient) Close() error {
+	if seq := c.seq.Load(); seq > 0 {
+		_ = c.store.SaveIngestSeq(seq)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stream = nil
@@ -150,11 +163,20 @@ func (c *IngestClient) dial(ctx context.Context, host string) (*grpc.ClientConn,
 	var opts []grpc.DialOption
 	if c.insecure || !c.store.HasCredentials() {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if c.insecure {
+			c.log.Warn("ingest using insecure transport (insecure_skip_tls=true); client cert not presented")
+		}
 	} else {
-		tlsCfg, err := LoadClientTLS(c.store.CertPath(), c.store.KeyPath(), c.store.CAPath())
+		tlsCfg, err := LoadClientTLSFromStore(c.store)
 		if err != nil {
 			return nil, nil, err
 		}
+		tlsCfg = TLSConfigForIngestHost(tlsCfg, host)
+		c.log.Info("ingest presenting device certificate via mTLS",
+			"host", host,
+			"server_name", tlsCfg.ServerName,
+			"secure_storage", c.store.BackendName(),
+		)
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	}
 	conn, err := grpc.NewClient(host, opts...)
