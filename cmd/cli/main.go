@@ -57,18 +57,19 @@ func init() {
 
 // platformDefaults sets defaults that match cmd/installer layouts (macOS/Linux/Windows).
 func platformDefaults() {
+	// Paths match cmd/installer platformPaths + agent.yaml layout.
 	switch runtime.GOOS {
 	case "darwin":
 		defaultConfigFile = "/Library/Application Support/EDR/config/agent.yaml"
 		defaultAlertFile = "/Library/Logs/EDR/alerts.jsonl"
 		defaultSocketPath = "/var/run/edr-agent.sock"
 	case "windows":
-		defaultConfigFile = `C:\ProgramData\EDR Agent\config.yml`
-		defaultAlertFile = `C:\ProgramData\EDR Agent\alerts.jsonl`
+		defaultConfigFile = `C:\ProgramData\EDR\config\agent.yaml`
+		defaultAlertFile = `C:\ProgramData\EDR\logs\alerts.jsonl`
 		defaultSocketPath = `\\.\pipe\edr-agent-control`
 	default:
-		defaultConfigFile = "/etc/edr-agent/config.yml"
-		defaultAlertFile = "/var/lib/edr-agent/alerts.jsonl"
+		defaultConfigFile = "/etc/edr/agent.yaml"
+		defaultAlertFile = "/var/log/edr/alerts.jsonl"
 		defaultSocketPath = "/var/run/edr-agent.sock"
 	}
 }
@@ -99,6 +100,7 @@ func main() {
 		newForensicsCmd(),
 		newRulesCmd(),
 		newConfigCmd(),
+		newEnrollCmd(),
 		newVersionCmd(),
 		newFleetCmd(),
 	)
