@@ -48,6 +48,7 @@ import (
 type Agent struct {
 	logger       *slog.Logger
 	cfg          config.Config
+	configPath   string // agent.yaml path (bootstrap token wipe / discovery)
 	collectors   []collector.Collector
 	ruleSet      rules.RuleSet
 	eventSpool   *spool.Queue[schema.ProcessEvent]
@@ -152,6 +153,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	a := &Agent{
 		logger:             slog.Default(),
 		cfg:                cfg,
+		configPath:         configPath,
 		collectors:         cols,
 		ruleSet:            rs,
 		eventSpool:         spool.NewQueueWithLimit[schema.ProcessEvent](cfg.Performance.EventBufferSize),
