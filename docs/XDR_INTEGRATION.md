@@ -10,12 +10,35 @@ Merge `configs/linux/config.xdr.yml` into your agent config (or set env vars):
 |---------|-----|---------|
 | `xdr.enabled` | `XDR_ENABLED` | Turn on XDR path |
 | `xdr.enrollment_host` | `XDR_ENROLLMENT_HOST` | `host:port` of enrollment bootstrap (`:50051`) |
-| `xdr.enrollment_token` | `XDR_ENROLLMENT_TOKEN` | One-time token from gateway/admin |
-| `xdr.tenant_id` | `XDR_TENANT_ID` | Required until RegisterResponse returns tenant_id |
+| `xdr.enrollment_token` | `XDR_ENROLLMENT_TOKEN` | One-time token (prefer file/flag; cleared after Register) |
+| `xdr.enrollment_token_file` | `XDR_ENROLLMENT_TOKEN_FILE` | Root-only sidecar (default `{config_dir}/enrollment.token`) |
+| `xdr.secure_storage` | `XDR_SECURE_STORAGE` | `auto\|keychain\|dpapi\|file` |
 | `xdr.insecure_skip_tls` | — | `true` for local/dev (plain gRPC) |
 | `xdr.spool_max_age_days` | — | Default **7** (drop oldest spool segments) |
 | `xdr.spool_max_bytes` | — | Default **1 GiB** |
 | `xdr.renew_before_days` | — | Default **7** (cert watch) |
+
+## Install + enroll (enterprise)
+
+Install and enroll are separate steps; prefer fleet flags / token sidecar (no end-user prompt).
+
+```bash
+# Install + enroll in one shot (token written to enrollment.token, then cleared)
+sudo ./edr-installer install \
+  --enrollment-host enrollment.example.com:50051 \
+  --enrollment-token "$TOKEN"
+
+# Or install only, enroll later
+sudo ./edr-installer install --enrollment-host ... --enrollment-token "$TOKEN" --delay-enroll
+sudo edrctl enroll --host enrollment.example.com:50051 --token-file /etc/edr/enrollment.token
+
+# Or start agent with bootstrap flags (enrolls then streams with cert)
+sudo edr-agent run --config /etc/edr/agent.yaml \
+  --enrollment-host enrollment.example.com:50051 \
+  --enrollment-token "$TOKEN"
+```
+
+After Register: private key + cert live in OS secure storage; bootstrap token file/yaml field are wiped. Ingest uses the signed cert (mTLS).
 
 ## Runtime flow
 
@@ -34,9 +57,9 @@ Legacy embedded `server.*` control plane and HTTP `forwarder.telemetry_endpoint`
 export XDR_ENABLED=true
 export XDR_ENROLLMENT_HOST=127.0.0.1:50051
 export XDR_ENROLLMENT_TOKEN=...
-export XDR_TENANT_ID=550e8400-e29b-41d4-a716-446655440001
 
 # Run agent with config that includes xdr: section
+# Tenant is bound server-side from the enrollment token (not an agent input).
 ```
 
 ## Package layout
