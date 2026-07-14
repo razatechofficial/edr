@@ -598,22 +598,39 @@ type Config struct {
 
 // XDRConfig configures integration with xdr-enrollment and xdr-ingest.
 type XDRConfig struct {
-	Enabled          bool     `yaml:"enabled" env:"XDR_ENABLED"`
-	EnrollmentHost   string   `yaml:"enrollment_host" env:"XDR_ENROLLMENT_HOST"` // host:port, e.g. localhost:50051
-	EnrollmentToken  string   `yaml:"enrollment_token" env:"XDR_ENROLLMENT_TOKEN"`
-	TenantID         string   `yaml:"tenant_id" env:"XDR_TENANT_ID"` // until RegisterResponse returns tenant_id
-	IngestHosts      []string `yaml:"ingest_hosts"`                  // optional override; else from Register
-	MachineID        string   `yaml:"machine_id" env:"XDR_MACHINE_ID"`
-	CertDir          string   `yaml:"cert_dir"` // default: {data_dir}/xdr-tls
-	RenewBeforeDays  int      `yaml:"renew_before_days"`
-	InsecureSkipTLS  bool     `yaml:"insecure_skip_tls"` // local/dev only for enrollment bootstrap
-	SpoolMaxBytes    int64    `yaml:"spool_max_bytes"`   // default 1GiB
-	SpoolMaxAgeDays  int      `yaml:"spool_max_age_days"` // default 7
+	Enabled         bool   `yaml:"enabled" env:"XDR_ENABLED"`
+	EnrollmentHost  string `yaml:"enrollment_host" env:"XDR_ENROLLMENT_HOST"` // host:port, e.g. localhost:50051
+	EnrollmentToken string `yaml:"enrollment_token" env:"XDR_ENROLLMENT_TOKEN"`
+	// EnrollmentTokenFile is a root-only bootstrap file (preferred over yaml token).
+	// Cleared after successful Register. Env: XDR_ENROLLMENT_TOKEN_FILE.
+	EnrollmentTokenFile string   `yaml:"enrollment_token_file" env:"XDR_ENROLLMENT_TOKEN_FILE"`
+	IngestHosts         []string `yaml:"ingest_hosts"` // optional override; else from Register
+	MachineID           string   `yaml:"machine_id" env:"XDR_MACHINE_ID"`
+	CertDir             string   `yaml:"cert_dir"` // default: {data_dir}/xdr-tls
+	// SecureStorage selects identity backend: auto|keychain|dpapi|file.
+	// auto = Keychain (macOS/CGO), DPAPI (Windows), sealed file otherwise.
+	SecureStorage   string `yaml:"secure_storage" env:"XDR_SECURE_STORAGE"`
+	RenewBeforeDays int    `yaml:"renew_before_days"`
+	InsecureSkipTLS bool   `yaml:"insecure_skip_tls"` // local/dev only for enrollment bootstrap
+	SpoolMaxBytes   int64  `yaml:"spool_max_bytes"`   // default 1GiB
+	SpoolMaxAgeDays int    `yaml:"spool_max_age_days"` // default 7
 }
 
-// EnabledForEnrollment reports whether XDR enrollment should run at startup.
+// HasBootstrapCredentials reports whether host+token are available for Register.
+func (c XDRConfig) HasBootstrapCredentials() bool {
+	return strings.TrimSpace(c.EnrollmentHost) != "" && strings.TrimSpace(c.EnrollmentToken) != ""
+}
+
+// EnabledForEnrollment reports whether XDR enrollment/ingest should run at startup.
+// True when explicitly enabled, bootstrap credentials are present, or a token file is configured.
 func (c XDRConfig) EnabledForEnrollment() bool {
-	return c.Enabled || (strings.TrimSpace(c.EnrollmentHost) != "" && strings.TrimSpace(c.EnrollmentToken) != "")
+	if c.Enabled {
+		return true
+	}
+	if c.HasBootstrapCredentials() {
+		return true
+	}
+	return strings.TrimSpace(c.EnrollmentTokenFile) != "" && strings.TrimSpace(c.EnrollmentHost) != ""
 }
 
 // CustomFeed represents an external threat intelligence feed.
@@ -638,6 +655,7 @@ func Defaults() Config {
 	cfg.Server.ReconnectSec = 5
 	cfg.Server.MutualTLS = true
 
+	cfg.XDR.SecureStorage = "auto"
 	cfg.XDR.RenewBeforeDays = 7
 	cfg.XDR.SpoolMaxBytes = 1 << 30 // 1 GiB
 	cfg.XDR.SpoolMaxAgeDays = 7
