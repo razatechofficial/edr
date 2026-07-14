@@ -4,7 +4,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/xdrclient"
 )
 
 var (
@@ -31,6 +34,13 @@ var (
 	flagConfigPath string
 	// Optional directory containing models/ and rules/ subfolders (defaults to the installer's directory).
 	flagBundleDir string
+
+	flagEnrollmentHost      string
+	flagEnrollmentToken     string
+	flagEnrollmentTokenFile string
+	flagEnroll              bool
+	flagDelayEnroll         bool
+	flagEnrollmentInsecure  bool
 )
 
 func main() {
@@ -56,9 +66,23 @@ func main() {
 
 Place edr-installer in a folder alongside models/ and rules/ (see "make bundle-enterprise"), then run: sudo ./edr-installer install
 
+XDR enrollment (optional, fleet):
+  sudo ./edr-installer install \
+    --enrollment-host enrollment.example.com:50051 \
+    --enrollment-token "$TOKEN"
+
+Token is written to a root-only sidecar and cleared after Register (unless --delay-enroll).
+Tenant is bound server-side from the enrollment token (not an agent input).
+
 Use --config only if you must supply a custom YAML instead of the generated enterprise profile.`,
 		RunE: runInstall,
 	}
+	installCmd.Flags().StringVar(&flagEnrollmentHost, "enrollment-host", "", "XDR enrollment host:port")
+	installCmd.Flags().StringVar(&flagEnrollmentToken, "enrollment-token", "", "XDR one-time enrollment token")
+	installCmd.Flags().StringVar(&flagEnrollmentTokenFile, "enrollment-token-file", "", "read enrollment token from file")
+	installCmd.Flags().BoolVar(&flagEnroll, "enroll", true, "run XDR enrollment after install when token+host are present")
+	installCmd.Flags().BoolVar(&flagDelayEnroll, "delay-enroll", false, "install token sidecar only; agent enrolls on first start")
+	installCmd.Flags().BoolVar(&flagEnrollmentInsecure, "enrollment-insecure", false, "insecure gRPC to enrollment (lab/dev)")
 
 	uninstallCmd := &cobra.Command{
 		Use:   "uninstall",
@@ -155,6 +179,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("    %s\n", configDst)
 
+	if err := applyInstallEnrollment(configDst, paths); err != nil {
+		return err
+	}
+
 	fmt.Println("==> Installing platform service")
 	if err := installService(paths, agentDst, configDst); err != nil {
 		return fmt.Errorf("installing service: %w", err)
@@ -165,6 +193,89 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    Data dir: %s\n", paths.dataDir)
 	fmt.Printf("    Logs:     %s\n", paths.logDir)
 	return nil
+}
+
+// applyInstallEnrollment writes XDR bootstrap material and optionally Registers.
+func applyInstallEnrollment(configDst string, paths installPaths) error {
+	host := strings.TrimSpace(flagEnrollmentHost)
+	token := strings.TrimSpace(flagEnrollmentToken)
+	tokenFileIn := strings.TrimSpace(flagEnrollmentTokenFile)
+	if host == "" && token == "" && tokenFileIn == "" {
+		return nil
+	}
+	if host == "" {
+		return fmt.Errorf("--enrollment-host is required when providing an enrollment token")
+	}
+	if token == "" && tokenFileIn != "" {
+		b, err := os.ReadFile(tokenFileIn)
+		if err != nil {
+			return fmt.Errorf("read --enrollment-token-file: %w", err)
+		}
+		token = strings.TrimSpace(string(b))
+	}
+	if token == "" {
+		return fmt.Errorf("enrollment token required (--enrollment-token or --enrollment-token-file)")
+	}
+
+	fmt.Println("==> Configuring XDR enrollment bootstrap")
+	if err := xdrclient.PatchXDRConfigFile(configDst, host, flagEnrollmentInsecure); err != nil {
+		return fmt.Errorf("patch xdr config: %w", err)
+	}
+	sidecar := xdrclient.DefaultEnrollmentTokenPath(paths.configDir)
+	if err := xdrclient.WriteEnrollmentTokenFile(sidecar, token); err != nil {
+		return fmt.Errorf("write enrollment token file: %w", err)
+	}
+	fmt.Printf("    enrollment_host: %s\n", host)
+	fmt.Printf("    token_file:      %s (mode 0600)\n", sidecar)
+
+	if flagDelayEnroll || !flagEnroll {
+		fmt.Println("    delay-enroll: agent will enroll on first start")
+		return nil
+	}
+
+	fmt.Println("==> Enrolling with XDR")
+	cfg, err := config.Load(configDst)
+	if err != nil {
+		return fmt.Errorf("load config for enroll: %w", err)
+	}
+	boot, err := xdrclient.ApplyBootstrap(&cfg.XDR, xdrclient.BootstrapOverrides{
+		Host:            host,
+		Token:           token,
+		TokenFile:       sidecar,
+		InsecureSkipTLS: flagEnrollmentInsecure,
+		InsecureSet:     true,
+		ConfigDir:       paths.configDir,
+		DataDir:         paths.dataDir,
+	})
+	if err != nil {
+		return err
+	}
+	cfg.XDR.Enabled = true
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	res, err := xdrclient.EnsureEnrolled(ctx, xdrclient.EnrollOptions{
+		Config:        cfg.XDR,
+		AgentID:       cfg.Agent.ID,
+		AgentVer:      firstNonEmpty(cfg.Agent.Version, version),
+		DataDir:       paths.dataDir,
+		Logger:        slog.Default(),
+		ConfigPath:    configDst,
+		TokenFileUsed: boot.TokenFileUsed,
+	})
+	if err != nil {
+		return fmt.Errorf("xdr enroll: %w", err)
+	}
+	fmt.Printf("    enrolled agent_id=%s secure_storage=%s\n", res.State.AgentID, res.State.SecureStorage)
+	return nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // runUninstall stops the agent service, removes installed files, and
