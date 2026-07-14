@@ -1,0 +1,52 @@
+# Local E2E: XDR enrollment + mTLS ingest with device-bound key storage.
+agent:
+  log_level: info
+  version: "e2e-secure-1.0.0"
+  data_dir: "/tmp/edr-agent-xdr-e2e"
+  temp_dir: "/tmp/edr-agent-xdr-e2e/tmp"
+
+rules_file: "rules/baseline.yaml"
+
+logging:
+  level: info
+  alert_file: "/tmp/edr-agent-xdr-e2e/alerts/alerts.jsonl"
+  audit_file: "/tmp/edr-agent-xdr-e2e/audit/audit.jsonl"
+
+monitoring:
+  mode: userland
+  kernel_enabled: false
+
+detection:
+  sigma:
+    enabled: true
+    rules_dir: "rules/sigma"
+  yara:
+    enabled: false
+  custom_rules:
+    enabled: false
+  ioc:
+    enabled: false
+
+compliance:
+  enabled: false
+
+response:
+  auto_response: false
+  allow_kill: false
+
+forwarder:
+  enabled: false
+
+xdr:
+  enabled: true
+  enrollment_host: "127.0.0.1:50051"
+  enrollment_token: "REPLACE_ME"
+  machine_id: ""
+  cert_dir: "/tmp/edr-agent-xdr-e2e/xdr-tls"
+  # auto → macOS Keychain (CGO), else sealed file
+  secure_storage: auto
+  renew_before_days: 7
+  # Present device cert to ingest over mTLS
+  insecure_skip_tls: false
+  spool_max_bytes: 67108864
+  spool_max_age_days: 7
