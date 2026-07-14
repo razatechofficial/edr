@@ -12,28 +12,39 @@ import (
 )
 
 func (a *Agent) initXDR() error {
-	if !a.cfg.XDR.EnabledForEnrollment() {
+	if !xdrclient.ShouldInitXDR(a.cfg.XDR, a.cfg.Agent.DataDir) {
 		return nil
 	}
+
+	boot, err := xdrclient.ApplyBootstrap(&a.cfg.XDR, xdrclient.BootstrapOverrides{
+		ConfigDir: filepath.Dir(a.configPath),
+		DataDir:   a.cfg.Agent.DataDir,
+	})
+	if err != nil {
+		return fmt.Errorf("xdr bootstrap: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	res, err := xdrclient.EnsureEnrolled(ctx, xdrclient.EnrollOptions{
-		Config:   a.cfg.XDR,
-		AgentID:  a.cfg.Agent.ID,
-		AgentVer: a.cfg.Agent.Version,
-		DataDir:  a.cfg.Agent.DataDir,
-		Logger:   a.logger,
+		Config:        a.cfg.XDR,
+		AgentID:       a.cfg.Agent.ID,
+		AgentVer:      a.cfg.Agent.Version,
+		DataDir:       a.cfg.Agent.DataDir,
+		Logger:        a.logger,
+		ConfigPath:    a.configPath,
+		TokenFileUsed: boot.TokenFileUsed,
 	})
 	if err != nil {
 		return fmt.Errorf("xdr enroll: %w", err)
 	}
+	// Drop bootstrap token from in-memory config after successful enroll.
+	if res.Fresh {
+		a.cfg.XDR.EnrollmentToken = ""
+	}
 	a.xdrStore = res.Store
 	a.xdrState = res.State
-
-	if a.cfg.XDR.TenantID == "" && res.State.TenantID == "" {
-		a.logger.Warn("xdr tenant_id not set; ingest batches may be rejected until configured")
-	}
 
 	maxBytes := a.cfg.XDR.SpoolMaxBytes
 	if maxBytes <= 0 {
@@ -53,7 +64,6 @@ func (a *Agent) initXDR() error {
 	ingest := xdrclient.NewIngestClient(
 		res.State.IngestHosts,
 		a.cfg.Agent.ID,
-		firstNonEmpty(res.State.TenantID, a.cfg.XDR.TenantID),
 		res.Store,
 		a.cfg.XDR.InsecureSkipTLS,
 		res.State.HeartbeatSec,
