@@ -18,6 +18,7 @@ import (
 
 	"github.com/razatechofficial/edr/internal/agent"
 	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/xdrclient"
 )
 
 var (
@@ -35,6 +36,12 @@ var (
 	installSvc bool
 	removeSvc  bool
 	showVer    bool
+
+	// XDR bootstrap (install/start-time). Prefer token file over embedding in yaml.
+	xdrEnrollmentHost      string
+	xdrEnrollmentToken     string
+	xdrEnrollmentTokenFile string
+	xdrInsecureSkipTLS     bool
 )
 
 func main() {
@@ -61,6 +68,10 @@ func main() {
 	root.PersistentFlags().BoolVar(&installSvc, "install", false, "install as system service")
 	root.PersistentFlags().BoolVar(&removeSvc, "uninstall", false, "uninstall system service")
 	root.PersistentFlags().BoolVar(&showVer, "version", false, "print version and exit")
+	root.PersistentFlags().StringVar(&xdrEnrollmentHost, "enrollment-host", "", "XDR enrollment host:port (or XDR_ENROLLMENT_HOST)")
+	root.PersistentFlags().StringVar(&xdrEnrollmentToken, "enrollment-token", "", "XDR one-time enrollment token (or XDR_ENROLLMENT_TOKEN)")
+	root.PersistentFlags().StringVar(&xdrEnrollmentTokenFile, "enrollment-token-file", "", "path to enrollment token file")
+	root.PersistentFlags().BoolVar(&xdrInsecureSkipTLS, "enrollment-insecure", false, "insecure gRPC to enrollment (lab/dev)")
 
 	runCmd := &cobra.Command{
 		Use:   "run",
@@ -175,10 +186,44 @@ func runAgentCore(ctx context.Context, cfgPath string) error {
 	if logLevel != "" {
 		_ = os.Setenv("LOG_LEVEL", logLevel)
 	}
+	// Propagate CLI bootstrap into env before Load so viper BindEnv picks them up.
+	if xdrEnrollmentHost != "" {
+		_ = os.Setenv("XDR_ENROLLMENT_HOST", xdrEnrollmentHost)
+	}
+	if xdrEnrollmentToken != "" {
+		_ = os.Setenv("XDR_ENROLLMENT_TOKEN", xdrEnrollmentToken)
+	}
+	if xdrEnrollmentTokenFile != "" {
+		_ = os.Setenv("XDR_ENROLLMENT_TOKEN_FILE", xdrEnrollmentTokenFile)
+	}
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	// Resolve token file → env so NewWithFiles/Load sees bootstrap credentials.
+	if _, err := xdrclient.ApplyBootstrap(&cfg.XDR, xdrclient.BootstrapOverrides{
+		Host:            xdrEnrollmentHost,
+		Token:           xdrEnrollmentToken,
+		TokenFile:       xdrEnrollmentTokenFile,
+		InsecureSkipTLS: xdrInsecureSkipTLS,
+		InsecureSet:     xdrInsecureSkipTLS,
+		ConfigDir:       filepath.Dir(cfgPath),
+		DataDir:         cfg.Agent.DataDir,
+	}); err != nil {
+		return fmt.Errorf("xdr bootstrap: %w", err)
+	}
+	if cfg.XDR.EnrollmentHost != "" {
+		_ = os.Setenv("XDR_ENROLLMENT_HOST", cfg.XDR.EnrollmentHost)
+	}
+	if cfg.XDR.EnrollmentToken != "" {
+		_ = os.Setenv("XDR_ENROLLMENT_TOKEN", cfg.XDR.EnrollmentToken)
+	}
+	if cfg.XDR.EnrollmentTokenFile != "" {
+		_ = os.Setenv("XDR_ENROLLMENT_TOKEN_FILE", cfg.XDR.EnrollmentTokenFile)
+	}
+	if xdrInsecureSkipTLS || cfg.XDR.HasBootstrapCredentials() || xdrclient.ShouldInitXDR(cfg.XDR, cfg.Agent.DataDir) {
+		_ = os.Setenv("XDR_ENABLED", "true")
 	}
 	logger, err := newLogger(cfg.Logging.Mode, cfg)
 	if err != nil {
