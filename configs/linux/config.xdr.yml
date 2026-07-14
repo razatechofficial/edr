@@ -11,11 +11,9 @@ xdr:
   enabled: true
   enrollment_host: "127.0.0.1:50051"
   enrollment_token: "REPLACE_WITH_TOKEN_FROM_GATEWAY"
-  # Required until RegisterResponse includes tenant_id
-  tenant_id: "550e8400-e29b-41d4-a716-446655440001"
   # Optional override; normally taken from RegisterResponse.ingest_hosts
   # ingest_hosts:
-  #   - "127.0.0.1:50052"
+  #   - "127.0.0.1:9020"
   machine_id: ""
   cert_dir: /var/lib/edr-agent/xdr-tls
   renew_before_days: 7
