@@ -48,7 +48,9 @@ func RenewCertificate(ctx context.Context, opt RenewOptions) (State, error) {
 		return opt.State, fmt.Errorf("enrollment_host required for renew")
 	}
 
-	keyCSR, err := GenerateKeyAndCSR(opt.State.AgentID)
+	// Renew re-binds device identity; enrollment token is not available (already consumed).
+	dev := CollectDeviceIdentity(opt.State.AgentID, opt.State.MachineID, opt.AgentVer, "")
+	keyCSR, err := GenerateKeyAndCSRWithIdentity(dev)
 	if err != nil {
 		return opt.State, err
 	}
@@ -91,7 +93,7 @@ func RenewCertificate(ctx context.Context, opt RenewOptions) (State, error) {
 	st.HeartbeatSec = resp.GetHeartbeatSec()
 	st.CertNotAfter = notAfter
 	st.RenewedAt = time.Now().UTC()
-	if err := opt.Store.Save(st, keyCSR.KeyPEM); err != nil {
+	if err := opt.Store.SaveWithCSR(st, keyCSR.KeyPEM, keyCSR.CSRPEM); err != nil {
 		return opt.State, err
 	}
 	log.Info("xdr certificate renewed", "cert_not_after", st.CertNotAfter)
@@ -102,7 +104,7 @@ func renewDialOptions(opt RenewOptions) ([]grpc.DialOption, error) {
 	if opt.Config.InsecureSkipTLS || !opt.Store.HasCredentials() {
 		return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, nil
 	}
-	tlsCfg, err := LoadClientTLS(opt.Store.CertPath(), opt.Store.KeyPath(), opt.Store.CAPath())
+	tlsCfg, err := LoadClientTLSFromStore(opt.Store)
 	if err != nil {
 		// Fall back to insecure for local/dev bootstrap renew listener.
 		return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, nil
