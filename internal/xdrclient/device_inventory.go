@@ -13,11 +13,14 @@ import (
 )
 
 // CollectDeviceIdentity gathers stable + contextual device facts for CSR binding.
-// Stable fields (serial/model/manufacturer/machine_id) follow IEEE 802.1AR / TCG
-// guidance for DevID subject identity. Volatile fields (IP, timezone, timestamp)
-// are included for enrollment context and also sent as Register labels / PKI tags.
+// MachineID prefers SMBIOS/IOPlatform UUID (OCSF hw_info.uuid); serial/model/
+// manufacturer follow IEEE 802.1AR / TCG DevID subject identity. Volatile fields
+// (IP, timezone, timestamp) are enrollment context + Register/PKI labels.
 func CollectDeviceIdentity(agentID, machineID, agentVer, enrollmentToken string) DeviceIdentity {
 	host := Hostname()
+	mfr := readManufacturer()
+	model := readProductModel()
+	serial := readHardwareSerial()
 	mid := ResolveMachineID(machineID)
 	id := DeviceIdentity{
 		AgentID:           agentID,
@@ -26,9 +29,9 @@ func CollectDeviceIdentity(agentID, machineID, agentVer, enrollmentToken string)
 		OSFamily:          runtime.GOOS,
 		OSVersion:         runtime.GOARCH,
 		AgentVer:          agentVer,
-		Manufacturer:      readManufacturer(),
-		ProductModel:      readProductModel(),
-		HardwareSerial:    readHardwareSerial(),
+		Manufacturer:      mfr,
+		ProductModel:      model,
+		HardwareSerial:    serial,
 		PrimaryIP:         primaryIPv4(),
 		Timezone:          localTimezone(),
 		EnrollTimestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -147,4 +150,13 @@ func runTrim(name string, args ...string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func firstNonEmptyLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if v := strings.TrimSpace(line); v != "" {
+			return v
+		}
+	}
+	return ""
 }

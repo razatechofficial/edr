@@ -3,10 +3,12 @@
 package xdrclient
 
 func readHardwareSerial() string {
+	// SMBIOS Type 1 product serial (not OS machine-id).
 	return readFileTrim(
 		"/sys/class/dmi/id/product_serial",
 		"/sys/devices/virtual/dmi/id/product_serial",
-		"/etc/machine-id",
+		"/sys/class/dmi/id/board_serial",
+		"/sys/devices/virtual/dmi/id/board_serial",
 	)
 }
 
