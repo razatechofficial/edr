@@ -6,7 +6,10 @@ import (
 	"path/filepath"
 	"time"
 
+	telemetryv1 "github.com/razatechofficial/xdr/api/proto/telemetry/v1"
+
 	"github.com/razatechofficial/edr/internal/forwarder"
+	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/xdrclient"
 )
@@ -69,6 +72,7 @@ func (a *Agent) initXDR() error {
 		res.State.HeartbeatSec,
 		a.logger,
 	)
+	ingest.SetCommandHandler(a.handleIngestCommand)
 	a.xdrIngest = ingest
 	a.telemetryRelay = forwarder.NewTelemetryRelayWithSender(ingest, qm, a.logger)
 	a.logger.Info("xdr ingest telemetry relay configured",
@@ -98,4 +102,28 @@ func (a *Agent) runXDRBackground(ctx context.Context) {
 			_ = a.xdrIngest.Close()
 		}
 	})
+}
+
+func (a *Agent) handleIngestCommand(ctx context.Context, cmd *telemetryv1.AgentCommand) error {
+	if a == nil || cmd == nil {
+		return fmt.Errorf("nil command")
+	}
+	if a.respEngine == nil {
+		return fmt.Errorf("response engine unavailable")
+	}
+	op := response.OpKey(xdrclient.MapRemoteCommandType(cmd.GetType()))
+	params := xdrclient.ParseCommandPayload(cmd.GetPayload())
+	if op == response.OpNetworkIsolate {
+		if _, ok := params["action"]; !ok {
+			params["action"] = "isolate"
+		}
+	}
+	result, err := a.respEngine.Execute(ctx, op, params)
+	if err != nil {
+		return err
+	}
+	if result != nil && !result.Success {
+		return fmt.Errorf("%s", result.Message)
+	}
+	return nil
 }
