@@ -8,6 +8,7 @@ import (
 
 // EnvelopeToMap serializes an OCSF envelope to a generic JSON map for forwarding.
 func EnvelopeToMap(e Envelope) map[string]any {
+	e.EnsureSeverity()
 	b, err := json.Marshal(e)
 	if err != nil {
 		return nil
@@ -66,6 +67,8 @@ func FromNetwork(in NetworkInput, product Product) Envelope {
 		CategoryName: "Network Activity",
 		ActivityID:   1,
 		ActivityName: "Open",
+		SeverityID:   SeverityInformational,
+		Severity:     "Informational",
 		Time:         ts,
 		Metadata: Metadata{
 			Version: SchemaVersion,
@@ -115,6 +118,8 @@ func FromDNS(in NetworkInput, product Product) Envelope {
 		CategoryName: "Network Activity",
 		ActivityID:   1,
 		ActivityName: "Query",
+		SeverityID:   SeverityInformational,
+		Severity:     "Informational",
 		Time:         ts,
 		Metadata: Metadata{
 			Version: SchemaVersion,

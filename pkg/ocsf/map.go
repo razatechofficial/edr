@@ -53,6 +53,8 @@ func FromProcess(in ProcessInput, product Product) Envelope {
 		CategoryName: "System Activity",
 		ActivityID:   1,
 		ActivityName: "Launch",
+		SeverityID:   SeverityInformational,
+		Severity:     "Informational",
 		Time:         ts.UnixMilli(),
 		Metadata: Metadata{
 			Version: SchemaVersion,
@@ -80,6 +82,8 @@ func FromFile(in FileInput, product Product) Envelope {
 		CategoryName: "System Activity",
 		ActivityID:   1,
 		ActivityName: in.Operation,
+		SeverityID:   SeverityInformational,
+		Severity:     "Informational",
 		Time:         ts.UnixMilli(),
 		Metadata: Metadata{
 			Version: SchemaVersion,
