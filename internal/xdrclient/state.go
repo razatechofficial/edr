@@ -2,6 +2,7 @@ package xdrclient
 
 import (
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -166,6 +167,45 @@ func (s Store) Load() (State, error) {
 		st.SecureStorage = s.BackendName()
 	}
 	return st, nil
+}
+
+// SaveMetadata rewrites enrollment.json (+ backend name) without rotating key/cert.
+// Used when secure store already holds identity but the sidecar metadata was lost.
+func (s Store) SaveMetadata(st State) error {
+	if err := s.ensureDir(); err != nil {
+		return err
+	}
+	st.SecureStorage = s.BackendName()
+	meta, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.statePath() + ".tmp"
+	if err := os.WriteFile(tmp, meta, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.statePath())
+}
+
+// LoadCAChainPEM reads the on-disk CA chain when present.
+func (s Store) LoadCAChainPEM() []string {
+	data, err := os.ReadFile(s.caPath())
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	var out []string
+	rest := data
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			out = append(out, string(pem.EncodeToMemory(block)))
+		}
+	}
+	return out
 }
 
 // HasCredentials reports whether key+cert exist in the secure store.

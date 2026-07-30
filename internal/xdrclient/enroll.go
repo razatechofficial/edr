@@ -74,14 +74,46 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 				"secure_storage", st.SecureStorage,
 				"ingest_hosts", st.IngestHosts,
 			)
+			if err := EnsureTrustCA(ctx, store, opt.Config.EnrollmentHost); err != nil {
+				log.Warn("xdr trust CA missing; ingest mTLS may fail", "error", err)
+			}
 			return &EnrollResult{State: st, Store: store, Fresh: false}, nil
+		}
+		// Industry: device identity is the key+cert. enrollment.json is a sidecar.
+		// If the sidecar was wiped (/tmp), rebuild it from the cert — do not demand a token.
+		recovered, recErr := recoverStateFromCredentials(store, opt.Config, opt.AgentID)
+		if recErr == nil {
+			if err := store.SaveMetadata(recovered); err != nil {
+				log.Warn("xdr recovered enrollment metadata but failed to persist enrollment.json",
+					"cert_dir", store.Dir, "error", err)
+			} else {
+				log.Info("xdr enrollment recovered from device certificate (no token needed)",
+					"agent_id", recovered.AgentID,
+					"cert_dir", store.Dir,
+					"ingest_hosts", recovered.IngestHosts,
+				)
+			}
+			if err := EnsureTrustCA(ctx, store, opt.Config.EnrollmentHost); err != nil {
+				log.Warn("xdr trust CA missing after recover; ingest mTLS will fail until CA is restored",
+					"cert_dir", store.Dir, "error", err)
+			} else {
+				log.Info("xdr trust CA ready for ingest", "ca_path", store.CAPath())
+			}
+			return &EnrollResult{State: recovered, Store: store, Fresh: false}, nil
+		}
+		if err != nil {
+			log.Warn("secure store has key/cert but enrollment state is unreadable; cannot resume without ingest_hosts",
+				"cert_dir", store.Dir, "load_error", err, "recover_error", recErr)
+		} else {
+			log.Warn("secure store has key/cert but enrollment.json is incomplete; cannot resume",
+				"cert_dir", store.Dir, "recover_error", recErr)
 		}
 	}
 
 	host := strings.TrimSpace(opt.Config.EnrollmentHost)
 	token := strings.TrimSpace(opt.Config.EnrollmentToken)
 	if host == "" || token == "" {
-		return nil, fmt.Errorf("xdr enrollment requires enrollment_host and enrollment_token")
+		return nil, fmt.Errorf("no usable local enrollment (need device cert + ingest_hosts, or %s/enrollment.json); set enrollment_host and a one-time enrollment_token to Register, then restart without the token", store.Dir)
 	}
 	if opt.AgentID == "" {
 		return nil, fmt.Errorf("agent_id required")
@@ -182,4 +214,62 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		"cert_not_after", st.CertNotAfter,
 	)
 	return &EnrollResult{State: st, Store: store, Fresh: true}, nil
+}
+
+// recoverStateFromCredentials rebuilds State from keystore cert + config when
+// enrollment.json is missing/incomplete. Does not call Register (no token).
+func recoverStateFromCredentials(store Store, cfg config.XDRConfig, fallbackAgentID string) (State, error) {
+	certPEM, err := store.LoadCertificatePEM()
+	if err != nil || len(certPEM) == 0 {
+		return State{}, fmt.Errorf("load certificate: %w", err)
+	}
+	agentID, err := AgentIDFromCert(string(certPEM))
+	if err != nil || agentID == "" {
+		agentID = strings.TrimSpace(fallbackAgentID)
+	}
+	if agentID == "" {
+		return State{}, fmt.Errorf("cannot derive agent_id from certificate CN")
+	}
+	hosts := append([]string(nil), cfg.IngestHosts...)
+	if len(hosts) == 0 {
+		hosts = defaultIngestHosts(cfg.EnrollmentHost)
+	}
+	if len(hosts) == 0 {
+		return State{}, fmt.Errorf("ingest_hosts required to resume (set xdr.ingest_hosts in config)")
+	}
+	notAfter, _ := CertNotAfter(string(certPEM))
+	machineID := MachineIDFromCert(string(certPEM))
+	if machineID == "" {
+		machineID = ResolveMachineID(cfg.MachineID)
+	}
+	hb := int32(30)
+	st := State{
+		AgentID:        agentID,
+		MachineID:      machineID,
+		CertificatePEM: string(certPEM),
+		CAChainPEM:     store.LoadCAChainPEM(),
+		IngestHosts:    hosts,
+		HeartbeatSec:   hb,
+		CertNotAfter:   notAfter,
+		EnrolledAt:     time.Now().UTC(),
+		SecureStorage:  store.BackendName(),
+	}
+	return st, nil
+}
+
+// defaultIngestHosts maps local enrollment host to the common ingest port when
+// ingest_hosts was never persisted (e2e /tmp wipe of enrollment.json).
+func defaultIngestHosts(enrollmentHost string) []string {
+	h := strings.TrimSpace(enrollmentHost)
+	if h == "" {
+		return []string{"127.0.0.1:9020"}
+	}
+	host := h
+	if i := strings.LastIndex(h, ":"); i > 0 {
+		host = h[:i]
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return []string{"127.0.0.1:9020"}
+	}
+	return nil
 }
