@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	telemetryv1 "github.com/razatechofficial/xdr/api/proto/telemetry/v1"
 
+	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/forwarder"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
@@ -48,6 +51,20 @@ func (a *Agent) initXDR() error {
 	}
 	a.xdrStore = res.Store
 	a.xdrState = res.State
+	// Ingest mTLS pins identity to the device cert CN. Always use the enrolled
+	// agent_id (from enrollment.json / cert), never a fresh local UUID that may
+	// differ after resume-without-token.
+	if id := strings.TrimSpace(res.State.AgentID); id != "" {
+		if a.cfg.Agent.ID != id {
+			a.logger.Info("pinning agent identity to enrolled certificate",
+				"previous_agent_id", a.cfg.Agent.ID,
+				"enrolled_agent_id", id,
+			)
+			a.cfg.Agent.ID = id
+		}
+		// Keep data_dir/agent_id in sync so next boot does not regenerate a mismatch.
+		_ = os.WriteFile(filepath.Join(a.cfg.Agent.DataDir, "agent_id"), []byte(id+"\n"), 0o600)
+	}
 
 	maxBytes := a.cfg.XDR.SpoolMaxBytes
 	if maxBytes <= 0 {
@@ -66,13 +83,16 @@ func (a *Agent) initXDR() error {
 
 	ingest := xdrclient.NewIngestClient(
 		res.State.IngestHosts,
-		a.cfg.Agent.ID,
+		res.State.AgentID,
 		res.Store,
 		a.cfg.XDR.InsecureSkipTLS,
 		res.State.HeartbeatSec,
 		a.logger,
 	)
 	ingest.SetCommandHandler(a.handleIngestCommand)
+	ingest.SetPostureProvider(func() map[string]string {
+		return collector.FleetPostureLabels(a.cfg)
+	})
 	a.xdrIngest = ingest
 	a.telemetryRelay = forwarder.NewTelemetryRelayWithSender(ingest, qm, a.logger)
 	a.logger.Info("xdr ingest telemetry relay configured",
