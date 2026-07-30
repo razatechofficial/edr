@@ -21,6 +21,9 @@ import (
 // CommandHandler executes a remote command pushed from ingest.
 type CommandHandler func(ctx context.Context, cmd *telemetryv1.AgentCommand) error
 
+// PostureProvider returns flat health posture labels for keepalive heartbeats.
+type PostureProvider func() map[string]string
+
 // IngestClient streams OCSF JSON lines and receives ServerFrames (acks + commands).
 type IngestClient struct {
 	hosts     []string
@@ -30,6 +33,7 @@ type IngestClient struct {
 	log       *slog.Logger
 	heartbeat time.Duration
 	onCommand CommandHandler
+	posture   PostureProvider
 
 	mu      sync.Mutex
 	conn    *grpc.ClientConn
@@ -73,7 +77,51 @@ func (c *IngestClient) SetCommandHandler(h CommandHandler) {
 	c.onCommand = h
 }
 
-// Send implements a line sender for TelemetryRelay: one OCSF JSON line per batch.
+// SetPostureProvider registers industry health posture labels for heartbeats.
+func (c *IngestClient) SetPostureProvider(p PostureProvider) {
+	if c == nil {
+		return
+	}
+	c.posture = p
+}
+
+// RunHeartbeat sends a liveness keepalive so ingest refreshes last_seen.
+// Ingest intentionally does not publish these to Kafka/ClickHouse (not hunt events).
+// Optional posture labels (monitoring health summary) ride in unmapped.posture.
+func (c *IngestClient) RunHeartbeat(ctx context.Context) {
+	t := time.NewTicker(c.heartbeat)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			_ = c.Send(ctx, c.heartbeatPayload())
+		}
+	}
+}
+
+func (c *IngestClient) heartbeatPayload() []byte {
+	unmapped := map[string]any{"heartbeat": true}
+	if c != nil && c.posture != nil {
+		if p := c.posture(); len(p) > 0 {
+			unmapped["posture"] = p
+		}
+	}
+	body := map[string]any{
+		"class_uid":    0,
+		"type_uid":     0,
+		"activity_id":  0,
+		"severity_id": 1,
+		"severity":    "Informational",
+		"unmapped":     unmapped,
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return []byte(`{"class_uid":0,"type_uid":0,"activity_id":0,"severity_id":1,"severity":"Informational","unmapped":{"heartbeat":true}}`)
+	}
+	return b
+}
 func (c *IngestClient) Send(ctx context.Context, line []byte) error {
 	if c == nil || len(line) == 0 {
 		return nil
@@ -175,20 +223,6 @@ func (c *IngestClient) Close() error {
 		return err
 	}
 	return nil
-}
-
-// RunHeartbeat sends empty batches when idle so ingest last_seen stays fresh.
-func (c *IngestClient) RunHeartbeat(ctx context.Context) {
-	t := time.NewTicker(c.heartbeat)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			_ = c.Send(ctx, []byte(`{"class_uid":0,"type_uid":0,"activity_id":0,"severity":{"status":"heartbeat"}}`))
-		}
-	}
 }
 
 func (c *IngestClient) ensureStream(ctx context.Context) error {
