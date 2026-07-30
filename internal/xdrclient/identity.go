@@ -145,13 +145,54 @@ func Hostname() string {
 
 // CertNotAfter parses the leaf certificate NotAfter from PEM.
 func CertNotAfter(certPEM string) (time.Time, error) {
-	block, _ := pem.Decode([]byte(certPEM))
-	if block == nil || block.Type != "CERTIFICATE" {
-		return time.Time{}, fmt.Errorf("invalid certificate pem")
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
+	cert, err := ParseLeafCertificate(certPEM)
 	if err != nil {
 		return time.Time{}, err
 	}
 	return cert.NotAfter.UTC(), nil
+}
+
+// ParseLeafCertificate parses the first CERTIFICATE PEM block.
+func ParseLeafCertificate(certPEM string) (*x509.Certificate, error) {
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("invalid certificate pem")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	return cert, nil
+}
+
+// AgentIDFromCert returns the leaf subject CN (agent_id).
+func AgentIDFromCert(certPEM string) (string, error) {
+	cert, err := ParseLeafCertificate(certPEM)
+	if err != nil {
+		return "", err
+	}
+	cn := strings.TrimSpace(cert.Subject.CommonName)
+	if cn == "" {
+		return "", fmt.Errorf("certificate CN missing")
+	}
+	return cn, nil
+}
+
+// MachineIDFromCert returns machine_id from URI SAN urn:xdr:machine:... when present.
+func MachineIDFromCert(certPEM string) string {
+	cert, err := ParseLeafCertificate(certPEM)
+	if err != nil {
+		return ""
+	}
+	for _, u := range cert.URIs {
+		if u == nil {
+			continue
+		}
+		s := u.String()
+		const prefix = "urn:xdr:machine:"
+		if strings.HasPrefix(s, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(s, prefix))
+		}
+	}
+	return ""
 }
