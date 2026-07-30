@@ -934,6 +934,17 @@ func (a *Agent) maybeForwardTelemetry(ctx context.Context, tel *collector.Teleme
 	}
 }
 
+// maybeForwardAlertOCSF sends a detection finding OCSF document over the same
+// XDR ingest relay used for endpoint telemetry.
+func (a *Agent) maybeForwardAlertOCSF(ctx context.Context, line []byte) {
+	if a.telemetryRelay == nil || len(line) == 0 {
+		return
+	}
+	if err := a.telemetryRelay.TrySend(ctx, line); err != nil {
+		a.telemetryRelay.Enqueue(line)
+	}
+}
+
 func (a *Agent) ProcessCycle(ctx context.Context) error {
 	if a.forwardDrain != nil {
 		if err := a.forwardDrain.DrainPending(); err != nil {
@@ -1284,12 +1295,15 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 			"correlation_id", correlationID)
 		a.alertSpool.Push(*al)
 		a.recordControlPlaneAlert()
-		if a.durableSpool != nil {
-			if data, err := marshalAlertOCSF(*al, productVersion); err == nil {
+		if data, err := marshalAlertOCSF(*al, productVersion); err == nil {
+			if a.durableSpool != nil {
 				if err := a.durableSpool.Write(data); err != nil {
 					a.logger.Error("durable spool write failed", "error", err)
 				}
 			}
+			// XDR ingest path: detection findings must reach the platform (dashboard/logs),
+			// not only raw Informational process/file/network telemetry.
+			a.maybeForwardAlertOCSF(context.Background(), data)
 		}
 		if err := a.writer.WriteAlert(*al); err != nil {
 			return err
