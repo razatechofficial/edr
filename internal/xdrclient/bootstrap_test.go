@@ -75,3 +75,24 @@ func TestPatchXDRConfigFile(t *testing.T) {
 		t.Fatal("token must not be embedded in yaml")
 	}
 }
+
+func TestPatchXDRConfigFileProdHostSetsIngest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.yaml")
+	if err := os.WriteFile(path, []byte("agent:\n  id: a1\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := xdrclient.PatchXDRConfigFile(path, xdrclient.DefaultEnrollmentHost, false); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.XDR.InsecureSkipTLS {
+		t.Fatal("prod install must not skip TLS")
+	}
+	if len(cfg.XDR.IngestHosts) != 1 || cfg.XDR.IngestHosts[0] != xdrclient.DefaultIngestHost {
+		t.Fatalf("ingest_hosts=%v", cfg.XDR.IngestHosts)
+	}
+}

@@ -18,25 +18,25 @@ Merge `configs/linux/config.xdr.yml` into your agent config (or set env vars):
 | `xdr.spool_max_bytes` | — | Default **1 GiB** |
 | `xdr.renew_before_days` | — | Default **7** (cert watch) |
 
-## Install + enroll (enterprise)
+## Install + enroll (production)
 
-Install and enroll are separate steps; prefer fleet flags / token sidecar (no end-user prompt).
+Install and enroll are separate steps. The installer defaults to
+`enroll.xdr.averox.com:443` / `ingest.xdr.averox.com:443` over TLS.
+
+Create a one-time token in the console (**EDR agents → Enrollment token**), then:
 
 ```bash
-# Install + enroll in one shot (token written to enrollment.token, then cleared)
-sudo ./edr-installer install \
-  --enrollment-host enrollment.example.com:50051 \
-  --enrollment-token "$TOKEN"
+# macOS / Linux (token from console; host is baked in)
+sudo ./edr-installer install --enrollment-token "$TOKEN"
 
-# Or install only, enroll later
-sudo ./edr-installer install --enrollment-host ... --enrollment-token "$TOKEN" --delay-enroll
-sudo edrctl enroll --host enrollment.example.com:50051 --token-file /etc/edr/enrollment.token
-
-# Or start agent with bootstrap flags (enrolls then streams with cert)
-sudo edr-agent run --config /etc/edr/agent.yaml \
-  --enrollment-host enrollment.example.com:50051 \
-  --enrollment-token "$TOKEN"
+# Already installed: enroll without reinstall
+sudo edrctl enroll --token "$TOKEN"
 ```
+
+Token is written to a root-only sidecar and cleared after Register (unless `--delay-enroll`).
+Tenant is bound server-side from the enrollment token (not an agent input).
+
+Lab only: add `--enrollment-insecure` and `--enrollment-host 127.0.0.1:50051`.
 
 After Register: private key + cert live in OS secure storage; bootstrap token file/yaml field are wiped. Ingest uses the signed cert (mTLS).
 

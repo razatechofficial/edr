@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/razatechofficial/edr/internal/config"
 	enrollmentv1 "github.com/razatechofficial/xdr/api/proto/enrollment/v1"
@@ -74,7 +73,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 				"secure_storage", st.SecureStorage,
 				"ingest_hosts", st.IngestHosts,
 			)
-			if err := EnsureTrustCA(ctx, store, opt.Config.EnrollmentHost); err != nil {
+			if err := EnsureTrustCA(ctx, store, opt.Config.EnrollmentHost, opt.Config.InsecureSkipTLS); err != nil {
 				log.Warn("xdr trust CA missing; ingest mTLS may fail", "error", err)
 			}
 			return &EnrollResult{State: st, Store: store, Fresh: false}, nil
@@ -93,7 +92,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 					"ingest_hosts", recovered.IngestHosts,
 				)
 			}
-			if err := EnsureTrustCA(ctx, store, opt.Config.EnrollmentHost); err != nil {
+			if err := EnsureTrustCA(ctx, store, opt.Config.EnrollmentHost, opt.Config.InsecureSkipTLS); err != nil {
 				log.Warn("xdr trust CA missing after recover; ingest mTLS will fail until CA is restored",
 					"cert_dir", store.Dir, "error", err)
 			} else {
@@ -143,7 +142,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		"enrollment_token_fp", truncFP(dev.EnrollmentTokenFP),
 	)
 
-	conn, err := grpc.NewClient(host, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(host, EnrollmentDialOptions(host, opt.Config.InsecureSkipTLS)...)
 	if err != nil {
 		return nil, fmt.Errorf("dial enrollment %s: %w", host, err)
 	}
@@ -260,16 +259,8 @@ func recoverStateFromCredentials(store Store, cfg config.XDRConfig, fallbackAgen
 // defaultIngestHosts maps local enrollment host to the common ingest port when
 // ingest_hosts was never persisted (e2e /tmp wipe of enrollment.json).
 func defaultIngestHosts(enrollmentHost string) []string {
-	h := strings.TrimSpace(enrollmentHost)
-	if h == "" {
+	if isLoopbackEnrollmentHost(enrollmentHost) {
 		return []string{"127.0.0.1:9020"}
 	}
-	host := h
-	if i := strings.LastIndex(h, ":"); i > 0 {
-		host = h[:i]
-	}
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		return []string{"127.0.0.1:9020"}
-	}
-	return nil
+	return DefaultIngestHosts()
 }

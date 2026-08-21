@@ -66,10 +66,8 @@ func main() {
 
 Place edr-installer in a folder alongside models/ and rules/ (see "make bundle-enterprise"), then run: sudo ./edr-installer install
 
-XDR enrollment (optional, fleet):
-  sudo ./edr-installer install \
-    --enrollment-host enrollment.example.com:50051 \
-    --enrollment-token "$TOKEN"
+XDR enrollment (token from the console Agents page; host defaults to production):
+  sudo ./edr-installer install --enrollment-token "$TOKEN"
 
 Token is written to a root-only sidecar and cleared after Register (unless --delay-enroll).
 Tenant is bound server-side from the enrollment token (not an agent input).
@@ -200,11 +198,11 @@ func applyInstallEnrollment(configDst string, paths installPaths) error {
 	host := strings.TrimSpace(flagEnrollmentHost)
 	token := strings.TrimSpace(flagEnrollmentToken)
 	tokenFileIn := strings.TrimSpace(flagEnrollmentTokenFile)
-	if host == "" && token == "" && tokenFileIn == "" {
+	if token == "" && tokenFileIn == "" {
 		return nil
 	}
 	if host == "" {
-		return fmt.Errorf("--enrollment-host is required when providing an enrollment token")
+		host = xdrclient.DefaultEnrollmentHost
 	}
 	if token == "" && tokenFileIn != "" {
 		b, err := os.ReadFile(tokenFileIn)
@@ -466,6 +464,14 @@ func generateConfig(dst string, paths installPaths) error {
 	cfg.SelfProtect.Enabled = true
 	cfg.SelfProtect.Watchdog = true
 	cfg.SelfProtect.IntegrityCheck = true
+
+	cfg.XDR.Enabled = false
+	cfg.XDR.EnrollmentHost = xdrclient.DefaultEnrollmentHost
+	cfg.XDR.IngestHosts = xdrclient.DefaultIngestHosts()
+	cfg.XDR.InsecureSkipTLS = false
+	cfg.XDR.SecureStorage = "auto"
+	cfg.XDR.CertDir = filepath.Join(paths.dataDir, "xdr-tls")
+	cfg.XDR.RenewBeforeDays = 7
 
 	data, err := yaml.Marshal(cfg)
 	if err != nil {

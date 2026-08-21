@@ -36,8 +36,8 @@ Token sources (first match wins):
   4) xdr.enrollment_token / env XDR_ENROLLMENT_TOKEN
 
 Examples:
-  sudo edrctl enroll --host enrollment.example.com:50051 --token "$TOKEN"
-  sudo edrctl enroll --host enrollment.example.com:50051 --token-file /etc/edr/enrollment.token
+  sudo edrctl enroll --token "$TOKEN"
+  sudo edrctl enroll --token-file /etc/edr/enrollment.token
   sudo edrctl enroll   # uses host/token from agent.yaml / env / sidecar`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath := configFile
@@ -57,6 +57,9 @@ Examples:
 			})
 			if err != nil {
 				return err
+			}
+			if strings.TrimSpace(cfg.XDR.EnrollmentHost) == "" {
+				cfg.XDR.EnrollmentHost = xdrclient.DefaultEnrollmentHost
 			}
 			cfg.XDR.Enabled = true
 

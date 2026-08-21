@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/razatechofficial/edr/internal/config"
 	enrollmentv1 "github.com/razatechofficial/xdr/api/proto/enrollment/v1"
@@ -55,10 +53,7 @@ func RenewCertificate(ctx context.Context, opt RenewOptions) (State, error) {
 		return opt.State, err
 	}
 
-	dialOpts, err := renewDialOptions(opt)
-	if err != nil {
-		return opt.State, err
-	}
+	dialOpts := EnrollmentDialOptions(host, opt.Config.InsecureSkipTLS)
 	conn, err := grpc.NewClient(host, dialOpts...)
 	if err != nil {
 		return opt.State, fmt.Errorf("dial enrollment renew: %w", err)
@@ -98,18 +93,6 @@ func RenewCertificate(ctx context.Context, opt RenewOptions) (State, error) {
 	}
 	log.Info("xdr certificate renewed", "cert_not_after", st.CertNotAfter)
 	return st, nil
-}
-
-func renewDialOptions(opt RenewOptions) ([]grpc.DialOption, error) {
-	if opt.Config.InsecureSkipTLS || !opt.Store.HasCredentials() {
-		return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, nil
-	}
-	tlsCfg, err := LoadClientTLSFromStore(opt.Store)
-	if err != nil {
-		// Fall back to insecure for local/dev bootstrap renew listener.
-		return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, nil
-	}
-	return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg))}, nil
 }
 
 // WatchAndRenew runs a periodic cert expiry check and renews when needed.

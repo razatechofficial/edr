@@ -227,6 +227,9 @@ func PatchXDRConfigFile(path string, host string, insecure bool) error {
 	if host != "" {
 		setMapString(xdr, "enrollment_host", host)
 	}
+	if host == DefaultEnrollmentHost {
+		setMapStringList(xdr, "ingest_hosts", DefaultIngestHosts())
+	}
 	setMapBool(xdr, "insecure_skip_tls", insecure)
 	setMapString(xdr, "secure_storage", "auto")
 	setMapString(xdr, "enrollment_token", "")
@@ -264,5 +267,20 @@ func setMapBool(m *yaml.Node, key string, value bool) {
 	m.Content = append(m.Content,
 		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
 		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: v},
+	)
+}
+
+func setMapStringList(m *yaml.Node, key string, values []string) {
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, v := range values {
+		seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v})
+	}
+	if n := mapValue(m, key); n != nil {
+		*n = *seq
+		return
+	}
+	m.Content = append(m.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		seq,
 	)
 }

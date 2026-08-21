@@ -8,14 +8,13 @@ import (
 	"strings"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	enrollmentv1 "github.com/razatechofficial/xdr/api/proto/enrollment/v1"
 )
 
 // EnsureTrustCA loads ca-chain.pem (and ingest-ca.pem) from disk, or fetches the
 // public trust bundle from enrollment when the sidecar was wiped with /tmp.
-func EnsureTrustCA(ctx context.Context, store Store, enrollmentHost string) error {
+func EnsureTrustCA(ctx context.Context, store Store, enrollmentHost string, insecureSkip bool) error {
 	if store.CAFilePresent() {
 		return nil
 	}
@@ -23,7 +22,7 @@ func EnsureTrustCA(ctx context.Context, store Store, enrollmentHost string) erro
 	if host == "" {
 		return fmt.Errorf("ca-chain.pem missing and enrollment_host empty; cannot fetch trust bundle")
 	}
-	chain, err := FetchTrustBundle(ctx, host)
+	chain, err := FetchTrustBundle(ctx, host, insecureSkip)
 	if err != nil {
 		return err
 	}
@@ -31,8 +30,8 @@ func EnsureTrustCA(ctx context.Context, store Store, enrollmentHost string) erro
 }
 
 // FetchTrustBundle dials enrollment GetTrustBundle (no token).
-func FetchTrustBundle(ctx context.Context, enrollmentHost string) ([]string, error) {
-	conn, err := grpc.NewClient(enrollmentHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func FetchTrustBundle(ctx context.Context, enrollmentHost string, insecureSkip bool) ([]string, error) {
+	conn, err := grpc.NewClient(enrollmentHost, EnrollmentDialOptions(enrollmentHost, insecureSkip)...)
 	if err != nil {
 		return nil, fmt.Errorf("dial enrollment for trust bundle: %w", err)
 	}
