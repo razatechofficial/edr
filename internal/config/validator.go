@@ -97,8 +97,12 @@ func Validate(cfg *Config) error {
 		validateThreshold(&errs, "ml.thresholds.ransomware_score", cfg.ML.Thresholds.RansomwareScore)
 		validateThreshold(&errs, "ml.thresholds.network_anomaly", cfg.ML.Thresholds.NetworkAnomaly)
 	}
-	if cfg.ML.Enabled && cfg.ML.ModelsDir != "" {
-		validateDirExists(&errs, "ml.models_dir", cfg.ML.ModelsDir)
+	if cfg.ML.Enabled && cfg.ML.RequireRuntime {
+		if strings.TrimSpace(cfg.ML.ModelsDir) == "" {
+			errs.add("ml.models_dir is required when ml.require_runtime is true")
+		} else {
+			validateDirExists(&errs, "ml.models_dir", cfg.ML.ModelsDir)
+		}
 	}
 
 	if cfg.Detection.Behavioral.SensitivityLevel != "" {

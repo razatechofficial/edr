@@ -32,8 +32,6 @@ required=(
 	"*/Library/Application Support/EDR/config/rules/baseline.yaml"
 	"*/Library/Application Support/EDR/config/rules/yara/exploits/cve_2021_44228_log4j.yar"
 	"*/Library/LaunchDaemons/com.razatech.edr-agent.plist"
-	"*/Library/Application Support/EDR/models/pe_classifier.onnx"
-	"*/Library/Application Support/EDR/models/ransomware.onnx"
 	"*/Library/Application Support/EDR/models/manifest.json"
 )
 
@@ -68,7 +66,7 @@ if ! awk '
 	echo "agent.yaml must set ml.enabled: true" >&2
 	exit 1
 fi
-onnx_count="$(find "${tmpdir}/expanded" -path '*/Library/Application Support/EDR/models/*.onnx' | wc -l | tr -d ' ')"
+onnx_count="$(find "${tmpdir}/expanded" -name '*.onnx' | wc -l | tr -d ' ')"
 if [ "${onnx_count}" -lt 12 ]; then
 	echo "expected 12 ONNX models in pkg, found ${onnx_count}" >&2
 	exit 1

@@ -57,19 +57,7 @@ $required = @(
 	'config.fleet.tls.yml',
 	'apply_tenant_config.bat',
 	'apply_tenant_tls_config.bat',
-	'manifest.json',
-	'pe_classifier.onnx',
-	'behavior_lstm.onnx',
-	'network_anomaly.onnx',
-	'ransomware.onnx',
-	'network_lgbm.onnx',
-	'rat_c2_detector.onnx',
-	'lolbin_detector.onnx',
-	'supply_chain_detector.onnx',
-	'aigen_detector.onnx',
-	'identity_threat.onnx',
-	'memory_injection.onnx',
-	'behavior_transformer.onnx'
+	'manifest.json'
 )
 
 # WiX File row keys when FileName is stored only as short 8.3 form.
@@ -91,4 +79,15 @@ foreach ($name in $required) {
 	}
 }
 
-Write-Host "MSI verification passed: $MsiPath ($($files.Count) file entries)"
+# Heat often stores long names as 8.3 (pe_classifier.onnx -> PE_CLA~1.ONN).
+$onnx = @()
+foreach ($n in $files) {
+	if ($n -match '\.onnx$' -or $n -match '\.onn$') {
+		$onnx += $n
+	}
+}
+if ($onnx.Count -lt 12) {
+	throw "MSI has $($onnx.Count) ONNX entries, want at least 12 (WiX 8.3 names included)"
+}
+
+Write-Host "MSI verification passed: $MsiPath ($($files.Count) file entries, $($onnx.Count) onnx)"

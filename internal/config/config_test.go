@@ -359,6 +359,39 @@ func TestLoadMacOSTenantProfile(t *testing.T) {
 	}
 }
 
+func TestLoadPackagedInstallerConfigs(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("ML_MODELS_DIR", t.TempDir())
+	for _, path := range []string{
+		"../../configs/linux/config.yml",
+		"../../configs/windows/config.yml",
+		"../../configs/linux/config.enterprise.yml",
+		"../../configs/windows/config.enterprise.yml",
+	} {
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load %s: %v", path, err)
+		}
+		if !cfg.ML.Enabled {
+			t.Fatalf("%s: ml.enabled want true", path)
+		}
+		if !cfg.Detection.Sigma.Enabled || !cfg.Detection.YARA.Enabled || !cfg.Detection.IOC.Enabled {
+			t.Fatalf("%s: sigma/yara/ioc must be enabled", path)
+		}
+	}
+}
+
+func TestValidateMLRequireRuntimeNeedsModelsDir(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.ML.Enabled = true
+	cfg.ML.RequireRuntime = true
+	cfg.ML.ModelsDir = ""
+	if err := Validate(&cfg); err == nil {
+		t.Fatal("expected error when require_runtime and models_dir empty")
+	}
+}
+
 func TestApplyLoggingPathDefaults(t *testing.T) {
 	cfg := testConfig()
 	cfg.Agent.DataDir = "/tmp/edr-logging-test"
