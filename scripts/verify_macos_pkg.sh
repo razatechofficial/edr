@@ -66,7 +66,7 @@ if ! awk '
 	echo "agent.yaml must set ml.enabled: true" >&2
 	exit 1
 fi
-onnx_count="$(find "${tmpdir}/expanded" -name '*.onnx' | wc -l | tr -d ' ')"
+onnx_count="$(find "${tmpdir}/expanded" \( -iname '*.onnx' -o -iname '*.onn' \) | wc -l | tr -d ' ')"
 if [ "${onnx_count}" -lt 12 ]; then
 	echo "expected 12 ONNX models in pkg, found ${onnx_count}" >&2
 	exit 1

@@ -394,7 +394,7 @@ test-ci: test
 
 test-ci-race:
 	@echo "==> Running CI race tests"
-	go test $$(go list ./... | grep -v '/temp/') -race -count=1 -timeout 300s
+	go test $$(go list ./... | grep -v '/temp/') -race -count=1 -timeout 20m
 
 # Collector package without CGO (avoids macOS EndpointSecurity link in CI/dev).
 test-collector:

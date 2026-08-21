@@ -65,6 +65,7 @@ if [ ! -d "${RULES_SRC}" ]; then
 fi
 mkdir -p pkg/deb/etc/edr-agent/rules
 cp -R "${RULES_SRC}/." pkg/deb/etc/edr-agent/rules/
+bash scripts/ci/ensure_onnx_models.sh
 if [ -d models ] && compgen -G "models/*.onnx" >/dev/null; then
     mkdir -p pkg/deb/usr/share/edr-agent/models
     cp models/*.onnx pkg/deb/usr/share/edr-agent/models/

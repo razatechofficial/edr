@@ -113,6 +113,14 @@ if (Test-Path -LiteralPath $modelsStage) {
 }
 New-Item -ItemType Directory -Force -Path $modelsStage | Out-Null
 
+$ensureOnnx = Join-Path $root 'scripts/ci/ensure_onnx_models.sh'
+if (Test-Path -LiteralPath $ensureOnnx) {
+    $bash = Get-Command bash -ErrorAction SilentlyContinue
+    if ($bash) {
+        & $bash.Source $ensureOnnx
+        if ($LASTEXITCODE -ne 0) { throw "ensure_onnx_models.sh failed with exit $LASTEXITCODE" }
+    }
+}
 $modelsSrc = Join-Path $root 'models'
 $modelFiles = @(Get-ChildItem -LiteralPath $modelsSrc -Filter '*.onnx' -ErrorAction SilentlyContinue)
 if ($modelFiles.Count -gt 0) {

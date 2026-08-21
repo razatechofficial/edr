@@ -59,6 +59,7 @@ if [[ -d rules ]]; then
 	cp -R rules/. "${PKG_ROOT}/Library/Application Support/EDR/config/rules/"
 fi
 
+bash "${ROOT}/scripts/ci/ensure_onnx_models.sh"
 if [[ -d models ]] && compgen -G "models/*.onnx" >/dev/null; then
 	cp models/*.onnx "${PKG_ROOT}/Library/Application Support/EDR/models/"
 	[[ -f models/manifest.json ]] && cp models/manifest.json "${PKG_ROOT}/Library/Application Support/EDR/models/"

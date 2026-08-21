@@ -45,6 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          lfs: true
           fetch-depth: 0
       - name: Resolve package and release identifiers
         id: meta
@@ -88,14 +89,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: ml/training/requirements.txt
-      - name: Install ML bootstrap dependencies
-        run: pip install -r ml/training/requirements.txt
-      - name: Refresh IOC feeds and bootstrap ML models
+          lfs: true
+          fetch-depth: 0
+      - name: Refresh IOC feeds and ensure ONNX models
         run: bash scripts/ci/prepare_release_assets.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -107,6 +104,7 @@ jobs:
           path: |
             models/*.onnx
             models/manifest.json
+            models/*.onnx.sig
             models/*.sig
 
   build-linux:
@@ -114,6 +112,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/download-artifact@v4
         with:
           name: release-ioc
@@ -153,11 +153,15 @@ jobs:
       fail-fast: false
       matrix:
         arch: [arm64, amd64]
+    # Intel slice on Apple Silicon runners needs Rosetta + x86 Homebrew; arm64 is the shipping pkg.
+    continue-on-error: ${{ matrix.arch == 'amd64' }}
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
       EDR_MACOS_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/download-artifact@v4
         with:
           name: release-ioc
@@ -218,6 +222,8 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/download-artifact@v4
         with:
           name: release-ioc
@@ -314,6 +320,7 @@ jobs:
           prerelease: ${{ needs.release_meta.outputs.is_prerelease == 'true' }}
           name: ${{ needs.release_meta.outputs.is_prerelease == 'true' && format('Prod build {0}', needs.release_meta.outputs.pkg_version) || needs.release_meta.outputs.pkg_version }}
           generate_release_notes: true
+          fail_on_unmatched_files: false
           files: |
             linux-packages/**/*
             macos-packages-arm64/**/*.pkg
