@@ -130,9 +130,11 @@ jobs:
         run: make test-coverage
 
       - name: Upload coverage artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
+          retention-days: 1
           path: coverage.html
 
   build-all:
@@ -165,9 +167,11 @@ jobs:
       # Cross-compiling linux→darwin cannot validate CGO=ON kernel builds reliably.
 
       - name: Upload binaries
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: edr-binaries
+          retention-days: 1
           path: bin/
 
   macos-production-build:
@@ -215,10 +219,8 @@ jobs:
       - name: Package macOS installer (${{ matrix.arch }})
         run: bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "$(git describe --tags --always --dirty)" "${{ matrix.arch }}"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-production-packages-${{ matrix.arch }}
-          path: dist/edr-agent_*_${{ matrix.arch }}.pkg
+      - name: Verify macOS package exists
+        run: ls -lh dist/edr-agent_*_${{ matrix.arch }}.pkg
 
   windows-monitoring-smoke:
     name: Windows monitoring smoke
@@ -697,11 +699,11 @@ jobs:
           bash scripts/verify_linux_package.sh "${DEB}"
 
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: linux-sqa-packages
-          path: |
-            dist/edr-sqa-kali-*.tar.gz
-            dist/edr-agent_*_amd64.deb
+          retention-days: 1
+          path: dist/edr-agent_*_amd64.deb
 
   package-windows:
     name: Package Windows
@@ -726,8 +728,10 @@ jobs:
         run: bash scripts/ci/build_windows_binaries.sh
 
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: windows-packages
+          retention-days: 1
           path: |
             bin/edr-agent-windows-amd64.exe
             bin/edrctl-windows-amd64.exe

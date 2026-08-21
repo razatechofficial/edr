@@ -57,8 +57,9 @@ func TestClearEnrollmentTokenInConfig(t *testing.T) {
 
 func TestPatchXDRConfigFile(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("DATA_DIR", dir)
 	path := filepath.Join(dir, "agent.yaml")
-	if err := os.WriteFile(path, []byte("agent:\n  id: a1\n"), 0o640); err != nil {
+	if err := os.WriteFile(path, []byte("agent:\n  id: a1\n  data_dir: "+dir+"\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	if err := xdrclient.PatchXDRConfigFile(path, "enroll:50051", true); err != nil {
@@ -78,8 +79,9 @@ func TestPatchXDRConfigFile(t *testing.T) {
 
 func TestPatchXDRConfigFileProdHostSetsIngest(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("DATA_DIR", dir)
 	path := filepath.Join(dir, "agent.yaml")
-	if err := os.WriteFile(path, []byte("agent:\n  id: a1\n"), 0o640); err != nil {
+	if err := os.WriteFile(path, []byte("agent:\n  id: a1\n  data_dir: "+dir+"\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	if err := xdrclient.PatchXDRConfigFile(path, xdrclient.DefaultEnrollmentHost, false); err != nil {
