@@ -143,18 +143,7 @@ if ($modelFiles.Count -gt 0) {
     }
     Write-Host "Staged models -> $modelsWxs"
 } else {
-    Write-Host "skip models MSI fragment (no models/*.onnx)"
-    if (Test-Path -LiteralPath $modelsWxs) {
-        Remove-Item -LiteralPath $modelsWxs -Force
-    }
-    @(
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">'
-        '  <Fragment>'
-        '    <ComponentGroup Id="ModelsComponents"/>'
-        '  </Fragment>'
-        '</Wix>'
-    ) -join "`n" | Set-Content -LiteralPath $modelsWxs -Encoding UTF8
+    throw "ML models not found in models/ (need *.onnx). Run 'make models-bootstrap' or wait for prepare_release_assets."
 }
 
 Write-Host "==> heat rules fragment"

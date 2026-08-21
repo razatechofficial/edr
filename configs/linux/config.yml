@@ -23,13 +23,17 @@ detection:
     ip_db_path: /etc/edr-agent/rules/ioc/ips.csv
     domain_db_path: /etc/edr-agent/rules/ioc/domains.csv
   behavioral:
-    sensitivity: medium
+    sensitivity: high
+    ransomware_detect: true
+    rat_detect: true
+    exfil_detect: true
+    lateral_movement_detect: true
 monitoring:
   mode: auto
   kernel_enabled: true
   fim_preset: standard
   linux_auth_auto_journal: true
-  linux_rootcheck_enabled: false
+  linux_rootcheck_enabled: true
 compliance:
   enabled: true
   rules_dir: /etc/edr-agent/rules/compliance/sca
@@ -38,6 +42,23 @@ compliance:
   enable_posture: true
   enable_rootcheck: true
   emit_passed_findings: false
+ml:
+  enabled: true
+  require_runtime: false
+  models_dir: /usr/share/edr-agent/models
+  auto_update: false
+  models:
+    pe_classifier: pe_classifier.onnx
+    behavior_lstm: behavior_lstm.onnx
+    network_anomaly: network_anomaly.onnx
+    ransomware: ransomware.onnx
+    network_lgbm: network_lgbm.onnx
+    rat_c2_detector: rat_c2_detector.onnx
+  thresholds:
+    pe_malicious: 0.80
+    behavior_anomaly: 0.75
+    ransomware_score: 0.85
+    network_anomaly: 0.70
 response:
   auto_response: true
   playbooks_path: /etc/edr-agent/rules/playbooks/playbooks.yml

@@ -52,6 +52,24 @@ grep -q '^rules_file: /etc/edr-agent/rules/baseline.yaml$' "${cfg}" || { echo "r
 grep -q '^  playbooks_path: /etc/edr-agent/rules/playbooks/playbooks.yml$' "${cfg}" || { echo "playbooks_path must be absolute in config.yml" >&2; exit 1; }
 grep -q '^    rules_dir: /etc/edr-agent/rules/sigma$' "${cfg}" || { echo "sigma rules_dir must be absolute in config.yml" >&2; exit 1; }
 grep -q '^    rules_dir: /etc/edr-agent/rules/yara$' "${cfg}" || { echo "yara rules_dir must be absolute in config.yml" >&2; exit 1; }
+if ! awk '
+  $0 == "ml:" { in_ml=1; next }
+  in_ml && /^[^ ]/ { in_ml=0 }
+  in_ml && $0 ~ /^  enabled: true$/ { found=1 }
+  END { exit found ? 0 : 1 }
+' "${cfg}"; then
+  echo "config.yml must set ml.enabled: true" >&2
+  exit 1
+fi
+grep -q '^  models_dir: /usr/share/edr-agent/models$' "${cfg}" || {
+  echo "config.yml must set ml.models_dir to /usr/share/edr-agent/models" >&2
+  exit 1
+}
+onnx_count="$(find "${tmpdir}/usr/share/edr-agent/models" -name '*.onnx' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${onnx_count}" -lt 12 ]; then
+  echo "expected 12 ONNX models in package, found ${onnx_count}" >&2
+  exit 1
+fi
 
 "${tmpdir}/usr/bin/edr-agent" --version >/dev/null
 

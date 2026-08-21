@@ -557,7 +557,7 @@ models-sign:
 
 models-verify:
 	@echo "==> Verifying ML model packaging completeness"
-	@REQUIRED_MODELS="pe_classifier.onnx behavior_lstm.onnx behavior_transformer.onnx network_anomaly.onnx ransomware.onnx"; \
+	@REQUIRED_MODELS="pe_classifier.onnx behavior_lstm.onnx behavior_transformer.onnx network_anomaly.onnx ransomware.onnx network_lgbm.onnx rat_c2_detector.onnx lolbin_detector.onnx supply_chain_detector.onnx aigen_detector.onnx identity_threat.onnx memory_injection.onnx"; \
 	MISSING=0; \
 	for m in $$REQUIRED_MODELS; do \
 		if [ ! -f "$(MODELS_DIR)/$$m" ]; then \

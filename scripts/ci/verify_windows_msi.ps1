@@ -56,7 +56,20 @@ $required = @(
 	'config.tenant.tls.yml',
 	'config.fleet.tls.yml',
 	'apply_tenant_config.bat',
-	'apply_tenant_tls_config.bat'
+	'apply_tenant_tls_config.bat',
+	'manifest.json',
+	'pe_classifier.onnx',
+	'behavior_lstm.onnx',
+	'network_anomaly.onnx',
+	'ransomware.onnx',
+	'network_lgbm.onnx',
+	'rat_c2_detector.onnx',
+	'lolbin_detector.onnx',
+	'supply_chain_detector.onnx',
+	'aigen_detector.onnx',
+	'identity_threat.onnx',
+	'memory_injection.onnx',
+	'behavior_transformer.onnx'
 )
 
 # WiX File row keys when FileName is stored only as short 8.3 form.

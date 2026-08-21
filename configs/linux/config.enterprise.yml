@@ -29,7 +29,7 @@ monitoring:
   kernel_enabled: true
   fim_preset: standard
   linux_auth_auto_journal: true
-  linux_rootcheck_enabled: false
+  linux_rootcheck_enabled: true
 compliance:
   enabled: true
   rules_dir: /etc/edr-agent/rules/compliance/sca

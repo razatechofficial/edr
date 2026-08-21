@@ -28,6 +28,10 @@ detection:
     domain_db_path: "C:\\ProgramData\\EDR Agent\\rules\\ioc\\domains.csv"
   behavioral:
     sensitivity: high
+    ransomware_detect: true
+    rat_detect: true
+    exfil_detect: true
+    lateral_movement_detect: true
 monitoring:
   mode: auto
   kernel_enabled: true

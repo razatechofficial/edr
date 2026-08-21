@@ -2,6 +2,7 @@ agent:
   log_level: info
   data_dir: "C:\\ProgramData\\EDR Agent"
   temp_dir: "C:\\ProgramData\\EDR Agent\\tmp"
+rules_file: "C:\\ProgramData\\EDR Agent\\rules\\baseline.yaml"
 logging:
   level: info
   alert_file: "C:\\ProgramData\\EDR Agent\\alerts.jsonl"
@@ -27,7 +28,11 @@ detection:
     ip_db_path: "C:\\ProgramData\\EDR Agent\\rules\\ioc\\ips.csv"
     domain_db_path: "C:\\ProgramData\\EDR Agent\\rules\\ioc\\domains.csv"
   behavioral:
-    sensitivity: medium
+    sensitivity: high
+    ransomware_detect: true
+    rat_detect: true
+    exfil_detect: true
+    lateral_movement_detect: true
 monitoring:
   mode: auto
   kernel_enabled: true
@@ -44,6 +49,23 @@ compliance:
   enable_posture: true
   enable_rootcheck: false
   emit_passed_findings: false
+ml:
+  enabled: true
+  require_runtime: false
+  models_dir: "C:\\ProgramData\\EDR Agent\\models"
+  auto_update: false
+  models:
+    pe_classifier: pe_classifier.onnx
+    behavior_lstm: behavior_lstm.onnx
+    network_anomaly: network_anomaly.onnx
+    ransomware: ransomware.onnx
+    network_lgbm: network_lgbm.onnx
+    rat_c2_detector: rat_c2_detector.onnx
+  thresholds:
+    pe_malicious: 0.80
+    behavior_anomaly: 0.75
+    ransomware_score: 0.85
+    network_anomaly: 0.70
 self_protect:
   enabled: false
 response:

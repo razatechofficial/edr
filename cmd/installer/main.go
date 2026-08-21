@@ -432,15 +432,33 @@ func generateConfig(dst string, paths installPaths) error {
 	cfg.ML.AutoUpdate = false
 	cfg.ML.UpdateIntervalH = 0
 	cfg.ML.VerifyPubKey = ""
+	cfg.ML.Models.PEClassifier = "pe_classifier.onnx"
+	cfg.ML.Models.BehaviorLSTM = "behavior_lstm.onnx"
+	cfg.ML.Models.NetworkAnomaly = "network_anomaly.onnx"
+	cfg.ML.Models.Ransomware = "ransomware.onnx"
+	cfg.ML.Models.NetworkLGBM = "network_lgbm.onnx"
+	cfg.ML.Models.RATC2 = "rat_c2_detector.onnx"
 
 	cfg.Detection.Sigma.Enabled = true
 	cfg.Detection.Sigma.RulesDir = filepath.Join(paths.rulesDir, "sigma")
 	cfg.Detection.YARA.Enabled = true
 	cfg.Detection.YARA.RulesDir = filepath.Join(paths.rulesDir, "yara")
+	cfg.Detection.CustomRules.Enabled = true
+	cfg.Detection.CustomRules.RulesPath = filepath.Join(paths.rulesDir, "custom")
 	cfg.Detection.IOC.Enabled = true
 	cfg.Detection.IOC.HashDBPath = filepath.Join(paths.dataDir, "ioc", "hashes.db")
 	cfg.Detection.IOC.IPDBPath = filepath.Join(paths.dataDir, "ioc", "ips.db")
 	cfg.Detection.IOC.DomainDBPath = filepath.Join(paths.dataDir, "ioc", "domains.db")
+	cfg.Detection.Behavioral.SensitivityLevel = "high"
+	cfg.Detection.Behavioral.RansomwareDetect = true
+	cfg.Detection.Behavioral.RATDetect = true
+	cfg.Detection.Behavioral.ExfilDetect = true
+	cfg.Detection.Behavioral.LateralDetect = true
+
+	cfg.Compliance.Enabled = true
+	cfg.Compliance.RulesDir = filepath.Join(paths.rulesDir, "compliance", "sca")
+	cfg.Monitoring.KernelEnabled = true
+	cfg.Monitoring.LinuxRootcheckEnabled = true
 
 	cfg.Response.Quarantine.Dir = paths.quarantineDir
 	cfg.Response.Forensics.OutputDir = filepath.Join(paths.dataDir, "forensics")
