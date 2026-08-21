@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package xdr.command.v1;
+
+option go_package = "github.com/razatechofficial/xdr/api/proto/command/v1;commandv1";
+
+service CommandService {
+  rpc Dispatch(Command) returns (CommandAck);
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  COMMAND_TYPE_KILL_PROCESS = 1;
+  COMMAND_TYPE_ISOLATE_HOST = 2;
+  COMMAND_TYPE_COLLECT_FORENSIC = 3;
+}
+
+message Command {
+  string command_id = 1;
+  string agent_id = 2;
+  CommandType type = 3;
+  bytes payload = 4;
+}
+
+message CommandAck {
+  bool accepted = 1;
+  string command_id = 2;
+  string message = 3;
+}

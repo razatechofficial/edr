@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package xdr.telemetry.v1;
+
+option go_package = "github.com/razatechofficial/xdr/api/proto/telemetry/v1;telemetryv1";
+
+// IngestAdminService receives remote commands from gateway/dispatch and routes
+// them to the live agent stream (local registry or Redis fan-out).
+service IngestAdminService {
+  rpc PushCommand(PushCommandRequest) returns (PushCommandResponse);
+  rpc DisconnectAgent(DisconnectAgentRequest) returns (DisconnectAgentResponse);
+}
+
+message PushCommandRequest {
+  string agent_id = 1;
+  string command_id = 2;
+  string type = 3;
+  bytes payload = 4;
+}
+
+message PushCommandResponse {
+  bool accepted = 1;
+  // delivered locally, published for another pod, or agent offline
+  string status = 2;
+  string message = 3;
+}
+
+message DisconnectAgentRequest {
+  string agent_id = 1;
+  string reason = 2;
+}
+
+message DisconnectAgentResponse {
+  bool ok = 1;
+  string message = 2;
+}

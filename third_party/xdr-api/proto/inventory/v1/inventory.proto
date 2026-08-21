@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package xdr.inventory.v1;
+
+option go_package = "github.com/razatechofficial/xdr/api/proto/inventory/v1;inventoryv1";
+
+message Asset {
+  string asset_id = 1;
+  string agent_id = 2;
+  string hostname = 3;
+  string os = 4;
+  string arch = 5;
+  int32 risk_score = 6;
+}

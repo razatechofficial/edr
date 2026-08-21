@@ -22,6 +22,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
       - name: Download dependencies
         run: go mod download
 

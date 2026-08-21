@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package xdr.query.v1;
+
+option go_package = "github.com/razatechofficial/xdr/api/proto/query/v1;queryv1";
+
+import "google/protobuf/timestamp.proto";
+
+// QueryService is the CQRS read API for console search/analytics.
+service QueryService {
+  rpc SearchEvents(SearchEventsRequest) returns (SearchEventsResponse);
+  rpc GetEvent(GetEventRequest) returns (GetEventResponse);
+  rpc SearchFindings(SearchFindingsRequest) returns (SearchFindingsResponse);
+  // Aggregated SOC dashboard metrics (ClickHouse).
+  rpc GetDashboardAnalytics(GetDashboardAnalyticsRequest) returns (GetDashboardAnalyticsResponse);
+}
+
+message SearchEventsRequest {
+  google.protobuf.Timestamp time_from = 1;
+  google.protobuf.Timestamp time_to = 2;
+  string agent_id = 3;
+  int32 class_uid = 4;
+  string process_name = 5;
+  string file_path = 6;
+  string src_ip = 7;
+  string dst_ip = 8;
+  string user_name = 9;
+  int32 severity_id = 10;
+  int32 limit = 11;
+  string cursor = 12; // opaque offset as decimal string for now
+}
+
+message TelemetryEvent {
+  string tenant_id = 1;
+  string agent_id = 2;
+  uint64 sequence = 3;
+  string event_id = 4;
+  google.protobuf.Timestamp event_time = 5;
+  google.protobuf.Timestamp ingested_at = 6;
+  int32 class_uid = 7;
+  string class_name = 8;
+  int32 category_uid = 9;
+  string category_name = 10;
+  int32 activity_id = 11;
+  string activity_name = 12;
+  int32 severity_id = 13;
+  int64 type_uid = 14;
+  string status = 15;
+  string process_name = 16;
+  uint32 process_pid = 17;
+  string file_path = 18;
+  string src_ip = 19;
+  string dst_ip = 20;
+  string user_name = 21;
+  string ocsf_raw = 22;
+}
+
+message SearchEventsResponse {
+  repeated TelemetryEvent events = 1;
+  string next_cursor = 2;
+  int32 total = 3; // -1 if unknown
+}
+
+message GetEventRequest {
+  string event_id = 1;
+}
+
+message GetEventResponse {
+  TelemetryEvent event = 1;
+}
+
+message SearchFindingsRequest {
+  google.protobuf.Timestamp time_from = 1;
+  google.protobuf.Timestamp time_to = 2;
+  string agent_id = 3;
+  string rule_id = 4;
+  int32 severity_id = 5;
+  string status = 6;
+  int32 limit = 7;
+  string cursor = 8;
+}
+
+message Finding {
+  string tenant_id = 1;
+  string agent_id = 2;
+  string finding_id = 3;
+  string rule_id = 4;
+  google.protobuf.Timestamp event_time = 5;
+  google.protobuf.Timestamp ingested_at = 6;
+  int32 class_uid = 7;
+  string class_name = 8;
+  int32 severity_id = 9;
+  string severity = 10;
+  float confidence_score = 11;
+  string status = 12;
+  string title = 13;
+  string process_name = 14;
+  string file_path = 15;
+  string src_ip = 16;
+  string dst_ip = 17;
+  string ocsf_raw = 18;
+}
+
+message SearchFindingsResponse {
+  repeated Finding findings = 1;
+  string next_cursor = 2;
+  int32 total = 3;
+}
+
+message GetDashboardAnalyticsRequest {
+  // Lookback window. Defaults to 24h when unset or invalid.
+  int32 lookback_hours = 1;
+  google.protobuf.Timestamp time_from = 2;
+  google.protobuf.Timestamp time_to = 3;
+}
+
+message NamedCount {
+  string name = 1;
+  int64 count = 2;
+}
+
+message TimeBucket {
+  google.protobuf.Timestamp bucket_start = 1;
+  int64 count = 2;
+}
+
+message DashboardKPIs {
+  int64 events_total = 1;
+  int64 events_previous = 2; // prior window of equal length for delta
+  int64 agents_active = 3;
+  int64 severity_critical = 4; // severity_id >= 4
+  int64 severity_high = 5;     // severity_id == 3
+  int64 findings_total = 6;
+  int64 findings_open = 7;
+}
+
+message GetDashboardAnalyticsResponse {
+  DashboardKPIs kpis = 1;
+  repeated TimeBucket events_over_time = 2;
+  repeated NamedCount severity_breakdown = 3;
+  repeated NamedCount top_classes = 4;
+  repeated NamedCount top_agents = 5;
+  repeated NamedCount top_categories = 6;
+  repeated TelemetryEvent recent_critical = 7;
+  google.protobuf.Timestamp time_from = 8;
+  google.protobuf.Timestamp time_to = 9;
+}

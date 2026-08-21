@@ -1,0 +1,183 @@
+syntax = "proto3";
+
+package xdr.enrollment.v1;
+
+option go_package = "github.com/razatechofficial/xdr/api/proto/enrollment/v1;enrollmentv1";
+
+import "google/protobuf/timestamp.proto";
+
+service EnrollmentAdminService {
+  rpc CreateToken(CreateTokenRequest) returns (CreateTokenResponse);
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+  rpc ListTokens(ListTokensRequest) returns (ListTokensResponse);
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
+  rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse);
+  rpc RevokeAgent(RevokeAgentRequest) returns (RevokeAgentResponse);
+  rpc BulkRevokeAgents(BulkRevokeAgentsRequest) returns (BulkRevokeAgentsResponse);
+  rpc ListAgentCertificates(ListAgentCertificatesRequest) returns (ListAgentCertificatesResponse);
+  rpc ForceRenewHint(ForceRenewHintRequest) returns (ForceRenewHintResponse);
+  rpc ApproveAgent(ApproveAgentRequest) returns (ApproveAgentResponse);
+}
+
+message CreateTokenRequest {
+  string label = 1;
+  int32 max_uses = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  string issuer_ref = 4;
+  int32 validity_days = 5;
+  map<string, string> tags = 6;
+}
+
+message CreateTokenResponse {
+  string token_id = 1;
+  string enrollment_token = 2;
+  string tenant_id = 3;
+  string org_id = 4;
+  string label = 5;
+  int32 max_uses = 6;
+  google.protobuf.Timestamp expires_at = 7;
+}
+
+message RevokeTokenRequest {
+  string token_id = 1;
+}
+
+message RevokeTokenResponse {
+  bool revoked = 1;
+}
+
+message ListTokensRequest {
+  int32 limit = 1;
+  string cursor = 2;
+  string label = 3;
+}
+
+message EnrollmentTokenInfo {
+  string token_id = 1;
+  string tenant_id = 2;
+  string org_id = 3;
+  string created_by = 4;
+  string label = 5;
+  string issuer_ref = 6;
+  int32 validity_days = 7;
+  int32 max_uses = 8;
+  int32 use_count = 9;
+  map<string, string> tags = 10;
+  google.protobuf.Timestamp expires_at = 11;
+  google.protobuf.Timestamp revoked_at = 12;
+  google.protobuf.Timestamp created_at = 13;
+}
+
+message ListTokensResponse {
+  repeated EnrollmentTokenInfo tokens = 1;
+  string next_cursor = 2;
+}
+
+message ListAgentsRequest {
+  int32 limit = 1;
+  string cursor = 2;
+  string status = 3;
+}
+
+message AgentInfo {
+  string agent_id = 1;
+  string tenant_id = 2;
+  string org_id = 3;
+  string enrolled_by = 4;
+  string hostname = 5;
+  string os_family = 6;
+  string os_version = 7;
+  string agent_version = 8;
+  string machine_id = 9;
+  map<string, string> labels = 10;
+  string status = 11;
+  google.protobuf.Timestamp last_seen_at = 12;
+  google.protobuf.Timestamp enrolled_at = 13;
+  google.protobuf.Timestamp revoked_at = 14;
+  string revoked_by = 15;
+}
+
+message ListAgentsResponse {
+  repeated AgentInfo agents = 1;
+  string next_cursor = 2;
+}
+
+message GetAgentRequest {
+  string agent_id = 1;
+}
+
+message CertificateInfo {
+  string certificate_id = 1;
+  string cert_id = 2;
+  string serial_number = 3;
+  string status = 4;
+  google.protobuf.Timestamp not_before = 5;
+  google.protobuf.Timestamp not_after = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp revoked_at = 8;
+}
+
+message GetAgentResponse {
+  AgentInfo agent = 1;
+  CertificateInfo active_certificate = 2;
+}
+
+message UpdateAgentRequest {
+  string agent_id = 1;
+  map<string, string> labels = 2;
+}
+
+message UpdateAgentResponse {
+  bool updated = 1;
+}
+
+message RevokeAgentRequest {
+  string agent_id = 1;
+}
+
+message RevokeAgentResponse {
+  bool revoked = 1;
+}
+
+message BulkRevokeAgentsRequest {
+  repeated string agent_ids = 1;
+}
+
+message BulkRevokeAgentsItem {
+  string agent_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+message BulkRevokeAgentsResponse {
+  repeated BulkRevokeAgentsItem results = 1;
+}
+
+message ListAgentCertificatesRequest {
+  string agent_id = 1;
+}
+
+message ListAgentCertificatesResponse {
+  repeated CertificateInfo certificates = 1;
+}
+
+message ForceRenewHintRequest {
+  string agent_id = 1;
+}
+
+message ForceRenewHintResponse {
+  bool ok = 1;
+}
+
+message ApproveAgentRequest {
+  string agent_id = 1;
+  string csr_pem = 2;
+  int32 validity_days = 3;
+}
+
+message ApproveAgentResponse {
+  string agent_id = 1;
+  string certificate_pem = 2;
+  repeated string ca_chain_pem = 3;
+}

@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package xdr.detection.v1;
+
+option go_package = "github.com/razatechofficial/xdr/api/proto/detection/v1;detectionv1";
+
+message Finding {
+  string finding_id = 1;
+  string agent_id = 2;
+  string rule_id = 3;
+  string severity = 4;
+  int32 score = 5;
+  string title = 6;
+  bytes ocsf = 7;
+}

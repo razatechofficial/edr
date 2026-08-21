@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package xdr.telemetry.v1;
+
+option go_package = "github.com/razatechofficial/xdr/api/proto/telemetry/v1;telemetryv1";
+
+// TelemetryService is the agent control/data plane: long-lived mTLS bidi stream.
+// Agent dials out, presents device cert; telemetry flows up, commands flow down.
+service TelemetryService {
+  rpc StreamTelemetry(stream AgentClientFrame) returns (stream ServerFrame);
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+message AgentClientFrame {
+  oneof body {
+    TelemetryBatch batch = 1;
+    CommandResult command_result = 2;
+  }
+}
+
+message ServerFrame {
+  oneof body {
+    TelemetryAck ack = 1;
+    AgentCommand command = 2;
+    StreamControl control = 3;
+  }
+}
+
+message TelemetryBatch {
+  string agent_id = 1;
+  int64 sequence = 2;
+  bytes payload = 3;
+  // tenant_id is ignored for auth; server resolves tenant from enrolled agent.
+  string tenant_id = 4;
+}
+
+message TelemetryAck {
+  bool accepted = 1;
+  int64 sequence = 2;
+  string message = 3;
+}
+
+message AgentCommand {
+  string command_id = 1;
+  // type aligns with command.v1 CommandType names (e.g. COMMAND_TYPE_KILL_PROCESS)
+  // or response op names (kill_process, network_isolate).
+  string type = 2;
+  bytes payload = 3;
+}
+
+message CommandResult {
+  string command_id = 1;
+  bool ok = 2;
+  string message = 3;
+}
+
+message StreamControl {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    FORCE_RECONNECT = 1;
+    GO_AWAY = 2;
+  }
+  Code code = 1;
+  string message = 2;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool healthy = 1;
+}

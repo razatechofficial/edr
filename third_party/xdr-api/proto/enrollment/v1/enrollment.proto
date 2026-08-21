@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package xdr.enrollment.v1;
+
+option go_package = "github.com/razatechofficial/xdr/api/proto/enrollment/v1;enrollmentv1";
+
+service EnrollmentService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Renew(RenewRequest) returns (RenewResponse);
+  // GetTrustBundle returns the public CA chain used to verify enrollment/ingest
+  // server certificates. Unauthenticated — industry pattern for device recovery
+  // when ca-chain.pem was lost but the device cert remains.
+  rpc GetTrustBundle(GetTrustBundleRequest) returns (GetTrustBundleResponse);
+}
+
+message RegisterRequest {
+  string enrollment_token = 1;
+  string agent_id = 2;
+  string hostname = 3;
+  string os_family = 4;
+  string os_version = 5;
+  string agent_version = 6;
+  string machine_id = 7;
+  string csr_pem = 8;
+  map<string, string> labels = 9;
+}
+
+message RegisterResponse {
+  bool accepted = 1;
+  string agent_id = 2;
+  string message = 3;
+  string certificate_pem = 4;
+  repeated string ca_chain_pem = 5;
+  int32 heartbeat_sec = 6;
+  // Telemetry gRPC targets (host:port). Agents connect directly; DNS/LB picks the ingest pod.
+  repeated string ingest_hosts = 7;
+}
+
+message RenewRequest {
+  string agent_id = 1;
+  string csr_pem = 2;
+  string agent_version = 3;
+  string os_version = 4;
+}
+
+message RenewResponse {
+  bool accepted = 1;
+  string agent_id = 2;
+  string message = 3;
+  string certificate_pem = 4;
+  repeated string ca_chain_pem = 5;
+  int32 heartbeat_sec = 6;
+}
+
+message GetTrustBundleRequest {}
+
+message GetTrustBundleResponse {
+  // Public CA PEMs (root + intermediates) for verifying data-plane TLS.
+  repeated string ca_chain_pem = 1;
+}
