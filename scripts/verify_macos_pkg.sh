@@ -33,6 +33,8 @@ required=(
 	"*/Library/Application Support/EDR/config/rules/yara/exploits/cve_2021_44228_log4j.yar"
 	"*/Library/LaunchDaemons/com.razatech.edr-agent.plist"
 	"*/Library/Application Support/EDR/models/manifest.json"
+	"*/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui"
+	"*/usr/local/bin/edrctl"
 )
 
 for pattern in "${required[@]}"; do

@@ -249,11 +249,14 @@ func hardenServiceInstallDirACL(dir string) error {
 	if dir == "" || dir == "." {
 		return fmt.Errorf("empty install dir")
 	}
-	// Best-effort: restrict inheritance while preserving SYSTEM/Administrators (operator may tune further).
+	// SYSTEM + Administrators keep full control. Users get RX only: unelevated
+	// Explorer (UAC split token) is not in Administrators, so without RX the
+	// Start Menu shortcut fails with "cannot be accessed / permissions".
 	cmd := exec.Command("icacls", dir,
 		"/inheritance:r",
 		"/grant:r", "SYSTEM:(OI)(CI)F",
 		"/grant:r", "Administrators:(OI)(CI)F",
+		"/grant:r", "*S-1-5-32-545:(OI)(CI)RX",
 	)
 	cmd.Stdout = nil
 	cmd.Stderr = nil

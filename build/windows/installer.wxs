@@ -61,9 +61,7 @@
           <Directory Id="MODELSROOT" Name="models"/>
         </Directory>
       </Directory>
-      <Directory Id="ProgramMenuFolder">
-        <Directory Id="ApplicationProgramsFolder" Name="EDR Agent"/>
-      </Directory>
+      <Directory Id="ProgramMenuFolder"/>
     </Directory>
   </Fragment>
 
@@ -93,18 +91,12 @@
               Name="edr.exe"
               KeyPath="yes"/>
       </Component>
-      <Component Id="cmpStartMenu" Guid="*" Directory="ApplicationProgramsFolder" Win64="yes">
-        <Shortcut Id="StartMenuStatus"
+      <Component Id="cmpStartMenu" Guid="*" Directory="ProgramMenuFolder" Win64="yes">
+        <Shortcut Id="StartMenuApp"
                   Name="EDR Agent"
-                  Description="Status, enrollment, and connection test"
-                  Target="[INSTALLFOLDER]edr-agent-ui.exe"
+                  Description="Open the EDR Agent console"
+                  Target="[#EdrUIExe]"
                   WorkingDirectory="INSTALLFOLDER"/>
-        <Shortcut Id="StartMenuEnroll"
-                  Name="EDR Agent Enroll"
-                  Description="Enroll this device with an enrollment token"
-                  Target="[INSTALLFOLDER]edr-agent-ui.exe"
-                  WorkingDirectory="INSTALLFOLDER"/>
-        <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
         <RegistryValue Root="HKLM"
                        Key="Software\RazaTech\EDR Agent"
                        Name="installed"

@@ -114,6 +114,11 @@ if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
 		echo "codesign for edrctl failed" >&2
 		exit 1
 	fi
+	if ! codesign --force --options runtime --timestamp \
+		--sign "${APPLE_SIGN_IDENTITY}" "${UI_OUT}"; then
+		echo "codesign for edr-agent-ui failed" >&2
+		exit 1
+	fi
 	if ! codesign -d --entitlements :- "${AGENT_OUT}" | grep -q 'com.apple.developer.endpoint-security.client'; then
 		echo "endpoint-security entitlement missing after signing" >&2
 		exit 1
@@ -125,6 +130,7 @@ if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
 else
 	codesign --force --sign - "${AGENT_OUT}" || echo "warning: ad-hoc codesign skipped for ${AGENT_OUT}" >&2
 	codesign --force --sign - "${CTL_OUT}" || echo "warning: ad-hoc codesign skipped for ${CTL_OUT}" >&2
+	codesign --force --sign - "${UI_OUT}" || echo "warning: ad-hoc codesign skipped for ${UI_OUT}" >&2
 	echo "Ad-hoc signed; set APPLE_SIGN_IDENTITY for release entitlements"
 fi
 

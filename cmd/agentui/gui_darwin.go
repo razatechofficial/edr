@@ -19,7 +19,11 @@ func runGUI() error {
 			status = status[:900] + "\n…"
 		}
 		choice, err := osascriptChoice(status)
-		if err != nil || choice == "" || choice == "Quit" || choice == "false" {
+		if err != nil {
+			osascriptAlert("EDR Agent", strings.TrimSpace(choice+"\n"+err.Error()), err)
+			return fmt.Errorf("open console: %w", err)
+		}
+		if choice == "" || choice == "Quit" || choice == "false" {
 			return nil
 		}
 		switch choice {
@@ -54,11 +58,11 @@ try
 	set c to choose from list {"Refresh status", "Enroll device", "Test connection", "Start agent", "Stop agent", "Grant permissions", "Quit"} with title "EDR Agent" with prompt %s default items {"Refresh status"}
 	if c is false then return "Quit"
 	return item 1 of c
-on error
-	return "Quit"
+on error errMsg number errNum
+	error errMsg
 end try
 `, applescriptString(prompt))
-	out, err := exec.Command("osascript", "-e", script).CombinedOutput()
+	out, err := exec.Command("/usr/bin/osascript", "-e", script).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
 
@@ -72,7 +76,7 @@ on error
 	return ""
 end try
 `
-	out, err := exec.Command("osascript", "-e", script).CombinedOutput()
+	out, err := exec.Command("/usr/bin/osascript", "-e", script).CombinedOutput()
 	if err != nil {
 		return "", false
 	}
@@ -88,19 +92,21 @@ func osascriptAlert(title, body string, runErr error) {
 	if msg == "" {
 		msg = "ok"
 	}
-	_ = exec.Command("osascript", "-e", fmt.Sprintf(`display dialog %s with title %s buttons {"OK"} default button "OK"`, applescriptString(msg), applescriptString(title))).Run()
+	_ = exec.Command("/usr/bin/osascript", "-e", fmt.Sprintf(`display dialog %s with title %s buttons {"OK"} default button "OK"`, applescriptString(msg), applescriptString(title))).Run()
 }
 
 func adminEdrctl(args ...string) (string, error) {
 	cmd := edrctlPath() + " " + strings.Join(args, " ")
 	script := fmt.Sprintf(`do shell script %s with administrator privileges`, applescriptString(cmd))
-	out, err := exec.Command("osascript", "-e", script).CombinedOutput()
+	out, err := exec.Command("/usr/bin/osascript", "-e", script).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
 
 func applescriptString(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\n", `" & return & "`)
 	return `"` + s + `"`
 }
 
