@@ -9,6 +9,8 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 )
 
 func (c *console) buildPreflight() fyne.CanvasObject {
@@ -156,7 +158,7 @@ func (c *console) onStartAgent() {
 				c.preflightHint.SetText(msg)
 				return
 			}
-			c.show(screenDash)
+			c.show(uistate.Dash)
 		})
 	}()
 }

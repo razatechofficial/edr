@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 	"github.com/razatechofficial/edr/internal/xdrclient"
 )
 
@@ -112,7 +113,7 @@ func (c *console) onEnroll() {
 				return
 			}
 			c.token.SetText("")
-			c.show(screenPreflight)
+			c.show(uistate.Preflight)
 		})
 	}()
 }

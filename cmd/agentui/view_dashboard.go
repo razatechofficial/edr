@@ -8,6 +8,8 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 )
 
 func (c *console) buildDashboard() fyne.CanvasObject {
@@ -88,15 +90,15 @@ func (c *console) buildDashboard() fyne.CanvasObject {
 }
 
 func (c *console) applyDashboard(st operatorStatus, res resourceSnapshot) {
-	k := classifyHealth(st.Enrolled, serviceHealthy(st.Service), st.ControlAPI == "ok", st.Isolated)
-	title, sub := healthCopy(k)
+	k := uistate.ClassifyHealth(st.Enrolled, serviceHealthy(st.Service), st.ControlAPI == "ok", st.Isolated)
+	title, sub := uistate.HealthCopy(k)
 	col := colorMuted
 	switch k {
-	case healthSecure:
+	case uistate.Secure:
 		col = colorOK
-	case healthContained:
+	case uistate.Contained:
 		col = colorDanger
-	case healthDegraded:
+	case uistate.Degraded:
 		col = colorWarn
 	}
 	c.healthTitle.Text = title

@@ -9,6 +9,8 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 )
 
 type console struct {
@@ -54,7 +56,7 @@ type console struct {
 	trayRes    *fyne.MenuItem
 	trayMenu   *fyne.Menu
 
-	screen screenID
+	screen uistate.Screen
 	busy   bool
 	last   operatorStatus
 }
@@ -79,10 +81,10 @@ func runDashboard() error {
 	st := loadStatus()
 	c.last = st
 	need := needsFullDiskAccess() && !hasFullDiskAccess()
-	c.show(initialScreen(st.Enrolled, need))
+	c.show(uistate.InitialScreen(st.Enrolled, need))
 
 	w.SetCloseIntercept(func() {
-		if c.screen == screenDash && c.hasTray() {
+		if c.screen == uistate.Dash && c.hasTray() {
 			w.Hide()
 			return
 		}
@@ -97,7 +99,7 @@ func runDashboard() error {
 			res := sampleResources(st)
 			fyne.Do(func() {
 				c.last = st
-				if c.screen == screenDash {
+				if c.screen == uistate.Dash {
 					c.applyDashboard(st, res)
 				}
 				c.refreshTray(st, res)
@@ -109,15 +111,15 @@ func runDashboard() error {
 	return nil
 }
 
-func (c *console) show(id screenID) {
+func (c *console) show(id uistate.Screen) {
 	c.screen = id
 	switch id {
-	case screenEnroll:
+	case uistate.Enroll:
 		c.win.SetContent(c.enrollContent)
-	case screenPreflight:
+	case uistate.Preflight:
 		c.win.SetContent(c.preflightContent)
 		go c.runPreflight()
-	case screenDash:
+	case uistate.Dash:
 		c.win.SetContent(c.dashContent)
 		res := sampleResources(c.last)
 		c.applyDashboard(c.last, res)

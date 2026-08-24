@@ -388,17 +388,19 @@ proto:
 # Test targets
 # ============================================================================
 
-GO_TEST_PKGS := $(shell go list ./... 2>/dev/null | grep -v '/temp/' || true)
+# Skip the Fyne GUI binary in headless CI (needs OpenGL/X11). Nested
+# packages under cmd/agentui/ that do not import Fyne still run.
+GO_TEST_PKGS := $(shell go list ./... 2>/dev/null | grep -v '/temp/' | grep -vE '/cmd/agentui$$' || true)
 
 test:
 	@echo "==> Running all tests"
-	go test $$(go list ./... | grep -v '/temp/') -count=1 -timeout 600s
+	go test $(GO_TEST_PKGS) -count=1 -timeout 600s
 
 test-ci: test
 
 test-ci-race:
 	@echo "==> Running CI race tests"
-	go test $$(go list ./... | grep -v '/temp/') -race -count=1 -timeout 20m
+	go test $(GO_TEST_PKGS) -race -count=1 -timeout 20m
 
 # Collector package without CGO (avoids macOS EndpointSecurity link in CI/dev).
 test-collector:
@@ -416,7 +418,7 @@ test-response:
 
 test-race:
 	@echo "==> Running tests with race detector"
-	go test $$(go list ./... | grep -v '/temp/') -race -count=1 -timeout 300s
+	go test $(GO_TEST_PKGS) -race -count=1 -timeout 300s
 
 # Longer race pass on the monitoring stack (avoids `go test ./...` which may include non-repo trees).
 monitoring-soak:
@@ -493,7 +495,7 @@ diagnose-esf:
 
 test-coverage:
 	@echo "==> Running tests with coverage"
-	go test $$(go list ./... | grep -v '/temp/') -coverprofile=coverage.out -covermode=atomic -timeout 600s
+	go test $(GO_TEST_PKGS) -coverprofile=coverage.out -covermode=atomic -timeout 600s
 	go tool cover -func=coverage.out
 	@echo "==> HTML coverage report: coverage.html"
 	go tool cover -html=coverage.out -o coverage.html
@@ -781,12 +783,12 @@ lint:
 		golangci-lint run ./...; \
 	else \
 		echo "golangci-lint not installed; running go vet only"; \
-		go vet ./...; \
+		go vet $(GO_TEST_PKGS); \
 	fi
 
 vet:
 	@echo "==> Running go vet"
-	go vet ./...
+	go vet $(GO_TEST_PKGS)
 
 vulncheck:
 	@echo "==> Running govulncheck"

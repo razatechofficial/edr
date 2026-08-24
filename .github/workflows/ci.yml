@@ -777,7 +777,7 @@ jobs:
       - name: go vet
         env:
           CGO_ENABLED: "0"
-        run: go vet ./...
+        run: make vet
 
   vulncheck:
     name: Vulnerability Check

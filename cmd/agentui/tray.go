@@ -5,6 +5,8 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
+
+	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 )
 
 func (c *console) hasTray() bool {
@@ -43,8 +45,8 @@ func (c *console) refreshTray(st operatorStatus, res resourceSnapshot) {
 	if c.trayMenu == nil {
 		return
 	}
-	k := classifyHealth(st.Enrolled, serviceHealthy(st.Service), st.ControlAPI == "ok", st.Isolated)
-	title, sub := healthCopy(k)
+	k := uistate.ClassifyHealth(st.Enrolled, serviceHealthy(st.Service), st.ControlAPI == "ok", st.Isolated)
+	title, sub := uistate.HealthCopy(k)
 	c.trayStatus.Label = title + " · " + sub
 	c.trayDetail.Label = fmt.Sprintf("Threats %d · Handled %d", st.Detections, st.EventsProc)
 	c.trayRes.Label = fmt.Sprintf("CPU %.0f%% sys / %.1f%% agent · RAM %s", res.SysCPU, res.AgentCPU, formatBytesGB(res.SysMemUsed))
