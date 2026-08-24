@@ -46,6 +46,12 @@ sign_target() {
 	fi
 }
 
+if command -v otool >/dev/null 2>&1 && otool -L "${UI_BIN}" | grep -Eiq 'libyara|/opt/yara/|/Cellar/yara/'; then
+	echo "${UI_BIN} links Homebrew libyara; rebuild the console without CGO yara flags" >&2
+	otool -L "${UI_BIN}" >&2 || true
+	exit 1
+fi
+
 rm -rf "${APP_OUT}"
 mkdir -p "${APP_OUT}/Contents/MacOS"
 cp "${UI_BIN}" "${APP_OUT}/Contents/MacOS/edr-agent-ui"

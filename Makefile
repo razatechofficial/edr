@@ -125,8 +125,8 @@ build-darwin:
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-installer-darwin-arm64 ./cmd/installer
 	GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-amd64 ./cmd/cli
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-arm64 ./cmd/cli
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-amd64 ./cmd/agentui
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-arm64 ./cmd/agentui
+	CGO_CFLAGS= CGO_CPPFLAGS= CGO_LDFLAGS= GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-amd64 ./cmd/agentui
+	CGO_CFLAGS= CGO_CPPFLAGS= CGO_LDFLAGS= GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-arm64 ./cmd/agentui
 	@mkdir -p dist/darwin-amd64 dist/darwin-arm64
 	CGO_ENABLED=$(DARWIN_DIST_CGO) GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-amd64/edr-agent ./cmd/agent
 	CGO_ENABLED=$(DARWIN_DIST_CGO) GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-arm64/edr-agent ./cmd/agent

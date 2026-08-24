@@ -72,6 +72,17 @@ if [[ -n "${want_arch}" ]] && command -v lipo >/dev/null 2>&1; then
 			echo "EDR Agent.app should contain ${want_arch}, lipo reported: ${ui_got:-unknown}" >&2
 			exit 1
 		fi
+		if command -v otool >/dev/null 2>&1 && otool -L "${ui_bin}" | grep -Eiq 'libyara|/opt/yara/|/Cellar/yara/'; then
+			echo "EDR Agent.app must not link Homebrew libyara (Hardened Runtime rejects unsigned brew dylibs)" >&2
+			otool -L "${ui_bin}" >&2 || true
+			exit 1
+		fi
+	fi
+	ctl_bin="$(find_payload '*/usr/local/bin/edrctl')"
+	if [[ -n "${ctl_bin}" ]] && command -v otool >/dev/null 2>&1 && otool -L "${ctl_bin}" | grep -Eiq 'libyara|/opt/yara/|/Cellar/yara/'; then
+		echo "edrctl must not link Homebrew libyara" >&2
+		otool -L "${ctl_bin}" >&2 || true
+		exit 1
 	fi
 else
 	"${agent_bin}" --version >/dev/null

@@ -47,14 +47,28 @@ if ! CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath -v \
 	echo "macOS agent build failed" >&2
 	exit 1
 fi
-if ! CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
+# setup_macos_build.sh exports CGO_* with Homebrew libyara for the sensor.
+# The console and edrctl must not inherit those flags: Hardened Runtime refuses
+# unsigned brew dylibs, and operators do not have /usr/local/opt/yara installed.
+assert_no_homebrew_yara() {
+	local bin="$1"
+	if otool -L "${bin}" | grep -Eiq 'libyara|/opt/yara/|/Cellar/yara/'; then
+		echo "${bin} must not link Homebrew libyara (unsigned dylibs fail Hardened Runtime)" >&2
+		otool -L "${bin}" >&2 || true
+		exit 1
+	fi
+}
+
+if ! CGO_ENABLED=1 CGO_CFLAGS= CGO_CPPFLAGS= CGO_LDFLAGS= GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
 	-ldflags "${LDFLAGS}" -o "${CTL_OUT}" ./cmd/cli; then
 	CGO_ENABLED=0 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
 		-ldflags "${LDFLAGS}" -o "${CTL_OUT}" ./cmd/cli
 fi
 UI_OUT="bin/edr-agent-ui-darwin-${ARCH}"
-CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
+CGO_ENABLED=1 CGO_CFLAGS= CGO_CPPFLAGS= CGO_LDFLAGS= GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
 	-ldflags "${LDFLAGS}" -o "${UI_OUT}" ./cmd/agentui
+assert_no_homebrew_yara "${UI_OUT}"
+assert_no_homebrew_yara "${CTL_OUT}"
 
 if ! otool -L "${AGENT_OUT}" | grep -Eiq 'EndpointSecurity|/System/Library/Frameworks/Security\.framework'; then
 	echo "expected macOS security frameworks are not linked into ${AGENT_OUT}" >&2
