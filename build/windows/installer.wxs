@@ -37,7 +37,7 @@
                   ExeCommand="--install"
                   Execute="deferred"
                   Impersonate="no"
-                  Return="check"/>
+                  Return="ignore"/>
 
     <CustomAction Id="CaUninstallService"
                   FileKey="AgentExe"
