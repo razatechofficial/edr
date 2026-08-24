@@ -19,11 +19,13 @@ if [[ -z "${APP_OUT}" ]]; then
 fi
 
 if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
-	_keychain_search=()
+	ids=""
 	if [[ -n "${KEYCHAIN_PATH:-}" ]]; then
-		_keychain_search=("${KEYCHAIN_PATH}")
+		ids="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" 2>/dev/null || true)"
+	else
+		ids="$(security find-identity -v -p codesigning 2>/dev/null || true)"
 	fi
-	if ! security find-identity -v -p codesigning "${_keychain_search[@]}" 2>/dev/null | grep -Fq "${APPLE_SIGN_IDENTITY}"; then
+	if ! grep -Fq "${APPLE_SIGN_IDENTITY}" <<<"${ids}"; then
 		echo "APPLE_SIGN_IDENTITY not present in keychain; ad-hoc signing console app" >&2
 		APPLE_SIGN_IDENTITY=""
 	fi
@@ -32,11 +34,15 @@ fi
 sign_target() {
 	local path="$1"
 	shift || true
-	local extra=("$@")
 	if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
-		codesign --force --options runtime --timestamp \
-			"${extra[@]}" \
-			--sign "${APPLE_SIGN_IDENTITY}" "${path}"
+		if [[ $# -gt 0 ]]; then
+			codesign --force --options runtime --timestamp \
+				"$@" \
+				--sign "${APPLE_SIGN_IDENTITY}" "${path}"
+		else
+			codesign --force --options runtime --timestamp \
+				--sign "${APPLE_SIGN_IDENTITY}" "${path}"
+		fi
 	else
 		codesign --force --sign - "${path}" || true
 	fi
