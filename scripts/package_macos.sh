@@ -37,6 +37,20 @@ x86_64) ARCH=amd64 ;;
 	;;
 esac
 
+if [[ "${ARCH}" == "amd64" ]]; then
+	NEED_UNAME=x86_64
+	NEED_LABEL="Intel (amd64)"
+	OTHER_PKG="arm64 (Apple silicon)"
+	HOST_ARCHS="x86_64"
+	ARCH_TITLE="Intel"
+else
+	NEED_UNAME=arm64
+	NEED_LABEL="Apple silicon (arm64)"
+	OTHER_PKG="amd64 (Intel)"
+	HOST_ARCHS="arm64"
+	ARCH_TITLE="Apple silicon"
+fi
+
 REQUIRED_BINS=(
 	bin/edr-agent-darwin-amd64
 	bin/edr-agent-darwin-arm64
@@ -141,14 +155,21 @@ if [[ "${AIRGAP}" == "1" ]]; then
 fi
 chmod 640 "${CONFIG_DST}"
 
-cat > "${SCRIPTS}/preinstall" <<'PRE'
+cat > "${SCRIPTS}/preinstall" <<PRE
 #!/bin/bash
 set -e
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+HOST="\$(uname -m)"
+NEED_UNAME="${NEED_UNAME}"
+if [[ "\${HOST}" != "\${NEED_UNAME}" ]]; then
+	echo "This EDR Agent package is for ${NEED_LABEL} Macs. This Mac reports \${HOST}. Download the ${OTHER_PKG} package instead." >&2
+	exit 1
+fi
 PLIST="/Library/LaunchDaemons/com.razatech.edr-agent.plist"
 if launchctl print "system/com.razatech.edr-agent" &>/dev/null; then
-	launchctl bootout system "${PLIST}" 2>/dev/null || true
+	launchctl bootout system "\${PLIST}" 2>/dev/null || true
 fi
-launchctl unload "${PLIST}" 2>/dev/null || true
+launchctl unload "\${PLIST}" 2>/dev/null || true
 PRE
 
 cat > "${SCRIPTS}/postinstall" <<'POST'
@@ -274,9 +295,9 @@ DIST_XML="${WORK}/distribution.xml"
 cat > "${DIST_XML}" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="1">
-	<title>EDR Agent (bundled ML models)</title>
+	<title>EDR Agent (${ARCH_TITLE})</title>
 	<domains enable_localSystem="true"/>
-	<options customize="never" require-scripts="false" rootVolumeOnly="true"/>
+	<options customize="never" require-scripts="false" rootVolumeOnly="true" hostArchitectures="${HOST_ARCHS}"/>
 	<choices-outline>
 		<line choice="com.razatech.edr-agent"/>
 	</choices-outline>

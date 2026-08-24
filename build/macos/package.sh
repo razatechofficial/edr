@@ -214,24 +214,69 @@ launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
 EOF
 chmod 755 pkg/macos/scripts/postinstall
 
-cat > pkg/macos/scripts/preinstall <<'EOF'
+if [[ "${ARCH}" == "amd64" ]]; then
+	NEED_UNAME=x86_64
+	NEED_LABEL="Intel (amd64)"
+	OTHER_PKG="arm64 (Apple silicon)"
+	HOST_ARCHS="x86_64"
+	ARCH_TITLE="Intel"
+else
+	NEED_UNAME=arm64
+	NEED_LABEL="Apple silicon (arm64)"
+	OTHER_PKG="amd64 (Intel)"
+	HOST_ARCHS="arm64"
+	ARCH_TITLE="Apple silicon"
+fi
+
+cat > pkg/macos/scripts/preinstall <<EOF
 #!/bin/bash
 set -e
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+HOST="\$(uname -m)"
+if [[ "\${HOST}" != "${NEED_UNAME}" ]]; then
+	MSG="This EDR Agent package is for ${NEED_LABEL} Macs. This Mac reports \${HOST}. Download the ${OTHER_PKG} package instead."
+	echo "\${MSG}" >&2
+	osascript -e "display dialog \"\${MSG}\" buttons {\"OK\"} default button \"OK\" with title \"EDR Agent\"" >/dev/null 2>&1 || true
+	exit 1
+fi
 PLIST="/Library/LaunchDaemons/com.razatech.edr-agent.plist"
 if launchctl print "system/com.razatech.edr-agent" &>/dev/null; then
-	launchctl bootout system "${PLIST}" 2>/dev/null || true
+	launchctl bootout system "\${PLIST}" 2>/dev/null || true
 fi
-launchctl unload "${PLIST}" 2>/dev/null || true
+launchctl unload "\${PLIST}" 2>/dev/null || true
 EOF
 chmod 755 pkg/macos/scripts/preinstall
 
-mkdir -p dist
+mkdir -p dist pkg/macos
+COMPONENT="pkg/macos/edr-agent-component.pkg"
 pkgbuild \
 	--root "${PKG_ROOT}" \
 	--scripts pkg/macos/scripts \
 	--identifier com.razatech.edr-agent \
 	--version "${VERSION}" \
 	--install-location "/" \
+	"${COMPONENT}"
+
+DIST_XML="pkg/macos/distribution.xml"
+cat > "${DIST_XML}" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+	<title>EDR Agent (${ARCH_TITLE})</title>
+	<domains enable_localSystem="true"/>
+	<options customize="never" require-scripts="false" hostArchitectures="${HOST_ARCHS}"/>
+	<choices-outline>
+		<line choice="com.razatech.edr-agent"/>
+	</choices-outline>
+	<choice id="com.razatech.edr-agent" visible="false">
+		<pkg-ref id="com.razatech.edr-agent"/>
+	</choice>
+	<pkg-ref id="com.razatech.edr-agent" version="${VERSION}" onConclusion="none">edr-agent-component.pkg</pkg-ref>
+</installer-gui-script>
+EOF
+
+productbuild \
+	--distribution "${DIST_XML}" \
+	--package-path pkg/macos \
 	"dist/edr-agent_${VERSION}_${ARCH}.pkg"
 
-echo "macOS package: dist/edr-agent_${VERSION}_${ARCH}.pkg"
+echo "macOS package: dist/edr-agent_${VERSION}_${ARCH}.pkg (${ARCH_TITLE})"

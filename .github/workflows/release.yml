@@ -145,8 +145,6 @@ jobs:
       fail-fast: false
       matrix:
         arch: [arm64, amd64]
-    # Intel slice on Apple Silicon runners needs Rosetta + x86 Homebrew; arm64 is the shipping pkg.
-    continue-on-error: ${{ matrix.arch == 'amd64' }}
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
       EDR_MACOS_ARCH: ${{ matrix.arch }}
@@ -205,6 +203,17 @@ jobs:
         run: |
           shopt -s nullglob
           files=(dist/edr-agent_*_${{ matrix.arch }}.pkg)
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            for f in "${files[@]}"; do
+              cp "${f}" "${f%_arm64.pkg}_apple-silicon.pkg"
+            done
+            files+=(dist/edr-agent_*_apple-silicon.pkg)
+          else
+            for f in "${files[@]}"; do
+              cp "${f}" "${f%_amd64.pkg}_intel.pkg"
+            done
+            files+=(dist/edr-agent_*_intel.pkg)
+          fi
           gh release upload "${{ needs.release_meta.outputs.release_tag }}" "${files[@]}" --clobber
 
   build-windows:

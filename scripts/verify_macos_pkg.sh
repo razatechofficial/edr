@@ -52,7 +52,38 @@ if [[ -z "${agent_bin}" ]]; then
 	echo "missing edr-agent binary in pkg payload" >&2
 	exit 1
 fi
-"${agent_bin}" --version >/dev/null
+
+base="$(basename "${PKG_PATH}")"
+want_arch=""
+case "${base}" in
+*_amd64.pkg|*_intel.pkg|*darwin-amd64*) want_arch=x86_64 ;;
+*_arm64.pkg|*_apple-silicon.pkg|*darwin-arm64*) want_arch=arm64 ;;
+esac
+if [[ -n "${want_arch}" ]] && command -v lipo >/dev/null 2>&1; then
+	got="$(lipo -archs "${agent_bin}" 2>/dev/null || true)"
+	if ! grep -qw "${want_arch}" <<<"${got}"; then
+		echo "package ${base} should contain ${want_arch}, lipo reported: ${got:-unknown}" >&2
+		exit 1
+	fi
+	ui_bin="$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui')"
+	if [[ -n "${ui_bin}" ]]; then
+		ui_got="$(lipo -archs "${ui_bin}" 2>/dev/null || true)"
+		if ! grep -qw "${want_arch}" <<<"${ui_got}"; then
+			echo "EDR Agent.app should contain ${want_arch}, lipo reported: ${ui_got:-unknown}" >&2
+			exit 1
+		fi
+	fi
+else
+	"${agent_bin}" --version >/dev/null
+fi
+
+dist="$(find "${tmpdir}/expanded" -name Distribution -print -quit)"
+if [[ -n "${dist}" && -n "${want_arch}" ]]; then
+	if ! grep -q "hostArchitectures=\"${want_arch}\"" "${dist}"; then
+		echo "Distribution.xml must set hostArchitectures=${want_arch} so the wrong CPU cannot install this pkg" >&2
+		exit 1
+	fi
+fi
 
 cfg="$(find "${tmpdir}/expanded" -path '*/Library/Application Support/EDR/config/agent.yaml' -print -quit)"
 if [[ -z "${cfg}" ]]; then
