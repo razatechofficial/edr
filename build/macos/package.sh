@@ -58,9 +58,30 @@ mkdir -p \
 	"${PKG_ROOT}/Library/Logs/EDR"
 
 if [[ -d "${APP_BUNDLE}/Contents" ]]; then
-	cp -R "${APP_BUNDLE}" "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
-	chmod -R 755 "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
-	touch "${PKG_ROOT}/usr/local/libexec/edr-agent.app/.metadata_never_index"
+	rm -rf "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
+	# ditto preserves code signatures; chmod/touch after signing invalidates them
+	# and Apple notarization rejects the binary.
+	if command -v ditto >/dev/null 2>&1; then
+		ditto "${APP_BUNDLE}" "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
+	else
+		cp -a "${APP_BUNDLE}" "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
+	fi
+	if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
+		AGENT_APP_DST="${PKG_ROOT}/usr/local/libexec/edr-agent.app"
+		FRAMEWORKS="${AGENT_APP_DST}/Contents/Frameworks"
+		ENT="${ROOT}/build/macos/edr-agent.entitlements.plist"
+		for dylib in "${FRAMEWORKS}"/*.dylib; do
+			[[ -f "${dylib}" ]] || continue
+			codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${dylib}"
+		done
+		codesign --force --options runtime --timestamp \
+			--entitlements "${ENT}" \
+			--sign "${APPLE_SIGN_IDENTITY}" "${AGENT_APP_DST}/Contents/MacOS/edr-agent"
+		codesign --force --options runtime --timestamp \
+			--preserve-metadata=entitlements,flags,runtime \
+			--sign "${APPLE_SIGN_IDENTITY}" "${AGENT_APP_DST}"
+		codesign --verify --deep --strict "${AGENT_APP_DST}"
+	fi
 elif [[ -f "${BINARY}" ]]; then
 	mkdir -p "${PKG_ROOT}/usr/local/bin"
 	cp "${BINARY}" "${PKG_ROOT}/usr/local/bin/edr-agent"
@@ -71,6 +92,10 @@ fi
 cp "${CTL_BIN}" "${PKG_ROOT}/usr/local/bin/edrctl"
 cp "${CTL_BIN}" "${PKG_ROOT}/usr/local/bin/edr"
 chmod 755 "${PKG_ROOT}/usr/local/bin/edrctl" "${PKG_ROOT}/usr/local/bin/edr"
+if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
+	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edrctl"
+	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edr"
+fi
 
 bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${CTL_BIN}" "${PKG_ROOT}/Applications/EDR Agent.app"
 

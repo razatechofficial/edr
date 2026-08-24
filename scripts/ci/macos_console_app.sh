@@ -11,6 +11,7 @@ CTL_BIN="${2:-}"
 APP_OUT="${3:-}"
 SCRIPT="${ROOT}/build/macos/console.applescript"
 INFO_PLIST="${ROOT}/build/macos/Info-console.plist"
+ENTITLEMENTS="${ROOT}/build/macos/edr-console.entitlements.plist"
 
 if [[ -z "${APP_OUT}" ]]; then
 	echo "usage: macos_console_app.sh path/to/edr-agent-ui path/to/edrctl dest/EDR Agent.app" >&2
@@ -30,10 +31,12 @@ fi
 
 sign_target() {
 	local path="$1"
-	# Do not use hardened runtime on the console applet: it breaks
-	# AppleScript "do shell script" / administrator-privileges dialogs.
+	shift || true
+	local extra=("$@")
 	if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
-		codesign --force --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${path}"
+		codesign --force --options runtime --timestamp \
+			"${extra[@]}" \
+			--sign "${APPLE_SIGN_IDENTITY}" "${path}"
 	else
 		codesign --force --sign - "${path}" || true
 	fi
@@ -62,9 +65,17 @@ if command -v osacompile >/dev/null 2>&1 && [[ -f "${SCRIPT}" ]]; then
 		sign_target "${APP_OUT}/Contents/MacOS/edr-agent-ui"
 	fi
 	if [[ -x "${APP_OUT}/Contents/MacOS/applet" ]]; then
-		sign_target "${APP_OUT}/Contents/MacOS/applet"
+		if [[ -f "${ENTITLEMENTS}" ]]; then
+			sign_target "${APP_OUT}/Contents/MacOS/applet" --entitlements "${ENTITLEMENTS}"
+		else
+			sign_target "${APP_OUT}/Contents/MacOS/applet"
+		fi
 	fi
-	sign_target "${APP_OUT}"
+	if [[ -f "${ENTITLEMENTS}" ]]; then
+		sign_target "${APP_OUT}" --entitlements "${ENTITLEMENTS}"
+	else
+		sign_target "${APP_OUT}"
+	fi
 	echo "Console applet: ${APP_OUT}"
 	exit 0
 fi
@@ -87,5 +98,9 @@ sign_target "${APP_OUT}/Contents/MacOS/edr-agent-ui"
 if [[ -f "${APP_OUT}/Contents/MacOS/edrctl" ]]; then
 	sign_target "${APP_OUT}/Contents/MacOS/edrctl"
 fi
-sign_target "${APP_OUT}"
+if [[ -f "${ENTITLEMENTS}" ]]; then
+	sign_target "${APP_OUT}" --entitlements "${ENTITLEMENTS}"
+else
+	sign_target "${APP_OUT}"
+fi
 echo "Console app (Go fallback): ${APP_OUT}"
