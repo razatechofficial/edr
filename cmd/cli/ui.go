@@ -74,19 +74,22 @@ type operatorHostProbe struct {
 }
 
 type operatorStatus struct {
-	Config      string               `json:"config"`
-	Service     string               `json:"service"`
-	Enrolled    bool                 `json:"enrolled"`
-	AgentID     string               `json:"agent_id,omitempty"`
-	Ingest      string               `json:"ingest,omitempty"`
-	Runtime     string               `json:"runtime,omitempty"`
-	Version     string               `json:"version,omitempty"`
-	Uptime      string               `json:"uptime,omitempty"`
-	Detections  uint64               `json:"detections"`
-	Isolated    bool                 `json:"isolated"`
-	ControlAPI  string               `json:"control_api"`
-	Hosts       []operatorHostProbe  `json:"hosts,omitempty"`
-	UpdatedAt   string               `json:"updated_at"`
+	Config     string              `json:"config"`
+	Service    string              `json:"service"`
+	Enrolled   bool                `json:"enrolled"`
+	AgentID    string              `json:"agent_id,omitempty"`
+	Ingest     string              `json:"ingest,omitempty"`
+	Runtime    string              `json:"runtime,omitempty"`
+	Version    string              `json:"version,omitempty"`
+	Uptime     string              `json:"uptime,omitempty"`
+	Detections uint64              `json:"detections"`
+	EventsProc uint64              `json:"events_processed,omitempty"`
+	CPUPercent float64             `json:"cpu_percent,omitempty"`
+	MemoryMB   float64             `json:"memory_mb,omitempty"`
+	Isolated   bool                `json:"isolated"`
+	ControlAPI string              `json:"control_api"`
+	Hosts      []operatorHostProbe `json:"hosts,omitempty"`
+	UpdatedAt  string              `json:"updated_at"`
 }
 
 func collectOperatorStatus() operatorStatus {
@@ -102,11 +105,14 @@ func collectOperatorStatus() operatorStatus {
 	if err == nil {
 		st.ControlAPI = "ok"
 		var status struct {
-			Status    string `json:"status"`
-			Version   string `json:"version"`
-			Uptime    string `json:"uptime"`
-			AlertsGen uint64 `json:"alerts_generated"`
-			Isolated  bool   `json:"isolated"`
+			Status     string  `json:"status"`
+			Version    string  `json:"version"`
+			Uptime     string  `json:"uptime"`
+			AlertsGen  uint64  `json:"alerts_generated"`
+			Isolated   bool    `json:"isolated"`
+			CPUPercent float64 `json:"cpu_percent"`
+			MemoryMB   float64 `json:"memory_mb"`
+			EventsProc uint64  `json:"events_processed"`
 		}
 		if json.Unmarshal(body, &status) == nil {
 			st.Runtime = status.Status
@@ -114,6 +120,9 @@ func collectOperatorStatus() operatorStatus {
 			st.Uptime = status.Uptime
 			st.Detections = status.AlertsGen
 			st.Isolated = status.Isolated
+			st.CPUPercent = status.CPUPercent
+			st.MemoryMB = status.MemoryMB
+			st.EventsProc = status.EventsProc
 		}
 	}
 
@@ -162,6 +171,9 @@ func printOperatorDashboard(out *os.File, st operatorStatus) error {
 		fmt.Fprintf(w, "Version:\t%s\n", emptyDash(st.Version))
 		fmt.Fprintf(w, "Uptime:\t%s\n", emptyDash(st.Uptime))
 		fmt.Fprintf(w, "Local detections:\t%d\n", st.Detections)
+		fmt.Fprintf(w, "Events processed:\t%d\n", st.EventsProc)
+		fmt.Fprintf(w, "Agent CPU:\t%.1f%%\n", st.CPUPercent)
+		fmt.Fprintf(w, "Agent memory:\t%.1f MB\n", st.MemoryMB)
 		if st.Isolated {
 			fmt.Fprintf(w, "Containment:\tISOLATED\n")
 		} else {

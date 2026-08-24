@@ -23,6 +23,9 @@ type operatorStatus struct {
 	Version    string              `json:"version,omitempty"`
 	Uptime     string              `json:"uptime,omitempty"`
 	Detections uint64              `json:"detections"`
+	EventsProc uint64              `json:"events_processed,omitempty"`
+	CPUPercent float64             `json:"cpu_percent,omitempty"`
+	MemoryMB   float64             `json:"memory_mb,omitempty"`
 	Isolated   bool                `json:"isolated"`
 	ControlAPI string              `json:"control_api"`
 	Hosts      []operatorHostProbe `json:"hosts,omitempty"`
@@ -90,6 +93,14 @@ func dash(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "—"
+	}
+	return s
+}
+
+func clipErr(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 400 {
+		return s[:400] + "…"
 	}
 	return s
 }
