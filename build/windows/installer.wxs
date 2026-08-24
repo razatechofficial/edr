@@ -20,7 +20,9 @@
     <WixVariable Id="WixUILicenseRtf" Value="$(var.EdrLicenseRtf)"/>
     <UIRef Id="WixUI_Minimal"/>
 
-    <MajorUpgrade DowngradeErrorMessage=
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage=
       "A newer version of EDR Agent is already installed."/>
     <MediaTemplate EmbedCab="yes"/>
 

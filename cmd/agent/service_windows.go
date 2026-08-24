@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
@@ -14,19 +15,77 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
+func installLog(format string, args ...any) {
+	p := filepath.Join(WindowsDataRoot(), "logs", "install.log")
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, time.Now().UTC().Format(time.RFC3339)+" "+format+"\n", args...)
+}
+
+func quotedBinPath(exe string, extra ...string) string {
+	parts := []string{`"` + exe + `"`}
+	for _, a := range extra {
+		parts = append(parts, `"`+a+`"`)
+	}
+	return strings.Join(parts, " ")
+}
+
+func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, error) {
+	if existing, err := m.OpenService(windowsServiceName); err == nil {
+		_, _ = existing.Control(svc.Stop)
+		cfg, cerr := existing.Config()
+		if cerr == nil {
+			cfg.StartType = mgr.StartAutomatic
+			cfg.DisplayName = "EDR Agent"
+			cfg.Description = "Endpoint Detection and Response Agent"
+			cfg.BinaryPathName = quotedBinPath(exePath, "--config", cfgPath)
+			_ = existing.UpdateConfig(cfg)
+		}
+		return existing, nil
+	}
+
+	var last error
+	for i := 0; i < 15; i++ {
+		if existing, err := m.OpenService(windowsServiceName); err == nil {
+			_, _ = existing.Control(svc.Stop)
+			_ = existing.Delete()
+			_ = existing.Close()
+			time.Sleep(time.Second)
+		}
+		s, err := m.CreateService(
+			windowsServiceName,
+			exePath,
+			mgr.Config{
+				StartType:        mgr.StartAutomatic,
+				DisplayName:      "EDR Agent",
+				Description:      "Endpoint Detection and Response Agent",
+				DelayedAutoStart: false,
+			},
+			"--config", cfgPath,
+		)
+		if err == nil {
+			return s, nil
+		}
+		last = err
+		installLog("CreateService attempt %d: %v", i+1, err)
+		time.Sleep(time.Second)
+	}
+	if existing, err := m.OpenService(windowsServiceName); err == nil {
+		return existing, nil
+	}
+	return nil, last
+}
+
 func installService() error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return err
 	}
 	defer m.Disconnect()
-
-	if existing, err := m.OpenService(windowsServiceName); err == nil {
-		_, _ = existing.Control(svc.Stop)
-		_ = existing.Delete()
-		_ = existing.Close()
-		time.Sleep(2 * time.Second)
-	}
 
 	exePath, err := os.Executable()
 	if err != nil {
@@ -44,20 +103,11 @@ func installService() error {
 	if err := os.MkdirAll(WindowsDataRoot(), 0o755); err != nil {
 		return fmt.Errorf("create data root: %w", err)
 	}
+	installLog("install start exe=%s config=%s", exePath, cfgPath)
 
-	s, err := m.CreateService(
-		windowsServiceName,
-		exePath,
-		mgr.Config{
-			StartType:    mgr.StartAutomatic,
-			DisplayName:  "EDR Agent",
-			Description:  "Endpoint Detection and Response Agent",
-			DelayedAutoStart: false,
-		},
-		"--config", cfgPath,
-	)
+	s, err := openOrCreateService(m, exePath, cfgPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("create service: %w", err)
 	}
 	defer s.Close()
 
@@ -76,7 +126,7 @@ func installService() error {
 
 	_ = eventlog.Remove(windowsServiceName)
 	if err := eventlog.InstallAsEventCreate(windowsServiceName, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
-		return err
+		installLog("eventlog source: %v (continuing)", err)
 	}
 
 	var posture map[string]any
@@ -87,11 +137,13 @@ func installService() error {
 	}
 	_ = writeServiceHardeningPosture(posture)
 	if err := installWindowsControlPlaneIntent(); err != nil {
-		return err
+		installLog("control plane intent: %v (continuing)", err)
 	}
 	if err := s.Start(); err != nil {
-		return fmt.Errorf("start service: %w", err)
+		installLog("start service: %v (files and service are installed)", err)
+		return nil
 	}
+	installLog("install complete")
 	return nil
 }
 
