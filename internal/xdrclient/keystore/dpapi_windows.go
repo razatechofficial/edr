@@ -136,7 +136,7 @@ func dpapiUnprotect(enc []byte) ([]byte, error) {
 		}
 		buf := make([]byte, out.Size)
 		copy(buf, unsafe.Slice(out.Data, out.Size))
-		_ = windows.LocalFree(windows.Handle(unsafe.Pointer(out.Data)))
+		_, _ = windows.LocalFree(windows.Handle(unsafe.Pointer(out.Data)))
 		return buf, nil
 	}
 	if last == nil {
