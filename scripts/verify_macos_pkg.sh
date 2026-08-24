@@ -33,7 +33,7 @@ required=(
 	"*/Library/Application Support/EDR/config/rules/yara/exploits/cve_2021_44228_log4j.yar"
 	"*/Library/LaunchDaemons/com.razatech.edr-agent.plist"
 	"*/Library/Application Support/EDR/models/manifest.json"
-	"*/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui"
+	"*/Applications/EDR Agent.app/Contents/Info.plist"
 	"*/usr/local/bin/edrctl"
 )
 
@@ -43,6 +43,11 @@ for pattern in "${required[@]}"; do
 		exit 1
 	fi
 done
+
+if [[ -z "$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/applet')" && -z "$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui')" ]]; then
+	echo "missing EDR Agent.app console executable (applet or edr-agent-ui)" >&2
+	exit 1
+fi
 
 agent_bin="$(find "${tmpdir}/expanded" -path '*/edr-agent.app/Contents/MacOS/edr-agent' -print -quit)"
 if [[ -z "${agent_bin}" ]]; then

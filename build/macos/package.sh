@@ -60,6 +60,7 @@ mkdir -p \
 if [[ -d "${APP_BUNDLE}/Contents" ]]; then
 	cp -R "${APP_BUNDLE}" "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
 	chmod -R 755 "${PKG_ROOT}/usr/local/libexec/edr-agent.app"
+	touch "${PKG_ROOT}/usr/local/libexec/edr-agent.app/.metadata_never_index"
 elif [[ -f "${BINARY}" ]]; then
 	mkdir -p "${PKG_ROOT}/usr/local/bin"
 	cp "${BINARY}" "${PKG_ROOT}/usr/local/bin/edr-agent"
@@ -175,8 +176,12 @@ if [[ -x "/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent" ]]; then
 fi
 if [[ -d "/Applications/EDR Agent.app" ]]; then
 	LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+	CONSOLE_USER="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
 	if [[ -x "${LSREG}" ]]; then
 		"${LSREG}" -f "/Applications/EDR Agent.app" >/dev/null 2>&1 || true
+		if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
+			/usr/bin/sudo -u "${CONSOLE_USER}" "${LSREG}" -f "/Applications/EDR Agent.app" >/dev/null 2>&1 || true
+		fi
 	fi
 fi
 launchctl bootstrap system "${PLIST}" 2>/dev/null || launchctl load "${PLIST}"
