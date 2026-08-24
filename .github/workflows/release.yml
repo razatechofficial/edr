@@ -176,6 +176,8 @@ jobs:
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
         run: bash scripts/ci/macos_run_build.sh bash scripts/ci/build_macos_production.sh
       - name: Package macOS installer (${{ matrix.arch }})
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
         run: bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "${{ needs.release_meta.outputs.pkg_version }}" "${{ matrix.arch }}"
       - name: Verify macOS package (${{ matrix.arch }})
         run: |

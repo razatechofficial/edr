@@ -29,17 +29,29 @@ if [[ ! -f configs/agent.yaml ]]; then
 	exit 1
 fi
 
+UI_BIN="bin/edr-agent-ui-darwin-${ARCH}"
+CTL_BIN="bin/edrctl-darwin-${ARCH}"
+if [[ ! -f "${UI_BIN}" ]]; then
+	echo "missing ${UI_BIN}; run build_macos_production.sh first" >&2
+	exit 1
+fi
+if [[ ! -f "${CTL_BIN}" ]]; then
+	echo "missing ${CTL_BIN}; run build_macos_production.sh first" >&2
+	exit 1
+fi
+
 EDR_BASE="/Library/Application Support/EDR"
 RULES_BASELINE="${EDR_BASE}/config/rules/baseline.yaml"
 PKG_ROOT="pkg/macos/root"
 
-rm -rf "${PKG_ROOT}/etc/edr-agent" "${PKG_ROOT}/usr/local/libexec"
+rm -rf "${PKG_ROOT}/etc/edr-agent" "${PKG_ROOT}/usr/local/libexec" "${PKG_ROOT}/Applications"
 AGENT_APP="/usr/local/libexec/edr-agent.app"
 AGENT_BIN="${AGENT_APP}/Contents/MacOS/edr-agent"
 
 mkdir -p \
 	"${PKG_ROOT}/usr/local/libexec" \
 	"${PKG_ROOT}/usr/local/bin" \
+	"${PKG_ROOT}/Applications" \
 	"${PKG_ROOT}/Library/LaunchDaemons" \
 	"${PKG_ROOT}/Library/Application Support/EDR/config/rules" \
 	"${PKG_ROOT}/Library/Application Support/EDR/models" \
@@ -53,6 +65,17 @@ elif [[ -f "${BINARY}" ]]; then
 	cp "${BINARY}" "${PKG_ROOT}/usr/local/bin/edr-agent"
 	chmod 755 "${PKG_ROOT}/usr/local/bin/edr-agent"
 	AGENT_BIN="/usr/local/bin/edr-agent"
+fi
+
+cp "${CTL_BIN}" "${PKG_ROOT}/usr/local/bin/edrctl"
+cp "${CTL_BIN}" "${PKG_ROOT}/usr/local/bin/edr"
+chmod 755 "${PKG_ROOT}/usr/local/bin/edrctl" "${PKG_ROOT}/usr/local/bin/edr"
+
+bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${CTL_BIN}" "${PKG_ROOT}/Applications/EDR Agent.app"
+
+if [[ -f "${ROOT}/deploy/macos/first-run-permissions.sh" ]]; then
+	cp "${ROOT}/deploy/macos/first-run-permissions.sh" "${PKG_ROOT}/Library/Application Support/EDR/first-run-permissions.sh"
+	chmod 755 "${PKG_ROOT}/Library/Application Support/EDR/first-run-permissions.sh"
 fi
 
 if [[ -d rules ]]; then
@@ -149,6 +172,12 @@ launchctl bootout system "${PLIST}" 2>/dev/null || true
 launchctl unload "${PLIST}" 2>/dev/null || true
 if [[ -x "/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent" ]]; then
 	ln -sf "../libexec/edr-agent.app/Contents/MacOS/edr-agent" /usr/local/bin/edr-agent
+fi
+if [[ -d "/Applications/EDR Agent.app" ]]; then
+	LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+	if [[ -x "${LSREG}" ]]; then
+		"${LSREG}" -f "/Applications/EDR Agent.app" >/dev/null 2>&1 || true
+	fi
 fi
 launchctl bootstrap system "${PLIST}" 2>/dev/null || launchctl load "${PLIST}"
 launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true

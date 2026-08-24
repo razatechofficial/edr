@@ -99,11 +99,8 @@ cp "${EDRCTL_BIN}" "${STAGE}/usr/local/bin/edrctl"
 cp "${EDRCTL_BIN}" "${STAGE}/usr/local/bin/edr"
 chmod 755 "${STAGE}/usr/local/bin/edr-agent" "${STAGE}/usr/local/bin/edrctl" "${STAGE}/usr/local/bin/edr"
 
-mkdir -p "${STAGE}/Applications/EDR Agent.app/Contents/MacOS"
-cp "${UI_BIN}" "${STAGE}/Applications/EDR Agent.app/Contents/MacOS/EDR Agent"
-cp "${ROOT}/build/macos/Info-console.plist" "${STAGE}/Applications/EDR Agent.app/Contents/Info.plist"
-printf 'APPL????' > "${STAGE}/Applications/EDR Agent.app/Contents/PkgInfo"
-chmod 755 "${STAGE}/Applications/EDR Agent.app/Contents/MacOS/EDR Agent"
+mkdir -p "${STAGE}/Applications"
+bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${EDRCTL_BIN}" "${STAGE}/Applications/EDR Agent.app"
 
 cp "${ROOT}/deploy/macos/first-run-permissions.sh" "${STAGE}/Library/Application Support/EDR/first-run-permissions.sh"
 chmod 755 "${STAGE}/Library/Application Support/EDR/first-run-permissions.sh"

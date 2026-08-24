@@ -217,6 +217,8 @@ jobs:
         run: bash scripts/ci/macos_run_build.sh bash scripts/ci/build_macos_production.sh
 
       - name: Package macOS installer (${{ matrix.arch }})
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
         run: bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "$(git describe --tags --always --dirty)" "${{ matrix.arch }}"
 
       - name: Verify macOS package exists
