@@ -84,6 +84,12 @@ func (s *dpapiStore) read(name string) ([]byte, error) {
 	return dpapiUnprotect(raw)
 }
 
+// cryptProtectLocalMachine binds the blob to this computer so LocalSystem
+// (the EDRAgent service) and Administrators can unprotect it. User-scope
+// DPAPI (the previous default) made enrollment succeed in an interactive
+// session and then fail when the service started.
+const cryptProtectLocalMachine = 0x4 // CRYPTPROTECT_LOCAL_MACHINE
+
 func dpapiProtect(plain []byte) ([]byte, error) {
 	if len(plain) == 0 {
 		return nil, fmt.Errorf("dpapi: empty plaintext")
@@ -93,7 +99,7 @@ func dpapiProtect(plain []byte) ([]byte, error) {
 		Data: &plain[0],
 	}
 	var out windows.DataBlob
-	const flags = windows.CRYPTPROTECT_UI_FORBIDDEN
+	flags := uint32(windows.CRYPTPROTECT_UI_FORBIDDEN | cryptProtectLocalMachine)
 	err := windows.CryptProtectData(&in, nil, nil, 0, nil, flags, &out)
 	if err != nil {
 		return nil, err
@@ -112,14 +118,29 @@ func dpapiUnprotect(enc []byte) ([]byte, error) {
 		Size: uint32(len(enc)),
 		Data: &enc[0],
 	}
-	var out windows.DataBlob
-	const flags = windows.CRYPTPROTECT_UI_FORBIDDEN
-	err := windows.CryptUnprotectData(&in, nil, nil, 0, nil, flags, &out)
-	if err != nil {
-		return nil, err
+	// Machine-scope blobs unprotect with UI_FORBIDDEN. Retry with the
+	// LOCAL_MACHINE flag, then with user-scope flags, so upgrades can still
+	// read credentials sealed before this change (interactive re-enroll).
+	flagSets := []uint32{
+		windows.CRYPTPROTECT_UI_FORBIDDEN,
+		windows.CRYPTPROTECT_UI_FORBIDDEN | cryptProtectLocalMachine,
+		0,
 	}
-	defer windows.LocalFree(windows.Handle(unsafe.Pointer(out.Data)))
-	buf := make([]byte, out.Size)
-	copy(buf, unsafe.Slice(out.Data, out.Size))
-	return buf, nil
+	var last error
+	for _, flags := range flagSets {
+		var out windows.DataBlob
+		err := windows.CryptUnprotectData(&in, nil, nil, 0, nil, flags, &out)
+		if err != nil {
+			last = err
+			continue
+		}
+		buf := make([]byte, out.Size)
+		copy(buf, unsafe.Slice(out.Data, out.Size))
+		_ = windows.LocalFree(windows.Handle(unsafe.Pointer(out.Data)))
+		return buf, nil
+	}
+	if last == nil {
+		last = fmt.Errorf("dpapi: unprotect failed")
+	}
+	return nil, last
 }

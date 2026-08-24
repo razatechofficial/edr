@@ -217,7 +217,7 @@ func (e *YARAEngine) LoadRules() error {
 			}
 		}(old)
 	}
-	e.logger.Info("yara: rules loaded", zap.Int("files", count))
+	e.logger.Debug("yara: rules loaded", zap.Int("files", count))
 	return nil
 }
 

@@ -41,6 +41,9 @@ monitoring:
   windows_ppl_required: false
   etw_threat_intel: false
   security_profile: standard
+  windows_service_hardening: true
+  windows_service_hardening_acl: true
+  windows_service_dacl_hardened: true
 compliance:
   enabled: true
   rules_dir: "C:\\ProgramData\\EDR Agent\\rules\\compliance\\sca"
@@ -66,8 +69,15 @@ ml:
     behavior_anomaly: 0.75
     ransomware_score: 0.85
     network_anomaly: 0.70
-self_protect:
+llm:
   enabled: false
+  rag:
+    enabled: true
+self_protect:
+  enabled: true
+  watchdog: true
+  anti_debug: true
+  integrity_check: true
 response:
   auto_response: true
   playbooks_dir: "C:\\ProgramData\\EDR Agent\\rules\\playbooks"

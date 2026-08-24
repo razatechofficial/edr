@@ -14,26 +14,31 @@ const (
 	pidFile       = "/var/run/edr-agent.pid"
 )
 
-// DataDir returns the default data directory on macOS.
-func DataDir() string { return dataDir }
-
-// ConfigDir returns the default configuration directory on macOS.
-func ConfigDir() string { return configDir }
-
-// LogDir returns the default log directory on macOS.
-func LogDir() string { return logDir }
-
-// TempDir returns the default temporary directory on macOS.
-func TempDir() string { return tempDir }
-
-// RulesDir returns the default rules directory on macOS.
-func RulesDir() string { return rulesDir }
-
-// QuarantineDir returns the default quarantine directory on macOS.
+func DataDir() string       { return dataDir }
+func ConfigDir() string     { return configDir }
+func LogDir() string        { return logDir }
+func TempDir() string       { return tempDir }
+func RulesDir() string      { return rulesDir }
 func QuarantineDir() string { return quarantineDir }
+func PIDFile() string       { return pidFile }
+func DataSubdir(name string) string {
+	return filepath.Join(dataDir, name)
+}
 
-// PIDFile returns the default PID file path on macOS.
-func PIDFile() string { return pidFile }
+func ControlSocket() string { return "/var/run/edr-agent.sock" }
 
-// DataSubdir returns a subdirectory under the data directory.
-func DataSubdir(name string) string { return filepath.Join(dataDir, name) }
+func ConfigFileCandidates() []string {
+	return []string{
+		"/Library/Application Support/EDR/config/agent.yaml",
+		"/Library/Application Support/EDR/config.yml",
+		"/Library/Application Support/EDR/config/config.yml",
+	}
+}
+
+func AlertFileCandidates() []string {
+	return []string{
+		"/Library/Application Support/EDR/alerts/alerts.jsonl",
+		"/Library/Logs/EDR/alerts.jsonl",
+		"/Library/Application Support/EDR/alerts.jsonl",
+	}
+}

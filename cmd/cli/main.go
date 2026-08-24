@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/razatechofficial/edr/internal/alert"
+	"github.com/razatechofficial/edr/internal/platform"
 )
 
 var (
@@ -55,30 +56,27 @@ func init() {
 	}
 }
 
-// platformDefaults sets defaults that match cmd/installer layouts (macOS/Linux/Windows).
+// platformDefaults auto-discovers the installed config (MSI/DEB/PKG vs older layouts).
 func platformDefaults() {
-	// Paths match cmd/installer platformPaths + agent.yaml layout.
-	switch runtime.GOOS {
-	case "darwin":
-		defaultConfigFile = "/Library/Application Support/EDR/config/agent.yaml"
-		defaultAlertFile = "/Library/Logs/EDR/alerts.jsonl"
-		defaultSocketPath = "/var/run/edr-agent.sock"
-	case "windows":
-		defaultConfigFile = `C:\ProgramData\EDR\config\agent.yaml`
-		defaultAlertFile = `C:\ProgramData\EDR\logs\alerts.jsonl`
-		defaultSocketPath = `\\.\pipe\edr-agent-control`
-	default:
-		defaultConfigFile = "/etc/edr/agent.yaml"
-		defaultAlertFile = "/var/log/edr/alerts.jsonl"
-		defaultSocketPath = "/var/run/edr-agent.sock"
-	}
+	defaultConfigFile = platform.ResolveConfigFile()
+	defaultAlertFile = platform.ResolveAlertFile()
+	defaultSocketPath = platform.ControlSocket()
 }
 
 func main() {
 	root := &cobra.Command{
 		Use:   "edrctl",
 		Short: "EDR agent management CLI",
-		Long:  "Command-line interface for managing the EDR endpoint detection and response agent. Provides status monitoring, alert viewing, on-demand scanning, network isolation, forensics collection, and configuration management.",
+		Long: `Command-line interface for the EDR endpoint agent.
+
+  edrctl status              enrollment and service health
+  edrctl ui                  operator dashboard (ASCII table)
+  edrctl enroll --token ...  register this device
+  edrctl start | stop        service control (requires administrator/root)
+  edrctl test-connection     enrollment and ingest reachability
+
+The config path is auto-detected. Override with --config or EDR_CONFIG.
+On Windows, edr.exe is the same CLI as edrctl.exe.`,
 		CompletionOptions: cobra.CompletionOptions{
 			DisableDefaultCmd: true,
 		},
@@ -93,6 +91,7 @@ func main() {
 
 	root.AddCommand(
 		newStatusCmd(),
+		newUICmd(),
 		newAlertsCmd(),
 		newScanCmd(),
 		newIsolateCmd(),
@@ -101,6 +100,9 @@ func main() {
 		newRulesCmd(),
 		newConfigCmd(),
 		newEnrollCmd(),
+		newStartCmd(),
+		newStopCmd(),
+		newTestConnectionCmd(),
 		newVersionCmd(),
 		newFleetCmd(),
 	)
@@ -146,6 +148,19 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+			enrolled, agentID, ingest := enrollmentSnapshot()
+			if enrolled {
+				fmt.Fprintf(w, "Enrollment:\tenrolled\n")
+			} else {
+				fmt.Fprintf(w, "Enrollment:\tidle (not enrolled)\n")
+			}
+			if agentID != "" {
+				fmt.Fprintf(w, "Agent ID:\t%s\n", agentID)
+			}
+			if ingest != "" {
+				fmt.Fprintf(w, "Ingest:\t%s\n", ingest)
+			}
+			fmt.Fprintf(w, "Service:\t%s\n", serviceRuntimeStatus())
 			fmt.Fprintf(w, "Status:\t%s\n", status.Status)
 			fmt.Fprintf(w, "Version:\t%s\n", status.Version)
 			fmt.Fprintf(w, "Uptime:\t%s\n", status.Uptime)
@@ -197,8 +212,20 @@ func printOfflineStatus(apiErr error) error {
 	fmt.Fprintf(w, "Control API:\tunavailable (%v)\n", apiErr)
 	fmt.Fprintln(w, "Note:\tThe agent may not expose the local HTTP/socket API in this build; showing on-disk status.")
 	fmt.Fprintf(w, "Config:\t%s\n", configFile)
-	if peek.Agent.ID != "" {
+	fmt.Fprintf(w, "Service:\t%s\n", serviceRuntimeStatus())
+	enrolled, agentID, ingest := enrollmentSnapshot()
+	if enrolled {
+		fmt.Fprintf(w, "Enrollment:\tenrolled\n")
+	} else {
+		fmt.Fprintf(w, "Enrollment:\tidle (not enrolled)\n")
+	}
+	if agentID != "" {
+		fmt.Fprintf(w, "Agent ID:\t%s\n", agentID)
+	} else if peek.Agent.ID != "" {
 		fmt.Fprintf(w, "Agent ID:\t%s\n", peek.Agent.ID)
+	}
+	if ingest != "" {
+		fmt.Fprintf(w, "Ingest:\t%s\n", ingest)
 	}
 	if peek.Agent.DataDir != "" {
 		fmt.Fprintf(w, "Data dir:\t%s\n", peek.Agent.DataDir)

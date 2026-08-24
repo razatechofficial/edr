@@ -29,8 +29,8 @@ import (
 	"github.com/razatechofficial/edr/internal/detection/llm"
 	"github.com/razatechofficial/edr/internal/detection/llm/providers"
 	mlpkg "github.com/razatechofficial/edr/internal/detection/ml"
-	"github.com/razatechofficial/edr/internal/forwarder"
 	"github.com/razatechofficial/edr/internal/forensics"
+	"github.com/razatechofficial/edr/internal/forwarder"
 	"github.com/razatechofficial/edr/internal/kernel"
 	"github.com/razatechofficial/edr/internal/pidfile"
 	"github.com/razatechofficial/edr/internal/response"
@@ -273,16 +273,16 @@ func NewWithFiles(configPath string) (*Agent, error) {
 
 	if cfg.Forwarder.Enabled {
 		fw, dr, err := forwarder.New(forwarder.Config{
-			Mode:           cfg.Forwarder.Mode,
-			HTTPEndpoint:   cfg.Forwarder.Endpoint,
-			SyslogAddr:     cfg.Forwarder.SyslogAddr,
-			KafkaBrokers:   cfg.Forwarder.KafkaBrokers,
-			KafkaTopic:     cfg.Forwarder.KafkaTopic,
-			RetryMax:       cfg.Forwarder.RetryMax,
-			SpoolPath:      cfg.Forwarder.SpoolPath,
-			SealEnvelopes:  cfg.Forwarder.SealEnvelopes,
-			SealKeyPath:    cfg.Forwarder.SealKeyPath,
-			SealKeyID:      cfg.Forwarder.SealKeyID,
+			Mode:          cfg.Forwarder.Mode,
+			HTTPEndpoint:  cfg.Forwarder.Endpoint,
+			SyslogAddr:    cfg.Forwarder.SyslogAddr,
+			KafkaBrokers:  cfg.Forwarder.KafkaBrokers,
+			KafkaTopic:    cfg.Forwarder.KafkaTopic,
+			RetryMax:      cfg.Forwarder.RetryMax,
+			SpoolPath:     cfg.Forwarder.SpoolPath,
+			SealEnvelopes: cfg.Forwarder.SealEnvelopes,
+			SealKeyPath:   cfg.Forwarder.SealKeyPath,
+			SealKeyID:     cfg.Forwarder.SealKeyID,
 		}, a.logger)
 		if err != nil {
 			return nil, err
@@ -331,12 +331,12 @@ func (a *Agent) initAdvancedDetection() error {
 		WorkerCount:             a.cfg.Performance.WorkerCount,
 		PerformanceProfile:      a.cfg.Performance.Profile,
 
-		MLModelPEClassifier:    a.cfg.ML.Models.PEClassifier,
-		MLModelBehaviorLSTM:    a.cfg.ML.Models.BehaviorLSTM,
-		MLModelNetworkAnomaly:  a.cfg.ML.Models.NetworkAnomaly,
-		MLModelNetworkLGBM:     a.cfg.ML.Models.NetworkLGBM,
-		MLModelRansomware:      a.cfg.ML.Models.Ransomware,
-		MLModelRATC2:           a.cfg.ML.Models.RATC2,
+		MLModelPEClassifier:   a.cfg.ML.Models.PEClassifier,
+		MLModelBehaviorLSTM:   a.cfg.ML.Models.BehaviorLSTM,
+		MLModelNetworkAnomaly: a.cfg.ML.Models.NetworkAnomaly,
+		MLModelNetworkLGBM:    a.cfg.ML.Models.NetworkLGBM,
+		MLModelRansomware:     a.cfg.ML.Models.Ransomware,
+		MLModelRATC2:          a.cfg.ML.Models.RATC2,
 
 		MLThresholdPE:         float64(a.cfg.ML.Thresholds.PEMalicious),
 		MLThresholdNetwork:    float64(a.cfg.ML.Thresholds.NetworkAnomaly),
@@ -739,7 +739,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	a.logger.Info("agent started")
-	a.logger.Info("rules loaded", "count", len(a.ruleSet.Rules))
+	a.logger.Debug("rules loaded", "count", len(a.ruleSet.Rules))
 
 	if a.responseLayer != nil {
 		a.responseLayer.Start(ctx)
@@ -945,7 +945,14 @@ func (a *Agent) maybeForwardAlertOCSF(ctx context.Context, line []byte) {
 	}
 }
 
-func (a *Agent) ProcessCycle(ctx context.Context) error {
+func (a *Agent) ProcessCycle(ctx context.Context) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			a.logger.Error("process cycle panic recovered", "panic", fmt.Sprint(rec))
+			a.logger.Debug("process cycle panic stack", "stack", string(debug.Stack()))
+			err = fmt.Errorf("process cycle panic: %v", rec)
+		}
+	}()
 	if a.forwardDrain != nil {
 		if err := a.forwardDrain.DrainPending(); err != nil {
 			a.logger.Error("forwarder spool drain failed", "error", err)
@@ -1521,6 +1528,7 @@ func (a *Agent) initSelfProtect() error {
 		if a.cfg.RulesFile != "" {
 			paths = append(paths, a.cfg.RulesFile)
 		}
+		paths = append(paths, a.protectedAssetPaths()...)
 		if len(paths) > 0 {
 			backupDir := filepath.Join(a.cfg.Agent.DataDir, "integrity-backups")
 			ic, err := selfprotect.NewIntegrityChecker(paths, backupDir, a.cfg.Agent.DataDir, a.zapLogger)
@@ -1528,7 +1536,7 @@ func (a *Agent) initSelfProtect() error {
 				a.logger.Warn("integrity checker init failed", "error", err)
 			} else {
 				a.integrity = ic
-				a.logger.Info("self-protection: integrity checker enabled", "tracked_files", len(paths))
+				a.logger.Debug("self-protection: integrity checker enabled", "tracked_files", len(paths))
 			}
 		}
 	}
@@ -1539,10 +1547,13 @@ func (a *Agent) initSelfProtect() error {
 		if ep != "" {
 			protectedPaths = append(protectedPaths, ep)
 		}
-		// Do not watch alert/audit JSONL: the agent appends constantly; fsnotify would flag every write as tampering.
+		if a.cfg.RulesFile != "" {
+			protectedPaths = append(protectedPaths, a.cfg.RulesFile)
+		}
+		protectedPaths = append(protectedPaths, a.protectedAssetPaths()...)
 		if len(protectedPaths) > 0 {
 			a.tamper = selfprotect.NewTamperDetector(protectedPaths, a.zapLogger)
-			a.logger.Info("self-protection: tamper detector enabled", "watched_paths", len(protectedPaths))
+			a.logger.Debug("self-protection: tamper detector enabled", "watched_paths", len(protectedPaths))
 		}
 	}
 
@@ -1551,6 +1562,23 @@ func (a *Agent) initSelfProtect() error {
 	}
 
 	return nil
+}
+
+func (a *Agent) protectedAssetPaths() []string {
+	var out []string
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		out = append(out, p)
+	}
+	add(a.cfg.Detection.Sigma.RulesDir)
+	add(a.cfg.Detection.YARA.RulesDir)
+	add(a.cfg.Detection.CustomRules.RulesPath)
+	add(a.cfg.ML.ModelsDir)
+	add(a.cfg.Compliance.RulesDir)
+	return out
 }
 
 // ---------------------------------------------------------------------------

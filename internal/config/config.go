@@ -660,6 +660,7 @@ func Defaults() Config {
 	cfg.XDR.SpoolMaxBytes = 1 << 30 // 1 GiB
 	cfg.XDR.SpoolMaxAgeDays = 7
 
+	cfg.LLM.Enabled = false
 	cfg.LLM.PrimaryProvider = "grok"
 	cfg.LLM.LocalProvider = "ollama"
 	cfg.LLM.MinSeverityForLLM = "medium"
@@ -667,7 +668,9 @@ func Defaults() Config {
 	cfg.LLM.TimeoutSec = 30
 	cfg.LLM.Grok.BaseURL = "https://api.x.ai/v1"
 	cfg.LLM.Ollama.Endpoint = "http://localhost:11434"
+	cfg.LLM.RAG.Enabled = true
 
+	cfg.ML.Enabled = true
 	cfg.ML.Thresholds.PEMalicious = 0.80
 	cfg.ML.Thresholds.BehaviorAnomaly = 0.75
 	cfg.ML.Thresholds.RansomwareScore = 0.85
@@ -756,6 +759,11 @@ func Defaults() Config {
 	cfg.Service.TickInterval = time.Second
 	cfg.LegacyResponse.MinKillScore = 90
 	cfg.RulesFile = "rules/baseline.yaml"
+
+	cfg.SelfProtect.Enabled = true
+	cfg.SelfProtect.Watchdog = true
+	cfg.SelfProtect.IntegrityCheck = true
+	cfg.SelfProtect.AntiDebug = true
 
 	return cfg
 }

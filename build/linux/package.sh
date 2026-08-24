@@ -41,9 +41,12 @@ chmod 755 pkg/deb/usr/bin/edr-agent
 if [ -f "${EDRCTL}" ]; then
     cp "${EDRCTL}" pkg/deb/usr/bin/edrctl
     chmod 755 pkg/deb/usr/bin/edrctl
+    cp "${EDRCTL}" pkg/deb/usr/bin/edr
+    chmod 755 pkg/deb/usr/bin/edr
 fi
 
 cp configs/linux/config.yml pkg/deb/etc/edr-agent/config.yml
+chmod 640 pkg/deb/etc/edr-agent/config.yml
 if [ -f configs/linux/config.enterprise.yml ]; then
     cp configs/linux/config.enterprise.yml pkg/deb/etc/edr-agent/config.enterprise.yml
 fi

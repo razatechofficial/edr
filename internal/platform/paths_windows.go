@@ -2,38 +2,65 @@
 
 package platform
 
-import "path/filepath"
-
-const (
-	dataDir       = `C:\ProgramData\EDR`
-	configDir     = `C:\ProgramData\EDR\config`
-	logDir        = `C:\ProgramData\EDR\logs`
-	tempDir       = `C:\ProgramData\EDR\temp`
-	rulesDir      = `C:\ProgramData\EDR\rules`
-	quarantineDir = `C:\ProgramData\EDR\quarantine`
-	pidFile       = `C:\ProgramData\EDR\edr-agent.pid`
+import (
+	"os"
+	"path/filepath"
 )
 
-// DataDir returns the default data directory on Windows.
-func DataDir() string { return dataDir }
+func programData() string {
+	if pd := os.Getenv("ProgramData"); pd != "" {
+		return pd
+	}
+	return `C:\ProgramData`
+}
 
-// ConfigDir returns the default configuration directory on Windows.
-func ConfigDir() string { return configDir }
+func programFiles() string {
+	if pf := os.Getenv("ProgramFiles"); pf != "" {
+		return pf
+	}
+	return `C:\Program Files`
+}
 
-// LogDir returns the default log directory on Windows.
-func LogDir() string { return logDir }
+func DataDir() string {
+	return filepath.Join(programData(), "EDR Agent")
+}
 
-// TempDir returns the default temporary directory on Windows.
-func TempDir() string { return tempDir }
+func ConfigDir() string { return DataDir() }
 
-// RulesDir returns the default rules directory on Windows.
-func RulesDir() string { return rulesDir }
+func LogDir() string { return filepath.Join(DataDir(), "logs") }
 
-// QuarantineDir returns the default quarantine directory on Windows.
-func QuarantineDir() string { return quarantineDir }
+func TempDir() string { return filepath.Join(DataDir(), "tmp") }
 
-// PIDFile returns the default PID file path on Windows.
-func PIDFile() string { return pidFile }
+func RulesDir() string { return filepath.Join(DataDir(), "rules") }
 
-// DataSubdir returns a subdirectory under the data directory.
-func DataSubdir(name string) string { return filepath.Join(dataDir, name) }
+func QuarantineDir() string { return filepath.Join(DataDir(), "quarantine") }
+
+func PIDFile() string { return filepath.Join(DataDir(), "agent.pid") }
+
+func DataSubdir(name string) string { return filepath.Join(DataDir(), name) }
+
+func ControlSocket() string { return `\\.\pipe\edr-agent-control` }
+
+// ConfigFileCandidates lists Windows config locations. Index 0 is the MSI path.
+func ConfigFileCandidates() []string {
+	pd := programData()
+	return []string{
+		filepath.Join(pd, "EDR Agent", "config.yml"),
+		filepath.Join(pd, "EDR", "config", "agent.yaml"),
+		filepath.Join(pd, "EDR", "config.yml"),
+	}
+}
+
+func AlertFileCandidates() []string {
+	pd := programData()
+	return []string{
+		filepath.Join(pd, "EDR Agent", "alerts.jsonl"),
+		filepath.Join(pd, "EDR Agent", "logs", "alerts.jsonl"),
+		filepath.Join(pd, "EDR", "logs", "alerts.jsonl"),
+	}
+}
+
+// InstallDir is C:\Program Files\EDR Agent (per-machine).
+func InstallDir() string {
+	return filepath.Join(programFiles(), "EDR Agent")
+}

@@ -47,6 +47,35 @@ compliance:
   enable_rootcheck: false
   emit_passed_findings: false
 
+ml:
+  enabled: true
+  require_runtime: false
+  models_dir: "/Library/Application Support/EDR/models"
+  auto_update: false
+  models:
+    pe_classifier: pe_classifier.onnx
+    behavior_lstm: behavior_lstm.onnx
+    network_anomaly: network_anomaly.onnx
+    ransomware: ransomware.onnx
+    network_lgbm: network_lgbm.onnx
+    rat_c2_detector: rat_c2_detector.onnx
+  thresholds:
+    pe_malicious: 0.80
+    behavior_anomaly: 0.75
+    ransomware_score: 0.85
+    network_anomaly: 0.70
+
+llm:
+  enabled: false
+  rag:
+    enabled: true
+
+self_protect:
+  enabled: true
+  watchdog: true
+  anti_debug: true
+  integrity_check: true
+
 response:
   auto_response: true
   playbooks_dir: "/Library/Application Support/EDR/config/rules/playbooks"

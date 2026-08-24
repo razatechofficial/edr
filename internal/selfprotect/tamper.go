@@ -3,7 +3,9 @@ package selfprotect
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +42,7 @@ type TamperDetector struct {
 	logger         *zap.Logger
 	protected      map[string]bool
 
-	mu          sync.RWMutex
+	mu           sync.RWMutex
 	responseHook TamperResponseHook
 	restoreFn    func(path string) error
 }
@@ -102,22 +104,34 @@ func (td *TamperDetector) Start(ctx context.Context) error {
 	defer watcher.Close()
 
 	dirs := make(map[string]bool)
+	addWatch := func(p string) {
+		if p == "" || dirs[p] {
+			return
+		}
+		if err := watcher.Add(p); err != nil {
+			td.logger.Warn("tamper: cannot watch path",
+				zap.String("path", p), zap.Error(err))
+			return
+		}
+		dirs[p] = true
+	}
 	for _, path := range td.protectedPaths {
-		if err := watcher.Add(path); err != nil {
-			td.logger.Warn("tamper: cannot watch path directly",
-				zap.String("path", path), zap.Error(err))
+		st, err := os.Stat(path)
+		if err == nil && st.IsDir() {
+			_ = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+				if err != nil || info == nil || !info.IsDir() {
+					return nil
+				}
+				addWatch(p)
+				return nil
+			})
+			continue
 		}
-		dir := filepath.Dir(path)
-		if !dirs[dir] {
-			if err := watcher.Add(dir); err != nil {
-				td.logger.Warn("tamper: cannot watch parent dir",
-					zap.String("dir", dir), zap.Error(err))
-			}
-			dirs[dir] = true
-		}
+		addWatch(path)
+		addWatch(filepath.Dir(path))
 	}
 
-	td.logger.Info("tamper detector started",
+	td.logger.Debug("tamper detector started",
 		zap.Int("protected_paths", len(td.protectedPaths)),
 	)
 
@@ -156,7 +170,7 @@ func (td *TamperDetector) handleEvent(event fsnotify.Event) {
 	if err != nil {
 		abs = event.Name
 	}
-	if !td.protected[abs] {
+	if !td.isProtected(abs) {
 		return
 	}
 
@@ -228,4 +242,20 @@ func (td *TamperDetector) handleEvent(event fsnotify.Event) {
 	}
 
 	td.emitResponse(resp)
+}
+
+func (td *TamperDetector) isProtected(abs string) bool {
+	if td.protected[abs] {
+		return true
+	}
+	for p := range td.protected {
+		if p == abs {
+			return true
+		}
+		sep := string(filepath.Separator)
+		if strings.HasPrefix(abs, strings.TrimRight(p, sep)+sep) {
+			return true
+		}
+	}
+	return false
 }

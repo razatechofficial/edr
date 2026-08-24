@@ -59,6 +59,10 @@ ml:
     behavior_anomaly: 0.75
     ransomware_score: 0.85
     network_anomaly: 0.70
+llm:
+  enabled: false
+  rag:
+    enabled: true
 response:
   auto_response: true
   playbooks_path: /etc/edr-agent/rules/playbooks/playbooks.yml
@@ -67,3 +71,8 @@ response:
   quarantine_dir: /var/lib/edr-agent/quarantine
   approval:
     mode: auto
+self_protect:
+  enabled: true
+  watchdog: true
+  anti_debug: true
+  integrity_check: true

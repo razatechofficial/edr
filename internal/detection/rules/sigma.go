@@ -167,7 +167,7 @@ func (e *SigmaEngine) LoadRules() error {
 	e.warmRegexCache()
 	e.mu.Unlock()
 
-	e.logger.Info("sigma: rules loaded",
+	e.logger.Debug("sigma: rules loaded",
 		zap.Int("loaded", len(evaluators)),
 		zap.Int("errors", parseErrors),
 		zap.Int("skipped_platform", skippedPlatform),

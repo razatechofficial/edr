@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -48,7 +49,7 @@ func resolveCertDir(cfg config.XDRConfig, dataDir string) string {
 	if d := strings.TrimSpace(cfg.CertDir); d != "" {
 		return d
 	}
-	return strings.TrimRight(dataDir, "/") + "/xdr-tls"
+	return filepath.Join(dataDir, "xdr-tls")
 }
 
 // EnsureEnrolled loads existing credentials or calls EnrollmentService/Register.

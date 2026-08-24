@@ -93,7 +93,7 @@ sed \
 	-e "s|models_dir: \"./models\"|models_dir: \"${EDR_BASE}/models\"|" \
 	-e "s|^rules_file:.*|rules_file: \"${RULES_BASELINE}\"|" \
 	configs/agent.yaml > "${CONFIG_DST}"
-chmod 644 "${CONFIG_DST}"
+chmod 640 "${CONFIG_DST}"
 
 cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -114,6 +114,8 @@ cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" <<'EOF'
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
     <key>StandardOutPath</key>
     <string>/Library/Logs/EDR/stdout.log</string>
     <key>StandardErrorPath</key>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,20 +27,31 @@ func newEnrollCmd() *cobra.Command {
 		Use:   "enroll",
 		Short: "Enroll this agent with XDR using a one-time enrollment token",
 		Long: `Registers the agent with xdr-enrollment (CSR + token), stores the signed
-certificate in OS secure storage (Keychain/DPAPI/sealed file), then clears the
-bootstrap token from disk.
+certificate in OS secure storage (Keychain / machine-scope DPAPI / sealed file),
+then clears the bootstrap token from disk.
 
 Token sources (first match wins):
   1) --token
   2) --token-file / xdr.enrollment_token_file / env XDR_ENROLLMENT_TOKEN_FILE
   3) configDir/enrollment.token (installer sidecar)
   4) xdr.enrollment_token / env XDR_ENROLLMENT_TOKEN
+  5) interactive prompt (when stdin is a terminal)
 
-Examples:
-  sudo edrctl enroll --token "$TOKEN"
-  sudo edrctl enroll --token-file /etc/edr/enrollment.token
-  sudo edrctl enroll   # uses host/token from agent.yaml / env / sidecar`,
+Examples (same on Windows, macOS, and Linux; Windows may omit sudo):
+  edrctl enroll --token "$TOKEN"
+  edrctl enroll --token-file /etc/edr-agent/enrollment.token
+  edrctl enroll --force --token "$TOKEN"   # replace existing device identity`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requirePrivileged(); err != nil {
+				return err
+			}
+			if strings.TrimSpace(token) == "" {
+				if t, err := promptEnrollmentToken(); err != nil {
+					return err
+				} else if t != "" {
+					token = t
+				}
+			}
 			cfgPath := configFile
 			cfg, err := config.Load(cfgPath)
 			if err != nil {
@@ -110,4 +122,17 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func promptEnrollmentToken() (string, error) {
+	st, err := os.Stdin.Stat()
+	if err != nil || st.Mode()&os.ModeCharDevice == 0 {
+		return "", nil
+	}
+	fmt.Fprint(os.Stderr, "Enrollment token: ")
+	var line string
+	if _, err := fmt.Scanln(&line); err != nil {
+		return "", fmt.Errorf("read token: %w", err)
+	}
+	return strings.TrimSpace(line), nil
 }

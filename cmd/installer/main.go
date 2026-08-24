@@ -160,10 +160,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("    warning: could not deploy edrctl: %v\n", err)
 		} else {
 			fmt.Printf("    %s -> %s\n", edrctlSrc, edrctlDst)
+			aliasDst := filepath.Join(paths.binDir, edrAliasBinaryName())
+			if err := copyFile(edrctlSrc, aliasDst, 0755); err != nil {
+				fmt.Printf("    warning: could not deploy edr alias: %v\n", err)
+			} else {
+				fmt.Printf("    %s -> %s\n", edrctlSrc, aliasDst)
+			}
 		}
 	}
 
-	configDst := filepath.Join(paths.configDir, "agent.yaml")
+	configDst := installedConfigPath(paths)
 	if flagConfigPath != "" {
 		fmt.Println("==> Installing provided config")
 		if err := copyFile(flagConfigPath, configDst, 0640); err != nil {
@@ -301,7 +307,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("==> Removing binaries")
-	binNames := []string{agentBinaryName(), edrctlBinaryName()}
+	binNames := []string{agentBinaryName(), edrctlBinaryName(), edrAliasBinaryName()}
 	if runtime.GOOS == "darwin" {
 		binNames = append(binNames, "edr-installer")
 	}
@@ -315,9 +321,11 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("==> Removing configuration")
-	configDst := filepath.Join(paths.configDir, "agent.yaml")
-	if err := os.Remove(configDst); err != nil && !os.IsNotExist(err) {
-		fmt.Printf("    warning: %v\n", err)
+	for _, name := range []string{installedConfigFileName(), "agent.yaml", "config.yml"} {
+		configDst := filepath.Join(paths.configDir, name)
+		if err := os.Remove(configDst); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("    warning: %v\n", err)
+		}
 	}
 
 	fmt.Println("==> Uninstallation complete")
@@ -335,6 +343,19 @@ type installPaths struct {
 	quarantineDir string
 }
 
+func installedConfigFileName() string {
+	switch runtime.GOOS {
+	case "windows", "linux":
+		return "config.yml"
+	default:
+		return "agent.yaml"
+	}
+}
+
+func installedConfigPath(p installPaths) string {
+	return filepath.Join(p.configDir, installedConfigFileName())
+}
+
 // platformPaths returns the canonical directory layout for the current OS,
 // respecting any user overrides via --data-dir.
 func platformPaths() installPaths {
@@ -343,11 +364,11 @@ func platformPaths() installPaths {
 	case "linux":
 		p = installPaths{
 			binDir:        "/usr/local/bin",
-			configDir:     "/etc/edr",
-			dataDir:       "/var/lib/edr",
-			logDir:        "/var/log/edr",
-			rulesDir:      "/etc/edr/rules",
-			quarantineDir: "/var/lib/edr/quarantine",
+			configDir:     "/etc/edr-agent",
+			dataDir:       "/var/lib/edr-agent",
+			logDir:        "/var/log/edr-agent",
+			rulesDir:      "/etc/edr-agent/rules",
+			quarantineDir: "/var/lib/edr-agent/quarantine",
 		}
 	case "darwin":
 		cfg := "/Library/Application Support/EDR/config"
@@ -360,22 +381,31 @@ func platformPaths() installPaths {
 			quarantineDir: "/Library/Application Support/EDR/quarantine",
 		}
 	case "windows":
-		cfg := `C:\ProgramData\EDR\config`
+		pf := os.Getenv("ProgramFiles")
+		if pf == "" {
+			pf = `C:\Program Files`
+		}
+		pd := os.Getenv("ProgramData")
+		if pd == "" {
+			pd = `C:\ProgramData`
+		}
+		root := filepath.Join(pd, "EDR Agent")
 		p = installPaths{
-			binDir:        `C:\Program Files\EDR\bin`,
-			configDir:     cfg,
-			dataDir:       `C:\ProgramData\EDR`,
-			logDir:        `C:\ProgramData\EDR\logs`,
-			rulesDir:      filepath.Join(cfg, "rules"),
-			quarantineDir: `C:\ProgramData\EDR\quarantine`,
+			binDir:        filepath.Join(pf, "EDR Agent"),
+			configDir:     root,
+			dataDir:       root,
+			logDir:        filepath.Join(root, "logs"),
+			rulesDir:      filepath.Join(root, "rules"),
+			quarantineDir: filepath.Join(root, "quarantine"),
 		}
 	default:
 		p = installPaths{
-			binDir:    "/usr/local/bin",
-			configDir: "/etc/edr",
-			dataDir:   "/var/lib/edr",
-			logDir:    "/var/log/edr",
-			rulesDir:  "/etc/edr/rules",
+			binDir:        "/usr/local/bin",
+			configDir:     "/etc/edr-agent",
+			dataDir:       "/var/lib/edr-agent",
+			logDir:        "/var/log/edr-agent",
+			rulesDir:      "/etc/edr-agent/rules",
+			quarantineDir: "/var/lib/edr-agent/quarantine",
 		}
 	}
 
@@ -425,6 +455,7 @@ func generateConfig(dst string, paths installPaths) error {
 	cfg.Server.GRPCPort = 50051
 
 	cfg.LLM.Enabled = false
+	cfg.LLM.RAG.Enabled = true
 	cfg.LLM.RAG.VectorDBPath = filepath.Join(paths.dataDir, "vectordb")
 
 	cfg.ML.Enabled = true
@@ -714,7 +745,7 @@ SyslogIdentifier=edr-agent
 
 # Hardening
 ProtectSystem=strict
-ReadWritePaths={{.DataDir}} {{.LogDir}}
+ReadWritePaths={{.DataDir}} {{.LogDir}} {{.ConfigDir}}
 PrivateTmp=true
 NoNewPrivileges=false
 ProtectKernelModules=false
@@ -746,11 +777,13 @@ func installSystemd(agentBin, configPath string, paths installPaths) error {
 		ConfigPath string
 		DataDir    string
 		LogDir     string
+		ConfigDir  string
 	}{
 		AgentBin:   agentBin,
 		ConfigPath: configPath,
 		DataDir:    paths.dataDir,
 		LogDir:     paths.logDir,
+		ConfigDir:  paths.configDir,
 	}
 	if err := tmpl.Execute(f, data); err != nil {
 		return fmt.Errorf("writing unit file: %w", err)
@@ -897,6 +930,13 @@ func edrctlBinaryName() string {
 		return "edrctl.exe"
 	}
 	return "edrctl"
+}
+
+func edrAliasBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "edr.exe"
+	}
+	return "edr"
 }
 
 // findAgentBinary locates the agent binary: embedded staging (single-file installer),

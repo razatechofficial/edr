@@ -112,7 +112,7 @@ func NewIntegrityChecker(paths []string, backupDir, dataDir string, logger *zap.
 		return nil, err
 	}
 	ic.encKey = key
-	logger.Info("backup key loaded", zap.String("source", source))
+	logger.Debug("backup key loaded", zap.String("source", source))
 
 	if err := os.MkdirAll(backupDir, 0700); err != nil {
 		return nil, fmt.Errorf("integrity: create backup dir: %w", err)

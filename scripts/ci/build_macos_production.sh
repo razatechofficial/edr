@@ -52,6 +52,9 @@ if ! CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
 	CGO_ENABLED=0 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
 		-ldflags "${LDFLAGS}" -o "${CTL_OUT}" ./cmd/cli
 fi
+UI_OUT="bin/edr-agent-ui-darwin-${ARCH}"
+CGO_ENABLED=0 GOOS=darwin GOARCH="${ARCH}" go build -trimpath \
+	-ldflags "${LDFLAGS}" -o "${UI_OUT}" ./cmd/agentui
 
 if ! otool -L "${AGENT_OUT}" | grep -Eiq 'EndpointSecurity|/System/Library/Frameworks/Security\.framework'; then
 	echo "expected macOS security frameworks are not linked into ${AGENT_OUT}" >&2

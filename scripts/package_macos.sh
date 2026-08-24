@@ -42,6 +42,8 @@ REQUIRED_BINS=(
 	bin/edr-agent-darwin-arm64
 	bin/edrctl-darwin-amd64
 	bin/edrctl-darwin-arm64
+	bin/edr-agent-ui-darwin-amd64
+	bin/edr-agent-ui-darwin-arm64
 )
 for f in "${REQUIRED_BINS[@]}"; do
 	if [[ ! -f "${f}" ]]; then
@@ -52,6 +54,7 @@ done
 
 AGENT_BIN="bin/edr-agent-darwin-${ARCH}"
 EDRCTL_BIN="bin/edrctl-darwin-${ARCH}"
+UI_BIN="bin/edr-agent-ui-darwin-${ARCH}"
 
 if [[ ! -f rules/baseline.yaml ]]; then
 	echo "missing rules/baseline.yaml" >&2
@@ -93,7 +96,20 @@ mkdir -p "${STAGE}/Library/Application Support/EDR/models"
 
 cp "${AGENT_BIN}" "${STAGE}/usr/local/bin/edr-agent"
 cp "${EDRCTL_BIN}" "${STAGE}/usr/local/bin/edrctl"
-chmod 755 "${STAGE}/usr/local/bin/edr-agent" "${STAGE}/usr/local/bin/edrctl"
+cp "${EDRCTL_BIN}" "${STAGE}/usr/local/bin/edr"
+chmod 755 "${STAGE}/usr/local/bin/edr-agent" "${STAGE}/usr/local/bin/edrctl" "${STAGE}/usr/local/bin/edr"
+
+mkdir -p "${STAGE}/Applications/EDR Agent.app/Contents/MacOS"
+cp "${UI_BIN}" "${STAGE}/Applications/EDR Agent.app/Contents/MacOS/EDR Agent"
+cp "${ROOT}/build/macos/Info-console.plist" "${STAGE}/Applications/EDR Agent.app/Contents/Info.plist"
+printf 'APPL????' > "${STAGE}/Applications/EDR Agent.app/Contents/PkgInfo"
+chmod 755 "${STAGE}/Applications/EDR Agent.app/Contents/MacOS/EDR Agent"
+
+cp "${ROOT}/deploy/macos/first-run-permissions.sh" "${STAGE}/Library/Application Support/EDR/first-run-permissions.sh"
+chmod 755 "${STAGE}/Library/Application Support/EDR/first-run-permissions.sh"
+mkdir -p "${STAGE}/Library/LaunchAgents"
+cp "${ROOT}/deploy/macos/com.razatech.edr.firstrun.plist" "${STAGE}/Library/LaunchAgents/com.razatech.edr.firstrun.plist"
+chmod 644 "${STAGE}/Library/LaunchAgents/com.razatech.edr.firstrun.plist"
 
 # Full rules tree (sigma, yara, baseline, …)
 if [[ -d "${ROOT}/rules" ]]; then
@@ -126,7 +142,7 @@ if [[ "${AIRGAP}" == "1" ]]; then
 	tmpf="$(mktemp)"
 	sed 's|airgap_mode: false|airgap_mode: true|' "${CONFIG_DST}" > "${tmpf}" && mv "${tmpf}" "${CONFIG_DST}"
 fi
-chmod 644 "${CONFIG_DST}"
+chmod 640 "${CONFIG_DST}"
 
 cat > "${SCRIPTS}/preinstall" <<'PRE'
 #!/bin/bash
@@ -195,7 +211,7 @@ forwarder:
   retry_max: 3
   spool_path: "${BASE}/alerts/forward_spool.jsonl"
 EOF
-	chmod 644 "${CONFIG_FILE}"
+	chmod 640 "${CONFIG_FILE}"
 fi
 
 # Upgrades and reinstalls often preserve an existing agent.yaml; force the bundled
@@ -204,7 +220,7 @@ RULES_BASELINE="${CONFIG_DIR}/rules/baseline.yaml"
 if [[ -f "${CONFIG_FILE}" ]]; then
 	tmpf="$(mktemp "${TMPDIR:-/tmp}/edr-postinstall.XXXXXX")"
 	sed "s|^rules_file:.*|rules_file: \"${RULES_BASELINE}\"|" "${CONFIG_FILE}" > "${tmpf}" && mv "${tmpf}" "${CONFIG_FILE}"
-	chmod 644 "${CONFIG_FILE}"
+	chmod 640 "${CONFIG_FILE}"
 fi
 
 cat > "${PLIST_DST}" <<'PLIST'
@@ -225,6 +241,8 @@ cat > "${PLIST_DST}" <<'PLIST'
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
 	<key>StandardOutPath</key>
 	<string>/Library/Logs/EDR/stdout.log</string>
 	<key>StandardErrorPath</key>

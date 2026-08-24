@@ -230,6 +230,21 @@ func applyWindowsServiceHardening(s *mgr.Service, exePath string, c config.Confi
 	return out
 }
 
+func restrictSensitiveTree(dir string) {
+	if dir == "" {
+		return
+	}
+	_ = os.MkdirAll(dir, 0o700)
+	cmd := exec.Command("icacls", dir,
+		"/inheritance:r",
+		"/grant:r", "SYSTEM:(OI)(CI)F",
+		"/grant:r", "Administrators:(OI)(CI)F",
+	)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	_ = cmd.Run()
+}
+
 func hardenServiceInstallDirACL(dir string) error {
 	if dir == "" || dir == "." {
 		return fmt.Errorf("empty install dir")

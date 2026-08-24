@@ -36,6 +36,13 @@ Copy-RuleTree 'rules/playbooks' 'playbooks'
 Copy-RuleTree 'rules/custom' 'custom'
 Copy-RuleTree 'rules/compliance/sca/windows' 'compliance/sca'
 
+$baselineSrc = Join-Path $root 'rules/baseline.yaml'
+if (Test-Path -LiteralPath $baselineSrc) {
+    Copy-Item -LiteralPath $baselineSrc -Destination (Join-Path $rulesStage 'baseline.yaml') -Force
+} else {
+    throw "missing rules/baseline.yaml (Windows config requires it)"
+}
+
 $configSrc = Join-Path $root 'configs/windows/config.yml'
 $configDest = Join-Path $root 'build/windows/config.yml'
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configDest) | Out-Null

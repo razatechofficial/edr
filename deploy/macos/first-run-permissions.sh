@@ -1,11 +1,6 @@
 #!/bin/bash
-# First-run wizard: guides the user through macOS Privacy & Security (TCC).
-# Cannot grant permissions programmatically — same limitation as commercial antivirus.
-#
-# Invoked by:
-#   - postinstall (sudo -u console user)
-#   - LaunchAgent at login (--login)
-#
+# First-run wizard: macOS cannot grant TCC programmatically (same as CrowdStrike/SentinelOne).
+# The agent will not stay running until Full Disk Access is granted.
 set -euo pipefail
 
 MODE="${1:-}"
@@ -16,8 +11,22 @@ mkdir -p "${MARKER_DIR}"
 exec >>"${LOG}" 2>&1
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) first-run-permissions MODE=${MODE}"
 
-if [[ -f "${MARKER}" && "${MODE}" != "--force" ]]; then
-	echo "marker exists, skipping wizard"
+has_fda() {
+	# Root still needs Full Disk Access to read TCC.db on modern macOS.
+	[ -r "/Library/Application Support/com.apple.TCC/TCC.db" ]
+}
+
+open_privacy_panes() {
+	open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || \
+		open "/System/Library/PreferencePanes/Security.prefPane" 2>/dev/null || true
+	sleep 1
+	open "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent" 2>/dev/null || true
+	open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent" 2>/dev/null || true
+}
+
+if has_fda && [[ "${MODE}" != "--force" ]]; then
+	touch "${MARKER}"
+	echo "Full Disk Access already granted"
 	exit 0
 fi
 
@@ -25,26 +34,40 @@ if [[ "${MODE}" == "--login" ]]; then
 	sleep 3
 fi
 
-BTN="Later"
+BTN="Open Settings"
 if command -v osascript >/dev/null 2>&1; then
-	BTN=$(osascript <<'APPLESCRIPT' 2>/dev/null || echo "Later")
+	BTN=$(osascript <<'APPLESCRIPT' 2>/dev/null || echo "Open Settings")
 try
-	set r to display dialog "EDR needs Full Disk Access and related permissions for full protection. macOS cannot grant these automatically — enable EDR in System Settings → Privacy & Security." with title "EDR — first run" buttons {"Later", "Open Settings"} default button "Open Settings" giving up after 120
+	set r to display dialog "EDR Agent cannot start until macOS permissions are granted:
+
+• Full Disk Access (required)
+• Input Monitoring (Endpoint Security)
+• Notifications (optional)
+
+These cannot be granted silently. Click Open Settings, enable EDR Agent, then quit and reopen this app." with title "EDR Agent — required permissions" buttons {"Quit", "Open Settings"} default button "Open Settings" giving up after 180
 	return button returned of r
 on error
-	return "Later"
+	return "Quit"
 end try
 APPLESCRIPT
 )
 fi
 
 if [[ "${BTN}" == "Open Settings" ]]; then
-	open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || \
-		open "/System/Library/PreferencePanes/Security.prefPane" 2>/dev/null || true
-	sleep 1
-	open "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent" 2>/dev/null || true
+	open_privacy_panes
+	# Wait for the user to grant FDA (up to ~10 minutes).
+	for _ in $(seq 1 120); do
+		if has_fda; then
+			touch "${MARKER}"
+			echo "Full Disk Access granted"
+			osascript -e 'display notification "EDR Agent permissions granted. The sensor will start." with title "EDR Agent"' 2>/dev/null || true
+			exit 0
+		fi
+		sleep 5
+	done
+	echo "Full Disk Access not granted within wait window"
+	exit 1
 fi
 
-touch "${MARKER}"
-echo "wizard completed, marker written"
-exit 0
+echo "user dismissed permission wizard"
+exit 1

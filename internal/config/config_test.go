@@ -44,6 +44,15 @@ func TestDefaults(t *testing.T) {
 		t.Error("Server.MutualTLS should be true")
 	}
 
+	if cfg.LLM.Enabled {
+		t.Error("LLM.Enabled should be false by default (no cloud LLM on the endpoint)")
+	}
+	if !cfg.LLM.RAG.Enabled {
+		t.Error("LLM.RAG.Enabled should be true by default")
+	}
+	if !cfg.ML.Enabled {
+		t.Error("ML.Enabled should be true by default")
+	}
 	if cfg.LLM.PrimaryProvider != "grok" {
 		t.Errorf("LLM.PrimaryProvider = %q, want %q", cfg.LLM.PrimaryProvider, "grok")
 	}
@@ -64,6 +73,10 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.LLM.Ollama.Endpoint != "http://localhost:11434" {
 		t.Errorf("LLM.Ollama.Endpoint = %q, want %q", cfg.LLM.Ollama.Endpoint, "http://localhost:11434")
+	}
+
+	if !cfg.ML.Enabled {
+		t.Fatal("ML.Enabled should be true")
 	}
 
 	if cfg.ML.Thresholds.PEMalicious != 0.80 {

@@ -182,7 +182,7 @@ llm:
 
   # Retrieval-Augmented Generation for contextual threat analysis.
   rag:
-    enabled: false
+    enabled: true
     vectordb_path: ""
     embedding_model: ""
     chunk_size: 0

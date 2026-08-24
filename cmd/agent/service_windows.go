@@ -61,6 +61,19 @@ func installService() error {
 	}
 	defer s.Close()
 
+	actions := []mgr.RecoveryAction{
+		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 60 * time.Second},
+	}
+	_ = s.SetRecoveryActions(actions, 86400)
+
+	restrictSensitiveTree(WindowsDataRoot())
+	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "rules"))
+	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "models"))
+	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "logs"))
+	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "xdr-tls"))
+
 	_ = eventlog.Remove(windowsServiceName)
 	if err := eventlog.InstallAsEventCreate(windowsServiceName, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
 		return err

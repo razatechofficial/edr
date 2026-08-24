@@ -23,10 +23,9 @@ const (
 )
 
 var (
-	modiphlpapiWin              = windows.NewLazySystemDLL("iphlpapi.dll")
-	procGetExtendedTcpTableWin  = modiphlpapiWin.NewProc("GetExtendedTcpTable")
-	procGetExtendedTcp6TableWin = modiphlpapiWin.NewProc("GetExtendedTcp6Table")
-	procGetExtendedUdpTableWin  = modiphlpapiWin.NewProc("GetExtendedUdpTable")
+	modiphlpapiWin             = windows.NewLazySystemDLL("iphlpapi.dll")
+	procGetExtendedTcpTableWin = modiphlpapiWin.NewProc("GetExtendedTcpTable")
+	procGetExtendedUdpTableWin = modiphlpapiWin.NewProc("GetExtendedUdpTable")
 )
 
 func mibPortFromDWORD(dw uint32) int {
@@ -38,6 +37,9 @@ func mibDwordToIPv4(dw uint32) net.IP {
 }
 
 func getExtendedTcpTableAF(af uintptr) ([]byte, error) {
+	if err := procGetExtendedTcpTableWin.Find(); err != nil {
+		return nil, err
+	}
 	var size uint32
 	r0, _, _ := procGetExtendedTcpTableWin.Call(0, uintptr(unsafe.Pointer(&size)), 1, af, uintptr(tcpTableOwnerPIDAll), 0)
 	if errno := uintptrToMIBErr(r0); errno != nil && !errors.Is(errno, windows.ERROR_INSUFFICIENT_BUFFER) {
@@ -65,35 +67,16 @@ func getExtendedTcpTableAF(af uintptr) ([]byte, error) {
 	return buf, nil
 }
 
+// getExtendedTcp6Buf uses GetExtendedTcpTable(AF_INET6). There is no
+// GetExtendedTcp6Table export in iphlpapi.dll; calling a missing LazyProc panics.
 func getExtendedTcp6Buf() ([]byte, error) {
-	var size uint32
-	r0, _, _ := procGetExtendedTcp6TableWin.Call(0, uintptr(unsafe.Pointer(&size)), 1, uintptr(syscall.AF_INET6), uintptr(tcpTableOwnerPIDAll), 0)
-	if errno := uintptrToMIBErr(r0); errno != nil && !errors.Is(errno, windows.ERROR_INSUFFICIENT_BUFFER) {
-		return nil, errno
-	}
-	if size == 0 {
-		size = 131072
-	}
-	buf := make([]byte, size)
-	r0, _, _ = procGetExtendedTcp6TableWin.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 1, uintptr(syscall.AF_INET6), uintptr(tcpTableOwnerPIDAll), 0)
-	if errno := uintptrToMIBErr(r0); errno != nil {
-		if errors.Is(errno, windows.ERROR_INSUFFICIENT_BUFFER) && int(size) > len(buf) {
-			buf = make([]byte, size)
-			r0, _, _ = procGetExtendedTcp6TableWin.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 1, uintptr(syscall.AF_INET6), uintptr(tcpTableOwnerPIDAll), 0)
-			if errno2 := uintptrToMIBErr(r0); errno2 != nil {
-				return nil, errno2
-			}
-		} else {
-			return nil, errno
-		}
-	}
-	if int(size) < len(buf) {
-		buf = buf[:size]
-	}
-	return buf, nil
+	return getExtendedTcpTableAF(uintptr(syscall.AF_INET6))
 }
 
 func getExtendedUDPTableAF(af uintptr) ([]byte, error) {
+	if err := procGetExtendedUdpTableWin.Find(); err != nil {
+		return nil, err
+	}
 	var size uint32
 	r0, _, _ := procGetExtendedUdpTableWin.Call(0, uintptr(unsafe.Pointer(&size)), 1, af, 1, 0)
 	if errno := uintptrToMIBErr(r0); errno != nil && !errors.Is(errno, windows.ERROR_INSUFFICIENT_BUFFER) {
@@ -122,6 +105,9 @@ func getExtendedUDPTableAF(af uintptr) ([]byte, error) {
 }
 
 func getExtendedUdp6Buf() ([]byte, error) {
+	if err := procGetExtendedUdpTableWin.Find(); err != nil {
+		return nil, err
+	}
 	var size uint32
 	r0, _, _ := procGetExtendedUdpTableWin.Call(0, uintptr(unsafe.Pointer(&size)), 1, uintptr(syscall.AF_INET6), 1, 0)
 	if errno := uintptrToMIBErr(r0); errno != nil && !errors.Is(errno, windows.ERROR_INSUFFICIENT_BUFFER) {

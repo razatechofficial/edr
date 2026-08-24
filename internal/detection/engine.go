@@ -341,7 +341,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		}()
 	}
 
-	e.logger.Info("engine: started",
+	e.logger.Debug("engine: started",
 		zap.Bool("ioc", e.ioc != nil),
 		zap.Bool("yara", e.yara != nil),
 		zap.Bool("sigma", e.sigma != nil),

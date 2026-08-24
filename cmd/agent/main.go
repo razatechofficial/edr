@@ -116,23 +116,31 @@ func newLogger(logMode string, cfg config.Config) (*zap.Logger, error) {
 		level.SetLevel(zap.DebugLevel)
 	}
 
-	cores := make([]zapcore.Core, 0, 3)
-	if mode == "structured" || mode == "dual" {
-		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(os.Stdout), level))
-	}
-	if mode == "pretty" || mode == "dual" || debug {
-		cores = append(cores, zapcore.NewCore(zapcore.NewConsoleEncoder(prettyCfg), zapcore.AddSync(os.Stdout), level))
-	}
-	if len(cores) == 0 {
-		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(os.Stdout), level))
+	// Console: warn+ only unless debug. File: info (or debug). NIST AU-2/AU-3 —
+	// local consoles must not dump rule bodies, tokens, or detection internals.
+	stdoutLevel := zap.NewAtomicLevelAt(zap.WarnLevel)
+	if debug || strings.EqualFold(cfg.Agent.LogLevel, "debug") {
+		stdoutLevel.SetLevel(zap.DebugLevel)
 	}
 
-	// Persist agent runtime logs for production troubleshooting.
-	logPath := filepath.Join(cfg.Agent.DataDir, "logs", "agent.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err == nil {
-		if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
-			cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(f), level))
+	cores := make([]zapcore.Core, 0, 3)
+	if !runningAsManagedService() || debug {
+		if mode == "pretty" || debug {
+			cores = append(cores, zapcore.NewCore(zapcore.NewConsoleEncoder(prettyCfg), zapcore.AddSync(os.Stdout), stdoutLevel))
+		} else if mode == "structured" || mode == "dual" {
+			cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(os.Stdout), stdoutLevel))
 		}
+	}
+
+	logPath := filepath.Join(cfg.Agent.DataDir, "logs", "agent.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o750); err == nil {
+		if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+			cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(f), level))
+			restrictSensitivePath(logPath)
+		}
+	}
+	if len(cores) == 0 {
+		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(os.Stderr), zap.NewAtomicLevelAt(zap.ErrorLevel)))
 	}
 
 	return zap.New(zapcore.NewTee(cores...), zap.WithCaller(false)), nil
@@ -240,6 +248,13 @@ func runAgentCore(ctx context.Context, cfgPath string) error {
 		zap.String("arch", runtime.GOARCH),
 		zap.String("config", cfgPath),
 	)
+
+	if !testMode {
+		if err := checkRequiredHostAccess(); err != nil {
+			logger.Error("required host permissions missing", zap.Error(err))
+			return err
+		}
+	}
 
 	_ = applyProcessMitigations(logger)
 

@@ -51,7 +51,10 @@ $files = Get-MsiInstalledFileNames -Path $MsiPath
 $required = @(
 	'edr-agent.exe',
 	'edrctl.exe',
+	'edr-agent-ui.exe',
+	'edr.exe',
 	'config.yml',
+	'baseline.yaml',
 	'config.tenant.yml',
 	'config.tenant.tls.yml',
 	'config.fleet.tls.yml',
@@ -64,6 +67,8 @@ $required = @(
 $knownFileKeys = @{
 	'edr-agent.exe' = @('AgentExe')
 	'edrctl.exe'    = @('EdrCtlExe')
+	'edr-agent-ui.exe' = @('EdrUIExe')
+	'edr.exe'       = @('EdrAliasExe')
 }
 
 foreach ($name in $required) {

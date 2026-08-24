@@ -64,27 +64,55 @@ func buildTLSConfig(cert tls.Certificate, caPath, certDir string) (*tls.Config, 
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{cert},
 	}
-	// Server trust material (verify ingest), not the agent identity CA.
-	trustPath := ""
-	if certDir != "" {
-		p := filepath.Join(certDir, "ingest-ca.pem")
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			trustPath = p
+	// Merge system roots with every on-disk trust file. Preferring only
+	// ingest-ca.pem used to fail when a leftover public CA (e.g. Let's Encrypt)
+	// shadowed the Averox chain in ca-chain.pem, and the reverse also failed
+	// when ingest was terminated by a public CA. Extra roots do not weaken
+	// verification of a correctly chained server cert.
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	appended := 0
+	for _, p := range ingestTrustFiles(certDir, caPath) {
+		caPEM, rerr := os.ReadFile(p)
+		if rerr != nil {
+			continue
+		}
+		if pool.AppendCertsFromPEM(caPEM) {
+			appended++
 		}
 	}
-	if trustPath == "" {
-		trustPath = caPath
+	if appended == 0 && caPath != "" {
+		return nil, fmt.Errorf("parse trust ca")
 	}
-	if trustPath != "" {
-		caPEM, err := os.ReadFile(trustPath)
-		if err != nil {
-			return nil, fmt.Errorf("read trust ca: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("parse trust ca")
-		}
-		cfg.RootCAs = pool
-	}
+	cfg.RootCAs = pool
 	return cfg, nil
+}
+
+func ingestTrustFiles(certDir, caPath string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		st, err := os.Stat(p)
+		if err != nil || st.IsDir() {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if certDir != "" {
+		add(filepath.Join(certDir, "ca-chain.pem"))
+		add(filepath.Join(certDir, "ingest-ca.pem"))
+		add(filepath.Join(certDir, "ca.pem"))
+	}
+	add(caPath)
+	return out
 }

@@ -14,7 +14,9 @@ fi
 launchctl unload "${PLIST}" 2>/dev/null || true
 
 rm -f "${PLIST}"
-rm -f /usr/local/bin/edr-agent /usr/local/bin/edrctl
+rm -f /usr/local/bin/edr-agent /usr/local/bin/edrctl /usr/local/bin/edr
+rm -rf "/Applications/EDR Agent.app"
+rm -f /Library/LaunchAgents/com.razatech.edr.firstrun.plist
 
 echo "Removed LaunchDaemon and binaries."
 echo "Data under /Library/Application Support/EDR/ was not removed; delete it manually if you want a full wipe."

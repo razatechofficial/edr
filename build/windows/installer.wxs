@@ -17,6 +17,11 @@
              InstallScope="perMachine"
              InstallPrivileges="elevated"/>
 
+    <Property Id="ALLUSERS" Value="1"/>
+    <Property Id="MSIINSTALLPERUSER" Value=""/>
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.EdrLicenseRtf)"/>
+    <UIRef Id="WixUI_Minimal"/>
+
     <MajorUpgrade DowngradeErrorMessage=
       "A newer version of EDR Agent is already installed."/>
     <MediaTemplate EmbedCab="yes"/>
@@ -58,6 +63,9 @@
           <Directory Id="MODELSROOT" Name="models"/>
         </Directory>
       </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="EDR Agent"/>
+      </Directory>
     </Directory>
   </Fragment>
 
@@ -74,6 +82,52 @@
               Source="$(var.EdrCtlExe)"
               Name="edrctl.exe"
               KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpEdrUIExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="EdrUIExe"
+              Source="$(var.EdrUIExe)"
+              Name="edr-agent-ui.exe"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpEdrAliasExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="EdrAliasExe"
+              Source="$(var.EdrCtlExe)"
+              Name="edr.exe"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpStartMenu" Guid="*" Directory="ApplicationProgramsFolder" Win64="yes">
+        <Shortcut Id="StartMenuStatus"
+                  Name="EDR Agent"
+                  Description="Status, enrollment, and connection test"
+                  Target="[INSTALLFOLDER]edr-agent-ui.exe"
+                  WorkingDirectory="INSTALLFOLDER"/>
+        <Shortcut Id="StartMenuEnroll"
+                  Name="EDR Agent Enroll"
+                  Description="Enroll this device with an enrollment token"
+                  Target="[INSTALLFOLDER]edr-agent-ui.exe"
+                  WorkingDirectory="INSTALLFOLDER"/>
+        <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
+        <RegistryValue Root="HKLM"
+                       Key="Software\RazaTech\EDR Agent"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpPath" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <Environment Id="EdrPath"
+                     Name="PATH"
+                     Value="[INSTALLFOLDER]"
+                     Permanent="no"
+                     Part="last"
+                     Action="set"
+                     System="yes"/>
+        <RegistryValue Root="HKLM"
+                       Key="Software\RazaTech\EDR Agent"
+                       Name="path"
+                       Type="string"
+                       Value="[INSTALLFOLDER]"
+                       KeyPath="yes"/>
       </Component>
       <Component Id="cmpConfigYml" Guid="*" Directory="DATAROOT" Win64="yes">
         <File Id="ConfigFile"

@@ -55,6 +55,10 @@ ml:
     behavior_anomaly: 0.75
     ransomware_score: 0.85
     network_anomaly: 0.70
+llm:
+  enabled: false
+  rag:
+    enabled: true
 response:
   auto_response: true
   playbooks_dir: "/Library/Application Support/EDR/config/rules/playbooks"

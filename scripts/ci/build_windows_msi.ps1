@@ -89,11 +89,15 @@ if (-not [string]::IsNullOrWhiteSpace($env:EDR_WIX_BIN)) {
 
 $agentExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edr-agent.exe'))
 $edrCtlExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edrctl.exe'))
+$edrUIExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edr-agent-ui.exe'))
 if (-not (Test-Path -LiteralPath $agentExe)) {
     throw "Missing Windows agent binary (build it first): $agentExe"
 }
 if (-not (Test-Path -LiteralPath $edrCtlExe)) {
     throw "Missing Windows edrctl binary (build it first): $edrCtlExe"
+}
+if (-not (Test-Path -LiteralPath $edrUIExe)) {
+    throw "Missing Windows UI binary (build it first): $edrUIExe"
 }
 
 & (Join-Path $PSScriptRoot 'stage_windows_msi.ps1') -Root $root
@@ -109,6 +113,10 @@ $configPPLYml = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/co
 $applyTenantBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_tenant_config.bat'))
 $applyTenantTlsBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_tenant_tls_config.bat'))
 $applyPPLBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_am_ppl_config.bat'))
+$licenseRtf = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/License.rtf'))
+if (-not (Test-Path -LiteralPath $licenseRtf)) {
+    throw "Missing EULA: $licenseRtf"
+}
 $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wxs'))
 $modelsWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wxs'))
 $rulesStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-rules'))
@@ -167,9 +175,11 @@ $lightLog = Join-Path $root 'build/windows/light.log'
 
 $candleArgList = @(
     '-nologo', '-arch', 'x64',
+    '-ext', 'WixUIExtension',
     "-dMsiProductVersion=$Version",
     "-dEdrAgentExe=$agentExe",
     "-dEdrCtlExe=$edrCtlExe",
+    "-dEdrUIExe=$edrUIExe",
     "-dEdrConfigYml=$configYml",
     "-dEdrConfigHardenedYml=$configHardenedYml",
     "-dEdrConfigEnterpriseYml=$configEnterpriseYml",
@@ -181,6 +191,7 @@ $candleArgList = @(
     "-dEdrApplyTenantBat=$applyTenantBat",
     "-dEdrApplyTenantTlsBat=$applyTenantTlsBat",
     "-dEdrApplyPPLBat=$applyPPLBat",
+    "-dEdrLicenseRtf=$licenseRtf",
     "-dRulesStage=$rulesStage",
     "-dModelsStage=$modelsStage",
     $wxs,
@@ -257,6 +268,7 @@ if ($yaraDlls.Count -gt 0) {
 
 $lightArgList = @(
     '-nologo', '-sval', '-sw1076',
+    '-ext', 'WixUIExtension',
     "-dRulesStage=$rulesStage",
     "-dModelsStage=$modelsStage",
     $lightInputs,
