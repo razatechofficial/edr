@@ -17,7 +17,6 @@
              InstallScope="perMachine"
              InstallPrivileges="elevated"/>
 
-    <Property Id="ALLUSERS" Value="1"/>
     <WixVariable Id="WixUILicenseRtf" Value="$(var.EdrLicenseRtf)"/>
     <UIRef Id="WixUI_Minimal"/>
 
