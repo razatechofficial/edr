@@ -58,6 +58,8 @@ func main() {
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.ArbitraryArgs,
+		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 	}
 
 	root.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath(), "path to agent configuration file")

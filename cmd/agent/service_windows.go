@@ -107,7 +107,8 @@ func installService() error {
 
 	s, err := openOrCreateService(m, exePath, cfgPath)
 	if err != nil {
-		return fmt.Errorf("create service: %w", err)
+		installLog("create service: %v (continuing; MSI must not roll back)", err)
+		return nil
 	}
 	defer s.Close()
 

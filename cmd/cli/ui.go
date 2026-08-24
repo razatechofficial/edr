@@ -17,14 +17,23 @@ import (
 )
 
 func newUICmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "ui",
 		Short: "Operator dashboard (status, enrollment, detections)",
-		Long:  "Prints a compact ASCII dashboard suitable for Windows/macOS Start Menu/Applications shortcuts and Linux terminals without a GUI.",
+		Long:  "Prints a compact operator dashboard. Use --json for the GUI.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return printOperatorDashboard(os.Stdout)
+			st := collectOperatorStatus()
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(st)
+			}
+			return printOperatorDashboard(os.Stdout, st)
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON for the operator GUI")
+	return cmd
 }
 
 func newTestConnectionCmd() *cobra.Command {
@@ -58,37 +67,40 @@ func newTestConnectionCmd() *cobra.Command {
 	}
 }
 
-func printOperatorDashboard(out *os.File) error {
-	fmt.Fprintln(out, "╔══════════════════════════════════════════════════════╗")
-	fmt.Fprintln(out, "║                   EDR Agent                          ║")
-	fmt.Fprintln(out, "╚══════════════════════════════════════════════════════╝")
+type operatorHostProbe struct {
+	Host   string `json:"host"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
 
-	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "Config:\t%s\n", configFile)
+type operatorStatus struct {
+	Config      string               `json:"config"`
+	Service     string               `json:"service"`
+	Enrolled    bool                 `json:"enrolled"`
+	AgentID     string               `json:"agent_id,omitempty"`
+	Ingest      string               `json:"ingest,omitempty"`
+	Runtime     string               `json:"runtime,omitempty"`
+	Version     string               `json:"version,omitempty"`
+	Uptime      string               `json:"uptime,omitempty"`
+	Detections  uint64               `json:"detections"`
+	Isolated    bool                 `json:"isolated"`
+	ControlAPI  string               `json:"control_api"`
+	Hosts       []operatorHostProbe  `json:"hosts,omitempty"`
+	UpdatedAt   string               `json:"updated_at"`
+}
 
-	svc := serviceRuntimeStatus()
-	fmt.Fprintf(w, "Service:\t%s\n", svc)
-
-	enrolled, agentID, ingest := enrollmentSnapshot()
-	if enrolled {
-		fmt.Fprintf(w, "Enrollment:\tenrolled\n")
-		if agentID != "" {
-			fmt.Fprintf(w, "Agent ID:\t%s\n", agentID)
-		}
-		if ingest != "" {
-			fmt.Fprintf(w, "Ingest:\t%s\n", ingest)
-		}
-	} else {
-		fmt.Fprintf(w, "Enrollment:\tidle (not enrolled)\n")
-		fmt.Fprintln(w, "Next:\tedrctl enroll --token <token>")
+func collectOperatorStatus() operatorStatus {
+	st := operatorStatus{
+		Config:     configFile,
+		Service:    serviceRuntimeStatus(),
+		ControlAPI: "unavailable",
+		UpdatedAt:  time.Now().Format(time.RFC3339),
 	}
+	st.Enrolled, st.AgentID, st.Ingest = enrollmentSnapshot()
 
 	body, err := agentRequest("GET", "/api/v1/status", nil)
-	if err != nil {
-		fmt.Fprintf(w, "Control API:\tunavailable\n")
-		fmt.Fprintf(w, "Detections:\tn/a (agent not responding)\n")
-		fmt.Fprintf(w, "Blocks:\tn/a\n")
-	} else {
+	if err == nil {
+		st.ControlAPI = "ok"
 		var status struct {
 			Status    string `json:"status"`
 			Version   string `json:"version"`
@@ -97,15 +109,63 @@ func printOperatorDashboard(out *os.File) error {
 			Isolated  bool   `json:"isolated"`
 		}
 		if json.Unmarshal(body, &status) == nil {
-			fmt.Fprintf(w, "Runtime:\t%s\n", emptyDash(status.Status))
-			fmt.Fprintf(w, "Version:\t%s\n", emptyDash(status.Version))
-			fmt.Fprintf(w, "Uptime:\t%s\n", emptyDash(status.Uptime))
-			fmt.Fprintf(w, "Local detections:\t%d\n", status.AlertsGen)
-			if status.Isolated {
-				fmt.Fprintf(w, "Containment:\tISOLATED\n")
-			} else {
-				fmt.Fprintf(w, "Containment:\tnormal\n")
+			st.Runtime = status.Status
+			st.Version = status.Version
+			st.Uptime = status.Uptime
+			st.Detections = status.AlertsGen
+			st.Isolated = status.Isolated
+		}
+	}
+
+	hosts, herr := connectionTargets()
+	if herr != nil {
+		st.Hosts = []operatorHostProbe{{Host: "-", OK: false, Detail: herr.Error()}}
+	} else {
+		for _, host := range hosts {
+			p := operatorHostProbe{Host: host, OK: true}
+			if err := probeTCP(host, 4*time.Second); err != nil {
+				p.OK = false
+				p.Detail = err.Error()
 			}
+			st.Hosts = append(st.Hosts, p)
+		}
+	}
+	return st
+}
+
+func printOperatorDashboard(out *os.File, st operatorStatus) error {
+	fmt.Fprintln(out, "╔══════════════════════════════════════════════════════╗")
+	fmt.Fprintln(out, "║                   EDR Agent                          ║")
+	fmt.Fprintln(out, "╚══════════════════════════════════════════════════════╝")
+
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintf(w, "Config:\t%s\n", st.Config)
+	fmt.Fprintf(w, "Service:\t%s\n", st.Service)
+	if st.Enrolled {
+		fmt.Fprintf(w, "Enrollment:\tenrolled\n")
+		if st.AgentID != "" {
+			fmt.Fprintf(w, "Agent ID:\t%s\n", st.AgentID)
+		}
+		if st.Ingest != "" {
+			fmt.Fprintf(w, "Ingest:\t%s\n", st.Ingest)
+		}
+	} else {
+		fmt.Fprintf(w, "Enrollment:\tidle (not enrolled)\n")
+		fmt.Fprintln(w, "Next:\tedrctl enroll --token <token>")
+	}
+	if st.ControlAPI != "ok" {
+		fmt.Fprintf(w, "Control API:\tunavailable\n")
+		fmt.Fprintf(w, "Detections:\tn/a (agent not responding)\n")
+		fmt.Fprintf(w, "Blocks:\tn/a\n")
+	} else {
+		fmt.Fprintf(w, "Runtime:\t%s\n", emptyDash(st.Runtime))
+		fmt.Fprintf(w, "Version:\t%s\n", emptyDash(st.Version))
+		fmt.Fprintf(w, "Uptime:\t%s\n", emptyDash(st.Uptime))
+		fmt.Fprintf(w, "Local detections:\t%d\n", st.Detections)
+		if st.Isolated {
+			fmt.Fprintf(w, "Containment:\tISOLATED\n")
+		} else {
+			fmt.Fprintf(w, "Containment:\tnormal\n")
 		}
 	}
 	if err := w.Flush(); err != nil {
@@ -114,18 +174,15 @@ func printOperatorDashboard(out *os.File) error {
 
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Connection test")
-	hosts, herr := connectionTargets()
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "TARGET\tRESULT")
-	if herr != nil {
-		fmt.Fprintf(tw, "-\t%s\n", herr)
-	} else {
-		for _, host := range hosts {
-			if err := probeTCP(host, 4*time.Second); err != nil {
-				fmt.Fprintf(tw, "%s\tfail\n", host)
-				continue
-			}
-			fmt.Fprintf(tw, "%s\tok\n", host)
+	for _, h := range st.Hosts {
+		if h.OK {
+			fmt.Fprintf(tw, "%s\tok\n", h.Host)
+		} else if h.Detail != "" {
+			fmt.Fprintf(tw, "%s\tfail (%s)\n", h.Host, h.Detail)
+		} else {
+			fmt.Fprintf(tw, "%s\tfail\n", h.Host)
 		}
 	}
 	return tw.Flush()
