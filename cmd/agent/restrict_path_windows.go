@@ -15,6 +15,7 @@ func restrictSensitivePath(path string) {
 		"/grant:r", "SYSTEM:F",
 		"/grant:r", "Administrators:F",
 	)
+	hideConsole(cmd)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	_ = cmd.Run()

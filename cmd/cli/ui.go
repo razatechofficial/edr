@@ -23,7 +23,7 @@ func newUICmd() *cobra.Command {
 		Short: "Operator dashboard (status, enrollment, detections)",
 		Long:  "Prints a compact operator dashboard. Use --json for the GUI.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			st := collectOperatorStatus()
+			st := collectOperatorStatus(!asJSON)
 			if asJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
@@ -92,7 +92,7 @@ type operatorStatus struct {
 	UpdatedAt  string              `json:"updated_at"`
 }
 
-func collectOperatorStatus() operatorStatus {
+func collectOperatorStatus(probeHosts bool) operatorStatus {
 	st := operatorStatus{
 		Config:     configFile,
 		Service:    serviceRuntimeStatus(),
@@ -124,6 +124,10 @@ func collectOperatorStatus() operatorStatus {
 			st.MemoryMB = status.MemoryMB
 			st.EventsProc = status.EventsProc
 		}
+	}
+
+	if !probeHosts {
+		return st
 	}
 
 	hosts, herr := connectionTargets()

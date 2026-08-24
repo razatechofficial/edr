@@ -6,7 +6,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -36,25 +35,21 @@ func (c *console) buildPreflight() fyne.CanvasObject {
 	c.startAgentBtn.Importance = widget.HighImportance
 	c.startAgentBtn.Disable()
 
-	title := heading("System Check")
-	title.Alignment = fyne.TextAlignCenter
-	sub := canvas.NewText("Validating pre-flight requirements", colorMuted)
+	sub := canvas.NewText("Required before the sensor can stream.", colorMuted)
 	sub.TextSize = 13
 	sub.Alignment = fyne.TextAlignCenter
 
 	body := container.NewVBox(
 		c.chrome(c.settingsButton()),
-		layout.NewSpacer(),
-		container.NewCenter(title),
+		stepLabel(2, 3, "System check"),
 		container.NewCenter(sub),
 		card(c.preflightBox),
 		c.preflightHint,
 		c.grantBtn,
 		recheck,
 		c.startAgentBtn,
-		layout.NewSpacer(),
 	)
-	c.preflightContent = container.NewPadded(body)
+	c.preflightContent = container.NewPadded(container.NewVScroll(body))
 	return c.preflightContent
 }
 

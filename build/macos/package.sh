@@ -160,9 +160,12 @@ cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" <<'EOF'
         <string>/Library/Application Support/EDR/config/agent.yaml</string>
     </array>
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>Crashed</key>
+        <true/>
+    </dict>
     <key>ThrottleInterval</key>
     <integer>30</integer>
     <key>StandardOutPath</key>
@@ -199,6 +202,11 @@ launchctl unload "${PLIST}" 2>/dev/null || true
 if [[ -x "/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent" ]]; then
 	ln -sf "../libexec/edr-agent.app/Contents/MacOS/edr-agent" /usr/local/bin/edr-agent
 fi
+launchctl bootstrap system "${PLIST}" 2>/dev/null || launchctl load "${PLIST}"
+launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
+if [[ -f "${BASE}/xdr-tls/enrollment.json" ]]; then
+	launchctl kickstart -k "system/com.razatech.edr-agent" 2>/dev/null || true
+fi
 if [[ -d "/Applications/EDR Agent.app" ]]; then
 	LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 	CONSOLE_USER="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
@@ -206,11 +214,10 @@ if [[ -d "/Applications/EDR Agent.app" ]]; then
 		"${LSREG}" -f "/Applications/EDR Agent.app" >/dev/null 2>&1 || true
 		if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
 			/usr/bin/sudo -u "${CONSOLE_USER}" "${LSREG}" -f "/Applications/EDR Agent.app" >/dev/null 2>&1 || true
+			/usr/bin/sudo -u "${CONSOLE_USER}" /usr/bin/open "/Applications/EDR Agent.app" >/dev/null 2>&1 || true
 		fi
 	fi
 fi
-launchctl bootstrap system "${PLIST}" 2>/dev/null || launchctl load "${PLIST}"
-launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
 EOF
 chmod 755 pkg/macos/scripts/postinstall
 
@@ -258,10 +265,16 @@ pkgbuild \
 	"${COMPONENT}"
 
 DIST_XML="pkg/macos/distribution.xml"
+RES_DIR="pkg/macos/resources"
+mkdir -p "${RES_DIR}"
+cp "${ROOT}/build/macos/welcome.html" "${RES_DIR}/welcome.html"
+cp "${ROOT}/build/macos/conclusion.html" "${RES_DIR}/conclusion.html"
 cat > "${DIST_XML}" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
 	<title>EDR Agent (${ARCH_TITLE})</title>
+	<welcome file="welcome.html" mime-type="text/html"/>
+	<conclusion file="conclusion.html" mime-type="text/html"/>
 	<domains enable_localSystem="true"/>
 	<options customize="never" require-scripts="false" hostArchitectures="${HOST_ARCHS}"/>
 	<choices-outline>
@@ -276,6 +289,7 @@ EOF
 
 productbuild \
 	--distribution "${DIST_XML}" \
+	--resources "${RES_DIR}" \
 	--package-path pkg/macos \
 	"dist/edr-agent_${VERSION}_${ARCH}.pkg"
 

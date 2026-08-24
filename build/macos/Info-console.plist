@@ -24,9 +24,9 @@
 	<string>12.0</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
-	<key>LSUIElement</key>
-	<true/>
 	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>EDR Agent uses administrator privileges to enroll, start, and stop the sensor.</string>

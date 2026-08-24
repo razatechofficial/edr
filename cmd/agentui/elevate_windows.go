@@ -4,14 +4,17 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
+func processIsAdmin() bool {
+	return windows.GetCurrentProcessToken().IsElevated()
+}
+
 func maybeElevate() error {
-	if exec.Command("net", "session").Run() == nil {
+	if processIsAdmin() {
 		return nil
 	}
 	exe, err := os.Executable()

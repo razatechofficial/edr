@@ -6,7 +6,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -22,7 +21,7 @@ func (c *console) buildEnroll() fyne.CanvasObject {
 	c.token = widget.NewPasswordEntry()
 	c.token.SetPlaceHolder("One-time enrollment token")
 
-	c.enrollHint = widget.NewLabel("Enter the host and token from the XDR console.")
+	c.enrollHint = widget.NewLabel("Checking device status…")
 	c.enrollHint.Wrapping = fyne.TextWrapWord
 	c.enrollHint.Alignment = fyne.TextAlignCenter
 
@@ -31,24 +30,14 @@ func (c *console) buildEnroll() fyne.CanvasObject {
 	c.enrollBtn = widget.NewButtonWithIcon("Enroll device", theme.ConfirmIcon(), c.onEnroll)
 	c.enrollBtn.Importance = widget.HighImportance
 
-	hero := canvas.NewText("Device Enrollment", colorText)
-	hero.TextSize = 24
-	hero.TextStyle = fyne.TextStyle{Bold: true}
-	hero.Alignment = fyne.TextAlignCenter
-	sub := canvas.NewText("Configure agent connection settings", colorMuted)
+	sub := canvas.NewText("This device is not registered yet.", colorMuted)
 	sub.TextSize = 13
 	sub.Alignment = fyne.TextAlignCenter
 
 	hostLabel := caption("SERVER HOST")
 	tokenLabel := caption("ENROLLMENT TOKEN")
 
-	body := container.NewVBox(
-		c.chrome(c.settingsButton()),
-		layout.NewSpacer(),
-		container.NewCenter(widget.NewIcon(theme.ComputerIcon())),
-		container.NewCenter(hero),
-		container.NewCenter(sub),
-		widget.NewSeparator(),
+	form := card(container.NewVBox(
 		hostLabel,
 		fieldWithIcon(theme.ComputerIcon(), c.host),
 		tokenLabel,
@@ -56,9 +45,15 @@ func (c *console) buildEnroll() fyne.CanvasObject {
 		c.enrollHint,
 		c.testBtn,
 		c.enrollBtn,
-		layout.NewSpacer(),
+	))
+
+	body := container.NewVBox(
+		c.chrome(c.settingsButton()),
+		stepLabel(1, 3, "Device enrollment"),
+		container.NewCenter(sub),
+		form,
 	)
-	c.enrollContent = container.NewPadded(body)
+	c.enrollContent = container.NewPadded(container.NewVScroll(body))
 	return c.enrollContent
 }
 

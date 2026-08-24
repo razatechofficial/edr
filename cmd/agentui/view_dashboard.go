@@ -6,7 +6,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
@@ -78,12 +77,12 @@ func (c *console) buildDashboard() fyne.CanvasObject {
 
 	body := container.NewVBox(
 		c.chrome(container.NewHBox(c.settingsButton())),
+		stepLabel(3, 3, "Protection"),
 		statusCard,
 		metrics,
 		cpuCard,
 		ramCard,
 		monitor,
-		layout.NewSpacer(),
 	)
 	c.dashContent = container.NewPadded(container.NewVScroll(body))
 	return c.dashContent

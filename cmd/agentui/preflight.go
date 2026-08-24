@@ -60,7 +60,7 @@ func probeTCP(host string, timeout time.Duration) error {
 func adminCheck() (ok bool, detail string) {
 	switch runtime.GOOS {
 	case "windows":
-		if exec.Command("net", "session").Run() == nil {
+		if processIsAdmin() {
 			return true, "Administrator token present"
 		}
 		return false, "Start EDR Agent from an elevated session"
@@ -82,11 +82,11 @@ func networkCheck(host string) (ok bool, detail string) {
 	if h == "" {
 		h = xdrclient.DefaultEnrollmentHost
 	}
-	if err := probeTCP(h, 5*time.Second); err != nil {
+	if err := probeTCP(h, 3*time.Second); err != nil {
 		return false, fmt.Sprintf("%s unreachable (%v)", h, err)
 	}
 	ingest := xdrclient.DefaultIngestHost
-	if err := probeTCP(ingest, 5*time.Second); err != nil {
+	if err := probeTCP(ingest, 3*time.Second); err != nil {
 		return true, fmt.Sprintf("Enrollment reachable; ingest %s still blocked", ingest)
 	}
 	return true, "Enrollment and ingest hosts reachable"

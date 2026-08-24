@@ -40,6 +40,7 @@ func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, err
 		cfg, cerr := existing.Config()
 		if cerr == nil {
 			cfg.StartType = mgr.StartAutomatic
+			cfg.DelayedAutoStart = true
 			cfg.DisplayName = "EDR Agent"
 			cfg.Description = "Endpoint Detection and Response Agent"
 			cfg.BinaryPathName = quotedBinPath(exePath, "--config", cfgPath)
@@ -49,12 +50,12 @@ func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, err
 	}
 
 	var last error
-	for i := 0; i < 15; i++ {
+	for i := 0; i < 3; i++ {
 		if existing, err := m.OpenService(windowsServiceName); err == nil {
 			_, _ = existing.Control(svc.Stop)
 			_ = existing.Delete()
 			_ = existing.Close()
-			time.Sleep(time.Second)
+			time.Sleep(200 * time.Millisecond)
 		}
 		s, err := m.CreateService(
 			windowsServiceName,
@@ -63,7 +64,7 @@ func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, err
 				StartType:        mgr.StartAutomatic,
 				DisplayName:      "EDR Agent",
 				Description:      "Endpoint Detection and Response Agent",
-				DelayedAutoStart: false,
+				DelayedAutoStart: true,
 			},
 			"--config", cfgPath,
 		)
@@ -72,7 +73,7 @@ func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, err
 		}
 		last = err
 		installLog("CreateService attempt %d: %v", i+1, err)
-		time.Sleep(time.Second)
+		time.Sleep(200 * time.Millisecond)
 	}
 	if existing, err := m.OpenService(windowsServiceName); err == nil {
 		return existing, nil
@@ -113,7 +114,7 @@ func installService() error {
 	defer s.Close()
 
 	actions := []mgr.RecoveryAction{
-		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 60 * time.Second},
 	}
@@ -140,11 +141,9 @@ func installService() error {
 	if err := installWindowsControlPlaneIntent(); err != nil {
 		installLog("control plane intent: %v (continuing)", err)
 	}
-	if err := s.Start(); err != nil {
-		installLog("start service: %v (files and service are installed)", err)
-		return nil
-	}
-	installLog("install complete")
+	// Do not start the sensor during MSI. Starting loads models and can hang setup;
+	// the operator console starts streaming after enrollment/preflight.
+	installLog("install complete (service registered, not started)")
 	return nil
 }
 

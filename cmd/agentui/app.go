@@ -68,23 +68,32 @@ func runDashboard() error {
 
 	w := a.NewWindow("EDR Agent")
 	w.SetMaster()
-	w.Resize(fyne.NewSize(440, 720))
+	w.Resize(fyne.NewSize(520, 760))
+	w.SetFixedSize(false)
 	w.CenterOnScreen()
-	w.SetFixedSize(true)
 
 	c := &console{app: a, win: w}
 	c.buildEnroll()
 	c.buildPreflight()
 	c.buildDashboard()
 	c.setupTray()
+	c.show(uistate.Enroll)
 
-	st := loadStatus()
-	c.last = st
-	need := needsFullDiskAccess() && !hasFullDiskAccess()
-	c.show(uistate.InitialScreen(st.Enrolled, need))
+	go func() {
+		st := loadStatus()
+		need := needsFullDiskAccess() && !hasFullDiskAccess()
+		fyne.Do(func() {
+			c.last = st
+			next := uistate.InitialScreen(st.Enrolled, need)
+			c.show(next)
+			if next == uistate.Enroll && c.enrollHint != nil {
+				c.enrollHint.SetText("Paste the one-time token from the XDR console, then enroll this device.")
+			}
+		})
+	}()
 
 	w.SetCloseIntercept(func() {
-		if c.screen == uistate.Dash && c.hasTray() {
+		if c.hasTray() {
 			w.Hide()
 			return
 		}
@@ -92,7 +101,7 @@ func runDashboard() error {
 	})
 
 	go func() {
-		t := time.NewTicker(4 * time.Second)
+		t := time.NewTicker(8 * time.Second)
 		defer t.Stop()
 		for range t.C {
 			st := loadStatus()
@@ -116,6 +125,9 @@ func (c *console) show(id uistate.Screen) {
 	switch id {
 	case uistate.Enroll:
 		c.win.SetContent(c.enrollContent)
+		if c.token != nil {
+			c.win.Canvas().Focus(c.token)
+		}
 	case uistate.Preflight:
 		c.win.SetContent(c.preflightContent)
 		go c.runPreflight()

@@ -43,6 +43,7 @@ func edrctlPath() string {
 
 func runEdrctl(args ...string) (string, error) {
 	cmd := exec.Command(edrctlPath(), args...)
+	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }

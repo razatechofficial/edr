@@ -240,6 +240,7 @@ func restrictSensitiveTree(dir string) {
 		"/grant:r", "SYSTEM:(OI)(CI)F",
 		"/grant:r", "Administrators:(OI)(CI)F",
 	)
+	hideConsole(cmd)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	_ = cmd.Run()
@@ -258,6 +259,7 @@ func hardenServiceInstallDirACL(dir string) error {
 		"/grant:r", "Administrators:(OI)(CI)F",
 		"/grant:r", "*S-1-5-32-545:(OI)(CI)RX",
 	)
+	hideConsole(cmd)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Run(); err != nil {

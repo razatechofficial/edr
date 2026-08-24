@@ -818,9 +818,12 @@ const launchdPlist = `<?xml version="1.0" encoding="UTF-8"?>
         <string>{{.ConfigPath}}</string>
     </array>
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>Crashed</key>
+        <true/>
+    </dict>
     <key>StandardOutPath</key>
     <string>/Library/Logs/EDR/agent.stdout.log</string>
     <key>StandardErrorPath</key>

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 
 	"fyne.io/fyne/v2"
@@ -38,6 +39,15 @@ func heading(s string) *canvas.Text {
 	t.TextSize = 22
 	t.TextStyle = fyne.TextStyle{Bold: true}
 	return t
+}
+
+func stepLabel(step, total int, title string) fyne.CanvasObject {
+	chip := canvas.NewText(fmt.Sprintf("STEP %d OF %d", step, total), colorCyan)
+	chip.TextSize = 11
+	chip.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
+	h := heading(title)
+	h.Alignment = fyne.TextAlignCenter
+	return container.NewVBox(container.NewCenter(chip), container.NewCenter(h))
 }
 
 func (c *console) chrome(right fyne.CanvasObject) fyne.CanvasObject {

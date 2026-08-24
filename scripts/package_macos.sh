@@ -255,10 +255,13 @@ cat > "${PLIST_DST}" <<'PLIST'
 		<string>--config</string>
 		<string>/Library/Application Support/EDR/config/agent.yaml</string>
 	</array>
-	<key>RunAtLoad</key>
-	<true/>
-	<key>KeepAlive</key>
-	<true/>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>Crashed</key>
+        <true/>
+    </dict>
 	<key>ThrottleInterval</key>
 	<integer>30</integer>
 	<key>StandardOutPath</key>
@@ -275,6 +278,27 @@ launchctl bootout system "${PLIST_DST}" 2>/dev/null || true
 launchctl unload "${PLIST_DST}" 2>/dev/null || true
 launchctl bootstrap system "${PLIST_DST}"
 launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
+
+# Do not start the sensor here — loading models during Installer hangs setup.
+# Re-enrolled upgrades resume streaming; first install waits for the console.
+if [[ -f "${BASE}/xdr-tls/enrollment.json" ]]; then
+	launchctl kickstart -k "system/com.razatech.edr-agent" 2>/dev/null || true
+fi
+
+APP="/Applications/EDR Agent.app"
+if [[ -d "${APP}" ]]; then
+	LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+	CONSOLE_USER="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
+	if [[ -x "${LSREG}" ]]; then
+		"${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
+	fi
+	if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
+		if [[ -x "${LSREG}" ]]; then
+			/usr/bin/sudo -u "${CONSOLE_USER}" "${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
+		fi
+		/usr/bin/sudo -u "${CONSOLE_USER}" /usr/bin/open "${APP}" >/dev/null 2>&1 || true
+	fi
+fi
 POST
 
 chmod 755 "${SCRIPTS}/preinstall" "${SCRIPTS}/postinstall"
@@ -292,10 +316,16 @@ pkgbuild \
 	"${COMPONENT}"
 
 DIST_XML="${WORK}/distribution.xml"
+RES="${WORK}/resources"
+mkdir -p "${RES}"
+cp "${ROOT}/build/macos/welcome.html" "${RES}/welcome.html"
+cp "${ROOT}/build/macos/conclusion.html" "${RES}/conclusion.html"
 cat > "${DIST_XML}" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="1">
 	<title>EDR Agent (${ARCH_TITLE})</title>
+	<welcome file="welcome.html" mime-type="text/html"/>
+	<conclusion file="conclusion.html" mime-type="text/html"/>
 	<domains enable_localSystem="true"/>
 	<options customize="never" require-scripts="false" rootVolumeOnly="true" hostArchitectures="${HOST_ARCHS}"/>
 	<choices-outline>
@@ -310,7 +340,7 @@ EOF
 
 OUT_SAFE_VER="${VERSION//\//-}"
 OUT="${ROOT}/dist/edr-agent-${OUT_SAFE_VER}-darwin-${ARCH}.pkg"
-productbuild --distribution "${DIST_XML}" --package-path "${WORK}" "${OUT}"
+productbuild --distribution "${DIST_XML}" --resources "${RES}" --package-path "${WORK}" "${OUT}"
 
 rm -rf "${WORK}"
 echo "${OUT}"

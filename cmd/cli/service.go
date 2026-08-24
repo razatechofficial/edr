@@ -39,7 +39,9 @@ func newStopCmd() *cobra.Command {
 func controlAgentService(action string) error {
 	switch runtime.GOOS {
 	case "windows":
-		out, err := exec.Command("sc.exe", action, "EDRAgent").CombinedOutput()
+		cmd := exec.Command("sc.exe", action, "EDRAgent")
+		hideConsole(cmd)
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("%s service: %w (%s)", action, err, strings.TrimSpace(string(out)))
 		}
@@ -74,7 +76,9 @@ func controlAgentService(action string) error {
 func serviceRuntimeStatus() string {
 	switch runtime.GOOS {
 	case "windows":
-		out, err := exec.Command("sc.exe", "query", "EDRAgent").CombinedOutput()
+		cmd := exec.Command("sc.exe", "query", "EDRAgent")
+		hideConsole(cmd)
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return "unknown"
 		}

@@ -4,7 +4,9 @@
     One-click Windows sensor MSI:
       C:\Program Files\EDR Agent\edr-agent.exe + edrctl.exe
       C:\ProgramData\EDR Agent\config.yml + rules\
-    Post-install custom action runs edr-agent with the install flag (registers and starts EDRAgent).
+    Post-install custom action registers the EDRAgent service but does not
+    start it (starting loads detection models and hangs Setup). The operator
+    console starts streaming after enrollment.
   -->
   <Product Id="*"
            Name="EDR Agent"
@@ -18,7 +20,20 @@
              InstallPrivileges="elevated"/>
 
     <WixVariable Id="WixUILicenseRtf" Value="$(var.EdrLicenseRtf)"/>
-    <UIRef Id="WixUI_Minimal"/>
+    <UI>
+      <UIRef Id="WixUI_Minimal"/>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication" Order="2">
+        WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed
+      </Publish>
+    </UI>
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open the EDR Agent console"/>
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1"/>
+    <CustomAction Id="LaunchApplication"
+                  FileKey="EdrUIExe"
+                  ExeCommand=""
+                  Execute="immediate"
+                  Impersonate="yes"
+                  Return="asyncNoWait"/>
 
     <MajorUpgrade AllowSameVersionUpgrades="yes"
                   Schedule="afterInstallInitialize"
