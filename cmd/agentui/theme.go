@@ -75,17 +75,21 @@ func (edrTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
 func (edrTheme) Size(name fyne.ThemeSizeName) float32 {
 	switch name {
 	case theme.SizeNamePadding:
-		return 10
-	case theme.SizeNameInnerPadding:
 		return 8
+	case theme.SizeNameInnerPadding:
+		return 6
 	case theme.SizeNameText:
-		return 14
+		return 13
 	case theme.SizeNameHeadingText:
 		return 22
 	case theme.SizeNameSubHeadingText:
 		return 16
 	case theme.SizeNameCaptionText:
-		return 12
+		return 11
+	case theme.SizeNameInlineIcon:
+		return 16
+	case theme.SizeNameScrollBar:
+		return 4
 	case theme.SizeNameInputBorder:
 		return 1
 	case theme.SizeNameInputRadius, theme.SizeNameSelectionRadius:

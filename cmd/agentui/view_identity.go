@@ -1,12 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
@@ -20,16 +20,10 @@ func (c *console) buildIdentity() fyne.CanvasObject {
 	c.identityHint.Wrapping = fyne.TextWrapWord
 
 	lock := bodyText("Private key never leaves this device. Only the certificate request is sent.")
-
-	body := container.NewVBox(
-		c.chrome(),
-		kicker("Enrolling", colorAccent),
-		heading("Securing device identity"),
-		c.identityHint,
-		card(c.identityBox),
-		card(lock),
-	)
-	c.identityContent = container.NewPadded(container.NewVScroll(body))
+	header := pageHeader("Enrolling", colorAccent, "Securing device identity", "")
+	header = container.NewVBox(header, c.identityHint)
+	body := card(c.identityBox)
+	c.identityContent = wizardPage(header, body, card(lock))
 	return c.identityContent
 }
 
@@ -37,24 +31,21 @@ func (c *console) renderIdentity(active int, done bool, failed bool) {
 	c.identityBox.Objects = nil
 	titles := identityTitles()
 	for i, title := range titles {
-		ico := theme.RadioButtonIcon()
-		prefix := "○  "
+		st := checkWait
 		switch {
 		case failed && i == active:
-			ico = theme.ErrorIcon()
-			prefix = "✕  "
+			st = checkFail
 		case done || i < active:
-			ico = theme.ConfirmIcon()
-			prefix = "✓  "
+			st = checkOK
 		case i == active:
-			ico = theme.ViewRefreshIcon()
-			prefix = "●  "
+			st = checkRun
 		}
-		row := container.NewBorder(nil, nil, widget.NewIcon(ico), nil, widget.NewLabel(prefix+title))
-		c.identityBox.Add(row)
+		c.identityBox.Add(listRow(statusMark(st), title, "", st == checkWait))
 	}
 	if done {
 		c.identityHint.SetText("Identity bound. Opening receipt…")
+	} else if active >= 0 && active < len(titles) {
+		c.identityHint.SetText(fmt.Sprintf("%d / %d  ·  Enter an administrator password if the system asks. The private key never leaves this computer.", active+1, len(titles)))
 	}
 	c.identityBox.Refresh()
 }
@@ -62,7 +53,6 @@ func (c *console) renderIdentity(active int, done bool, failed bool) {
 func (c *console) startIdentity(host, token string) {
 	titles := identityTitles()
 	c.renderIdentity(0, false, false)
-	c.identityHint.SetText("Enter an administrator password if the system asks. The private key never leaves this computer.")
 	c.setBusy(true)
 	xdrclient.ClearEnrollProgress(platform.DataDir())
 

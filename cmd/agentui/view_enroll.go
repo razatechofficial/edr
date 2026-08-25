@@ -5,7 +5,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
@@ -23,7 +22,7 @@ func (c *console) buildEnroll() fyne.CanvasObject {
 
 	c.enrollFaultBox = container.NewVBox()
 
-	c.enrollBtn = widget.NewButtonWithIcon("Enroll", theme.ConfirmIcon(), c.onEnroll)
+	c.enrollBtn = widget.NewButton("Enroll", c.onEnroll)
 	c.enrollBtn.Importance = widget.HighImportance
 
 	adv := container.NewVBox(
@@ -36,22 +35,15 @@ func (c *console) buildEnroll() fyne.CanvasObject {
 		adv,
 	))
 
-	form := card(container.NewVBox(
+	form := container.NewVBox(
 		caption("Enrollment token"),
-		fieldWithIcon(theme.VisibilityOffIcon(), c.token),
+		c.token,
 		accordion,
 		c.enrollFaultBox,
-		c.enrollBtn,
-	))
-
-	body := container.NewVBox(
-		c.chrome(),
-		kicker("First run", colorAccent),
-		heading("Enroll this device"),
-		bodyText(enrollBody()),
-		form,
 	)
-	c.enrollContent = container.NewPadded(container.NewVScroll(body))
+
+	header := pageHeader("First run", colorAccent, "Enroll this device", enrollBody())
+	c.enrollContent = wizardPage(header, form, c.enrollBtn)
 	return c.enrollContent
 }
 

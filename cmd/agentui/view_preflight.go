@@ -3,35 +3,28 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
 func (c *console) buildPreflight() fyne.CanvasObject {
 	c.preflightBox = container.NewVBox()
-	c.preflightHint = widget.NewLabel("Each start re-checks the certificate, OS access, service, and offline spool. Start EDR Agent when every line is green. The sensor can run if the cloud is unreachable.")
+	c.preflightHint = widget.NewLabel("Each start re-checks the certificate, OS access, service, and offline spool. Start when every line is green. The sensor can run if the cloud is unreachable.")
 	c.preflightHint.Wrapping = fyne.TextWrapWord
 
-	c.startAgentBtn = widget.NewButtonWithIcon("Start EDR Agent", theme.MediaPlayIcon(), c.onStartAgent)
+	c.startAgentBtn = widget.NewButton("Start EDR Agent", c.onStartAgent)
 	c.startAgentBtn.Importance = widget.HighImportance
 	c.startAgentBtn.Disable()
 	c.preflightFaultBox = container.NewVBox()
 
-	recheck := widget.NewButtonWithIcon("Recheck", theme.ViewRefreshIcon(), func() {
+	recheck := widget.NewButton("Recheck", func() {
 		go c.runPreflight()
 	})
+	recheck.Importance = widget.MediumImportance
 
-	body := container.NewVBox(
-		c.chrome(),
-		kicker("Every launch", colorAccent),
-		heading("Ready to start"),
-		c.preflightHint,
-		card(c.preflightBox),
-		c.preflightFaultBox,
-		recheck,
-		c.startAgentBtn,
-	)
-	c.preflightContent = container.NewPadded(container.NewVScroll(body))
+	header := pageHeader("Every launch", colorAccent, "Ready to start", "")
+	header = container.NewVBox(header, c.preflightHint)
+	foot := container.NewVBox(c.preflightFaultBox, recheck, c.startAgentBtn)
+	c.preflightContent = wizardPage(header, card(c.preflightBox), foot)
 	return c.preflightContent
 }
 
@@ -42,7 +35,7 @@ func (c *console) renderPreflight() {
 		if it.State != checkOK {
 			allOK = false
 		}
-		c.preflightBox.Add(preflightRow(it))
+		c.preflightBox.Add(listRow(statusMark(it.State), it.Title, it.Detail, false))
 	}
 	c.preflightBox.Refresh()
 	c.checksOK = allOK
@@ -52,19 +45,6 @@ func (c *console) renderPreflight() {
 	} else {
 		c.startAgentBtn.Disable()
 	}
-}
-
-func preflightRow(it preflightItem) fyne.CanvasObject {
-	_, ico := checkVisual(it.State)
-	title := widget.NewLabel(it.Title)
-	title.Wrapping = fyne.TextWrapWord
-	detail := widget.NewLabel(it.Detail)
-	detail.Wrapping = fyne.TextWrapWord
-	detail.Importance = widget.LowImportance
-	if it.Detail == "" {
-		detail.Hide()
-	}
-	return container.NewPadded(container.NewBorder(nil, nil, widget.NewIcon(ico), nil, container.NewVBox(title, detail)))
 }
 
 func (c *console) runPreflight() {

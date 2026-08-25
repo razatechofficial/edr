@@ -13,35 +13,31 @@ func (c *console) buildReceipt() fyne.CanvasObject {
 	c.receiptContinue = widget.NewButton("Continue", c.onReceiptContinue)
 	c.receiptContinue.Importance = widget.HighImportance
 
-	body := container.NewVBox(
-		c.chrome(),
-		kicker("Device enrolled", colorOK),
-		heading("Identity bound"),
-		bodyText("The private key stayed on this computer. The signed certificate is this device’s identity."),
-		card(c.receiptBox),
+	header := pageHeader("Device enrolled", colorOK, "Identity bound",
+		"The private key stayed on this computer. The signed certificate is this device’s identity.")
+	foot := container.NewVBox(
 		bodyText("Same fields as a Keychain or certificate-store receipt. Register already stored ingest."),
 		c.receiptContinue,
 	)
-	c.receiptContent = container.NewPadded(container.NewVScroll(body))
+	c.receiptContent = wizardPage(header, card(c.receiptBox), foot)
 	return c.receiptContent
-}
-
-func receiptRow(label, value string) fyne.CanvasObject {
-	l := caption(label)
-	v := widget.NewLabel(value)
-	v.Wrapping = fyne.TextWrapWord
-	return container.NewVBox(l, v)
 }
 
 func (c *console) refreshReceipt() {
 	r := c.receipt
 	c.receiptBox.Objects = nil
-	c.receiptBox.Add(receiptRow("Device ID", dash(r.DeviceID)))
-	c.receiptBox.Add(receiptRow("Machine ID", dash(r.MachineID)))
-	c.receiptBox.Add(receiptRow("Issued by", dash(r.IssuedBy)))
-	c.receiptBox.Add(receiptRow("Valid until", dash(r.ValidUntil)))
-	c.receiptBox.Add(receiptRow("Stored in", dash(r.Storage)))
-	c.receiptBox.Add(receiptRow("Enrolled", dash(r.EnrolledAt)))
+	id := widget.NewLabel(dash(r.DeviceID))
+	id.Wrapping = fyne.TextWrapWord
+	id.TextStyle = fyne.TextStyle{Monospace: true, Bold: true}
+	c.receiptBox.Add(caption("Device ID"))
+	c.receiptBox.Add(id)
+	c.receiptBox.Add(kvCell("Machine ID", dash(r.MachineID)))
+	c.receiptBox.Add(container.NewGridWithColumns(2,
+		kvCell("Issued by", dash(r.IssuedBy)),
+		kvCell("Valid until", dash(r.ValidUntil)),
+		kvCell("Stored in", dash(r.Storage)),
+		kvCell("Enrolled", dash(r.EnrolledAt)),
+	))
 	c.receiptBox.Add(caption("Keystore receipt · ingest host not shown"))
 	c.receiptBox.Refresh()
 }

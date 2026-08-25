@@ -148,7 +148,7 @@ func (c *console) dismissToTray() {
 func (c *console) showPopover() {
 	c.screen = uistate.Dash
 	c.win.SetContent(c.dashContent)
-	c.win.Resize(fyne.NewSize(336, 500))
+	c.lockSize(popoverW, popoverH)
 	res := sampleResources(c.last)
 	c.applyDashboard(c.last, res)
 	c.refreshTray(c.last, res)

@@ -5,7 +5,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
@@ -19,6 +18,8 @@ func (c *console) buildSetup() fyne.CanvasObject {
 
 	eula := widget.NewLabel(eulaText)
 	eula.Wrapping = fyne.TextWrapWord
+	eulaScroll := container.NewVScroll(eula)
+	eulaScroll.SetMinSize(fyne.NewSize(0, 168))
 
 	c.setupAccept = widget.NewButton("Accept", c.onSetupAccept)
 	c.setupAccept.Importance = widget.HighImportance
@@ -42,21 +43,12 @@ func (c *console) buildSetup() fyne.CanvasObject {
 		bodyText("Required for host monitoring. This is not a “this user only” app."),
 	)
 
-	c.setupBody = container.NewVBox(
-		c.chrome(),
-		kicker("License agreement", colorAccent),
-		heading("Software license"),
-		c.setupHint,
-		card(eula),
-		card(per),
-		c.setupFaultBox,
-		c.setupSteps,
-		c.setupActions,
-		c.setupLaunch,
-		c.setupLaunchHint,
-		c.setupClose,
-	)
-	c.setupContent = container.NewPadded(container.NewVScroll(c.setupBody))
+	header := pageHeader("License agreement", colorAccent, "Software license", "")
+	header = container.NewVBox(header, c.setupHint)
+	body := container.NewVBox(card(eulaScroll), card(per), c.setupFaultBox, c.setupSteps)
+	foot := container.NewVBox(c.setupActions, c.setupLaunch, c.setupLaunchHint, c.setupClose)
+	c.setupBody = body
+	c.setupContent = wizardPage(header, body, foot)
 	return c.setupContent
 }
 
@@ -180,16 +172,16 @@ func (c *console) renderSetupSteps(active int, done, failed bool) {
 	c.setupSteps.Objects = nil
 	titles := setupStepTitles()
 	for i, title := range titles {
-		ico := theme.RadioButtonIcon()
+		st := checkWait
 		switch {
 		case failed && i == active:
-			ico = theme.ErrorIcon()
+			st = checkFail
 		case done || i < active:
-			ico = theme.ConfirmIcon()
+			st = checkOK
 		case i == active:
-			ico = theme.ViewRefreshIcon()
+			st = checkRun
 		}
-		c.setupSteps.Add(container.NewBorder(nil, nil, widget.NewIcon(ico), nil, widget.NewLabel(title)))
+		c.setupSteps.Add(listRow(statusMark(st), title, "", false))
 	}
 	c.setupSteps.Refresh()
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
@@ -13,7 +12,7 @@ func (c *console) buildPermissions() fyne.CanvasObject {
 	c.permHint = widget.NewLabel(permBody())
 	c.permHint.Wrapping = fyne.TextWrapWord
 
-	c.grantBtn = widget.NewButtonWithIcon(openSettingsLabel(), theme.SettingsIcon(), func() {
+	c.grantBtn = widget.NewButton(openSettingsLabel(), func() {
 		_ = openOSGrantSettings()
 		c.permHint.SetText("Open the system pane, grant access, then Recheck. Do not skip.")
 	})
@@ -39,19 +38,11 @@ func (c *console) buildPermissions() fyne.CanvasObject {
 	})
 	recheck.Importance = widget.HighImportance
 
-	guide := bodyText(permGuide())
-
-	body := container.NewVBox(
-		c.chrome(),
-		kicker("Required access", colorWarn),
-		heading("Grant OS access"),
-		c.permHint,
-		card(guide),
-		c.permFaultBox,
-		c.grantBtn,
-		recheck,
-	)
-	c.permContent = container.NewPadded(container.NewVScroll(body))
+	header := pageHeader("Required access", colorWarn, "Grant OS access", "")
+	header = container.NewVBox(header, c.permHint)
+	body := container.NewVBox(card(bodyText(permGuide())), c.permFaultBox)
+	foot := container.NewGridWithColumns(2, c.grantBtn, recheck)
+	c.permContent = wizardPage(header, body, foot)
 	return c.permContent
 }
 

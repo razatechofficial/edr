@@ -88,8 +88,8 @@ func runDashboard() error {
 
 	w := a.NewWindow(productName)
 	w.SetMaster()
-	w.Resize(fyne.NewSize(420, 680))
-	w.SetFixedSize(false)
+	w.Resize(fyne.NewSize(wizardW, wizardH))
+	w.SetFixedSize(true)
 	w.CenterOnScreen()
 
 	c := &console{app: a, win: w}
@@ -158,7 +158,7 @@ func (c *console) show(id uistate.Screen) {
 		c.showPopover()
 		return
 	}
-	c.win.Resize(fyne.NewSize(420, 680))
+	c.lockSize(wizardW, wizardH)
 	switch id {
 	case uistate.Setup:
 		c.win.SetContent(c.setupContent)
