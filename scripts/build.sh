@@ -64,8 +64,9 @@ build_darwin() {
 
 build_windows() {
     echo "==> Building Windows amd64"
-    build_binary windows amd64 ./cmd/agent edr-agent
-    build_binary windows amd64 ./cmd/cli   edrctl
+    build_binary windows amd64 ./cmd/agent     edr-agent
+    build_binary windows amd64 ./cmd/installer edr-installer
+    build_binary windows amd64 ./cmd/cli       edrctl
 }
 
 build_current() {

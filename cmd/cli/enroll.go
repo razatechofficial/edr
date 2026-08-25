@@ -82,6 +82,7 @@ Examples (same on Windows, macOS, and Linux; Windows may omit sudo):
 
 			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cancel()
+			defer xdrclient.ClearEnrollProgress(cfg.Agent.DataDir)
 
 			res, err := xdrclient.EnsureEnrolled(ctx, xdrclient.EnrollOptions{
 				Config:        cfg.XDR,
@@ -97,12 +98,12 @@ Examples (same on Windows, macOS, and Linux; Windows may omit sudo):
 				return err
 			}
 			if res.Fresh {
-				fmt.Printf("enrolled agent_id=%s secure_storage=%s ingest=%v cert_not_after=%s\n",
-					res.State.AgentID, res.State.SecureStorage, res.State.IngestHosts,
+				fmt.Printf("enrolled agent_id=%s machine_id=%s secure_storage=%s cert_not_after=%s\n",
+					res.State.AgentID, res.State.MachineID, res.State.SecureStorage,
 					res.State.CertNotAfter.Format(time.RFC3339))
 			} else {
-				fmt.Printf("credentials loaded agent_id=%s secure_storage=%s ingest=%v\n",
-					res.State.AgentID, res.State.SecureStorage, res.State.IngestHosts)
+				fmt.Printf("credentials loaded agent_id=%s secure_storage=%s\n",
+					res.State.AgentID, res.State.SecureStorage)
 			}
 			return nil
 		},

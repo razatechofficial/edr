@@ -12,8 +12,8 @@ import (
 func edrIcon() fyne.Resource {
 	const n = 64
 	img := image.NewNRGBA(image.Rect(0, 0, n, n))
-	fill := color.NRGBA{R: 0x2E, G: 0xE6, B: 0xD6, A: 0xFF}
-	core := color.NRGBA{R: 0x07, G: 0x11, B: 0x1A, A: 0xFF}
+	fill := color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0xFF}
+	core := color.NRGBA{R: 0x1C, G: 0x1C, B: 0x1E, A: 0xFF}
 	cx, cy := n/2, n/2
 	for y := 0; y < n; y++ {
 		for x := 0; x < n; x++ {

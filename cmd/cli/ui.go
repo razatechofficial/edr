@@ -78,12 +78,17 @@ type operatorStatus struct {
 	Service    string              `json:"service"`
 	Enrolled   bool                `json:"enrolled"`
 	AgentID    string              `json:"agent_id,omitempty"`
+	MachineID  string              `json:"machine_id,omitempty"`
 	Ingest     string              `json:"ingest,omitempty"`
 	Runtime    string              `json:"runtime,omitempty"`
 	Version    string              `json:"version,omitempty"`
 	Uptime     string              `json:"uptime,omitempty"`
 	Detections uint64              `json:"detections"`
 	EventsProc uint64              `json:"events_processed,omitempty"`
+	Blocks     uint64              `json:"blocks,omitempty"`
+	RulesCount int                 `json:"rules_count,omitempty"`
+	SpoolBytes int64               `json:"spool_bytes,omitempty"`
+	CertExpiry string              `json:"cert_not_after,omitempty"`
 	CPUPercent float64             `json:"cpu_percent,omitempty"`
 	MemoryMB   float64             `json:"memory_mb,omitempty"`
 	Isolated   bool                `json:"isolated"`
@@ -100,6 +105,9 @@ func collectOperatorStatus(probeHosts bool) operatorStatus {
 		UpdatedAt:  time.Now().Format(time.RFC3339),
 	}
 	st.Enrolled, st.AgentID, st.Ingest = enrollmentSnapshot()
+	st.MachineID, st.CertExpiry = enrollmentIdentity()
+	st.SpoolBytes = dirSize(filepath.Join(peekDataDir(), "telemetry-queue"))
+	st.Blocks = countFiles(filepath.Join(peekDataDir(), "quarantine"))
 
 	body, err := agentRequest("GET", "/api/v1/status", nil)
 	if err == nil {
@@ -113,6 +121,7 @@ func collectOperatorStatus(probeHosts bool) operatorStatus {
 			CPUPercent float64 `json:"cpu_percent"`
 			MemoryMB   float64 `json:"memory_mb"`
 			EventsProc uint64  `json:"events_processed"`
+			RulesCount int     `json:"rules_count"`
 		}
 		if json.Unmarshal(body, &status) == nil {
 			st.Runtime = status.Status
@@ -123,6 +132,7 @@ func collectOperatorStatus(probeHosts bool) operatorStatus {
 			st.CPUPercent = status.CPUPercent
 			st.MemoryMB = status.MemoryMB
 			st.EventsProc = status.EventsProc
+			st.RulesCount = status.RulesCount
 		}
 	}
 
@@ -212,8 +222,64 @@ func emptyDash(s string) string {
 }
 
 type enrollMeta struct {
-	AgentID     string   `json:"agent_id"`
-	IngestHosts []string `json:"ingest_hosts"`
+	AgentID        string    `json:"agent_id"`
+	MachineID      string    `json:"machine_id"`
+	IngestHosts    []string  `json:"ingest_hosts"`
+	CertNotAfter   time.Time `json:"cert_not_after"`
+	SecureStorage  string    `json:"secure_storage"`
+}
+
+func peekDataDir() string {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return ""
+	}
+	var peek yamlConfigPeek
+	_ = yaml.Unmarshal(data, &peek)
+	return peek.Agent.DataDir
+}
+
+func enrollmentIdentity() (machineID, certExpiry string) {
+	dir := peekDataDir()
+	if dir == "" {
+		return "", ""
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "xdr-tls", "enrollment.json"))
+	if err != nil {
+		return "", ""
+	}
+	var meta enrollMeta
+	if json.Unmarshal(raw, &meta) != nil {
+		return "", ""
+	}
+	if !meta.CertNotAfter.IsZero() {
+		certExpiry = meta.CertNotAfter.UTC().Format(time.RFC3339)
+	}
+	return meta.MachineID, certExpiry
+}
+
+func dirSize(root string) int64 {
+	var n int64
+	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		n += info.Size()
+		return nil
+	})
+	return n
+}
+
+func countFiles(root string) uint64 {
+	var n uint64
+	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		n++
+		return nil
+	})
+	return n
 }
 
 func enrollmentSnapshot() (enrolled bool, agentID, ingest string) {

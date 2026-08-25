@@ -36,8 +36,10 @@ fi
 
 GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o bin/edr-agent-windows-amd64.exe ./cmd/agent
 GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o bin/edrctl-windows-amd64.exe ./cmd/cli
+GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o bin/edr-installer-windows-amd64.exe ./cmd/installer
 GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
 GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o dist/windows-amd64/edrctl.exe ./cmd/cli
+GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o dist/windows-amd64/edr-installer.exe ./cmd/installer
 # Console does not scan; do not inherit agent YARA CGO flags or -tags.
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o bin/edr-agent-ui-windows-amd64.exe ./cmd/agentui

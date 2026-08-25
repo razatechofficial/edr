@@ -5,8 +5,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
-
-	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 )
 
 func (c *console) hasTray() bool {
@@ -21,20 +19,21 @@ func (c *console) setupTray() {
 	}
 	c.trayStatus = fyne.NewMenuItem("Status: …", nil)
 	c.trayStatus.Disabled = true
-	c.trayDetail = fyne.NewMenuItem("Threats —", nil)
+	c.trayDetail = fyne.NewMenuItem("Sensor · Stream", nil)
 	c.trayDetail.Disabled = true
 	c.trayRes = fyne.NewMenuItem("Resources —", nil)
 	c.trayRes.Disabled = true
 	open := fyne.NewMenuItem("Open", func() {
-		c.win.Show()
+		c.showPopover()
 	})
 	quit := fyne.NewMenuItem("Quit", func() { c.app.Quit() })
-	c.trayMenu = fyne.NewMenu("EDR Agent",
+	c.trayMenu = fyne.NewMenu(productName,
+		open,
+		fyne.NewMenuItemSeparator(),
 		c.trayStatus,
 		c.trayDetail,
 		c.trayRes,
 		fyne.NewMenuItemSeparator(),
-		open,
 		quit,
 	)
 	desk.SetSystemTrayMenu(c.trayMenu)
@@ -45,10 +44,12 @@ func (c *console) refreshTray(st operatorStatus, res resourceSnapshot) {
 	if c.trayMenu == nil {
 		return
 	}
-	k := uistate.ClassifyHealth(st.Enrolled, serviceHealthy(st.Service), st.ControlAPI == "ok", st.Isolated)
-	title, sub := uistate.HealthCopy(k)
-	c.trayStatus.Label = title + " · " + sub
-	c.trayDetail.Label = fmt.Sprintf("Threats %d · Handled %d", st.Detections, st.EventsProc)
-	c.trayRes.Label = fmt.Sprintf("CPU %.0f%% sys / %.1f%% agent · RAM %s", res.SysCPU, res.AgentCPU, formatBytesGB(res.SysMemUsed))
+	_, lamps := decorateHealth(st)
+	c.trayStatus.Label = lamps.Title
+	c.trayDetail.Label = fmt.Sprintf("Sensor %s · Stream %s", lamps.Sensor, lamps.Stream)
+	if lamps.Banner != "" {
+		c.trayDetail.Label = lamps.Banner
+	}
+	c.trayRes.Label = fmt.Sprintf("CPU %.1f%% agent · RAM %.0f MB", res.AgentCPU, res.AgentMemMB)
 	c.trayMenu.Refresh()
 }

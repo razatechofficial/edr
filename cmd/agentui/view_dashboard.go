@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -12,167 +13,166 @@ import (
 )
 
 func (c *console) buildDashboard() fyne.CanvasObject {
-	c.healthDot = canvas.NewCircle(colorOK)
-	c.healthDot.StrokeWidth = 0
-	c.healthTitle = canvas.NewText("SECURE", colorOK)
-	c.healthTitle.TextSize = 28
+	c.healthTitle = canvas.NewText("Protected", colorOK)
+	c.healthTitle.TextSize = 24
 	c.healthTitle.TextStyle = fyne.TextStyle{Bold: true}
-	c.healthTitle.Alignment = fyne.TextAlignCenter
-	c.healthSub = widget.NewLabel("SYSTEM PROTECTED")
-	c.healthSub.Alignment = fyne.TextAlignCenter
 
-	c.monitorCheck = widget.NewCheck("Active monitoring", c.onMonitorToggle)
-	c.streamHint = widget.NewLabel("Real-time threat detection is active.")
-	c.streamHint.Wrapping = fyne.TextWrapWord
+	c.sensorLamp = widget.NewLabel("Sensor —")
+	c.streamLamp = widget.NewLabel("Stream —")
+	c.healthSub = widget.NewLabel("")
+	c.healthSub.Wrapping = fyne.TextWrapWord
 
-	c.threatsVal = canvas.NewText("0", colorPink)
-	c.threatsVal.TextSize = 28
-	c.threatsVal.TextStyle = fyne.TextStyle{Bold: true}
-	c.handledVal = canvas.NewText("0", colorOK)
-	c.handledVal.TextSize = 28
-	c.handledVal.TextStyle = fyne.TextStyle{Bold: true}
+	c.cpuAgent = widget.NewLabel("—")
+	c.ramAgent = widget.NewLabel("—")
+	c.eventsVal = widget.NewLabel("—")
+	c.threatsVal = widget.NewLabel("—")
+	c.blocksVal = widget.NewLabel("—")
+	c.uptimeVal = widget.NewLabel("—")
+	c.agentLine = widget.NewLabel("")
+	c.agentLine.TextStyle = fyne.TextStyle{Monospace: true}
 
-	c.cpuBar = widget.NewProgressBar()
-	c.cpuSys = widget.NewLabel("System  —")
-	c.cpuAgent = widget.NewLabel("Agent   —")
-	c.ramBar = widget.NewProgressBar()
-	c.ramSys = widget.NewLabel("System  —")
-	c.ramAgent = widget.NewLabel("Agent   —")
-	c.uptimeVal = widget.NewLabel("Uptime —")
-	c.agentLine = widget.NewLabel("Agent ID —")
-	c.agentLine.Wrapping = fyne.TextWrapWord
-	c.uptimeVal.Wrapping = fyne.TextWrapWord
+	c.cpuSpark = container.NewHBox()
+	c.cpuHist = make([]float64, 0, 12)
 
-	statusCard := card(container.NewVBox(
-		caption("SYSTEM STATUS"),
-		container.NewCenter(container.NewHBox(
-			container.NewGridWrap(fyne.NewSize(12, 12), c.healthDot),
-			c.healthTitle,
-		)),
+	status := card(container.NewVBox(
+		c.healthTitle,
+		container.NewHBox(c.sensorLamp, widget.NewLabel("·"), c.streamLamp),
 		c.healthSub,
-		c.uptimeVal,
-		c.agentLine,
 	))
-
-	metrics := container.NewGridWithColumns(2,
-		accentCard(colorPink, container.NewVBox(caption("THREATS"), c.threatsVal)),
-		accentCard(colorOK, container.NewVBox(caption("HANDLED"), c.handledVal)),
+	res := container.NewGridWithColumns(2,
+		card(container.NewVBox(caption("Agent CPU"), c.cpuAgent, c.cpuSpark)),
+		card(container.NewVBox(caption("Agent RAM"), c.ramAgent)),
 	)
-	cpuCard := card(container.NewVBox(
-		caption("CPU  SYSTEM vs AGENT"),
-		c.cpuSys,
-		c.cpuAgent,
-		c.cpuBar,
+	counts := card(container.NewGridWithColumns(3,
+		container.NewVBox(caption("Events"), c.eventsVal),
+		container.NewVBox(caption("Threats"), c.threatsVal),
+		container.NewVBox(caption("Blocked"), c.blocksVal),
 	))
-	ramCard := card(container.NewVBox(
-		caption("MEMORY  SYSTEM vs AGENT"),
-		c.ramSys,
-		c.ramAgent,
-		c.ramBar,
-	))
-	monitor := card(container.NewBorder(nil, nil, nil, c.monitorCheck, container.NewVBox(
-		widget.NewLabelWithStyle("Active monitoring", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		c.streamHint,
-	)))
+	foot := container.NewBorder(nil, nil, c.uptimeVal, c.agentLine, nil)
 
-	body := container.NewVBox(
-		c.chrome(container.NewHBox(c.settingsButton())),
-		stepLabel(3, 3, "Protection"),
-		statusCard,
-		metrics,
-		cpuCard,
-		ramCard,
-		monitor,
-	)
-	c.dashContent = container.NewPadded(container.NewVScroll(body))
+	body := container.NewVBox(status, res, counts, foot)
+	c.dashContent = container.NewPadded(body)
 	return c.dashContent
 }
 
 func (c *console) applyDashboard(st operatorStatus, res resourceSnapshot) {
-	k := uistate.ClassifyHealth(st.Enrolled, serviceHealthy(st.Service), st.ControlAPI == "ok", st.Isolated)
-	title, sub := uistate.HealthCopy(k)
+	k, lamps := decorateHealth(st)
+
 	col := colorMuted
 	switch k {
-	case uistate.Secure:
+	case uistate.Protected:
 		col = colorOK
 	case uistate.Contained:
 		col = colorDanger
 	case uistate.Degraded:
 		col = colorWarn
+	case uistate.Unprotected:
+		col = colorDanger
 	}
-	c.healthTitle.Text = title
+	c.healthTitle.Text = lamps.Title
 	c.healthTitle.Color = col
 	c.healthTitle.Refresh()
-	c.healthDot.FillColor = col
-	c.healthDot.Refresh()
-	c.healthSub.SetText(sub)
-	c.threatsVal.Text = fmt.Sprintf("%d", st.Detections)
-	c.threatsVal.Refresh()
-	c.handledVal.Text = fmt.Sprintf("%d", st.EventsProc)
-	c.handledVal.Refresh()
-	c.uptimeVal.SetText("Uptime  " + dash(st.Uptime))
+	c.sensorLamp.SetText("Sensor " + lamps.Sensor)
+	c.streamLamp.SetText("Stream " + lamps.Stream)
+	if lamps.Banner != "" {
+		c.healthSub.SetText(lamps.Banner)
+		c.healthSub.Show()
+	} else {
+		c.healthSub.SetText("")
+		c.healthSub.Hide()
+	}
+
+	stopped := !serviceHealthy(st.Service)
+	if stopped {
+		c.cpuAgent.SetText("0.0%  ·  Sensor idle")
+		c.ramAgent.SetText(fmt.Sprintf("%.0f MB", res.AgentMemMB))
+		c.eventsVal.SetText("—")
+		c.threatsVal.SetText("—")
+		c.blocksVal.SetText("—")
+		c.uptimeVal.SetText("—")
+	} else {
+		c.cpuAgent.SetText(fmt.Sprintf("%.1f%%  ·  System %.0f%%", res.AgentCPU, res.SysCPU))
+		c.ramAgent.SetText(fmt.Sprintf("%.0f MB  ·  %s", res.AgentMemMB, formatBytesGB(res.SysMemTot)))
+		c.eventsVal.SetText(fmt.Sprintf("%d", st.EventsProc))
+		c.threatsVal.SetText(fmt.Sprintf("%d", st.Detections))
+		c.blocksVal.SetText(fmt.Sprintf("%d", st.Blocks))
+		rules := "Rules —"
+		if st.RulesCount > 0 {
+			rules = fmt.Sprintf("Rules %d", st.RulesCount)
+		}
+		c.uptimeVal.SetText(fmt.Sprintf("%s · %s", dash(st.Uptime), rules))
+	}
+	c.pushCPU(res.AgentCPU, stopped)
 	id := dash(st.AgentID)
-	if st.Ingest != "" {
-		id += "\nIngest  " + st.Ingest
+	if len(id) > 12 {
+		id = id[:12]
 	}
-	c.agentLine.SetText("Agent   " + id)
-
-	c.cpuSys.SetText(fmt.Sprintf("System  %.0f%%", res.SysCPU))
-	c.cpuAgent.SetText(fmt.Sprintf("Agent   %.1f%%", res.AgentCPU))
-	c.cpuBar.SetValue(clamp01(res.SysCPU / 100))
-	if res.SysMemTot > 0 {
-		c.ramSys.SetText(fmt.Sprintf("System  %s / %s", formatBytesGB(res.SysMemUsed), formatBytesGB(res.SysMemTot)))
-		c.ramBar.SetValue(float64(res.SysMemUsed) / float64(res.SysMemTot))
-	} else {
-		c.ramSys.SetText("System  —")
-	}
-	c.ramAgent.SetText(fmt.Sprintf("Agent   %.0f MB", res.AgentMemMB))
-
-	on := serviceHealthy(st.Service)
-	c.ignoreMonitor = true
-	c.monitorCheck.SetChecked(on)
-	c.ignoreMonitor = false
-	if on {
-		c.streamHint.SetText("Real-time threat detection is active.")
-	} else {
-		c.streamHint.SetText("Start streaming to send telemetry to XDR.")
-	}
+	c.agentLine.SetText(id)
 }
 
-func (c *console) onMonitorToggle(on bool) {
-	if c.ignoreMonitor || c.busy {
-		c.ignoreMonitor = false
+func (c *console) pushCPU(pct float64, stopped bool) {
+	if stopped {
+		pct = 0
+	}
+	c.cpuHist = append(c.cpuHist, pct)
+	if len(c.cpuHist) > 12 {
+		c.cpuHist = c.cpuHist[len(c.cpuHist)-12:]
+	}
+	if c.cpuSpark == nil {
 		return
 	}
-	c.setBusy(true)
-	go func() {
-		var out string
-		var err error
-		if on {
-			out, err = runEdrctlPrivileged("start")
-		} else {
-			out, err = runEdrctlPrivileged("stop")
+	c.cpuSpark.Objects = nil
+	max := 1.0
+	for _, v := range c.cpuHist {
+		if v > max {
+			max = v
 		}
-		st := loadStatus()
-		res := sampleResources(st)
-		fyne.Do(func() {
-			c.setBusy(false)
-			c.last = st
-			c.applyDashboard(st, res)
-			c.refreshTray(st, res)
-			if err != nil {
-				c.streamHint.SetText(clipErr(out))
-			}
-		})
-	}()
+	}
+	for _, v := range c.cpuHist {
+		h := float32(6 + (v/max)*18)
+		bar := canvas.NewRectangle(colorCyan)
+		bar.CornerRadius = 1
+		bar.SetMinSize(fyne.NewSize(7, h))
+		c.cpuSpark.Add(bar)
+	}
+	c.cpuSpark.Refresh()
 }
 
-func clamp01(v float64) float64 {
-	if v < 0 {
-		return 0
+func (c *console) dismissToTray() {
+	c.showPopover()
+	if c.hasTray() {
+		c.win.Hide()
 	}
-	if v > 1 {
-		return 1
+}
+
+func (c *console) showPopover() {
+	c.screen = uistate.Dash
+	c.win.SetContent(c.dashContent)
+	c.win.Resize(fyne.NewSize(336, 500))
+	res := sampleResources(c.last)
+	c.applyDashboard(c.last, res)
+	c.refreshTray(c.last, res)
+	c.win.Show()
+}
+
+func formatBytesMB(n int64) string {
+	if n < 1024*1024 {
+		return fmt.Sprintf("%d KB", n/1024)
 	}
-	return v
+	return fmt.Sprintf("%.0f MB", float64(n)/(1024*1024))
+}
+
+func certExpiring(rfc3339 string) (bool, int) {
+	if rfc3339 == "" {
+		return false, 0
+	}
+	t, err := time.Parse(time.RFC3339, rfc3339)
+	if err != nil {
+		return false, 0
+	}
+	d := int(time.Until(t).Hours() / 24)
+	if d >= 0 && d <= 7 {
+		return true, d
+	}
+	return false, d
 }

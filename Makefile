@@ -136,6 +136,7 @@ build-windows:
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-windows-amd64.exe ./cmd/agent
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-windows-amd64.exe ./cmd/cli
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o $(BIN_DIR)/edr-agent-ui-windows-amd64.exe ./cmd/agentui
+	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-installer-windows-amd64.exe ./cmd/installer
 	@mkdir -p dist/windows-amd64
 ifeq ($(WINDOWS_CGO),1)
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
@@ -143,6 +144,7 @@ else
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
 endif
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edrctl.exe ./cmd/cli
+	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-installer.exe ./cmd/installer
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui
 
 build-darwin-production:

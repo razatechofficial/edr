@@ -102,6 +102,12 @@
               Name="edr-agent-ui.exe"
               KeyPath="yes"/>
       </Component>
+      <Component Id="cmpEdrInstallerExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="EdrInstallerExe"
+              Source="$(var.EdrInstallerExe)"
+              Name="edr-installer.exe"
+              KeyPath="yes"/>
+      </Component>
       <Component Id="cmpEdrAliasExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="EdrAliasExe"
               Source="$(var.EdrCtlExe)"

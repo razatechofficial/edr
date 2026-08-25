@@ -7,20 +7,21 @@ import (
 	"fyne.io/fyne/v2/theme"
 )
 
+// Native host chrome — system dark, not the XDR console (no mint, no pink).
 var (
-	colorBg     = color.NRGBA{R: 0x07, G: 0x11, B: 0x1A, A: 0xFF}
-	colorCard   = color.NRGBA{R: 0x0E, G: 0x1A, B: 0x26, A: 0xFF}
-	colorInput  = color.NRGBA{R: 0x12, G: 0x22, B: 0x30, A: 0xFF}
-	colorCyan   = color.NRGBA{R: 0x2E, G: 0xE6, B: 0xD6, A: 0xFF}
-	colorText   = color.NRGBA{R: 0xE8, G: 0xF1, B: 0xF8, A: 0xFF}
-	colorMuted  = color.NRGBA{R: 0x8B, G: 0xA0, B: 0xB3, A: 0xFF}
-	colorOK     = color.NRGBA{R: 0x3D, G: 0xDC, B: 0x82, A: 0xFF}
-	colorWarn   = color.NRGBA{R: 0xF5, G: 0xA5, B: 0x24, A: 0xFF}
-	colorDanger = color.NRGBA{R: 0xFF, G: 0x6B, B: 0x4A, A: 0xFF}
-	colorOnCyan = color.NRGBA{R: 0x07, G: 0x11, B: 0x1A, A: 0xFF}
-	colorHover  = color.NRGBA{R: 0x16, G: 0x2C, B: 0x3C, A: 0xFF}
-	colorSep    = color.NRGBA{R: 0x1C, G: 0x32, B: 0x44, A: 0xFF}
-	colorPink   = color.NRGBA{R: 0xFF, G: 0x6B, B: 0x9A, A: 0xFF}
+	colorBg       = color.NRGBA{R: 0x1C, G: 0x1C, B: 0x1E, A: 0xFF}
+	colorCard     = color.NRGBA{R: 0x2C, G: 0x2C, B: 0x2E, A: 0xFF}
+	colorInput    = color.NRGBA{R: 0x3A, G: 0x3A, B: 0x3C, A: 0xFF}
+	colorAccent   = color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0xFF}
+	colorText     = color.NRGBA{R: 0xF5, G: 0xF5, B: 0xF7, A: 0xFF}
+	colorMuted    = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF}
+	colorOK       = color.NRGBA{R: 0x32, G: 0xD7, B: 0x4B, A: 0xFF}
+	colorWarn     = color.NRGBA{R: 0xFF, G: 0xD6, B: 0x0A, A: 0xFF}
+	colorDanger   = color.NRGBA{R: 0xFF, G: 0x45, B: 0x3A, A: 0xFF}
+	colorOnAccent = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+	colorHover    = color.NRGBA{R: 0x3A, G: 0x3A, B: 0x3C, A: 0xFF}
+	colorSep      = color.NRGBA{R: 0x48, G: 0x48, B: 0x4A, A: 0xFF}
+	colorCyan     = color.NRGBA{R: 0x5A, G: 0xC8, B: 0xFF, A: 0xFF}
 )
 
 type edrTheme struct{}
@@ -40,9 +41,9 @@ func (edrTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color
 	case theme.ColorNameDisabledButton:
 		return colorCard
 	case theme.ColorNamePrimary, theme.ColorNameHyperlink:
-		return colorCyan
+		return colorAccent
 	case theme.ColorNameForegroundOnPrimary:
-		return colorOnCyan
+		return colorOnAccent
 	case theme.ColorNameSuccess:
 		return colorOK
 	case theme.ColorNameError:
@@ -50,11 +51,11 @@ func (edrTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color
 	case theme.ColorNameWarning:
 		return colorWarn
 	case theme.ColorNameFocus:
-		return colorCyan
+		return colorAccent
 	case theme.ColorNameHover, theme.ColorNamePressed:
 		return colorHover
 	case theme.ColorNameSelection:
-		return color.NRGBA{R: 0x2E, G: 0xE6, B: 0xD6, A: 0x40}
+		return color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0x40}
 	case theme.ColorNameSeparator, theme.ColorNameShadow:
 		return colorSep
 	case theme.ColorNameInputBorder:

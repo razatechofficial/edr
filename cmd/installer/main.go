@@ -41,13 +41,17 @@ var (
 	flagEnroll              bool
 	flagDelayEnroll         bool
 	flagEnrollmentInsecure  bool
+	flagNoStart             bool
 )
 
 func main() {
 	root := &cobra.Command{
 		Use:   "edr-installer",
 		Short: "EDR agent installer and service manager",
-		Long:  "Cross-platform installer that deploys the EDR agent binary, generates initial configuration, creates data directories, and registers the platform service.",
+		Long: `Attended (Windows/macOS): run with no arguments to open the EDR Agent setup wizard (EULA → copy files → Launch). Linux prints a terminal license prompt.
+
+Silent fleet: edr-installer install [--enrollment-token TOKEN]
+The sensor is not started in the attended wizard (--no-start). First-run enrollment happens after Launch.`,
 		CompletionOptions: cobra.CompletionOptions{
 			DisableDefaultCmd: true,
 		},
@@ -81,6 +85,7 @@ Use --config only if you must supply a custom YAML instead of the generated ente
 	installCmd.Flags().BoolVar(&flagEnroll, "enroll", true, "run XDR enrollment after install when token+host are present")
 	installCmd.Flags().BoolVar(&flagDelayEnroll, "delay-enroll", false, "install token sidecar only; agent enrolls on first start")
 	installCmd.Flags().BoolVar(&flagEnrollmentInsecure, "enrollment-insecure", false, "insecure gRPC to enrollment (lab/dev)")
+	installCmd.Flags().BoolVar(&flagNoStart, "no-start", false, "register the service but do not start the sensor (attended first-run)")
 
 	uninstallCmd := &cobra.Command{
 		Use:   "uninstall",
@@ -98,7 +103,14 @@ Use --config only if you must supply a custom YAML instead of the generated ente
 		},
 	}
 
-	root.AddCommand(installCmd, uninstallCmd, versionCmd)
+	wizardCmd := &cobra.Command{
+		Use:   "wizard",
+		Short: "Attended installer (EULA + files, then Launch)",
+		RunE:  runAttendedEntry,
+	}
+
+	root.RunE = runAttendedEntry
+	root.AddCommand(installCmd, uninstallCmd, versionCmd, wizardCmd)
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -166,6 +178,12 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			} else {
 				fmt.Printf("    %s -> %s\n", edrctlSrc, aliasDst)
 			}
+		}
+	}
+
+	if uiSrc := findAgentUIBinary(&paths); uiSrc != "" {
+		if err := deployAgentUI(uiSrc, paths); err != nil {
+			fmt.Printf("    warning: could not deploy EDR Agent UI: %v\n", err)
 		}
 	}
 
@@ -797,6 +815,10 @@ func installSystemd(agentBin, configPath string, paths installPaths) error {
 	if err := runCmd("systemctl", "enable", "edr-agent"); err != nil {
 		return fmt.Errorf("systemctl enable: %w", err)
 	}
+	if flagNoStart {
+		fmt.Println("    service enabled (not started; --no-start)")
+		return nil
+	}
 	if err := runCmd("systemctl", "start", "edr-agent"); err != nil {
 		return fmt.Errorf("systemctl start: %w", err)
 	}
@@ -912,6 +934,10 @@ func installWindowsService(agentBin, configPath string) error {
 		fmt.Printf("    warning: setting recovery: %v\n", err)
 	}
 
+	if flagNoStart {
+		fmt.Println("    Windows Service installed (not started; --no-start)")
+		return nil
+	}
 	if err := runCmd("sc", "start", "EDRAgent"); err != nil {
 		return fmt.Errorf("sc start: %w", err)
 	}

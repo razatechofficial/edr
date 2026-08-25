@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UI_BIN="${1:-}"
+CTL_BIN="${2:-}"
 APP_OUT="${3:-}"
 INFO_PLIST="${ROOT}/build/macos/Info-console.plist"
 ENTITLEMENTS="${ROOT}/build/macos/edr-console.entitlements.plist"
@@ -56,6 +57,11 @@ rm -rf "${APP_OUT}"
 mkdir -p "${APP_OUT}/Contents/MacOS"
 cp "${UI_BIN}" "${APP_OUT}/Contents/MacOS/edr-agent-ui"
 chmod 755 "${APP_OUT}/Contents/MacOS/edr-agent-ui"
+if [[ -n "${CTL_BIN}" && -f "${CTL_BIN}" ]]; then
+	cp "${CTL_BIN}" "${APP_OUT}/Contents/MacOS/edrctl"
+	chmod 755 "${APP_OUT}/Contents/MacOS/edrctl"
+	sign_target "${APP_OUT}/Contents/MacOS/edrctl"
+fi
 cp "${INFO_PLIST}" "${APP_OUT}/Contents/Info.plist"
 printf 'APPL????' > "${APP_OUT}/Contents/PkgInfo"
 sign_target "${APP_OUT}/Contents/MacOS/edr-agent-ui"

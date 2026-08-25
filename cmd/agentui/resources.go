@@ -8,8 +8,6 @@ import (
 	"github.com/razatechofficial/edr/internal/platform"
 )
 
-const requiredStorageBytes = 2 * 1024 * 1024 * 1024
-
 type resourceSnapshot struct {
 	SysCPU     float64
 	SysMemUsed uint64
@@ -51,16 +49,23 @@ func diskFreeBytes(path string) (uint64, error) {
 }
 
 func storageCheck() (ok bool, detail string) {
-	path := platform.DataDir()
-	free, err := diskFreeBytes(path)
-	if err != nil {
-		return false, "Could not measure free space on the data volume"
+	dir := filepath.Join(platform.DataDir(), "telemetry-queue")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return false, "Cannot create the offline event spool directory."
 	}
-	gb := float64(free) / float64(1<<30)
-	if free < requiredStorageBytes {
-		return false, fmt.Sprintf("%.1f GB free, 2.0 GB required", gb)
+	probe := filepath.Join(dir, ".write-test")
+	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
+		return false, "Offline event spool is not writable."
 	}
-	return true, fmt.Sprintf("%.1f GB available", gb)
+	_ = os.Remove(probe)
+	free, err := diskFreeBytes(dir)
+	if err == nil && free < 64*1024*1024 {
+		return false, fmt.Sprintf("Only %.0f MB free; spool needs room for offline events.", float64(free)/(1<<20))
+	}
+	if err == nil {
+		return true, fmt.Sprintf("Writable · %.1f GB free", float64(free)/float64(1<<30))
+	}
+	return true, "Spool directory is writable"
 }
 
 func formatBytesGB(n uint64) string {

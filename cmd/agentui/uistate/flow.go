@@ -1,58 +1,81 @@
 package uistate
 
-// Screen routing follows the standard EDR onboarding state machine:
-// not enrolled → enrollment → preflight → dashboard. Already-enrolled
-// devices skip to the dashboard unless a blocking permission check remains.
+// Screen routing: setup (attended installer) → token → identity → receipt
+// → OS grants → every-launch preflight → tray.
 
 type Screen int
 
 const (
 	Enroll Screen = iota
+	Identity
+	Receipt
+	Permissions
 	Preflight
 	Dash
+	Setup
 )
 
 type Health int
 
 const (
-	Offline Health = iota
+	Unprotected Health = iota
 	Degraded
 	Contained
-	Secure
+	Protected
 )
 
-func InitialScreen(enrolled, needsPreflight bool) Screen {
+func InitialScreen(installed, enrolled, needsGrants, serviceOK bool) Screen {
+	if !installed {
+		return Setup
+	}
 	if !enrolled {
 		return Enroll
 	}
-	if needsPreflight {
+	if needsGrants {
+		return Permissions
+	}
+	if !serviceOK {
 		return Preflight
 	}
 	return Dash
 }
 
-func ClassifyHealth(enrolled, serviceOK, apiOK, isolated bool) Health {
+// ClassifyHealth splits sensor (local monitoring) from stream (ingest).
+// A running sensor with a down stream is degraded, not unprotected (NIST SI-4).
+func ClassifyHealth(enrolled, serviceOK, streamOK, isolated bool) Health {
 	if isolated {
 		return Contained
 	}
 	if !enrolled || !serviceOK {
-		return Offline
+		return Unprotected
 	}
-	if !apiOK {
+	if !streamOK {
 		return Degraded
 	}
-	return Secure
+	return Protected
 }
 
-func HealthCopy(k Health) (title, subtitle string) {
+type Lamps struct {
+	Title  string
+	Sensor string
+	Stream string
+	Banner string
+}
+
+func HealthCopy(k Health) Lamps {
 	switch k {
-	case Secure:
-		return "SECURE", "System protected"
+	case Protected:
+		return Lamps{Title: "Protected", Sensor: "Running", Stream: "Live"}
 	case Contained:
-		return "CONTAINED", "Host isolation is active"
+		return Lamps{Title: "Contained", Sensor: "Running", Stream: "Live", Banner: "Host isolation is active."}
 	case Degraded:
-		return "DEGRADED", "Sensor running without a control API"
+		return Lamps{
+			Title:  "On this device",
+			Sensor: "Running",
+			Stream: "Queued",
+			Banner: "Telemetry queued. Local detections continue.",
+		}
 	default:
-		return "OFFLINE", "Sensor is not streaming"
+		return Lamps{Title: "Unprotected", Sensor: "Stopped", Stream: "Idle", Banner: "This host is not monitored."}
 	}
 }

@@ -1,14 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"image/color"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -18,19 +15,9 @@ func card(obj fyne.CanvasObject) fyne.CanvasObject {
 	return container.NewStack(bg, container.NewPadded(obj))
 }
 
-func accentCard(accent color.Color, obj fyne.CanvasObject) fyne.CanvasObject {
-	bar := canvas.NewRectangle(accent)
-	bar.SetMinSize(fyne.NewSize(4, 1))
-	bg := canvas.NewRectangle(colorCard)
-	bg.CornerRadius = 12
-	inner := container.NewBorder(nil, nil, container.NewPadded(bar), nil, container.NewPadded(obj))
-	return container.NewStack(bg, inner)
-}
-
 func caption(s string) *canvas.Text {
 	t := canvas.NewText(s, colorMuted)
 	t.TextSize = 11
-	t.TextStyle = fyne.TextStyle{Monospace: true}
 	return t
 }
 
@@ -41,30 +28,27 @@ func heading(s string) *canvas.Text {
 	return t
 }
 
-func stepLabel(step, total int, title string) fyne.CanvasObject {
-	chip := canvas.NewText(fmt.Sprintf("STEP %d OF %d", step, total), colorCyan)
-	chip.TextSize = 11
-	chip.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
-	h := heading(title)
-	h.Alignment = fyne.TextAlignCenter
-	return container.NewVBox(container.NewCenter(chip), container.NewCenter(h))
+func kicker(s string, col color.Color) *canvas.Text {
+	t := canvas.NewText(s, col)
+	t.TextSize = 11
+	t.TextStyle = fyne.TextStyle{Bold: true}
+	return t
 }
 
-func (c *console) chrome(right fyne.CanvasObject) fyne.CanvasObject {
-	mark := canvas.NewText("EDR AGENT", colorCyan)
+func bodyText(s string) *widget.Label {
+	l := widget.NewLabel(s)
+	l.Wrapping = fyne.TextWrapWord
+	l.Importance = widget.LowImportance
+	return l
+}
+
+func (c *console) chrome() fyne.CanvasObject {
+	mark := canvas.NewText(productName, colorText)
 	mark.TextSize = 14
-	mark.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
-	left := container.NewHBox(widget.NewIcon(c.app.Icon()), mark)
-	if right == nil {
-		right = layout.NewSpacer()
-	}
-	return container.NewBorder(nil, nil, left, right, layout.NewSpacer())
-}
-
-func (c *console) settingsButton() *widget.Button {
-	btn := widget.NewButtonWithIcon("", theme.SettingsIcon(), c.showSettings)
-	btn.Importance = widget.LowImportance
-	return btn
+	mark.TextStyle = fyne.TextStyle{Bold: true}
+	ver := canvas.NewText("Version "+productVersion, colorMuted)
+	ver.TextSize = 11
+	return container.NewVBox(mark, ver)
 }
 
 func fieldWithIcon(icon fyne.Resource, entry fyne.CanvasObject) fyne.CanvasObject {
@@ -73,4 +57,25 @@ func fieldWithIcon(icon fyne.Resource, entry fyne.CanvasObject) fyne.CanvasObjec
 	ico := widget.NewIcon(icon)
 	row := container.NewBorder(nil, nil, container.NewPadded(ico), nil, entry)
 	return container.NewStack(bg, container.NewPadded(row))
+}
+
+func faultCard(f uiFault) fyne.CanvasObject {
+	if f.Title == "" {
+		return widget.NewLabel("")
+	}
+	title := widget.NewLabelWithStyle(f.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	title.Wrapping = fyne.TextWrapWord
+	body := widget.NewLabel(f.Body)
+	body.Wrapping = fyne.TextWrapWord
+	detail := widget.NewLabel(f.Detail)
+	detail.Wrapping = fyne.TextWrapWord
+	detail.Importance = widget.LowImportance
+	items := []fyne.CanvasObject{title, body, detail}
+	if f.Action != "" {
+		act := caption(f.Action)
+		items = append(items, act)
+	}
+	bg := canvas.NewRectangle(color.NRGBA{R: 0xFF, G: 0x45, B: 0x3A, A: 0x24})
+	bg.CornerRadius = 12
+	return container.NewStack(bg, container.NewPadded(container.NewVBox(items...)))
 }

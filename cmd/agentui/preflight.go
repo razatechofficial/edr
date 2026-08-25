@@ -2,14 +2,13 @@ package main
 
 import (
 	"fmt"
-	"net"
-	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
-	"github.com/razatechofficial/edr/internal/xdrclient"
+	"image/color"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
 )
 
 type checkState int
@@ -23,109 +22,86 @@ const (
 
 type preflightItem struct {
 	ID     string
-	Code   string
 	Title  string
 	Detail string
 	State  checkState
 }
 
-func (s checkState) Label() string {
-	switch s {
-	case checkOK:
-		return "OK"
-	case checkRun:
-		return "CHKG"
-	case checkFail:
-		return "FAIL"
-	default:
-		return "WAIT"
-	}
-}
-
-func probeTCP(host string, timeout time.Duration) error {
-	h := strings.TrimSpace(host)
-	if h == "" {
-		h = xdrclient.DefaultEnrollmentHost
-	}
-	if _, _, err := net.SplitHostPort(h); err != nil {
-		h = net.JoinHostPort(h, "443")
-	}
-	c, err := net.DialTimeout("tcp", h, timeout)
-	if err != nil {
-		return err
-	}
-	return c.Close()
-}
-
-func adminCheck() (ok bool, detail string) {
-	switch runtime.GOOS {
-	case "windows":
-		if processIsAdmin() {
-			return true, "Administrator token present"
-		}
-		return false, "Start EDR Agent from an elevated session"
-	case "darwin":
-		return true, "macOS will prompt for administrator to start the sensor"
-	default:
-		if os.Geteuid() == 0 {
-			return true, "Running as root"
-		}
-		if _, err := exec.LookPath("pkexec"); err == nil {
-			return true, "PolicyKit will prompt for administrator"
-		}
-		return false, "Administrator privileges are required"
-	}
-}
-
-func networkCheck(host string) (ok bool, detail string) {
-	h := strings.TrimSpace(host)
-	if h == "" {
-		h = xdrclient.DefaultEnrollmentHost
-	}
-	if err := probeTCP(h, 3*time.Second); err != nil {
-		return false, fmt.Sprintf("%s unreachable (%v)", h, err)
-	}
-	ingest := xdrclient.DefaultIngestHost
-	if err := probeTCP(ingest, 3*time.Second); err != nil {
-		return true, fmt.Sprintf("Enrollment reachable; ingest %s still blocked", ingest)
-	}
-	return true, "Enrollment and ingest hosts reachable"
-}
-
 func newPreflightItems() []preflightItem {
 	items := []preflightItem{
-		{ID: "net", Code: "SYS.NET_CONN", Title: "Network connectivity"},
-		{ID: "admin", Code: "SYS.ADMIN_PRV", Title: "Administrative access"},
+		{ID: "cert", Title: "Device certificate valid"},
 	}
-	if needsFullDiskAccess() {
-		items = append(items, preflightItem{
-			ID:    "fda",
-			Code:  "SYS.FDA",
-			Title: "Full Disk Access",
-		})
+	switch {
+	case isDarwin():
+		items = append(items, preflightItem{ID: "grants", Title: "OS permissions still granted"})
+	case isWindows():
+		items = append(items, preflightItem{ID: "grants", Title: "Firewall and service rights"})
+	default:
+		items = append(items, preflightItem{ID: "grants", Title: "Kernel and audit capabilities"})
 	}
-	items = append(items, preflightItem{
-		ID:    "disk",
-		Code:  "SYS.DSK_SPC",
-		Title: "Storage space (2 GB required)",
-	})
+	svc := "Sensor service registered"
+	if isWindows() {
+		svc = "EDRAgent service registered"
+	}
+	items = append(items,
+		preflightItem{ID: "svc", Title: svc},
+		preflightItem{ID: "spool", Title: "Local event spool writable"},
+	)
 	return items
 }
 
-func runOneCheck(id, host string) (ok bool, detail string) {
+func runOneCheck(id string, st operatorStatus) (ok bool, detail string) {
 	switch id {
-	case "net":
-		return networkCheck(host)
-	case "admin":
-		return adminCheck()
-	case "fda":
-		if hasFullDiskAccess() {
-			return true, "Full Disk Access is granted"
+	case "cert":
+		if !st.Enrolled {
+			return false, "This host is not enrolled. Return to Enroll with a new token."
 		}
-		return false, "Enable EDR Agent Sensor in System Settings → Privacy & Security → Full Disk Access"
-	case "disk":
+		if st.CertExpiry != "" {
+			t, err := time.Parse(time.RFC3339, st.CertExpiry)
+			if err == nil {
+				if time.Now().After(t) {
+					return false, "Device certificate has expired. Re-enroll with a new token."
+				}
+				days := int(time.Until(t).Hours() / 24)
+				if days <= 7 {
+					return true, fmt.Sprintf("Valid; expires in %d days", days)
+				}
+			}
+		}
+		return true, "Device identity certificate is present"
+	case "grants":
+		if needsFullDiskAccess() && !hasFullDiskAccess() {
+			return false, "Full Disk Access was revoked. Open System Settings, then Recheck."
+		}
+		if isDarwin() {
+			return true, "System Extension and Full Disk Access are granted"
+		}
+		if isWindows() {
+			return true, "Service rights look healthy"
+		}
+		return true, "Required capabilities are present"
+	case "svc":
+		s := st.Service
+		if s == "" || s == "unknown" || strings.Contains(strings.ToLower(s), "not installed") || strings.Contains(strings.ToLower(s), "missing") {
+			return false, "The machine-wide sensor service is not registered. Reinstall as administrator."
+		}
+		return true, "Service: " + s
+	case "spool":
 		return storageCheck()
 	default:
 		return false, "unknown check"
+	}
+}
+
+func checkVisual(s checkState) (color.Color, fyne.Resource) {
+	switch s {
+	case checkOK:
+		return colorOK, theme.ConfirmIcon()
+	case checkRun:
+		return colorCyan, theme.ViewRefreshIcon()
+	case checkFail:
+		return colorDanger, theme.ErrorIcon()
+	default:
+		return colorMuted, theme.RadioButtonIcon()
 	}
 }

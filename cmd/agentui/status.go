@@ -18,12 +18,17 @@ type operatorStatus struct {
 	Service    string              `json:"service"`
 	Enrolled   bool                `json:"enrolled"`
 	AgentID    string              `json:"agent_id,omitempty"`
+	MachineID  string              `json:"machine_id,omitempty"`
 	Ingest     string              `json:"ingest,omitempty"`
 	Runtime    string              `json:"runtime,omitempty"`
 	Version    string              `json:"version,omitempty"`
 	Uptime     string              `json:"uptime,omitempty"`
 	Detections uint64              `json:"detections"`
 	EventsProc uint64              `json:"events_processed,omitempty"`
+	Blocks     uint64              `json:"blocks,omitempty"`
+	RulesCount int                 `json:"rules_count,omitempty"`
+	SpoolBytes int64               `json:"spool_bytes,omitempty"`
+	CertExpiry string              `json:"cert_not_after,omitempty"`
 	CPUPercent float64             `json:"cpu_percent,omitempty"`
 	MemoryMB   float64             `json:"memory_mb,omitempty"`
 	Isolated   bool                `json:"isolated"`

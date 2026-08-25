@@ -23,11 +23,11 @@ func truncFP(fp string) string {
 
 // EnrollOptions configures bootstrap Register.
 type EnrollOptions struct {
-	Config     config.XDRConfig
-	AgentID    string
-	AgentVer   string
-	DataDir    string
-	Logger     *slog.Logger
+	Config   config.XDRConfig
+	AgentID  string
+	AgentVer string
+	DataDir  string
+	Logger   *slog.Logger
 	// ConfigPath is the agent.yaml path; used to wipe enrollment_token after Register.
 	ConfigPath string
 	// TokenFileUsed is the bootstrap token sidecar path to delete after Register.
@@ -63,6 +63,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		DataDir: opt.DataDir,
 		Backend: opt.Config.SecureStorage,
 	}
+	WriteEnrollProgress(opt.DataDir, "token")
 	if !opt.Force && store.HasCredentials() {
 		st, err := store.Load()
 		if err == nil && st.AgentID != "" && len(st.IngestHosts) > 0 {
@@ -77,6 +78,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 			if err := EnsureTrustCA(ctx, store, opt.Config.EnrollmentHost, opt.Config.InsecureSkipTLS); err != nil {
 				log.Warn("xdr trust CA missing; ingest mTLS may fail", "error", err)
 			}
+			WriteEnrollProgress(opt.DataDir, "done")
 			return &EnrollResult{State: st, Store: store, Fresh: false}, nil
 		}
 		// Industry: device identity is the key+cert. enrollment.json is a sidecar.
@@ -99,6 +101,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 			} else {
 				log.Info("xdr trust CA ready for ingest", "ca_path", store.CAPath())
 			}
+			WriteEnrollProgress(opt.DataDir, "done")
 			return &EnrollResult{State: recovered, Store: store, Fresh: false}, nil
 		}
 		if err != nil {
@@ -126,10 +129,12 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 	dev := CollectDeviceIdentity(opt.AgentID, opt.Config.MachineID, agentVer, token)
 
 	// On-device keygen + CSR with full device identity (private key never leaves device).
+	WriteEnrollProgress(opt.DataDir, "key")
 	keyCSR, err := GenerateKeyAndCSRWithIdentity(dev)
 	if err != nil {
 		return nil, err
 	}
+	WriteEnrollProgress(opt.DataDir, "csr")
 	log.Info("xdr device identity keypair generated for secure storage",
 		"agent_id", dev.AgentID,
 		"machine_id", dev.MachineID,
@@ -150,6 +155,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 	defer conn.Close()
 
 	client := enrollmentv1.NewEnrollmentServiceClient(conn)
+	WriteEnrollProgress(opt.DataDir, "sign")
 	resp, err := client.Register(ctx, &enrollmentv1.RegisterRequest{
 		EnrollmentToken: token,
 		AgentId:         opt.AgentID,
@@ -167,6 +173,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 	if !resp.GetAccepted() || resp.GetCertificatePem() == "" {
 		return nil, fmt.Errorf("enrollment rejected: %s", resp.GetMessage())
 	}
+	WriteEnrollProgress(opt.DataDir, "cert")
 
 	notAfter, err := CertNotAfter(resp.GetCertificatePem())
 	if err != nil {
@@ -193,6 +200,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 	if err := store.SaveWithCSR(st, keyCSR.KeyPEM, keyCSR.CSRPEM); err != nil {
 		return nil, err
 	}
+	WriteEnrollProgress(opt.DataDir, "store")
 	st.SecureStorage = store.BackendName()
 	if !opt.SkipBootstrapClear {
 		tokenFile := strings.TrimSpace(opt.TokenFileUsed)
@@ -205,6 +213,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 			log.Info("xdr bootstrap token cleared after enrollment")
 		}
 	}
+	WriteEnrollProgress(opt.DataDir, "ingest")
 	log.Info("xdr enrollment complete; key+cert in OS secure storage",
 		"agent_id", st.AgentID,
 		"secure_storage", st.SecureStorage,
@@ -213,6 +222,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		"heartbeat_sec", st.HeartbeatSec,
 		"cert_not_after", st.CertNotAfter,
 	)
+	WriteEnrollProgress(opt.DataDir, "done")
 	return &EnrollResult{State: st, Store: store, Fresh: true}, nil
 }
 

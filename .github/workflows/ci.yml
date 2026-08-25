@@ -737,6 +737,8 @@ jobs:
           path: |
             bin/edr-agent-windows-amd64.exe
             bin/edrctl-windows-amd64.exe
+            bin/edr-installer-windows-amd64.exe
+            bin/edr-agent-ui-windows-amd64.exe
 
   macos-test-nosec:
     name: macOS tests (nosec)

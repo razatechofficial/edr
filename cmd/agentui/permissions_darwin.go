@@ -38,3 +38,5 @@ func openFullDiskAccessSettings() error {
 	}
 	return last
 }
+
+func openOSGrantSettings() error { return openFullDiskAccessSettings() }

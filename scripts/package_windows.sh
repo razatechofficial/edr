@@ -13,6 +13,8 @@ trap cleanup EXIT
 
 AGENT_SRC="${BIN_DIR}/edr-agent-windows-amd64.exe"
 CTL_SRC="${BIN_DIR}/edrctl-windows-amd64.exe"
+INST_SRC="${BIN_DIR}/edr-installer-windows-amd64.exe"
+UI_SRC="${BIN_DIR}/edr-agent-ui-windows-amd64.exe"
 
 if [[ ! -f "${AGENT_SRC}" ]] || [[ ! -f "${CTL_SRC}" ]]; then
 	echo "Missing Windows binaries. Build first: ${ROOT_DIR}/scripts/build.sh windows" >&2
@@ -22,6 +24,12 @@ fi
 
 mkdir -p "${DIST_DIR}" "${STAGING}/config"
 cp "${AGENT_SRC}" "${CTL_SRC}" "${STAGING}/"
+if [[ -f "${INST_SRC}" ]]; then
+	cp "${INST_SRC}" "${STAGING}/edr-installer.exe"
+fi
+if [[ -f "${UI_SRC}" ]]; then
+	cp "${UI_SRC}" "${STAGING}/edr-agent-ui.exe"
+fi
 cp "${SCRIPT_DIR}/windows/install.bat" "${SCRIPT_DIR}/windows/uninstall.bat" "${STAGING}/"
 
 sed -e 's#data_dir: "/var/lib/edr"#data_dir: "C:/ProgramData/EDR/data"#g' \

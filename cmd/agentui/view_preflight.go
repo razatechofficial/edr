@@ -1,51 +1,33 @@
 package main
 
 import (
-	"image/color"
-
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-
-	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 )
 
 func (c *console) buildPreflight() fyne.CanvasObject {
 	c.preflightBox = container.NewVBox()
-	c.preflightHint = widget.NewLabel("Validating pre-flight requirements.")
+	c.preflightHint = widget.NewLabel("Each start re-checks the certificate, OS access, service, and offline spool. Start EDR Agent when every line is green. The sensor can run if the cloud is unreachable.")
 	c.preflightHint.Wrapping = fyne.TextWrapWord
-	c.preflightHint.Alignment = fyne.TextAlignCenter
 
-	c.grantBtn = widget.NewButtonWithIcon("Open permission settings", theme.SettingsIcon(), func() {
-		_ = openFullDiskAccessSettings()
-		c.preflightHint.SetText("Enable EDR Agent Sensor, then Recheck.")
-	})
-	c.grantBtn.Importance = widget.MediumImportance
-	if !needsFullDiskAccess() {
-		c.grantBtn.Hide()
-	}
+	c.startAgentBtn = widget.NewButtonWithIcon("Start EDR Agent", theme.MediaPlayIcon(), c.onStartAgent)
+	c.startAgentBtn.Importance = widget.HighImportance
+	c.startAgentBtn.Disable()
+	c.preflightFaultBox = container.NewVBox()
 
 	recheck := widget.NewButtonWithIcon("Recheck", theme.ViewRefreshIcon(), func() {
 		go c.runPreflight()
 	})
 
-	c.startAgentBtn = widget.NewButtonWithIcon("Start agent", theme.MediaPlayIcon(), c.onStartAgent)
-	c.startAgentBtn.Importance = widget.HighImportance
-	c.startAgentBtn.Disable()
-
-	sub := canvas.NewText("Required before the sensor can stream.", colorMuted)
-	sub.TextSize = 13
-	sub.Alignment = fyne.TextAlignCenter
-
 	body := container.NewVBox(
-		c.chrome(c.settingsButton()),
-		stepLabel(2, 3, "System check"),
-		container.NewCenter(sub),
-		card(c.preflightBox),
+		c.chrome(),
+		kicker("Every launch", colorAccent),
+		heading("Ready to start"),
 		c.preflightHint,
-		c.grantBtn,
+		card(c.preflightBox),
+		c.preflightFaultBox,
 		recheck,
 		c.startAgentBtn,
 	)
@@ -66,60 +48,40 @@ func (c *console) renderPreflight() {
 	c.checksOK = allOK
 	if allOK {
 		c.startAgentBtn.Enable()
-		c.preflightHint.SetText("All checks passed. Start the sensor to begin streaming.")
+		c.preflightHint.SetText("All checks passed.")
 	} else {
 		c.startAgentBtn.Disable()
 	}
 }
 
 func preflightRow(it preflightItem) fyne.CanvasObject {
-	statusCol, ico := checkVisual(it.State)
-	code := caption(it.Code)
+	_, ico := checkVisual(it.State)
 	title := widget.NewLabel(it.Title)
 	title.Wrapping = fyne.TextWrapWord
 	detail := widget.NewLabel(it.Detail)
 	detail.Wrapping = fyne.TextWrapWord
+	detail.Importance = widget.LowImportance
 	if it.Detail == "" {
 		detail.Hide()
 	}
-	st := canvas.NewText(it.State.Label(), statusCol)
-	st.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
-	st.TextSize = 12
-	left := container.NewHBox(widget.NewIcon(ico), container.NewVBox(code, title, detail))
-	return container.NewPadded(container.NewBorder(nil, widget.NewSeparator(), nil, st, left))
-}
-
-func checkVisual(s checkState) (color.Color, fyne.Resource) {
-	switch s {
-	case checkOK:
-		return colorOK, theme.ConfirmIcon()
-	case checkRun:
-		return colorCyan, theme.ViewRefreshIcon()
-	case checkFail:
-		return colorDanger, theme.ErrorIcon()
-	default:
-		return colorMuted, theme.RadioButtonIcon()
-	}
+	return container.NewPadded(container.NewBorder(nil, nil, widget.NewIcon(ico), nil, container.NewVBox(title, detail)))
 }
 
 func (c *console) runPreflight() {
-	host := ""
-	if c.host != nil {
-		host = c.host.Text
-	}
 	items := newPreflightItems()
 	fyne.DoAndWait(func() {
 		c.preflightItems = items
 		c.startAgentBtn.Disable()
 		c.renderPreflight()
 	})
+	st := loadStatus()
 	for i := range items {
 		items[i].State = checkRun
 		fyne.DoAndWait(func() {
 			c.preflightItems = items
 			c.renderPreflight()
 		})
-		ok, detail := runOneCheck(items[i].ID, host)
+		ok, detail := runOneCheck(items[i].ID, st)
 		if ok {
 			items[i].State = checkOK
 		} else {
@@ -127,6 +89,7 @@ func (c *console) runPreflight() {
 		}
 		items[i].Detail = detail
 		fyne.DoAndWait(func() {
+			c.last = st
 			c.preflightItems = items
 			c.renderPreflight()
 		})
@@ -146,14 +109,27 @@ func (c *console) onStartAgent() {
 			c.setBusy(false)
 			c.last = st
 			if err != nil && !serviceHealthy(st.Service) {
-				msg := clipErr(out)
-				if msg == "" && err != nil {
-					msg = err.Error()
+				f := classifyStartError(out)
+				if f.Detail == "" && err != nil {
+					f.Detail = err.Error()
 				}
-				c.preflightHint.SetText(msg)
+				c.setPreflightFault(f)
+				c.preflightHint.SetText(f.Title)
 				return
 			}
-			c.show(uistate.Dash)
+			c.setPreflightFault(uiFault{})
+			c.dismissToTray()
 		})
 	}()
+}
+
+func (c *console) setPreflightFault(f uiFault) {
+	if c.preflightFaultBox == nil {
+		return
+	}
+	c.preflightFaultBox.Objects = nil
+	if f.Title != "" {
+		c.preflightFaultBox.Add(faultCard(f))
+	}
+	c.preflightFaultBox.Refresh()
 }

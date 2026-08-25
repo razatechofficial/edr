@@ -52,6 +52,7 @@ $required = @(
 	'edr-agent.exe',
 	'edrctl.exe',
 	'edr-agent-ui.exe',
+	'edr-installer.exe',
 	'edr.exe',
 	'config.yml',
 	'baseline.yaml',
@@ -68,6 +69,7 @@ $knownFileKeys = @{
 	'edr-agent.exe' = @('AgentExe')
 	'edrctl.exe'    = @('EdrCtlExe')
 	'edr-agent-ui.exe' = @('EdrUIExe')
+	'edr-installer.exe' = @('EdrInstallerExe')
 	'edr.exe'       = @('EdrAliasExe')
 }
 

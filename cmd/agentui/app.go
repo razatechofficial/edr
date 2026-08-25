@@ -1,13 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
@@ -18,38 +16,60 @@ type console struct {
 	win fyne.Window
 
 	enrollContent    fyne.CanvasObject
+	identityContent  fyne.CanvasObject
+	receiptContent   fyne.CanvasObject
+	permContent      fyne.CanvasObject
 	preflightContent fyne.CanvasObject
 	dashContent      fyne.CanvasObject
+	setupContent     fyne.CanvasObject
 
-	host       *widget.Entry
-	token      *widget.Entry
-	enrollHint *widget.Label
-	testBtn    *widget.Button
-	enrollBtn  *widget.Button
+	domain         *widget.Entry
+	token          *widget.Entry
+	enrollBtn      *widget.Button
+	enrollFaultBox *fyne.Container
 
-	preflightBox   *fyne.Container
-	preflightHint  *widget.Label
-	startAgentBtn  *widget.Button
-	grantBtn       *widget.Button
-	preflightItems []preflightItem
-	checksOK       bool
+	identityBox  *fyne.Container
+	identityHint *widget.Label
 
-	healthDot     *canvas.Circle
-	healthTitle   *canvas.Text
-	healthSub     *widget.Label
-	monitorCheck  *widget.Check
-	ignoreMonitor bool
-	threatsVal    *canvas.Text
-	handledVal    *canvas.Text
-	cpuSys        *widget.Label
-	cpuAgent      *widget.Label
-	cpuBar        *widget.ProgressBar
-	ramSys        *widget.Label
-	ramAgent      *widget.Label
-	ramBar        *widget.ProgressBar
-	uptimeVal     *widget.Label
-	agentLine     *widget.Label
-	streamHint    *widget.Label
+	receipt         identityReceipt
+	receiptBox      *fyne.Container
+	receiptContinue *widget.Button
+
+	permHint     *widget.Label
+	permFaultBox *fyne.Container
+	grantBtn     *widget.Button
+
+	preflightBox      *fyne.Container
+	preflightHint     *widget.Label
+	preflightFaultBox *fyne.Container
+	startAgentBtn     *widget.Button
+	preflightItems    []preflightItem
+	checksOK          bool
+
+	setupBody       *fyne.Container
+	setupHint       *widget.Label
+	setupFaultBox   *fyne.Container
+	setupSteps      *fyne.Container
+	setupAccept     *widget.Button
+	setupDecline    *widget.Button
+	setupLaunch     *widget.Button
+	setupLaunchHint *widget.Label
+	setupClose      *widget.Button
+	setupActions    *fyne.Container
+	cpuSpark        *fyne.Container
+	cpuHist         []float64
+
+	healthTitle *canvas.Text
+	healthSub   *widget.Label
+	sensorLamp  *widget.Label
+	streamLamp  *widget.Label
+	cpuAgent    *widget.Label
+	ramAgent    *widget.Label
+	eventsVal   *widget.Label
+	threatsVal  *widget.Label
+	blocksVal   *widget.Label
+	uptimeVal   *widget.Label
+	agentLine   *widget.Label
 
 	trayStatus *fyne.MenuItem
 	trayDetail *fyne.MenuItem
@@ -66,29 +86,27 @@ func runDashboard() error {
 	a.Settings().SetTheme(edrTheme{})
 	a.SetIcon(edrIcon())
 
-	w := a.NewWindow("EDR Agent")
+	w := a.NewWindow(productName)
 	w.SetMaster()
-	w.Resize(fyne.NewSize(520, 760))
+	w.Resize(fyne.NewSize(420, 680))
 	w.SetFixedSize(false)
 	w.CenterOnScreen()
 
 	c := &console{app: a, win: w}
+	c.buildSetup()
 	c.buildEnroll()
+	c.buildIdentity()
+	c.buildReceipt()
+	c.buildPermissions()
 	c.buildPreflight()
 	c.buildDashboard()
 	c.setupTray()
-	c.show(uistate.Enroll)
 
 	go func() {
 		st := loadStatus()
-		need := needsFullDiskAccess() && !hasFullDiskAccess()
 		fyne.Do(func() {
 			c.last = st
-			next := uistate.InitialScreen(st.Enrolled, need)
-			c.show(next)
-			if next == uistate.Enroll && c.enrollHint != nil {
-				c.enrollHint.SetText("Paste the one-time token from the XDR console, then enroll this device.")
-			}
+			c.routeInitial()
 		})
 	}()
 
@@ -120,29 +138,51 @@ func runDashboard() error {
 	return nil
 }
 
+func (c *console) routeInitial() {
+	installed := agentInstalled()
+	if flagSetup && installed {
+		c.show(uistate.Enroll)
+		return
+	}
+	next := uistate.InitialScreen(installed, c.last.Enrolled, needsOSGrants(), serviceHealthy(c.last.Service))
+	if next == uistate.Dash {
+		c.showPopover()
+		return
+	}
+	c.show(next)
+}
+
 func (c *console) show(id uistate.Screen) {
 	c.screen = id
+	if id == uistate.Dash {
+		c.showPopover()
+		return
+	}
+	c.win.Resize(fyne.NewSize(420, 680))
 	switch id {
+	case uistate.Setup:
+		c.win.SetContent(c.setupContent)
 	case uistate.Enroll:
 		c.win.SetContent(c.enrollContent)
 		if c.token != nil {
 			c.win.Canvas().Focus(c.token)
 		}
+	case uistate.Identity:
+		c.win.SetContent(c.identityContent)
+	case uistate.Receipt:
+		c.win.SetContent(c.receiptContent)
+	case uistate.Permissions:
+		c.win.SetContent(c.permContent)
 	case uistate.Preflight:
 		c.win.SetContent(c.preflightContent)
 		go c.runPreflight()
-	case uistate.Dash:
-		c.win.SetContent(c.dashContent)
-		res := sampleResources(c.last)
-		c.applyDashboard(c.last, res)
-		c.refreshTray(c.last, res)
 	}
 	c.win.Show()
 }
 
 func (c *console) setBusy(on bool) {
 	c.busy = on
-	for _, b := range []*widget.Button{c.testBtn, c.enrollBtn, c.startAgentBtn, c.grantBtn} {
+	for _, b := range []*widget.Button{c.enrollBtn, c.startAgentBtn, c.grantBtn, c.receiptContinue, c.setupAccept, c.setupLaunch, c.setupDecline, c.setupClose} {
 		if b == nil {
 			continue
 		}
@@ -155,11 +195,4 @@ func (c *console) setBusy(on bool) {
 	if !on && c.startAgentBtn != nil && !c.checksOK {
 		c.startAgentBtn.Disable()
 	}
-}
-
-func (c *console) showSettings() {
-	st := c.last
-	body := fmt.Sprintf("Service: %s\nEnrollment: %v\nAgent ID: %s\nConfig: %s\nVersion: %s",
-		dash(st.Service), st.Enrolled, dash(st.AgentID), dash(st.Config), dash(st.Version))
-	dialog.ShowInformation("EDR Agent", body, c.win)
 }
