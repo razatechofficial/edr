@@ -41,7 +41,7 @@ func runEdrctlPrivileged(args ...string) (string, error) {
 }
 
 func runInstallerPrivileged(args ...string) (string, error) {
-	cmd := exec.Command(append([]string{installerPath()}, args...)...)
+	cmd := exec.Command(installerPath(), args...)
 	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err

@@ -9,7 +9,7 @@ import (
 
 func runEdrctlPrivileged(args ...string) (string, error) {
 	if _, err := exec.LookPath("pkexec"); err == nil {
-		cmd := exec.Command(append([]string{"pkexec", edrctlPath()}, args...)...)
+		cmd := exec.Command("pkexec", append([]string{edrctlPath()}, args...)...)
 		out, e := cmd.CombinedOutput()
 		return strings.TrimSpace(string(out)), e
 	}
@@ -18,11 +18,11 @@ func runEdrctlPrivileged(args ...string) (string, error) {
 
 func runInstallerPrivileged(args ...string) (string, error) {
 	if _, err := exec.LookPath("pkexec"); err == nil {
-		cmd := exec.Command(append([]string{"pkexec", installerPath()}, args...)...)
+		cmd := exec.Command("pkexec", append([]string{installerPath()}, args...)...)
 		out, e := cmd.CombinedOutput()
 		return strings.TrimSpace(string(out)), e
 	}
-	cmd := exec.Command(append([]string{installerPath()}, args...)...)
+	cmd := exec.Command(installerPath(), args...)
 	out, e := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), e
 }
