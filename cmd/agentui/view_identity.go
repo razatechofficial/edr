@@ -129,6 +129,8 @@ func (c *console) renderIdentity(active int, done, failed, waiting bool) {
 	c.identityBox.Refresh()
 }
 
+const identityStepHold = time.Second
+
 func (c *console) startIdentity(host, token string) {
 	n := len(identityTitles())
 	c.renderIdentity(0, false, false, true)
@@ -148,35 +150,43 @@ func (c *console) startIdentity(host, token string) {
 	}()
 
 	go func() {
-		ui := -1
+		ui := 0
+		target := 0
+		waiting := true
+		finished := false
+		last := time.Now()
 		var res result
-		tick := time.NewTicker(250 * time.Millisecond)
+		tick := time.NewTicker(100 * time.Millisecond)
 		defer tick.Stop()
 
-		finishOK := func() {
-			c.setBusy(false)
-			c.releaseEnrollForm()
-			c.receipt = receiptFromEnroll(res.out, res.st)
-			c.applyEnrolled(res.st, c.receipt)
-			c.renderIdentity(n, true, false, false)
-			c.refreshReceipt()
-			c.token.SetText("")
-			go func() {
-				time.Sleep(450 * time.Millisecond)
-				fyne.Do(func() { c.show(uistate.Receipt) })
-			}()
+		paint := func(done, failed, wait bool) {
+			a := ui
+			fyne.Do(func() { c.renderIdentity(a, done, failed, wait) })
 		}
 
 		fail := func(msg string) {
 			a := ui
-			if a < 0 {
-				a = 0
-			}
-			c.setBusy(false)
-			c.releaseEnrollForm()
-			c.renderIdentity(a, false, true, false)
-			c.show(uistate.Enroll)
-			c.setEnrollFault(classifyEnrollError(msg))
+			fyne.Do(func() {
+				c.setBusy(false)
+				c.releaseEnrollForm()
+				c.renderIdentity(a, false, true, false)
+				c.show(uistate.Enroll)
+				c.setEnrollFault(classifyEnrollError(msg))
+			})
+		}
+
+		succeed := func() {
+			fyne.Do(func() {
+				c.setBusy(false)
+				c.releaseEnrollForm()
+				c.receipt = receiptFromEnroll(res.out, res.st)
+				c.applyEnrolled(res.st, c.receipt)
+				c.renderIdentity(n, true, false, false)
+				c.refreshReceipt()
+				c.token.SetText("")
+			})
+			time.Sleep(450 * time.Millisecond)
+			fyne.Do(func() { c.show(uistate.Receipt) })
 		}
 
 		for {
@@ -191,26 +201,34 @@ func (c *console) startIdentity(host, token string) {
 					if msg == "" {
 						msg = "Enrollment did not return a device certificate."
 					}
-					fyne.Do(func() { fail(msg) })
+					fail(msg)
 					return
 				}
-				fyne.Do(finishOK)
-				return
+				finished = true
+				waiting = false
+				target = n - 1
 			case <-tick.C:
-				step := xdrclient.ReadEnrollProgress(platform.DataDir())
-				if step == "" {
+				if !finished {
+					step := xdrclient.ReadEnrollProgress(platform.DataDir())
+					if step != "" && step != "done" {
+						if idx := identityStepIndex(step); idx > target {
+							target = idx
+							waiting = false
+						}
+					}
+				}
+				if waiting {
 					continue
 				}
-				if step == "done" {
-					continue
+				if ui < target && time.Since(last) >= identityStepHold {
+					ui++
+					last = time.Now()
+					paint(false, false, false)
 				}
-				idx := identityStepIndex(step)
-				if idx < 0 || idx <= ui {
-					continue
+				if finished && ui >= n-1 && time.Since(last) >= identityStepHold {
+					succeed()
+					return
 				}
-				ui = idx
-				a := ui
-				fyne.Do(func() { c.renderIdentity(a, false, false, false) })
 			}
 		}
 	}()
