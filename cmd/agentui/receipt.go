@@ -130,6 +130,15 @@ func identityStoreTitle() string {
 	}
 }
 
+func identityWaiting() string {
+	switch {
+	case isDarwin(), isWindows():
+		return "Waiting for administrator approval…"
+	default:
+		return "Starting enrollment…"
+	}
+}
+
 func identityDoing(i int) string {
 	doings := []string{
 		"Validating the enrollment token…",

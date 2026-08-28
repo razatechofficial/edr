@@ -20,28 +20,19 @@ func (c *console) buildIdentity() fyne.CanvasObject {
 	c.identityHint = widget.NewLabel("This device creates a key, sends a certificate request, and stores the signed cert in the OS keystore. The private key never leaves this computer.")
 	c.identityHint.Wrapping = fyne.TextWrapWord
 
-	hero := canvas.NewImageFromResource(heroResource(colorAccent, heroOK))
-	hero.FillMode = canvas.ImageFillContain
-	hero.SetMinSize(fyne.NewSize(56, 56))
+	hero := heroWell(wizHero, colorAccent, "shield")
 	kick := kicker("ENROLLING", colorAccent)
 	title := heading("Securing device identity")
-	header := container.NewVBox(
-		container.NewBorder(nil, nil, hero, nil, container.NewPadded(container.NewVBox(kick, title))),
-		c.identityHint,
-	)
+	header := iconBand(wizHero, wizHeroGap, hero, vstack(4, kick, title))
 
-	c.identityBar = widget.NewProgressBar()
-	c.identityBar.Min = 0
-	c.identityBar.Max = 1
-	c.identityBar.TextFormatter = func() string { return "" }
+	c.identityBar = newSmoothBar()
 	c.identityCount = canvas.NewText("0/7", colorTertiary)
 	c.identityCount.TextSize = 11
-	c.identityDoing = canvas.NewText("Validating the enrollment token…", colorMuted)
+	c.identityDoing = canvas.NewText(identityWaiting(), colorMuted)
 	c.identityDoing.TextSize = 12
 
-	c.identityBox = container.NewVBox()
-	meter := container.NewBorder(nil, nil, nil, c.identityCount, c.identityBar)
-	body := container.NewVBox(meter, c.identityDoing, c.identityBox)
+	c.identityBox = container.New(&gapStack{axis: stackV, gap: 0})
+	meter := container.New(&meterLay{}, c.identityBar, c.identityCount)
 
 	lockIco := canvas.NewImageFromResource(drawMiniIcon("lock", colorAccent))
 	lockIco.FillMode = canvas.ImageFillContain
@@ -53,15 +44,28 @@ func (c *console) buildIdentity() fyne.CanvasObject {
 	lockBg.CornerRadius = 12
 	lockBg.StrokeColor = color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0x38}
 	lockBg.StrokeWidth = 1
-	lock := container.NewStack(lockBg, container.NewPadded(
-		container.NewBorder(nil, nil, container.NewPadded(lockIco), nil, lockTxt),
+	lock := container.NewStack(lockBg, inset(12, 14, 12, 14,
+		iconBand(14, 10, lockIco, lockTxt),
 	))
 
-	c.identityContent = wizardPage(header, body, lock)
+	sheet := pad5(vstack(0,
+		header,
+		gapH(12),
+		c.identityHint,
+		gapH(16),
+		meter,
+		gapH(8),
+		c.identityDoing,
+		gapH(16),
+		c.identityBox,
+		gapH(8),
+		lock,
+	))
+	c.identityContent = firstRunFrame(sheet)
 	return c.identityContent
 }
 
-func (c *console) renderIdentity(active int, done bool, failed bool) {
+func (c *console) renderIdentity(active int, done, failed, waiting bool) {
 	c.identityBox.Objects = nil
 	titles := identityTitles()
 	n := len(titles)
@@ -79,12 +83,14 @@ func (c *console) renderIdentity(active int, done bool, failed bool) {
 		case i == active:
 			st = checkRun
 		}
-		row := container.NewPadded(container.NewBorder(nil, nil, statusMark(st), nil, compactTitle(title, st == checkWait || st == checkOK)))
-		c.identityBox.Add(row)
+		c.identityBox.Add(timelineRow(st, title, i == n-1, st == checkOK))
 	}
 	frac := float64(passed) / float64(n)
 	if !done && !failed && active < n {
 		frac = (float64(passed) + 0.45) / float64(n)
+	}
+	if waiting && !done && !failed {
+		frac = 0.08
 	}
 	if c.identityBar != nil {
 		c.identityBar.SetValue(frac)
@@ -95,6 +101,9 @@ func (c *console) renderIdentity(active int, done bool, failed bool) {
 	}
 	if shown > n {
 		shown = n
+	}
+	if waiting && !done && !failed {
+		shown = 1
 	}
 	if c.identityCount != nil {
 		c.identityCount.Text = fmt.Sprintf("%d/%d", shown, n)
@@ -108,6 +117,9 @@ func (c *console) renderIdentity(active int, done bool, failed bool) {
 		case done:
 			c.identityDoing.Text = "Identity bound. Opening receipt…"
 			c.identityDoing.Color = colorOK
+		case waiting:
+			c.identityDoing.Text = identityWaiting()
+			c.identityDoing.Color = colorMuted
 		default:
 			c.identityDoing.Text = identityDoing(active)
 			c.identityDoing.Color = colorMuted
@@ -118,64 +130,87 @@ func (c *console) renderIdentity(active int, done bool, failed bool) {
 }
 
 func (c *console) startIdentity(host, token string) {
-	titles := identityTitles()
-	c.renderIdentity(0, false, false)
+	n := len(identityTitles())
+	c.renderIdentity(0, false, false, true)
 	c.setBusy(true)
 	xdrclient.ClearEnrollProgress(platform.DataDir())
 
-	doneCh := make(chan struct {
+	type result struct {
 		out string
 		err error
 		st  operatorStatus
-	}, 1)
+	}
+	doneCh := make(chan result, 1)
 	go func() {
 		out, err := runEdrctlPrivileged("enroll", "--force", "--host", host, "--token", token)
 		st := loadStatus()
-		doneCh <- struct {
-			out string
-			err error
-			st  operatorStatus
-		}{out, err, st}
+		doneCh <- result{out, err, st}
 	}()
 
 	go func() {
-		active := 0
+		ui := -1
+		var res result
 		tick := time.NewTicker(250 * time.Millisecond)
 		defer tick.Stop()
+
+		finishOK := func() {
+			c.setBusy(false)
+			c.releaseEnrollForm()
+			c.receipt = receiptFromEnroll(res.out, res.st)
+			c.applyEnrolled(res.st, c.receipt)
+			c.renderIdentity(n, true, false, false)
+			c.refreshReceipt()
+			c.token.SetText("")
+			go func() {
+				time.Sleep(450 * time.Millisecond)
+				fyne.Do(func() { c.show(uistate.Receipt) })
+			}()
+		}
+
+		fail := func(msg string) {
+			a := ui
+			if a < 0 {
+				a = 0
+			}
+			c.setBusy(false)
+			c.releaseEnrollForm()
+			c.renderIdentity(a, false, true, false)
+			c.show(uistate.Enroll)
+			c.setEnrollFault(classifyEnrollError(msg))
+		}
+
 		for {
 			select {
-			case res := <-doneCh:
-				fyne.Do(func() {
-					c.setBusy(false)
-					if !enrollLooksSuccessful(res.out, res.err, res.st) {
-						msg := strings.TrimSpace(res.out)
-						if msg == "" && res.err != nil {
-							msg = res.err.Error()
-						}
-						if msg == "" {
-							msg = "Enrollment did not return a device certificate."
-						}
-						c.renderIdentity(active, false, true)
-						c.show(uistate.Enroll)
-						c.setEnrollFault(classifyEnrollError(msg))
-						return
+			case r := <-doneCh:
+				res = r
+				if !enrollLooksSuccessful(res.out, res.err, res.st) {
+					msg := strings.TrimSpace(res.out)
+					if msg == "" && res.err != nil {
+						msg = res.err.Error()
 					}
-					c.receipt = receiptFromEnroll(res.out, res.st)
-					c.applyEnrolled(res.st, c.receipt)
-					c.renderIdentity(len(titles), true, false)
-					c.refreshReceipt()
-					c.token.SetText("")
-					c.show(uistate.Receipt)
-				})
+					if msg == "" {
+						msg = "Enrollment did not return a device certificate."
+					}
+					fyne.Do(func() { fail(msg) })
+					return
+				}
+				fyne.Do(finishOK)
 				return
 			case <-tick.C:
-				if step := xdrclient.ReadEnrollProgress(platform.DataDir()); step != "" {
-					if idx := identityStepIndex(step); idx > active {
-						active = idx
-						a := active
-						fyne.Do(func() { c.renderIdentity(a, false, false) })
-					}
+				step := xdrclient.ReadEnrollProgress(platform.DataDir())
+				if step == "" {
+					continue
 				}
+				if step == "done" {
+					continue
+				}
+				idx := identityStepIndex(step)
+				if idx < 0 || idx <= ui {
+					continue
+				}
+				ui = idx
+				a := ui
+				fyne.Do(func() { c.renderIdentity(a, false, false, false) })
 			}
 		}
 	}()
