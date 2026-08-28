@@ -30,10 +30,13 @@ type console struct {
 	token          *widget.Entry
 	enrollBtn      *widget.Button
 	enrollFaultBox *fyne.Container
+	enrollAdv      fyne.CanvasObject
+	enrollAdvLink  *textLink
+	enrollAdvOpen  bool
 
 	identityBox   *fyne.Container
 	identityHint  *widget.Label
-	identityBar   *widget.ProgressBar
+	identityBar   *smoothBar
 	identityCount *canvas.Text
 	identityDoing *canvas.Text
 
@@ -70,6 +73,8 @@ type console struct {
 	setupActions    *fyne.Container
 	setupProcess    *widget.Label
 	setupWorking    *widget.Button
+	setupRoot       *fyne.Container
+	setupPhase      string
 	cpuHist         []float64
 
 	glow        *glowBG
@@ -98,6 +103,8 @@ type console struct {
 
 	dashAction   *widget.Button
 	dashFaultBox *fyne.Container
+	dashTail     *fyne.Container
+	dashSheet    fyne.CanvasObject
 
 	trayMenu *fyne.Menu
 
@@ -237,14 +244,17 @@ func (c *console) show(id uistate.Screen) {
 	if c.pop != nil {
 		c.pop.Hide()
 	}
-	c.win.SetPadded(true)
-	c.lockSize(wizardW, wizardHeight(id))
+	c.win.SetPadded(false)
+	if id != uistate.Enroll {
+		c.lockSize(wizardW, wizardHeight(id))
+	}
 	c.win.CenterOnScreen()
 	switch id {
 	case uistate.Setup:
 		c.win.SetContent(c.setupContent)
 	case uistate.Enroll:
 		c.win.SetContent(c.enrollContent)
+		c.fitEnroll()
 		if c.token != nil {
 			c.win.Canvas().Focus(c.token)
 		}
