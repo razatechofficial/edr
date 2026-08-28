@@ -97,11 +97,11 @@ func (c *console) buildDashboard() fyne.CanvasObject {
 	metricsBg.StrokeColor = colorHairline
 	metricsBg.StrokeWidth = 1
 	metricsInner := container.New(&metricsStrip{},
-		metricCell(drawMiniIcon("activity", colorCyan), colorCyan, c.eventsVal, "EVENTS"),
+		metricCell("activity", colorCyan, c.eventsVal, "EVENTS"),
 		sep(),
-		metricCell(drawMiniIcon("alert", colorWarn), colorWarn, c.threatsVal, "THREATS"),
+		metricCell("alert", colorWarn, c.threatsVal, "THREATS"),
 		sep(),
-		metricCell(drawMiniIcon("ban", colorOK), colorOK, c.blocksVal, "BLOCKED"),
+		metricCell("ban", colorOK, c.blocksVal, "BLOCKED"),
 	)
 	metrics := container.NewStack(metricsBg, inset(dashMetricsPadY, dashMetricsPadX, dashMetricsPadY, dashMetricsPadX, metricsInner))
 
@@ -111,16 +111,19 @@ func (c *console) buildDashboard() fyne.CanvasObject {
 		container.NewBorder(nil, nil, c.uptimeVal, c.agentLine, nil),
 	))
 
-	body := vstack(0, tiles, gapH(dashMetricsMT), metrics, c.dashFaultBox, c.dashAction)
-	sheet := container.NewBorder(
+	tailInner := container.New(&gapStack{axis: stackV, gap: 12}, c.dashFaultBox, c.dashAction)
+	c.dashTail = container.New(&padLayout{4, dashBodyPadX, dashBodyPadY, dashBodyPadX}, tailInner)
+	c.dashTail.Hide()
+	body := vstack(0, tiles, gapH(dashMetricsMT), metrics)
+	c.dashSheet = vstack(0,
 		inset(dashHeaderPadT, dashHeaderPadX, dashHeaderPadB, dashHeaderPadX, header),
-		foot,
-		nil, nil,
 		inset(dashBodyPadY, dashBodyPadX, dashBodyPadY, dashBodyPadX, body),
+		c.dashTail,
+		foot,
 	)
 	c.dashContent = container.NewStack(
 		c.glow,
-		newDragFrame(sheet, c.dashHost),
+		newDragFrame(c.dashSheet, c.dashHost),
 	)
 	if c.pop != nil {
 		c.pop.SetPadded(false)
@@ -163,18 +166,11 @@ func resourceTile(label string, value, unit, hint *canvas.Text, child fyne.Canva
 	return container.NewStack(bg, inset(dashTilePadY, dashTilePadX, dashTilePadY, dashTilePadX, body))
 }
 
-func metricCell(ico fyne.Resource, wellCol color.NRGBA, value *canvas.Text, label string) fyne.CanvasObject {
-	well := canvas.NewRectangle(withAlpha(wellCol, 0x22))
-	well.CornerRadius = 14
-	well.SetMinSize(fyne.NewSize(dashIconWell, dashIconWell))
-	img := canvas.NewImageFromResource(ico)
-	img.FillMode = canvas.ImageFillContain
-	img.SetMinSize(fyne.NewSize(14, 14))
-	icon := container.NewCenter(container.NewStack(well, container.NewCenter(img)))
+func metricCell(kind string, wellCol color.NRGBA, value *canvas.Text, label string) fyne.CanvasObject {
 	cap := labelCaps(label, 10, colorTertiary)
 	cap.Alignment = fyne.TextAlignCenter
 	value.Alignment = fyne.TextAlignCenter
-	return vstack(0, icon, gapH(dashMetricValMT), value, cap)
+	return vstack(0, metricWell(kind, wellCol), gapH(dashMetricValMT), value, cap)
 }
 
 func (c *console) applyDashboard(st operatorStatus, res resourceSnapshot) {
@@ -282,9 +278,6 @@ func (c *console) applyDashboard(st operatorStatus, res resourceSnapshot) {
 	c.ramBar.SetRatio(ratio)
 	c.pushCPU(res.AgentCPU, stopped)
 	c.updateDashAction(st)
-	if c.dashContent != nil {
-		c.dashContent.Refresh()
-	}
 }
 
 func lampColor(s string) color.NRGBA {
@@ -306,26 +299,37 @@ func (c *console) updateDashAction(st operatorStatus) {
 	if c.dashAction == nil {
 		return
 	}
+	was := c.dashTail != nil && c.dashTail.Visible()
+	show := false
 	if !st.Enrolled {
 		c.dashAction.SetText("Enroll this device")
-		c.dashAction.Show()
-		return
-	}
-	if !serviceHealthy(st.Service) {
+		show = true
+	} else if !serviceHealthy(st.Service) {
 		c.dashAction.SetText("Start " + productName)
-		c.dashAction.Show()
-		return
-	}
-	if !st.IngestConfigured || !st.IngestEnv || !st.IngestOK {
+		show = true
+	} else if !st.IngestConfigured || !st.IngestEnv || !st.IngestOK {
 		if st.IngestConfigured && st.IngestEnv {
 			c.dashAction.SetText("Retry stream")
 		} else {
 			c.dashAction.SetText("Connect stream")
 		}
-		c.dashAction.Show()
-		return
+		show = true
 	}
-	c.dashAction.Hide()
+	if show {
+		c.dashAction.Show()
+		if c.dashTail != nil {
+			c.dashTail.Show()
+		}
+	} else {
+		c.dashAction.Hide()
+		if c.dashTail != nil && (c.dashFaultBox == nil || !c.dashFaultBox.Visible()) {
+			c.dashTail.Hide()
+		}
+	}
+	now := c.dashTail != nil && c.dashTail.Visible()
+	if was != now {
+		c.fitDash()
+	}
 }
 
 func (c *console) onDashAction() {
@@ -397,21 +401,45 @@ func (c *console) showDash() {
 	if c.dashContent != nil && target.Content() != c.dashContent {
 		target.SetContent(c.dashContent)
 	}
-	target.Resize(fyne.NewSize(popoverW, popoverH))
-	target.SetFixedSize(true)
 	res := sampleResources(c.last)
 	c.applyDashboard(c.last, res)
 	c.refreshTray(c.last, res)
 	c.flyoutOpen = true
+	c.fitDash()
 	target.Show()
 	target.RequestFocus()
-	if c.sensorLive != nil {
-		c.sensorLive.Kick()
+	h := c.dashHeight()
+	placeNearTray(target, popoverW, h, true, true)
+}
+
+func (c *console) dashHeight() float32 {
+	h := popoverH
+	if c.dashSheet != nil {
+		h = c.dashSheet.MinSize().Height
 	}
-	if c.dashContent != nil {
-		c.dashContent.Refresh()
+	if h < 360 {
+		h = 360
 	}
-	placeNearTray(target, popoverW, popoverH, true, true)
+	if h > 560 {
+		h = 560
+	}
+	return h
+}
+
+func (c *console) fitDash() {
+	target := c.flyoutWindow()
+	if target == nil {
+		return
+	}
+	h := c.dashHeight()
+	if target.Content() != nil {
+		got := target.Canvas().Size()
+		if abs32(got.Width-popoverW) < 1 && abs32(got.Height-h) < 1 {
+			return
+		}
+	}
+	nativeResizeKeepTop(target, popoverW, h)
+	target.Resize(fyne.NewSize(popoverW, h))
 }
 
 func (c *console) showPopover() {
