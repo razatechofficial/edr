@@ -8,7 +8,7 @@ import (
 
 func (c *console) buildPreflight() fyne.CanvasObject {
 	c.preflightBox = container.NewVBox()
-	c.preflightHint = widget.NewLabel("Each start re-checks the certificate, OS access, service, and offline spool. Start when every line is green. The sensor can run if the cloud is unreachable.")
+	c.preflightHint = widget.NewLabel("Each start re-checks the certificate, OS access, service, and offline spool. Start edr when every line is green. The sensor can run if the cloud is unreachable.")
 	c.preflightHint.Wrapping = fyne.TextWrapWord
 
 	c.startAgentBtn = widget.NewButton("Start "+productName, c.onStartAgent)
@@ -21,30 +21,42 @@ func (c *console) buildPreflight() fyne.CanvasObject {
 	})
 	recheck.Importance = widget.MediumImportance
 
-	header := pageHeader("Every launch", colorAccent, "Ready to start", "")
-	header = container.NewVBox(header, c.preflightHint)
-	foot := container.NewVBox(c.preflightFaultBox, recheck, c.startAgentBtn)
-	c.preflightContent = wizardPage(header, card(c.preflightBox), foot)
+	intro := inset(wizPad, wizPad, 8, wizPad, c.preflightHint)
+	list := inset(8, wizPad, 8, wizPad, c.preflightBox)
+	foot := checklistFooter(c.preflightFaultBox, recheck, c.startAgentBtn)
+	c.preflightContent = firstRunFrame(checklistSheet(intro, list, foot))
 	return c.preflightContent
 }
 
 func (c *console) renderPreflight() {
 	c.preflightBox.Objects = nil
 	allOK := len(c.preflightItems) > 0
+	line := "Checking…"
 	for _, it := range c.preflightItems {
 		if it.State != checkOK {
 			allOK = false
 		}
-		c.preflightBox.Add(listRow(statusMark(it.State), it.Title, it.Detail, false))
+		if it.State == checkFail && it.Detail != "" {
+			line = it.Detail
+		}
+		if it.State == checkRun {
+			line = it.Title + "…"
+		}
+		c.preflightBox.Add(checkRow(statusMark(it.State), it.Title, "", it.State == checkWait || it.State == checkOK))
 	}
 	c.preflightBox.Refresh()
 	c.checksOK = allOK
 	if allOK {
 		c.startAgentBtn.Enable()
-		c.preflightHint.SetText("All checks passed.")
+		c.startAgentBtn.SetText("Start " + productName)
+		c.preflightHint.SetText("Each start re-checks the certificate, OS access, service, and offline spool. Start edr when every line is green. The sensor can run if the cloud is unreachable.")
 	} else {
 		c.startAgentBtn.Disable()
+		if line != "Checking…" {
+			c.startAgentBtn.SetText("Working…")
+		}
 	}
+	_ = line
 }
 
 func (c *console) runPreflight() {
@@ -52,6 +64,7 @@ func (c *console) runPreflight() {
 	fyne.DoAndWait(func() {
 		c.preflightItems = items
 		c.startAgentBtn.Disable()
+		c.startAgentBtn.SetText("Working…")
 		c.renderPreflight()
 	})
 	st := c.sessionStatus()
@@ -73,6 +86,13 @@ func (c *console) runPreflight() {
 			c.renderPreflight()
 		})
 	}
+	fyne.Do(func() {
+		if c.checksOK {
+			c.startAgentBtn.SetText("Start " + productName)
+		} else {
+			c.startAgentBtn.SetText("Start " + productName)
+		}
+	})
 }
 
 func (c *console) sessionStatus() operatorStatus {

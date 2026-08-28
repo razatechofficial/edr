@@ -2,7 +2,6 @@ package main
 
 import (
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
@@ -14,8 +13,7 @@ func (c *console) buildPermissions() fyne.CanvasObject {
 	c.permHint = widget.NewLabel(permBody())
 	c.permHint.Wrapping = fyne.TextWrapWord
 
-	c.permLine = widget.NewLabel("Grant each required item, then Recheck.")
-	c.permLine.Wrapping = fyne.TextWrapWord
+	c.permLine = processLine("Grant each required item, then Recheck.")
 
 	c.permBox = container.NewVBox()
 	c.permFaultBox = container.NewVBox()
@@ -42,15 +40,11 @@ func (c *console) buildPermissions() fyne.CanvasObject {
 	c.permContinue.Importance = widget.HighImportance
 	c.permContinue.Disable()
 
-	header := pageHeader("Required access", colorWarn, "Grant OS access", "")
-	header = container.NewVBox(header, c.permHint)
-	foot := container.NewVBox(
-		c.permLine,
-		c.permFaultBox,
-		container.NewGridWithColumns(2, c.grantBtn, c.permRecheck),
-		c.permContinue,
-	)
-	c.permContent = wizardPage(header, card(c.permBox), foot)
+	intro := inset(wizPad, wizPad, 8, wizPad, c.permHint)
+	list := inset(8, wizPad, 8, wizPad, c.permBox)
+	actions := container.New(&equalRow{gap: 8}, c.grantBtn, c.permRecheck)
+	foot := checklistFooter(c.permLine, c.permFaultBox, actions, c.permContinue)
+	c.permContent = firstRunFrame(checklistSheet(intro, list, foot))
 	return c.permContent
 }
 
@@ -64,7 +58,7 @@ func (c *console) onOpenSettings() {
 	}
 	c.permOpened = true
 	c.permRecheck.Enable()
-	c.permLine.SetText("Opened System Settings. Grant access, then Recheck. Do not skip.")
+	c.permLine.SetText("Open the system pane, grant access, then Recheck. Do not skip.")
 	go func() {
 		err := hostperm.OpenSettings(id)
 		if err == nil {
@@ -124,7 +118,7 @@ func (c *console) paintPermChecking() {
 		default:
 			st = checkRun
 		}
-		c.permBox.Add(permRow(statusMark(st), it.Title, "", it.Status == hostperm.StatusOK || it.Status == hostperm.StatusNA))
+		c.permBox.Add(checkRow(statusMark(st), it.Title, "", it.Status == hostperm.StatusOK || it.Status == hostperm.StatusNA))
 	}
 	c.permBox.Refresh()
 }
@@ -177,7 +171,7 @@ func (c *console) renderPermissions(rep hostperm.Report) {
 		if it.Status == hostperm.StatusAction {
 			badge = "Action required"
 		}
-		c.permBox.Add(permRow(statusMark(st), it.Title, badge, it.Status == hostperm.StatusOK || it.Status == hostperm.StatusNA))
+		c.permBox.Add(checkRow(statusMark(st), it.Title, badge, it.Status == hostperm.StatusOK || it.Status == hostperm.StatusNA))
 	}
 	c.permBox.Refresh()
 
@@ -190,7 +184,7 @@ func (c *console) renderPermissions(rep hostperm.Report) {
 			c.permHint.SetText(permBody())
 		} else {
 			c.permLine.SetText("All checks passed.")
-			c.permHint.SetText("Required access is granted. Continue to the every-launch check.")
+			c.permHint.SetText(permBody())
 		}
 		c.permContinue.Enable()
 		c.permContinue.Show()
@@ -203,6 +197,7 @@ func (c *console) renderPermissions(rep hostperm.Report) {
 	c.grantBtn.Show()
 	c.permRecheck.Show()
 	c.permContinue.Disable()
+	c.permContinue.Hide()
 	id := c.currentPermActionID()
 	line := "Grant each required item, then Recheck."
 	for _, it := range items {
@@ -212,18 +207,6 @@ func (c *console) renderPermissions(rep hostperm.Report) {
 		}
 	}
 	c.permLine.SetText(line)
-}
-
-func permRow(mark fyne.CanvasObject, title, badge string, titleMuted bool) fyne.CanvasObject {
-	t := compactTitle(title, titleMuted)
-	head := fyne.CanvasObject(t)
-	if badge != "" {
-		b := canvas.NewText(badge, colorWarn)
-		b.TextSize = 11
-		b.TextStyle = fyne.TextStyle{Bold: true}
-		head = container.NewBorder(nil, nil, nil, b, t)
-	}
-	return container.NewPadded(container.NewBorder(nil, nil, mark, nil, head))
 }
 
 func (c *console) setPermGuide(text string) {
