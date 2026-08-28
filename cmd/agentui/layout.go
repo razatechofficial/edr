@@ -23,20 +23,59 @@ const (
 func wizardHeight(id uistate.Screen) float32 {
 	switch id {
 	case uistate.Identity:
-		return 600
-	case uistate.Permissions:
-		return 520
-	case uistate.Setup:
 		return 580
+	case uistate.Receipt:
+		return 620
+	case uistate.Permissions:
+		return 540
+	case uistate.Preflight:
+		return 560
+	case uistate.Setup:
+		return 640
+	case uistate.Enroll:
+		return 360
 	default:
 		return wizardH
 	}
 }
 
 func (c *console) lockSize(w, h float32) {
-	c.win.SetFixedSize(false)
-	c.win.Resize(fyne.NewSize(w, h))
-	c.win.SetFixedSize(true)
+	if c.win == nil {
+		return
+	}
+	want := fyne.NewSize(w, h)
+	if c.win.Content() != nil {
+		got := c.win.Canvas().Size()
+		if abs32(got.Width-want.Width) < 1 && abs32(got.Height-want.Height) < 1 {
+			return
+		}
+	}
+	nativeResizeKeepTop(c.win, w, h)
+	c.win.Resize(want)
+}
+
+func abs32(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func clampEnrollH(h float32) float32 {
+	if h < 1 {
+		h = 280
+	}
+	if h > 640 {
+		h = 640
+	}
+	return h
+}
+
+func (c *console) fitEnroll() {
+	if c.win == nil || c.enrollContent == nil {
+		return
+	}
+	c.lockSize(wizardW, clampEnrollH(c.enrollContent.MinSize().Height))
 }
 
 func pageHeader(kick string, kickCol color.Color, title, body string) fyne.CanvasObject {
@@ -47,7 +86,7 @@ func pageHeader(kick string, kickCol color.Color, title, body string) fyne.Canva
 	if body != "" {
 		items = append(items, bodyText(body))
 	}
-	return container.NewVBox(items...)
+	return vstack(8, items...)
 }
 
 func osBadgeLabel() string {
@@ -79,31 +118,18 @@ func productHeader() fyne.CanvasObject {
 	badgeBg.StrokeColor = colorSep
 	badgeBg.StrokeWidth = 1
 	badgeBg.CornerRadius = 6
-	badge := container.NewStack(badgeBg, container.NewPadded(badgeTxt))
+	badge := container.NewStack(badgeBg, inset(4, 8, 4, 8, badgeTxt))
 	row := container.NewBorder(nil, nil,
 		container.NewCenter(container.NewStack(well, ico)),
 		badge,
-		container.NewPadded(container.NewVBox(mark, ver)),
+		inset(0, 12, 0, 12, vstack(0, mark, ver)),
 	)
 	rule := canvas.NewRectangle(colorHairline)
 	rule.SetMinSize(fyne.NewSize(1, 1))
-	return container.NewVBox(container.NewPadded(row), rule)
-}
-
-// wizardPage is a fixed sheet: product chrome, header, filling body, pinned footer.
-func wizardPage(header, body, footer fyne.CanvasObject) fyne.CanvasObject {
-	top := container.NewVBox(productHeader(), container.NewPadded(header))
-	var bot fyne.CanvasObject
-	if footer != nil {
-		bot = container.NewPadded(footer)
-	}
-	mid := container.NewPadded(body)
-	return container.NewBorder(top, bot, nil, nil, mid)
+	return vstack(0, inset(20, 20, 20, 20, row), rule)
 }
 
 func statusMark(state checkState) fyne.CanvasObject {
-	slot := canvas.NewRectangle(color.Transparent)
-	slot.SetMinSize(fyne.NewSize(28, 28))
 	well := canvas.NewRectangle(colorInput)
 	well.CornerRadius = 14
 	well.SetMinSize(fyne.NewSize(28, 28))
@@ -129,12 +155,29 @@ func statusMark(state checkState) fyne.CanvasObject {
 		ring := canvas.NewCircle(color.Transparent)
 		ring.StrokeColor = colorTertiary
 		ring.StrokeWidth = 2
-		ring.Resize(fyne.NewSize(14, 14))
-		pad := canvas.NewRectangle(color.Transparent)
-		pad.SetMinSize(fyne.NewSize(14, 14))
-		glyph = container.NewCenter(container.NewStack(pad, ring))
+		glyph = ring
 	}
-	return container.NewCenter(container.NewStack(slot, well, container.NewCenter(glyph)))
+	return container.New(&iconWellLay{well: 28, glyph: 14}, well, glyph)
+}
+
+type iconWellLay struct{ well, glyph float32 }
+
+func (l iconWellLay) MinSize([]fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(l.well, l.well)
+}
+
+func (l iconWellLay) Layout(objects []fyne.CanvasObject, _ fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	objects[0].Move(fyne.NewPos(0, 0))
+	objects[0].Resize(fyne.NewSize(l.well, l.well))
+	if len(objects) < 2 || objects[1] == nil {
+		return
+	}
+	p := (l.well - l.glyph) / 2
+	objects[1].Move(fyne.NewPos(p, p))
+	objects[1].Resize(fyne.NewSize(l.glyph, l.glyph))
 }
 
 func listRow(mark fyne.CanvasObject, title, detail string, titleMuted bool) fyne.CanvasObject {
@@ -208,9 +251,12 @@ func (r *spinRender) Destroy() {
 }
 
 func (r *spinRender) Layout(sz fyne.Size) {
-	if len(r.objs) > 0 {
-		r.objs[0].Resize(sz)
+	if len(r.objs) == 0 {
+		return
 	}
+	const g float32 = 14
+	r.objs[0].Resize(fyne.NewSize(g, g))
+	r.objs[0].Move(fyne.NewPos((sz.Width-g)/2, (sz.Height-g)/2))
 }
 
 func (r *spinRender) MinSize() fyne.Size { return fyne.NewSize(14, 14) }
