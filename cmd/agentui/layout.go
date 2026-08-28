@@ -29,7 +29,7 @@ func wizardHeight(id uistate.Screen) float32 {
 	case uistate.Permissions:
 		return 540
 	case uistate.Preflight:
-		return 560
+		return 520
 	case uistate.Setup:
 		return 640
 	case uistate.Enroll:

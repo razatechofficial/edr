@@ -56,6 +56,7 @@ type console struct {
 
 	preflightBox      *fyne.Container
 	preflightHint     *widget.Label
+	preflightLine     *widget.Label
 	preflightFaultBox *fyne.Container
 	startAgentBtn     *widget.Button
 	preflightItems    []preflightItem
