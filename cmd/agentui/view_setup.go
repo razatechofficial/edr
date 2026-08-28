@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
@@ -16,19 +17,13 @@ func (c *console) buildSetup() fyne.CanvasObject {
 	c.setupHint.Wrapping = fyne.TextWrapWord
 	c.setupFaultBox = container.NewVBox()
 	c.setupSteps = container.NewVBox()
-	c.setupProcess = widget.NewLabel("")
-	c.setupProcess.Wrapping = fyne.TextWrapWord
+	c.setupProcess = processLine("")
 	c.setupProcess.Hide()
-
-	eula := widget.NewLabel(eulaText)
-	eula.Wrapping = fyne.TextWrapWord
-	eulaScroll := container.NewVScroll(eula)
-	eulaScroll.SetMinSize(fyne.NewSize(0, 168))
 
 	c.setupAccept = widget.NewButton("Accept", c.onSetupAccept)
 	c.setupAccept.Importance = widget.HighImportance
 	c.setupDecline = widget.NewButton("Decline", c.onSetupDecline)
-	c.setupActions = container.NewGridWithColumns(2, c.setupDecline, c.setupAccept)
+	c.setupActions = container.New(&equalRow{gap: 8}, c.setupDecline, c.setupAccept)
 
 	c.setupWorking = widget.NewButton("Working…", nil)
 	c.setupWorking.Importance = widget.MediumImportance
@@ -39,32 +34,126 @@ func (c *console) buildSetup() fyne.CanvasObject {
 		c.show(uistate.Enroll)
 	})
 	c.setupLaunch.Importance = widget.HighImportance
-	c.setupLaunch.Hide()
+
 	c.setupLaunchHint = widget.NewLabel("Launch opens first-run enrollment. The sensor starts after identity and checks pass.")
 	c.setupLaunchHint.Wrapping = fyne.TextWrapWord
-	c.setupLaunchHint.Hide()
+	c.setupLaunchHint.Alignment = fyne.TextAlignCenter
 
 	c.setupClose = widget.NewButton("Close", func() { c.app.Quit() })
-	c.setupClose.Hide()
 
-	per := container.NewVBox(
-		widget.NewLabelWithStyle("Installs for all users of this computer", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		bodyText("Required for host monitoring. This is not a “this user only” app."),
-	)
-
-	header := pageHeader("License agreement", colorAccent, "Software license", "")
-	header = container.NewVBox(header, c.setupHint)
-	body := container.NewVBox(card(eulaScroll), card(per), c.setupFaultBox, c.setupSteps, c.setupProcess)
-	foot := container.NewVBox(c.setupActions, c.setupWorking, c.setupLaunch, c.setupLaunchHint, c.setupClose)
-	c.setupBody = body
-	c.setupContent = wizardPage(header, body, foot)
+	c.setupRoot = container.NewStack()
+	c.setupContent = c.setupRoot
+	c.paintSetupLicense()
 	return c.setupContent
+}
+
+func (c *console) setSetupSheet(inner fyne.CanvasObject, h float32) {
+	c.setupRoot.Objects = []fyne.CanvasObject{installerFrame(inner)}
+	c.setupRoot.Refresh()
+	if c.screen == uistate.Setup && c.win != nil {
+		c.lockSize(wizardW, h)
+		c.win.SetContent(c.setupContent)
+	}
+}
+
+func (c *console) paintSetupLicense() {
+	c.setupPhase = "license"
+	eula := widget.NewLabel(eulaText)
+	eula.Wrapping = fyne.TextWrapWord
+	eulaScroll := container.NewVScroll(eula)
+	eulaScroll.SetMinSize(fyne.NewSize(0, wizEulaH))
+	eulaWell := elevatedWell(8, inset(12, 12, 12, 12, eulaScroll))
+
+	perTitle := canvas.NewText("Installs for all users of this computer", colorText)
+	perTitle.TextSize = 13
+	perTitle.TextStyle = fyne.TextStyle{Bold: true}
+	per := elevatedWell(8, inset(12, 12, 12, 12, vstack(4, perTitle,
+		bodyText("Required for host monitoring. This is not a “this user only” app."))))
+
+	c.setupAccept.Show()
+	c.setupDecline.Show()
+	c.setupActions.Show()
+	c.setupWorking.Hide()
+	c.setupLaunch.Hide()
+	c.setupLaunchHint.Hide()
+	c.setupClose.Hide()
+	c.setupProcess.Hide()
+
+	inner := pad5(vstack(0,
+		pageHeader("License agreement", colorMuted, "Software license", ""),
+		gapH(8),
+		c.setupHint,
+		gapH(16),
+		eulaWell,
+		gapH(16),
+		per,
+		gapH(16),
+		c.setupFaultBox,
+		gapH(20),
+		c.setupActions,
+	))
+	c.setSetupSheet(inner, 640)
+}
+
+func (c *console) paintSetupInstall() {
+	c.setupPhase = "install"
+	c.setupProcess.Show()
+	c.setupWorking.Show()
+	c.setupActions.Hide()
+	c.setupLaunch.Hide()
+	c.setupLaunchHint.Hide()
+	c.setupClose.Hide()
+	foot := checklistFooter(c.setupProcess, c.setupWorking)
+	inner := checklistSheet(nil, inset(8, wizPad, 8, wizPad, c.setupSteps), foot)
+	c.setSetupSheet(inner, 420)
+}
+
+func (c *console) paintSetupFinish() {
+	c.setupPhase = "finish"
+	c.setupWorking.Hide()
+	c.setupActions.Hide()
+	c.setupClose.Hide()
+	c.setupProcess.Hide()
+	c.setupLaunch.Show()
+	c.setupLaunchHint.Show()
+	kick := kicker("Setup complete", colorMuted)
+	kick.Alignment = fyne.TextAlignCenter
+	title := heading("Files are installed")
+	title.Alignment = fyne.TextAlignCenter
+	body := bodyText(installedBody())
+	body.Alignment = fyne.TextAlignCenter
+	inner := inset(wizPad8, wizPad, wizPad8, wizPad, vstack(0,
+		kick,
+		gapH(8),
+		title,
+		gapH(8),
+		body,
+		gapH(24),
+		c.setupLaunch,
+		gapH(12),
+		c.setupLaunchHint,
+	))
+	c.setSetupSheet(inner, 460)
+}
+
+func (c *console) paintSetupDeclined() {
+	c.setupPhase = "declined"
+	c.setupActions.Hide()
+	c.setupWorking.Hide()
+	c.setupLaunch.Hide()
+	c.setupLaunchHint.Hide()
+	c.setupProcess.Hide()
+	c.setupClose.Show()
+	f := copyErrorDeclined()
+	f.OnAction = func() { c.app.Quit() }
+	inner := pad5(vstack(0, faultCard(f), gapH(16), c.setupClose))
+	c.setSetupSheet(inner, 420)
 }
 
 func copyErrorDeclined() uiFault {
 	return uiFault{
 		Title:  "Setup was cancelled",
-		Body:   "EDR Agent was not installed. You can run setup again when you are ready to accept the license.",
+		Body:   "edr was not installed. You can run setup again when you are ready to accept the license.",
 		Detail: "Silent fleet does not show this screen.",
 		Action: "Close",
 	}
@@ -79,17 +168,8 @@ func (c *console) setSetupFault(f uiFault) {
 }
 
 func (c *console) onSetupDecline() {
-	c.setSetupFault(copyErrorDeclined())
-	c.setupActions.Hide()
-	c.setupLaunch.Hide()
-	if c.setupLaunchHint != nil {
-		c.setupLaunchHint.Hide()
-	}
-	if c.setupWorking != nil {
-		c.setupWorking.Hide()
-	}
-	c.setupClose.Show()
-	c.setupHint.SetText("You can run setup again when you are ready to accept the license.")
+	c.setSetupFault(uiFault{})
+	c.paintSetupDeclined()
 }
 
 func (c *console) onSetupAccept() {
@@ -99,23 +179,17 @@ func (c *console) onSetupAccept() {
 	if !installerPresent() {
 		c.setSetupFault(uiFault{
 			Title:  "Installer not found",
-			Body:   "Place edr-installer next to EDR Agent and try again, or deploy the package silently.",
+			Body:   "Place edr-installer next to this app and try again, or deploy the package silently.",
 			Detail: adminDetail(),
 			Action: "OK",
 		})
+		c.paintSetupLicense()
 		return
 	}
 	c.setSetupFault(uiFault{})
-	c.setupActions.Hide()
-	c.setupHint.SetText("Copies files and registers the machine-wide service. No token on this screen.")
-	if c.setupProcess != nil {
-		c.setupProcess.SetText(setupStepDoing(0))
-		c.setupProcess.Show()
-	}
-	if c.setupWorking != nil {
-		c.setupWorking.SetText("Working…")
-		c.setupWorking.Show()
-	}
+	c.setupProcess.SetText(setupStepDoing(0))
+	c.setupWorking.SetText("Working…")
+	c.paintSetupInstall()
 	c.setBusy(true)
 	installprogress.Clear()
 	c.renderSetupSteps(0, false, false)
@@ -146,30 +220,15 @@ func (c *console) onSetupAccept() {
 							step = 0
 						}
 						c.renderSetupSteps(step, false, true)
-						if c.setupProcess != nil {
-							c.setupProcess.SetText("Install did not finish.")
-						}
-						if c.setupWorking != nil {
-							c.setupWorking.Hide()
-						}
+						c.setupProcess.SetText("Install did not finish.")
 						c.setSetupFault(classifyInstallError(res.out + "\n" + res.err.Error()))
-						c.setupActions.Show()
+						c.paintSetupLicense()
 						c.setupAccept.Enable()
 						return
 					}
 					c.renderSetupSteps(n, true, false)
-					if c.setupProcess != nil {
-						c.setupProcess.SetText("All checks passed.")
-					}
-					if c.setupWorking != nil {
-						c.setupWorking.Hide()
-					}
-					c.setupHint.SetText(installedBody())
-					c.setupLaunch.Show()
-					if c.setupLaunchHint != nil {
-						c.setupLaunchHint.Show()
-					}
-					c.setupActions.Hide()
+					c.setupProcess.SetText("All checks passed.")
+					c.paintSetupFinish()
 					installprogress.Clear()
 				})
 				return
@@ -186,9 +245,7 @@ func (c *console) onSetupAccept() {
 				line := setupStepDoing(i)
 				fyne.Do(func() {
 					c.renderSetupSteps(i, false, false)
-					if c.setupProcess != nil {
-						c.setupProcess.SetText(line)
-					}
+					c.setupProcess.SetText(line)
 				})
 			}
 		}
@@ -263,7 +320,7 @@ func (c *console) renderSetupSteps(active int, done, failed bool) {
 		case i == active:
 			st = checkRun
 		}
-		c.setupSteps.Add(listRow(statusMark(st), title, "", false))
+		c.setupSteps.Add(checkRow(statusMark(st), title, "", st == checkWait || st == checkOK))
 	}
 	c.setupSteps.Refresh()
 }
