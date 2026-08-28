@@ -14,8 +14,12 @@ func TestEnrollProgressFile(t *testing.T) {
 	if got := ReadEnrollProgress(dir); got != "csr" {
 		t.Fatalf("got %q", got)
 	}
-	ClearEnrollProgress(dir)
-	if _, err := os.Stat(EnrollProgressPath(dir)); !os.IsNotExist(err) {
-		t.Fatal("expected removed")
+	if got := readProgressFile(PublicEnrollProgressPath()); got != "csr" {
+		t.Fatalf("public %q", got)
 	}
+	ClearEnrollProgress(dir)
+	if got := ReadEnrollProgress(dir); got != "" {
+		t.Fatalf("cleared %q", got)
+	}
+	t.Cleanup(func() { _ = os.Remove(PublicEnrollProgressPath()) })
 }
