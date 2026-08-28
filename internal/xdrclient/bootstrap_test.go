@@ -98,3 +98,46 @@ func TestPatchXDRConfigFileProdHostSetsIngest(t *testing.T) {
 		t.Fatalf("ingest_hosts=%v", cfg.XDR.IngestHosts)
 	}
 }
+
+func TestEnableIngestFromEnrollmentCreatesSection(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DATA_DIR", dir)
+	path := filepath.Join(dir, "agent.yaml")
+	if err := os.WriteFile(path, []byte("agent:\n  id: a1\n  data_dir: "+dir+"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	st := xdrclient.State{
+		IngestHosts:   []string{"ingest.xdr.averox.com:443"},
+		SecureStorage: "keychain",
+	}
+	if err := xdrclient.EnableIngestFromEnrollment(path, st); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.XDR.Enabled {
+		t.Fatal("expected xdr.enabled")
+	}
+	if cfg.XDR.EnrollmentHost != xdrclient.DefaultEnrollmentHost {
+		t.Fatalf("enrollment_host=%s", cfg.XDR.EnrollmentHost)
+	}
+	if cfg.XDR.SecureStorage != "file" {
+		t.Fatalf("secure_storage=%s want file", cfg.XDR.SecureStorage)
+	}
+	if len(cfg.XDR.IngestHosts) != 1 || cfg.XDR.IngestHosts[0] != "ingest.xdr.averox.com:443" {
+		t.Fatalf("ingest_hosts=%v", cfg.XDR.IngestHosts)
+	}
+	if cfg.XDR.EnrollmentToken != "" {
+		t.Fatal("token must not be embedded")
+	}
+	envRaw, err := os.ReadFile(filepath.Join(dir, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	envBody := string(envRaw)
+	if !strings.Contains(envBody, "XDR_ENABLED=true") || !strings.Contains(envBody, "XDR_SECURE_STORAGE=file") {
+		t.Fatalf("runtime env=%s", envBody)
+	}
+}

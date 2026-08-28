@@ -75,7 +75,22 @@ Examples (same on Windows, macOS, and Linux; Windows may omit sudo):
 			}
 			cfg.XDR.Enabled = true
 
-			if !cfg.XDR.HasBootstrapCredentials() {
+			if force {
+				if err := xdrclient.ResetLocalIdentity(cfg.Agent.DataDir, cfg.XDR.SecureStorage); err != nil {
+					return fmt.Errorf("clear previous identity: %w", err)
+				}
+				cfg.Agent.ID = ""
+				if err := config.EnsureAgentIdentity(&cfg); err != nil {
+					return fmt.Errorf("new agent identity: %w", err)
+				}
+			}
+
+			store := xdrclient.Store{
+				Dir:     xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
+				DataDir: cfg.Agent.DataDir,
+				Backend: cfg.XDR.SecureStorage,
+			}
+			if !cfg.XDR.HasBootstrapCredentials() && !store.HasCredentials() {
 				return fmt.Errorf("enrollment requires --host and a token (--token, --token-file, env, or %s)",
 					xdrclient.DefaultEnrollmentTokenPath(filepath.Dir(cfgPath)))
 			}
@@ -100,10 +115,11 @@ Examples (same on Windows, macOS, and Linux; Windows may omit sudo):
 			if res.Fresh {
 				fmt.Printf("enrolled agent_id=%s machine_id=%s secure_storage=%s cert_not_after=%s\n",
 					res.State.AgentID, res.State.MachineID, res.State.SecureStorage,
-					res.State.CertNotAfter.Format(time.RFC3339))
+					res.State.CertNotAfter.UTC().Format(time.RFC3339))
 			} else {
-				fmt.Printf("credentials loaded agent_id=%s secure_storage=%s\n",
-					res.State.AgentID, res.State.SecureStorage)
+				fmt.Printf("credentials loaded agent_id=%s machine_id=%s secure_storage=%s cert_not_after=%s\n",
+					res.State.AgentID, res.State.MachineID, res.State.SecureStorage,
+					res.State.CertNotAfter.UTC().Format(time.RFC3339))
 			}
 			return nil
 		},

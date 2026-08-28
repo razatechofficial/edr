@@ -37,3 +37,10 @@ func TestClassifyHealth(t *testing.T) {
 		t.Fatal("not enrolled is unprotected")
 	}
 }
+
+func TestHealthCopyDegradedIsIdle(t *testing.T) {
+	l := HealthCopy(Degraded)
+	if l.Stream != "Idle" {
+		t.Fatalf("stream=%q want Idle", l.Stream)
+	}
+}

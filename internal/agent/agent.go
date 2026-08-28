@@ -176,14 +176,14 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	if telEP == "" {
 		telEP = strings.TrimSpace(cfg.Forwarder.Endpoint)
 	}
-	// Prefer XDR gRPC ingest when configured; otherwise keep HTTP telemetry relay.
-	if cfg.XDR.EnabledForEnrollment() {
+	// Prefer XDR gRPC ingest when configured or device credentials already exist.
+	if xdrclient.ShouldInitXDR(cfg.XDR, cfg.Agent.DataDir) {
 		if err := a.initXDR(); err != nil {
 			return nil, err
 		}
 	} else if telEP != "" {
 		qdir := filepath.Join(cfg.Agent.DataDir, "telemetry-queue")
-		qm, qerr := telemetryqueue.NewManager(qdir, 500<<20)
+		qm, qerr := telemetryqueue.NewManager(qdir, telemetryqueue.EffectiveMaxBytes(cfg.XDR.SpoolMaxBytes))
 		if qerr != nil {
 			a.logger.Warn("telemetry disk queue init failed", "error", qerr)
 		} else {

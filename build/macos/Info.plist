@@ -11,9 +11,9 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>EDR Agent Sensor</string>
+	<string>edr</string>
 	<key>CFBundleDisplayName</key>
-	<string>EDR Agent Sensor</string>
+	<string>edr</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>LSBackgroundOnly</key>

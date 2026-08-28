@@ -11,7 +11,7 @@ func (c *console) buildPreflight() fyne.CanvasObject {
 	c.preflightHint = widget.NewLabel("Each start re-checks the certificate, OS access, service, and offline spool. Start when every line is green. The sensor can run if the cloud is unreachable.")
 	c.preflightHint.Wrapping = fyne.TextWrapWord
 
-	c.startAgentBtn = widget.NewButton("Start EDR Agent", c.onStartAgent)
+	c.startAgentBtn = widget.NewButton("Start "+productName, c.onStartAgent)
 	c.startAgentBtn.Importance = widget.HighImportance
 	c.startAgentBtn.Disable()
 	c.preflightFaultBox = container.NewVBox()
@@ -54,7 +54,7 @@ func (c *console) runPreflight() {
 		c.startAgentBtn.Disable()
 		c.renderPreflight()
 	})
-	st := loadStatus()
+	st := c.sessionStatus()
 	for i := range items {
 		items[i].State = checkRun
 		fyne.DoAndWait(func() {
@@ -69,35 +69,67 @@ func (c *console) runPreflight() {
 		}
 		items[i].Detail = detail
 		fyne.DoAndWait(func() {
-			c.last = st
 			c.preflightItems = items
 			c.renderPreflight()
 		})
 	}
 }
 
+func (c *console) sessionStatus() operatorStatus {
+	st := loadStatus()
+	if !st.Enrolled && c.last.Enrolled {
+		st.Enrolled = true
+		st.AgentID = firstNonEmpty(st.AgentID, c.last.AgentID)
+		st.MachineID = firstNonEmpty(st.MachineID, c.last.MachineID)
+		st.CertExpiry = firstNonEmpty(st.CertExpiry, c.last.CertExpiry)
+	}
+	return st
+}
+
 func (c *console) onStartAgent() {
 	if c.busy || !c.checksOK {
 		return
 	}
+	c.startSensor()
+}
+
+func (c *console) startSensor() {
 	c.setBusy(true)
-	c.preflightHint.SetText("Starting the sensor…")
+	if c.preflightHint != nil {
+		c.preflightHint.SetText("Starting the sensor…")
+	}
+	if c.dashAction != nil {
+		c.dashAction.SetText("Starting…")
+	}
+	c.setDashFault(uiFault{})
 	go func() {
+		_, _ = runEdrctl("stage-identity")
 		out, err := runEdrctlPrivileged("start")
 		st := loadStatus()
 		fyne.Do(func() {
 			c.setBusy(false)
-			c.last = st
+			if st.Enrolled {
+				c.last = st
+			} else {
+				st.Enrolled = c.last.Enrolled
+				st.AgentID = firstNonEmpty(st.AgentID, c.last.AgentID)
+			}
 			if err != nil && !serviceHealthy(st.Service) {
 				f := classifyStartError(out)
 				if f.Detail == "" && err != nil {
 					f.Detail = err.Error()
 				}
 				c.setPreflightFault(f)
-				c.preflightHint.SetText(f.Title)
+				c.setDashFault(f)
+				if c.preflightHint != nil {
+					c.preflightHint.SetText(f.Title)
+				}
+				c.applyDashboard(st, sampleResources(st))
 				return
 			}
 			c.setPreflightFault(uiFault{})
+			c.setDashFault(uiFault{})
+			c.last = st
 			c.dismissToTray()
 		})
 	}()

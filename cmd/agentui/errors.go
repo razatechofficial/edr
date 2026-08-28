@@ -5,10 +5,11 @@ import (
 )
 
 type uiFault struct {
-	Title  string
-	Body   string
-	Detail string
-	Action string
+	Title    string
+	Body     string
+	Detail   string
+	Action   string
+	OnAction func()
 }
 
 func faultTokenMissing() uiFault {
@@ -141,6 +142,29 @@ func classifyStartError(raw string) uiFault {
 			Body:   "This host cannot prove its identity to ingest until the certificate is renewed.",
 			Detail: "Keep the device online so renewal can run, or re-enroll with a new token if your admin requires it.",
 			Action: "OK",
+		}
+	case strings.Contains(s, "operation not permitted") || strings.Contains(s, "write sensor") ||
+		strings.Contains(s, "replace sensor") || strings.Contains(s, "retarget service"):
+		return uiFault{
+			Title:  "The sensor could not be installed",
+			Body:   "macOS blocked replacing the signed app. Start now installs the sensor next to its data files instead.",
+			Detail: firstLine(raw),
+			Action: "Try again",
+		}
+	case strings.Contains(s, "local sensor binary not found") || strings.Contains(s, "sensor binary missing"):
+		return uiFault{
+			Title:  "The sensor program is missing",
+			Body:   "Quit this window and launch the UI from the same folder as edr-agent.",
+			Detail: firstLine(raw),
+			Action: "Try again",
+		}
+	case strings.Contains(s, "did not stay running") || strings.Contains(s, "no usable local enrollment") ||
+		strings.Contains(s, "cannot read the device certificate") || strings.Contains(s, "staged identity"):
+		return uiFault{
+			Title:  "The sensor could not start",
+			Body:   "This Mac is enrolled, but the background sensor exited. The device certificate must be readable by the system service.",
+			Detail: firstLine(raw),
+			Action: "Try again",
 		}
 	default:
 		return uiFault{

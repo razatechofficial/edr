@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/razatechofficial/edr/internal/alert"
+	"github.com/razatechofficial/edr/internal/hostperm"
 	"github.com/razatechofficial/edr/internal/platform"
 )
 
@@ -64,6 +65,13 @@ func platformDefaults() {
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "fda-probe" {
+		if hostperm.ProcessHasFDA() {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
+
 	root := &cobra.Command{
 		Use:   "edrctl",
 		Short: "EDR agent management CLI",
@@ -100,11 +108,15 @@ On Windows, edr.exe is the same CLI as edrctl.exe.`,
 		newRulesCmd(),
 		newConfigCmd(),
 		newEnrollCmd(),
+		newResetIdentityCmd(),
+		newStageIdentityCmd(),
 		newStartCmd(),
 		newStopCmd(),
 		newTestConnectionCmd(),
 		newVersionCmd(),
 		newFleetCmd(),
+		newHostpermCmd(),
+		newUpdateCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

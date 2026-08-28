@@ -10,6 +10,17 @@ import (
 
 func edrctlPath() string {
 	var cands []string
+	// Prefer the binary next to this UI so a local/dev .app uses matching edrctl,
+	// not a stale copy in /usr/local/bin.
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		cands = append(cands,
+			filepath.Join(dir, "edrctl"),
+			filepath.Join(dir, "edrctl.exe"),
+			filepath.Join(dir, "edr"),
+			filepath.Join(dir, "edr.exe"),
+		)
+	}
 	if runtime.GOOS == "darwin" {
 		cands = append(cands,
 			"/usr/local/bin/edrctl",
@@ -25,15 +36,6 @@ func edrctlPath() string {
 	if runtime.GOOS == "linux" {
 		cands = append(cands, "/usr/bin/edrctl", "/usr/local/bin/edrctl")
 	}
-	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		cands = append(cands,
-			filepath.Join(dir, "edrctl"),
-			filepath.Join(dir, "edrctl.exe"),
-			filepath.Join(dir, "edr"),
-			filepath.Join(dir, "edr.exe"),
-		)
-	}
 	for _, p := range cands {
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
 			return p
@@ -47,6 +49,13 @@ func edrctlPath() string {
 
 func installerPath() string {
 	var cands []string
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		cands = append(cands,
+			filepath.Join(dir, "edr-installer"),
+			filepath.Join(dir, "edr-installer.exe"),
+		)
+	}
 	if runtime.GOOS == "darwin" {
 		cands = append(cands, "/usr/local/bin/edr-installer")
 	}
@@ -57,13 +66,6 @@ func installerPath() string {
 	}
 	if runtime.GOOS == "linux" {
 		cands = append(cands, "/usr/bin/edr-installer", "/usr/local/bin/edr-installer")
-	}
-	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		cands = append(cands,
-			filepath.Join(dir, "edr-installer"),
-			filepath.Join(dir, "edr-installer.exe"),
-		)
 	}
 	for _, p := range cands {
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {

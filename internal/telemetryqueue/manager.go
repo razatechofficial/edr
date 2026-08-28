@@ -18,7 +18,28 @@ import (
 	"time"
 )
 
-const segmentMax = 64 << 20 // rotate segment after 64MiB
+const (
+	segmentMax = 64 << 20 // rotate segment after 64MiB
+
+	// DefaultMaxBytes is the offline ingest spool cap (3 GiB). Industry range
+	// for endpoint telemetry caches is 1–5 GiB (Elastic Filebeat disk queue,
+	// osquery buffered_log, Falcon/MDE local cache). 3 GiB sits in the
+	// 2–4 GiB band requested for this product. Oldest segments are dropped
+	// first; age eviction is separate (default 7 days).
+	DefaultMaxBytes int64 = 3 << 30
+	// MinFreeBytes is the floor free-space check so the cap can actually fill.
+	MinFreeBytes uint64 = 2 << 30
+	// DefaultMaxAgeDays drops closed segments older than this even if under cap.
+	DefaultMaxAgeDays = 7
+)
+
+// EffectiveMaxBytes returns n, or DefaultMaxBytes when n is unset.
+func EffectiveMaxBytes(n int64) int64 {
+	if n <= 0 {
+		return DefaultMaxBytes
+	}
+	return n
+}
 
 // Stats holds queue metrics for health reporting.
 type Stats struct {
@@ -50,7 +71,7 @@ type Manager struct {
 // NewManager creates a queue under dir with maxTotal bytes retained (oldest segments removed first).
 func NewManager(dir string, maxTotal int64) (*Manager, error) {
 	if maxTotal <= 0 {
-		maxTotal = 500 << 20
+		maxTotal = DefaultMaxBytes
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err

@@ -208,7 +208,9 @@ func bindEnvVars(v *viper.Viper, prefix string, t reflect.Type) {
 		}
 
 		if envVar := field.Tag.Get("env"); envVar != "" {
-			_ = v.BindEnv(key, envVar)
+			if _, ok := os.LookupEnv(envVar); ok {
+				_ = v.BindEnv(key, envVar)
+			}
 		}
 	}
 }

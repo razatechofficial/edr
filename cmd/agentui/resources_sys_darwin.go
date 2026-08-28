@@ -21,11 +21,13 @@ func sampleSystem() (cpuPct float64, memUsed, memTotal uint64) {
 		memTotal = n
 	}
 	page := uint64(unix.Getpagesize())
-	free, _ := unix.SysctlUint64("vm.page_free_count")
-	inactive, _ := unix.SysctlUint64("vm.page_inactive_count")
-	avail := (free + inactive) * page
-	if memTotal > avail {
-		memUsed = memTotal - avail
+	free, ferr := unix.SysctlUint64("vm.page_free_count")
+	inactive, ierr := unix.SysctlUint64("vm.page_inactive_count")
+	if ferr == nil || ierr == nil {
+		avail := (free + inactive) * page
+		if memTotal > avail {
+			memUsed = memTotal - avail
+		}
 	}
 
 	idle, total := readCPUTicks()
@@ -45,6 +47,9 @@ func sampleSystem() (cpuPct float64, memUsed, memTotal uint64) {
 		idle2, total2 := readCPUTicks()
 		if total2 > total {
 			cpuPct = (1 - float64(idle2-idle)/float64(total2-total)) * 100
+			if cpuPct < 0 {
+				cpuPct = 0
+			}
 		}
 	}
 	lastIdle, lastTotal = idle, total

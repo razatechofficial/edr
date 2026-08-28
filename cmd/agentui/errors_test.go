@@ -15,6 +15,9 @@ func TestClassifyEnrollError(t *testing.T) {
 	if classifyEnrollError("keychain: item add failed").Title != "Could not store the device certificate" {
 		t.Fatal("keystore")
 	}
+	if classifyStartError("sensor did not stay running (status not running)").Title != "The sensor could not start" {
+		t.Fatal("start running")
+	}
 }
 
 func TestClassifyInstallError(t *testing.T) {
@@ -51,5 +54,23 @@ func TestCertExpiring(t *testing.T) {
 func TestFormatBytesMB(t *testing.T) {
 	if formatBytesMB(512) == "" {
 		t.Fatal("empty")
+	}
+}
+
+func TestServiceHealthy(t *testing.T) {
+	if serviceHealthy("not running") {
+		t.Fatal(`"not running" must not count as healthy`)
+	}
+	if serviceHealthy("inactive") {
+		t.Fatal("inactive")
+	}
+	if serviceHealthy("loaded") {
+		t.Fatal("loaded is registered, not running")
+	}
+	if !serviceHealthy("running") {
+		t.Fatal("running")
+	}
+	if !serviceHealthy("active") {
+		t.Fatal("active")
 	}
 }

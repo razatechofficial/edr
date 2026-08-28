@@ -121,6 +121,8 @@ chmod 755 "${STAGE}/Library/Application Support/EDR/first-run-permissions.sh"
 mkdir -p "${STAGE}/Library/LaunchAgents"
 cp "${ROOT}/deploy/macos/com.razatech.edr.firstrun.plist" "${STAGE}/Library/LaunchAgents/com.razatech.edr.firstrun.plist"
 chmod 644 "${STAGE}/Library/LaunchAgents/com.razatech.edr.firstrun.plist"
+cp "${ROOT}/deploy/macos/com.razatech.edr-agent-ui.plist" "${STAGE}/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
+chmod 644 "${STAGE}/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
 
 # Full rules tree (sigma, yara, baseline, …)
 if [[ -d "${ROOT}/rules" ]]; then
@@ -256,11 +258,13 @@ cat > "${PLIST_DST}" <<'PLIST'
 		<string>/Library/Application Support/EDR/config/agent.yaml</string>
 	</array>
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
     <key>KeepAlive</key>
     <dict>
         <key>Crashed</key>
         <true/>
+        <key>SuccessfulExit</key>
+        <false/>
     </dict>
 	<key>ThrottleInterval</key>
 	<integer>30</integer>
@@ -276,14 +280,16 @@ chown root:wheel "${PLIST_DST}"
 
 launchctl bootout system "${PLIST_DST}" 2>/dev/null || true
 launchctl unload "${PLIST_DST}" 2>/dev/null || true
-launchctl bootstrap system "${PLIST_DST}"
-launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
-
-# Do not start the sensor here — loading models during Installer hangs setup.
-# Re-enrolled upgrades resume streaming; first install waits for the console.
+# RunAtLoad is true so the next reboot starts the sensor for every user.
+# Do not bootstrap during Installer.app — loading models hangs the pkg UI.
+# Re-enrolled upgrades resume now; first install waits for EDR Agent.app.
 if [[ -f "${BASE}/xdr-tls/enrollment.json" ]]; then
+	launchctl bootstrap system "${PLIST_DST}" 2>/dev/null || launchctl load "${PLIST_DST}" 2>/dev/null || true
+	launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
 	launchctl kickstart -k "system/com.razatech.edr-agent" 2>/dev/null || true
 fi
+
+UI_PLIST="/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
 
 APP="/Applications/EDR Agent.app"
 if [[ -d "${APP}" ]]; then
@@ -297,6 +303,12 @@ if [[ -d "${APP}" ]]; then
 			/usr/bin/sudo -u "${CONSOLE_USER}" "${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
 		fi
 		/usr/bin/sudo -u "${CONSOLE_USER}" /usr/bin/open "${APP}" >/dev/null 2>&1 || true
+		if [[ -f "${UI_PLIST}" ]]; then
+			UID_U="$(/usr/bin/id -u "${CONSOLE_USER}" 2>/dev/null || true)"
+			if [[ -n "${UID_U}" ]]; then
+				launchctl bootstrap "gui/${UID_U}" "${UI_PLIST}" 2>/dev/null || true
+			fi
+		fi
 	fi
 fi
 POST

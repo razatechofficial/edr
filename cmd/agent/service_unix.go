@@ -39,10 +39,11 @@ WantedBy=multi-user.target
 <key>ProgramArguments</key><array>
 <string>/usr/local/bin/edr-agent</string><string>run</string><string>--config</string><string>/Library/Application Support/EDR/config/agent.yaml</string>
 </array>
-<key>RunAtLoad</key><false/>
+<key>RunAtLoad</key><true/>
 <key>KeepAlive</key>
 <dict>
 <key>Crashed</key><true/>
+<key>SuccessfulExit</key><false/>
 </dict>
 <key>StandardOutPath</key><string>/Library/Logs/EDR/stdout.log</string>
 <key>StandardErrorPath</key><string>/Library/Logs/EDR/stderr.log</string>

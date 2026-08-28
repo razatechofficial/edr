@@ -612,8 +612,11 @@ type XDRConfig struct {
 	SecureStorage   string `yaml:"secure_storage" env:"XDR_SECURE_STORAGE"`
 	RenewBeforeDays int    `yaml:"renew_before_days"`
 	InsecureSkipTLS bool   `yaml:"insecure_skip_tls"` // local/dev only for enrollment bootstrap
-	SpoolMaxBytes   int64  `yaml:"spool_max_bytes"`   // default 1GiB
+	SpoolMaxBytes   int64  `yaml:"spool_max_bytes"`   // default 3GiB (2–4 GiB enterprise offline cache)
 	SpoolMaxAgeDays int    `yaml:"spool_max_age_days"` // default 7
+	// UpdateCatalogURL is an HTTPS JSON catalog (latest version + package URLs).
+	// Empty = skip (MDM/WSUS/Jamf owns updates; air-gap safe).
+	UpdateCatalogURL string `yaml:"update_catalog_url"`
 }
 
 // HasBootstrapCredentials reports whether host+token are available for Register.
@@ -657,7 +660,7 @@ func Defaults() Config {
 
 	cfg.XDR.SecureStorage = "auto"
 	cfg.XDR.RenewBeforeDays = 7
-	cfg.XDR.SpoolMaxBytes = 1 << 30 // 1 GiB
+	cfg.XDR.SpoolMaxBytes = 3 << 30 // 3 GiB (2–4 GiB industry band)
 	cfg.XDR.SpoolMaxAgeDays = 7
 
 	cfg.LLM.Enabled = false

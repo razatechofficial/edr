@@ -18,7 +18,7 @@ func WriteEnrollProgress(dataDir, step string) {
 	if strings.TrimSpace(dataDir) == "" || strings.TrimSpace(step) == "" {
 		return
 	}
-	_ = os.MkdirAll(dataDir, 0o750)
+	_ = os.MkdirAll(dataDir, 0o755)
 	_ = os.WriteFile(EnrollProgressPath(dataDir), []byte(strings.TrimSpace(step)+"\n"), 0o600)
 }
 

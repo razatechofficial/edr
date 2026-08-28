@@ -124,7 +124,7 @@ func linuxEnroll(in *bufio.Reader) error {
 	}
 	done := make(chan enrollRes, 1)
 	go func() {
-		out, err := runEdrctlPrivileged("enroll", "--host", host, "--token", tok)
+		out, err := runEdrctlPrivileged("enroll", "--force", "--host", host, "--token", tok)
 		done <- enrollRes{out, err}
 	}()
 
@@ -148,10 +148,13 @@ wait:
 	}
 
 	st := loadStatus()
-	if res.err != nil && !st.Enrolled {
+	if !enrollLooksSuccessful(res.out, res.err, st) {
 		msg := strings.TrimSpace(res.out)
-		if msg == "" {
+		if msg == "" && res.err != nil {
 			msg = res.err.Error()
+		}
+		if msg == "" {
+			msg = "Enrollment did not return a device certificate."
 		}
 		f := classifyEnrollError(msg)
 		return fmt.Errorf("%s\n%s\n%s", f.Title, f.Body, f.Detail)

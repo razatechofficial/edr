@@ -2,157 +2,428 @@ package main
 
 import (
 	"fmt"
+	"image/color"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
+	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/platform"
+	"github.com/razatechofficial/edr/internal/updatecheck"
 )
 
 func (c *console) buildDashboard() fyne.CanvasObject {
-	c.healthTitle = canvas.NewText("Protected", colorOK)
-	c.healthTitle.TextSize = 24
-	c.healthTitle.TextStyle = fyne.TextStyle{Bold: true}
-
-	c.sensorLamp = widget.NewLabel("Sensor —")
-	c.streamLamp = widget.NewLabel("Stream —")
-	c.healthSub = widget.NewLabel("")
-	c.healthSub.Wrapping = fyne.TextWrapWord
-
-	c.cpuAgent = widget.NewLabel("—")
-	c.ramAgent = widget.NewLabel("—")
-	c.eventsVal = widget.NewLabel("—")
-	c.threatsVal = widget.NewLabel("—")
-	c.blocksVal = widget.NewLabel("—")
-	c.uptimeVal = widget.NewLabel("—")
-	c.agentLine = widget.NewLabel("")
-	c.agentLine.TextStyle = fyne.TextStyle{Monospace: true}
-
-	c.cpuSpark = container.NewHBox()
+	c.glow = newGlowBG(colorOK)
+	c.spark = newAreaSpark(colorCyan)
+	c.ramBar = newRamBar()
 	c.cpuHist = make([]float64, 0, 12)
 
-	status := card(container.NewVBox(
-		c.healthTitle,
-		container.NewHBox(c.sensorLamp, widget.NewLabel("·"), c.streamLamp),
-		c.healthSub,
-	))
-	res := container.NewGridWithColumns(2,
-		card(container.NewVBox(caption("Agent CPU"), c.cpuAgent, c.cpuSpark)),
-		card(container.NewVBox(caption("Agent RAM"), c.ramAgent)),
-	)
-	counts := card(container.NewGridWithColumns(3,
-		container.NewVBox(caption("Events"), c.eventsVal),
-		container.NewVBox(caption("Threats"), c.threatsVal),
-		container.NewVBox(caption("Blocked"), c.blocksVal),
-	))
-	foot := container.NewBorder(nil, nil, c.uptimeVal, c.agentLine, nil)
+	c.heroFace = newHeroFace()
+	c.healthTitle = canvas.NewText("Protected", colorText)
+	c.healthTitle.TextSize = dashTitleSize
+	c.healthTitle.TextStyle = fyne.TextStyle{Bold: true}
 
-	body := container.NewVBox(status, res, counts, foot)
-	c.dashContent = container.NewPadded(body)
+	c.sensorLive = newLiveDot()
+	c.sensorLamp = canvas.NewText("Sensor Running", colorText)
+	c.sensorLamp.TextSize = 11
+	c.streamLamp = canvas.NewText("Live", colorText)
+	c.streamLamp.TextSize = 11
+	c.streamMark = newIconDot("wifi", colorOK)
+
+	c.bannerBg = canvas.NewRectangle(colorWell)
+	c.bannerBg.CornerRadius = 12
+	c.bannerBg.StrokeWidth = 1
+	c.bannerBg.StrokeColor = withAlpha(colorOK, 0x44)
+	c.bannerText = canvas.NewText("", colorText)
+	c.bannerText.TextSize = 12
+	c.bannerWrap = container.NewStack(c.bannerBg, inset(dashBannerPadY, dashBannerPadX, dashBannerPadY, dashBannerPadX, c.bannerText))
+	c.bannerWrap.Hide()
+
+	c.cpuVal = numText("0.0", 32, colorText)
+	c.cpuUnit = canvas.NewText("%", colorTertiary)
+	c.cpuUnit.TextSize = 12
+	c.cpuHint = canvas.NewText("Sensor idle", colorTertiary)
+	c.cpuHint.TextSize = 11
+
+	c.ramVal = numText("0", 32, colorText)
+	c.ramUnit = canvas.NewText("MB", colorTertiary)
+	c.ramUnit.TextSize = 12
+	c.ramHint = canvas.NewText("—", colorTertiary)
+	c.ramHint.TextSize = 11
+
+	c.eventsVal = numText("—", 22, colorText)
+	c.threatsVal = numText("—", 22, colorText)
+	c.blocksVal = numText("—", 22, colorText)
+	c.eventsVal.Alignment = fyne.TextAlignCenter
+	c.threatsVal.Alignment = fyne.TextAlignCenter
+	c.blocksVal.Alignment = fyne.TextAlignCenter
+
+	c.uptimeVal = canvas.NewText("— · Rules —", colorTertiary)
+	c.uptimeVal.TextSize = 11
+	c.agentLine = canvas.NewText("—", color.NRGBA{R: 0xEB, G: 0xEB, B: 0xF5, A: 0x52})
+	c.agentLine.TextSize = 10
+	c.agentLine.TextStyle = fyne.TextStyle{Monospace: true}
+
+	c.dashAction = widget.NewButton("Start "+productName, c.onDashAction)
+	c.dashAction.Importance = widget.HighImportance
+	c.dashAction.Hide()
+	c.dashFaultBox = container.NewVBox()
+	c.dashFaultBox.Hide()
+
+	pills := hstack(dashPillGap,
+		pill(c.sensorLive, c.sensorLamp),
+		pill(lockH(12, c.streamMark), c.streamLamp),
+	)
+	titleCol := vstack(0, c.healthTitle, gapH(dashPillsMT), pills)
+	header := vstack(dashBannerMT, heroRow(c.heroFace, titleCol), c.bannerWrap)
+
+	cpuTile := resourceTile("AGENT CPU", c.cpuVal, c.cpuUnit, c.cpuHint, lockH(dashSparkH, c.spark))
+	ramTile := resourceTile("AGENT RAM", c.ramVal, c.ramUnit, c.ramHint, pinTopH(dashSparkH, c.ramBar))
+	tiles := splitRow(dashTileGap, cpuTile, ramTile)
+
+	sep := func() fyne.CanvasObject {
+		line := canvas.NewRectangle(color.NRGBA{R: 255, G: 255, B: 255, A: 0x14})
+		line.SetMinSize(fyne.NewSize(1, 1))
+		return line
+	}
+	metricsBg := canvas.NewRectangle(colorTile)
+	metricsBg.CornerRadius = 16
+	metricsBg.StrokeColor = colorHairline
+	metricsBg.StrokeWidth = 1
+	metricsInner := container.New(&metricsStrip{},
+		metricCell(drawMiniIcon("activity", colorCyan), colorCyan, c.eventsVal, "EVENTS"),
+		sep(),
+		metricCell(drawMiniIcon("alert", colorWarn), colorWarn, c.threatsVal, "THREATS"),
+		sep(),
+		metricCell(drawMiniIcon("ban", colorOK), colorOK, c.blocksVal, "BLOCKED"),
+	)
+	metrics := container.NewStack(metricsBg, inset(dashMetricsPadY, dashMetricsPadX, dashMetricsPadY, dashMetricsPadX, metricsInner))
+
+	footLine := canvas.NewRectangle(color.NRGBA{R: 255, G: 255, B: 255, A: 0x0F})
+	footLine.SetMinSize(fyne.NewSize(1, 1))
+	foot := vstack(0, footLine, inset(dashFootPadY, dashFootPadX, dashFootPadY, dashFootPadX,
+		container.NewBorder(nil, nil, c.uptimeVal, c.agentLine, nil),
+	))
+
+	body := vstack(0, tiles, gapH(dashMetricsMT), metrics, c.dashFaultBox, c.dashAction)
+	sheet := container.NewBorder(
+		inset(dashHeaderPadT, dashHeaderPadX, dashHeaderPadB, dashHeaderPadX, header),
+		foot,
+		nil, nil,
+		inset(dashBodyPadY, dashBodyPadX, dashBodyPadY, dashBodyPadX, body),
+	)
+	c.dashContent = container.NewStack(
+		c.glow,
+		newDragFrame(sheet, c.dashHost),
+	)
+	if c.pop != nil {
+		c.pop.SetPadded(false)
+		c.pop.SetContent(c.dashContent)
+	}
 	return c.dashContent
+}
+
+func (c *console) dashHost() fyne.Window {
+	if c.pop != nil {
+		return c.pop
+	}
+	return c.win
+}
+
+func (c *console) dashCanvas() fyne.Canvas {
+	if c.pop != nil {
+		return c.pop.Canvas()
+	}
+	return c.win.Canvas()
+}
+
+func pill(mark fyne.CanvasObject, label *canvas.Text) fyne.CanvasObject {
+	bg := canvas.NewRectangle(colorPill)
+	bg.CornerRadius = 12
+	bg.StrokeColor = colorHairline
+	bg.StrokeWidth = 1
+	row := hstack(dashPillMark, mark, label)
+	return container.NewStack(bg, inset(dashPillPadY, dashPillPadX, dashPillPadY, dashPillPadX, row))
+}
+
+func resourceTile(label string, value, unit, hint *canvas.Text, child fyne.CanvasObject) fyne.CanvasObject {
+	bg := canvas.NewRectangle(colorTile)
+	bg.CornerRadius = 16
+	bg.StrokeColor = colorHairline
+	bg.StrokeWidth = 1
+	cap := labelCaps(label, 10, colorTertiary)
+	nums := hstack(4, value, unit)
+	body := vstack(0, cap, gapH(dashNumMT), nums, gapH(dashSparkMT), child, gapH(dashHintMT), hint)
+	return container.NewStack(bg, inset(dashTilePadY, dashTilePadX, dashTilePadY, dashTilePadX, body))
+}
+
+func metricCell(ico fyne.Resource, wellCol color.NRGBA, value *canvas.Text, label string) fyne.CanvasObject {
+	well := canvas.NewRectangle(withAlpha(wellCol, 0x22))
+	well.CornerRadius = 14
+	well.SetMinSize(fyne.NewSize(dashIconWell, dashIconWell))
+	img := canvas.NewImageFromResource(ico)
+	img.FillMode = canvas.ImageFillContain
+	img.SetMinSize(fyne.NewSize(14, 14))
+	icon := container.NewCenter(container.NewStack(well, container.NewCenter(img)))
+	cap := labelCaps(label, 10, colorTertiary)
+	cap.Alignment = fyne.TextAlignCenter
+	value.Alignment = fyne.TextAlignCenter
+	return vstack(0, icon, gapH(dashMetricValMT), value, cap)
 }
 
 func (c *console) applyDashboard(st operatorStatus, res resourceSnapshot) {
 	k, lamps := decorateHealth(st)
-
-	col := colorMuted
+	hero := colorOK
+	kind := heroOK
 	switch k {
 	case uistate.Protected:
-		col = colorOK
+		hero = colorOK
+		kind = heroOK
+		if lamps.Banner != "" {
+			hero = colorWarn
+			kind = heroAlert
+		}
 	case uistate.Contained:
-		col = colorDanger
+		hero = colorDanger
+		kind = heroOff
 	case uistate.Degraded:
-		col = colorWarn
-	case uistate.Unprotected:
-		col = colorDanger
+		hero = colorWarn
+		kind = heroAlert
+	default:
+		hero = colorDanger
+		kind = heroOff
+	}
+
+	c.glow.SetHero(hero)
+	if c.heroFace != nil {
+		c.heroFace.Set(hero, kind)
 	}
 	c.healthTitle.Text = lamps.Title
-	c.healthTitle.Color = col
+	c.healthTitle.Color = colorText
 	c.healthTitle.Refresh()
-	c.sensorLamp.SetText("Sensor " + lamps.Sensor)
-	c.streamLamp.SetText("Stream " + lamps.Stream)
+
+	sensorCol := lampColor(lamps.Sensor)
+	streamCol := lampColor(lamps.Stream)
+	if c.sensorLive != nil {
+		c.sensorLive.Set(sensorCol, lamps.Sensor == "Running")
+	}
+	c.sensorLamp.Text = "Sensor " + lamps.Sensor
+	c.sensorLamp.Refresh()
+	c.streamLamp.Text = lamps.Stream
+	c.streamLamp.Refresh()
+	wifi := "wifi"
+	if lamps.Stream != "Live" {
+		wifi = "wifi-off"
+	}
+	if c.streamMark != nil {
+		c.streamMark.Set(wifi, streamCol)
+	}
+
 	if lamps.Banner != "" {
-		c.healthSub.SetText(lamps.Banner)
-		c.healthSub.Show()
+		c.bannerText.Text = lamps.Banner
+		c.bannerText.Refresh()
+		c.bannerBg.StrokeColor = withAlpha(hero, 0x44)
+		c.bannerBg.Refresh()
+		c.bannerWrap.Show()
 	} else {
-		c.healthSub.SetText("")
-		c.healthSub.Hide()
+		c.bannerWrap.Hide()
 	}
 
 	stopped := !serviceHealthy(st.Service)
-	if stopped {
-		c.cpuAgent.SetText("0.0%  ·  Sensor idle")
-		c.ramAgent.SetText(fmt.Sprintf("%.0f MB", res.AgentMemMB))
-		c.eventsVal.SetText("—")
-		c.threatsVal.SetText("—")
-		c.blocksVal.SetText("—")
-		c.uptimeVal.SetText("—")
-	} else {
-		c.cpuAgent.SetText(fmt.Sprintf("%.1f%%  ·  System %.0f%%", res.AgentCPU, res.SysCPU))
-		c.ramAgent.SetText(fmt.Sprintf("%.0f MB  ·  %s", res.AgentMemMB, formatBytesGB(res.SysMemTot)))
-		c.eventsVal.SetText(fmt.Sprintf("%d", st.EventsProc))
-		c.threatsVal.SetText(fmt.Sprintf("%d", st.Detections))
-		c.blocksVal.SetText(fmt.Sprintf("%d", st.Blocks))
-		rules := "Rules —"
-		if st.RulesCount > 0 {
-			rules = fmt.Sprintf("Rules %d", st.RulesCount)
+	switch {
+	case stopped:
+		c.cpuVal.Text = "0.0"
+		c.cpuHint.Text = "Sensor idle"
+		c.ramVal.Text = fmt.Sprintf("%.0f", res.AgentMemMB)
+		c.eventsVal.Text = "—"
+		c.threatsVal.Text = "—"
+		c.blocksVal.Text = "—"
+		c.uptimeVal.Text = "— · Rules —"
+	default:
+		c.cpuVal.Text = fmt.Sprintf("%.1f", res.AgentCPU)
+		c.cpuHint.Text = systemCPUHint(res.SysCPU)
+		c.ramVal.Text = fmt.Sprintf("%.0f", res.AgentMemMB)
+		c.eventsVal.Text = formatCount(st.EventsProc)
+		c.threatsVal.Text = formatCount(st.Detections)
+		c.blocksVal.Text = formatCount(st.Blocks)
+		c.uptimeVal.Text = rulesLine(st.Uptime, st.RulesCount)
+	}
+	c.cpuVal.Refresh()
+	c.cpuHint.Refresh()
+	c.ramVal.Refresh()
+	c.ramHint.Text = ramHint(res.SysMemUsed, res.SysMemTot)
+	c.ramHint.Refresh()
+	c.eventsVal.Refresh()
+	c.threatsVal.Refresh()
+	c.blocksVal.Refresh()
+	c.uptimeVal.Refresh()
+	c.agentLine.Text = compactAgentID(st.AgentID)
+	c.agentLine.Refresh()
+
+	ratio := 0.12
+	if res.AgentMemMB > 0 {
+		ratio = res.AgentMemMB / 256
+		if ratio < 0.08 {
+			ratio = 0.08
 		}
-		c.uptimeVal.SetText(fmt.Sprintf("%s · %s", dash(st.Uptime), rules))
+		if ratio > 1 {
+			ratio = 1
+		}
 	}
+	if stopped {
+		ratio = 0.12
+	}
+	c.ramBar.SetRatio(ratio)
 	c.pushCPU(res.AgentCPU, stopped)
-	id := dash(st.AgentID)
-	if len(id) > 12 {
-		id = id[:12]
+	c.updateDashAction(st)
+	if c.dashContent != nil {
+		c.dashContent.Refresh()
 	}
-	c.agentLine.SetText(id)
+}
+
+func lampColor(s string) color.NRGBA {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "running", "live":
+		return colorOK
+	case "idle":
+		return color.NRGBA{R: 0xEB, G: 0xEB, B: 0xF5, A: 0x59}
+	case "queued", "retrying", "limited":
+		return colorWarn
+	case "stopped":
+		return colorDanger
+	default:
+		return colorMuted
+	}
+}
+
+func (c *console) updateDashAction(st operatorStatus) {
+	if c.dashAction == nil {
+		return
+	}
+	if !st.Enrolled {
+		c.dashAction.SetText("Enroll this device")
+		c.dashAction.Show()
+		return
+	}
+	if !serviceHealthy(st.Service) {
+		c.dashAction.SetText("Start " + productName)
+		c.dashAction.Show()
+		return
+	}
+	if !st.IngestConfigured || !st.IngestEnv || !st.IngestOK {
+		if st.IngestConfigured && st.IngestEnv {
+			c.dashAction.SetText("Retry stream")
+		} else {
+			c.dashAction.SetText("Connect stream")
+		}
+		c.dashAction.Show()
+		return
+	}
+	c.dashAction.Hide()
+}
+
+func (c *console) onDashAction() {
+	if c.busy {
+		return
+	}
+	if !c.last.Enrolled {
+		c.show(uistate.Enroll)
+		return
+	}
+	c.startSensor()
+}
+
+func (c *console) setDashFault(f uiFault) {
+	if c.dashFaultBox == nil {
+		return
+	}
+	c.dashFaultBox.Objects = nil
+	if f.Title != "" {
+		c.dashFaultBox.Add(faultCard(f))
+		c.dashFaultBox.Show()
+	} else {
+		c.dashFaultBox.Hide()
+	}
+	c.dashFaultBox.Refresh()
 }
 
 func (c *console) pushCPU(pct float64, stopped bool) {
 	if stopped {
-		pct = 0
+		pct = 0.2
 	}
 	c.cpuHist = append(c.cpuHist, pct)
 	if len(c.cpuHist) > 12 {
 		c.cpuHist = c.cpuHist[len(c.cpuHist)-12:]
 	}
-	if c.cpuSpark == nil {
-		return
+	if c.spark != nil {
+		c.spark.SetValues(c.cpuHist)
 	}
-	c.cpuSpark.Objects = nil
-	max := 1.0
-	for _, v := range c.cpuHist {
-		if v > max {
-			max = v
-		}
-	}
-	for _, v := range c.cpuHist {
-		h := float32(6 + (v/max)*18)
-		bar := canvas.NewRectangle(colorCyan)
-		bar.CornerRadius = 1
-		bar.SetMinSize(fyne.NewSize(7, h))
-		c.cpuSpark.Add(bar)
-	}
-	c.cpuSpark.Refresh()
 }
 
 func (c *console) dismissToTray() {
-	c.showPopover()
-	if c.hasTray() {
+	c.flyoutOpen = false
+	if c.win != nil {
 		c.win.Hide()
+	}
+	if c.pop != nil {
+		c.pop.Hide()
 	}
 }
 
-func (c *console) showPopover() {
+func (c *console) flyoutWindow() fyne.Window {
+	if c.pop != nil {
+		return c.pop
+	}
+	return c.win
+}
+
+func (c *console) showDash() {
 	c.screen = uistate.Dash
-	c.win.SetContent(c.dashContent)
-	c.lockSize(popoverW, popoverH)
+	lastTrayTap = time.Now()
+	if c.win != nil && c.win != c.flyoutWindow() {
+		c.win.Hide()
+	}
+	target := c.flyoutWindow()
+	if target == nil {
+		return
+	}
+	target.SetPadded(false)
+	if c.dashContent != nil && target.Content() != c.dashContent {
+		target.SetContent(c.dashContent)
+	}
+	target.Resize(fyne.NewSize(popoverW, popoverH))
+	target.SetFixedSize(true)
 	res := sampleResources(c.last)
 	c.applyDashboard(c.last, res)
 	c.refreshTray(c.last, res)
-	c.win.Show()
+	c.flyoutOpen = true
+	target.Show()
+	target.RequestFocus()
+	if c.sensorLive != nil {
+		c.sensorLive.Kick()
+	}
+	if c.dashContent != nil {
+		c.dashContent.Refresh()
+	}
+	placeNearTray(target, popoverW, popoverH, true, true)
+}
+
+func (c *console) showPopover() {
+	c.showDash()
+}
+
+func (c *console) showDecoratedDash() {
+	c.showDash()
+}
+
+func (c *console) returnToDash() {
+	c.showDash()
 }
 
 func formatBytesMB(n int64) string {
@@ -175,4 +446,72 @@ func certExpiring(rfc3339 string) (bool, int) {
 		return true, d
 	}
 	return false, d
+}
+
+func (c *console) onCheckUpdates() {
+	c.bannerText.Text = "Checking for updates…"
+	c.bannerText.Refresh()
+	c.bannerWrap.Show()
+	go func() {
+		r := updatecheck.Check(productVersion, updateCatalogURL(), nil)
+		fyne.Do(func() {
+			msg := "EDR Agent is up to date (" + r.Current + ")."
+			switch {
+			case r.Skipped != "":
+				msg = "Updates are managed by your organization (MDM / catalog not set)."
+			case r.Error != "":
+				msg = "Could not reach the update catalog."
+			case r.Update:
+				msg = "Update available: " + r.Latest + " (this device is " + r.Current + "). Install as administrator."
+			}
+			c.bannerText.Text = msg
+			c.bannerText.Refresh()
+			c.bannerWrap.Show()
+		})
+	}()
+}
+
+func updateCatalogURL() string {
+	p := platform.ResolveConfigFile()
+	if p == "" {
+		return ""
+	}
+	cfg, err := config.Load(p)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.XDR.UpdateCatalogURL)
+}
+
+func (c *console) onUninstall() {
+	parent := c.dashHost()
+	d := dialog.NewConfirm(
+		"Uninstall EDR Agent",
+		"This removes the sensor, rules, models, certificates, keys, and data. Administrator authentication is required.",
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			c.setBusy(true)
+			go func() {
+				out, err := runInstallerPrivileged("uninstall")
+				fyne.Do(func() {
+					c.setBusy(false)
+					if err != nil {
+						c.setDashFault(classifyInstallError(out + "\n" + err.Error()))
+						return
+					}
+					c.setDashFault(uiFault{
+						Title:  "EDR Agent was removed",
+						Body:   "This computer is no longer protected. You can close this window.",
+						Action: "Close",
+					})
+				})
+			}()
+		},
+		parent,
+	)
+	d.SetDismissText("Cancel")
+	d.SetConfirmText("Uninstall")
+	d.Show()
 }

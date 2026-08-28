@@ -21,26 +21,38 @@ func EnsureAgentIdentity(cfg *Config) error {
 	if strings.TrimSpace(cfg.Agent.DataDir) == "" {
 		return fmt.Errorf("agent.data_dir is required for persistent agent identity")
 	}
-	if err := os.MkdirAll(cfg.Agent.DataDir, 0o750); err != nil {
-		return fmt.Errorf("create data_dir: %w", err)
+	if err := os.MkdirAll(cfg.Agent.DataDir, 0o755); err != nil {
+		if !os.IsPermission(err) {
+			return fmt.Errorf("create data_dir: %w", err)
+		}
 	}
 
 	path := filepath.Join(cfg.Agent.DataDir, agentIDFileName)
 	if id := strings.TrimSpace(cfg.Agent.ID); id != "" {
-		return writeAgentID(path, id)
+		if err := writeAgentID(path, id); err != nil && !os.IsPermission(err) {
+			return err
+		}
+		return nil
 	}
 	if data, err := os.ReadFile(path); err == nil {
 		if id := strings.TrimSpace(string(data)); id != "" {
 			cfg.Agent.ID = id
 			return nil
 		}
+	} else if os.IsPermission(err) {
+		return nil
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("read agent_id: %w", err)
 	}
 
 	id := uuid.NewString()
 	cfg.Agent.ID = id
-	return writeAgentID(path, id)
+	if err := writeAgentID(path, id); err != nil && os.IsPermission(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return nil
 }
 
 func writeAgentID(path, id string) error {

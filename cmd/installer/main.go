@@ -20,6 +20,9 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/hostperm"
+	"github.com/razatechofficial/edr/internal/installprogress"
+	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/xdrclient"
 )
 
@@ -42,6 +45,7 @@ var (
 	flagDelayEnroll         bool
 	flagEnrollmentInsecure  bool
 	flagNoStart             bool
+	flagKeepData            bool
 )
 
 func main() {
@@ -89,10 +93,15 @@ Use --config only if you must supply a custom YAML instead of the generated ente
 
 	uninstallCmd := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Stop service, remove files, and unregister the agent",
-		Long:  "Stops the running EDR agent service, removes installed binaries, configuration, data directories, and unregisters the platform service.",
-		RunE:  runUninstall,
+		Short: "Stop service and purge EDR Agent from this computer",
+		Long: `Stops the sensor, unregisters the service, and removes binaries, rules, ML models,
+certificates, keystore material, logs, and the offline spool.
+
+Requires administrator / root (the OS password prompt). Use --keep-data only when
+a support engineer asks to preserve forensics under the data directory.`,
+		RunE: runUninstall,
 	}
+	uninstallCmd.Flags().BoolVar(&flagKeepData, "keep-data", false, "leave the data directory (forensics) on disk")
 
 	versionCmd := &cobra.Command{
 		Use:   "version",
@@ -125,7 +134,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	installprogress.Clear()
+	installprogress.Write("reqs")
+
 	paths := platformPaths()
+	if err := requireSpoolDisk(paths.dataDir); err != nil {
+		installprogress.Write("fail")
+		return err
+	}
 
 	fmt.Println("==> Creating directories")
 	for _, dir := range []string{
@@ -137,12 +153,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		filepath.Join(paths.dataDir, "alerts"),
 		filepath.Join(paths.dataDir, "forensics"),
 		filepath.Join(paths.dataDir, "vectordb"),
+		filepath.Join(paths.dataDir, "telemetry-queue"),
 	} {
-		if err := os.MkdirAll(dir, 0750); err != nil {
+		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("creating directory %s: %w", dir, err)
 		}
 		fmt.Printf("    %s\n", dir)
 	}
+
+	installprogress.Write("pkg")
 
 	if flagConfigPath == "" {
 		bundleRoot, err := resolveBundleRoot()
@@ -190,7 +209,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	configDst := installedConfigPath(paths)
 	if flagConfigPath != "" {
 		fmt.Println("==> Installing provided config")
-		if err := copyFile(flagConfigPath, configDst, 0640); err != nil {
+		if err := copyFile(flagConfigPath, configDst, 0644); err != nil {
 			return fmt.Errorf("installing config: %w", err)
 		}
 	} else {
@@ -202,14 +221,24 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    %s\n", configDst)
 
 	if err := applyInstallEnrollment(configDst, paths); err != nil {
+		installprogress.Write("fail")
 		return err
 	}
 
+	installprogress.Write("daemon")
+
 	fmt.Println("==> Installing platform service")
 	if err := installService(paths, agentDst, configDst); err != nil {
+		installprogress.Write("fail")
 		return fmt.Errorf("installing service: %w", err)
 	}
 
+	fmt.Println("==> Registering login autostart (all users)")
+	if err := installLoginAutostart(paths); err != nil {
+		fmt.Printf("    warning: %v\n", err)
+	}
+
+	installprogress.Write("done")
 	fmt.Println("==> Installation complete")
 	fmt.Printf("    Agent ID: check %s\n", configDst)
 	fmt.Printf("    Data dir: %s\n", paths.dataDir)
@@ -300,8 +329,26 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// runUninstall stops the agent service, removes installed files, and
-// unregisters the platform service.
+func requireSpoolDisk(dataDir string) error {
+	probe := dataDir
+	if _, err := os.Stat(probe); err != nil {
+		probe = filepath.Dir(dataDir)
+	}
+	free, err := hostperm.DiskFree(probe)
+	if err != nil {
+		return nil
+	}
+	need := hostperm.MinFreeForSpool
+	if free < need {
+		return fmt.Errorf("need at least 2 GiB free for the offline telemetry queue (have %.1f GiB on %s)", float64(free)/float64(1<<30), probe)
+	}
+	fmt.Printf("    disk: %.1f GiB free (queue cap %d GiB, retain %d days)\n",
+		float64(free)/float64(1<<30), telemetryqueue.DefaultMaxBytes>>30, telemetryqueue.DefaultMaxAgeDays)
+	return nil
+}
+
+// runUninstall stops the agent service and removes EDR Agent from the host.
+// Admin/root is required (sudo, UAC, or the OS password dialog from the UI).
 func runUninstall(cmd *cobra.Command, args []string) error {
 	if err := requirePrivileged(); err != nil {
 		return err
@@ -314,6 +361,9 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("    warning: %v\n", err)
 	}
 
+	fmt.Println("==> Removing login autostart")
+	removeLoginAutostart()
+
 	if runtime.GOOS == "darwin" {
 		fmt.Println("==> Removing consumer first-run LaunchAgent (if present)")
 		removeDarwinFirstRunAgent(paths)
@@ -324,8 +374,11 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("    warning: %v\n", err)
 	}
 
+	fmt.Println("==> Clearing device identity (certs, keys, keystore)")
+	_ = xdrclient.ResetLocalIdentity(paths.dataDir, "auto")
+
 	fmt.Println("==> Removing binaries")
-	binNames := []string{agentBinaryName(), edrctlBinaryName(), edrAliasBinaryName()}
+	binNames := []string{agentBinaryName(), edrctlBinaryName(), edrAliasBinaryName(), agentUIBinaryName()}
 	if runtime.GOOS == "darwin" {
 		binNames = append(binNames, "edr-installer")
 	}
@@ -333,21 +386,48 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		p := filepath.Join(paths.binDir, name)
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			fmt.Printf("    warning: removing %s: %v\n", p, err)
-		} else {
+		} else if err == nil {
 			fmt.Printf("    removed %s\n", p)
+		}
+	}
+	if runtime.GOOS == "darwin" {
+		if err := os.RemoveAll("/Applications/EDR Agent.app"); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("    warning: removing EDR Agent.app: %v\n", err)
 		}
 	}
 
 	fmt.Println("==> Removing configuration")
-	for _, name := range []string{installedConfigFileName(), "agent.yaml", "config.yml"} {
+	for _, name := range []string{installedConfigFileName(), "agent.yaml", "config.yml", "enrollment.token", "com.razatech.edr.enrollment-token"} {
 		configDst := filepath.Join(paths.configDir, name)
 		if err := os.Remove(configDst); err != nil && !os.IsNotExist(err) {
 			fmt.Printf("    warning: %v\n", err)
 		}
 	}
 
+	if !flagKeepData {
+		fmt.Println("==> Purging data (rules, models, queue, certs, alerts, forensics)")
+		for _, dir := range []string{paths.dataDir, paths.logDir, paths.rulesDir, paths.quarantineDir, paths.configDir} {
+			if strings.TrimSpace(dir) == "" || dir == "/" {
+				continue
+			}
+			if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+				fmt.Printf("    warning: removing %s: %v\n", dir, err)
+			} else {
+				fmt.Printf("    removed %s\n", dir)
+			}
+		}
+		if runtime.GOOS == "linux" {
+			_ = os.RemoveAll("/etc/edr")
+			_ = os.RemoveAll("/var/lib/edr")
+		}
+		if runtime.GOOS == "windows" {
+			_ = runCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name=EDR Agent")
+		}
+	} else {
+		fmt.Printf("    --keep-data: left %s in place\n", paths.dataDir)
+	}
+
 	fmt.Println("==> Uninstallation complete")
-	fmt.Printf("    Note: data directory %s was preserved. Remove manually if desired.\n", paths.dataDir)
 	return nil
 }
 
@@ -544,7 +624,7 @@ func generateConfig(dst string, paths installPaths) error {
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	return os.WriteFile(dst, data, 0640)
+	return os.WriteFile(dst, data, 0644)
 }
 
 // resolveBundleRoot returns the directory that contains models/ and rules/ (typically the installer's directory).
@@ -840,12 +920,16 @@ const launchdPlist = `<?xml version="1.0" encoding="UTF-8"?>
         <string>{{.ConfigPath}}</string>
     </array>
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
     <key>KeepAlive</key>
     <dict>
         <key>Crashed</key>
         <true/>
+        <key>SuccessfulExit</key>
+        <false/>
     </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
     <key>StandardOutPath</key>
     <string>/Library/Logs/EDR/agent.stdout.log</string>
     <key>StandardErrorPath</key>
@@ -898,6 +982,11 @@ func installLaunchDaemon(agentBin, configPath string) error {
 	// Remove prior registration if present (upgrade / retry).
 	_ = exec.Command(lc, "bootout", "system", plistPath).Run()
 
+	if flagNoStart {
+		fmt.Println("    LaunchDaemon written for next boot (RunAtLoad); not loaded now (--no-start)")
+		return nil
+	}
+
 	// Prefer bootstrap; fall back to deprecated load if needed.
 	if err := runCmd(lc, "bootstrap", "system", plistPath); err != nil {
 		if err2 := runCmd(lc, "load", plistPath); err2 != nil {
@@ -933,6 +1022,12 @@ func installWindowsService(agentBin, configPath string) error {
 	); err != nil {
 		fmt.Printf("    warning: setting recovery: %v\n", err)
 	}
+
+	_ = runCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name=EDR Agent")
+	_ = runCmd("netsh", "advfirewall", "firewall", "add", "rule",
+		"name=EDR Agent", "dir=out", "action=allow", "program="+agentBin, "enable=yes", "profile=any")
+	_ = runCmd("netsh", "advfirewall", "firewall", "add", "rule",
+		"name=EDR Agent", "dir=in", "action=allow", "program="+agentBin, "enable=yes", "profile=any")
 
 	if flagNoStart {
 		fmt.Println("    Windows Service installed (not started; --no-start)")

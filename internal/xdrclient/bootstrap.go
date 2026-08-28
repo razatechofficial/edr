@@ -240,6 +240,152 @@ func PatchXDRConfigFile(path string, host string, insecure bool) error {
 	return os.WriteFile(path, out, 0o640)
 }
 
+// EnableIngestFromEnrollment writes xdr.enabled + ingest_hosts so the sensor
+// starts the ingest relay. Creates the xdr: section if the install YAML never
+// had one. Does not embed enrollment tokens.
+func EnableIngestFromEnrollment(path string, st State) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("config path required")
+	}
+	root, doc, err := parseYAMLMapping(path)
+	if err != nil {
+		return err
+	}
+	xdr := ensureXDRMap(doc)
+	host := DefaultEnrollmentHost
+	if n := mapValue(xdr, "enrollment_host"); n != nil {
+		if h := strings.TrimSpace(n.Value); h != "" {
+			host = h
+		}
+	}
+	ingest := append([]string(nil), st.IngestHosts...)
+	if len(ingest) == 0 {
+		ingest = DefaultIngestHosts()
+	}
+	backend := strings.TrimSpace(st.SecureStorage)
+	switch backend {
+	case "", "auto", "keychain":
+		// LaunchDaemon / SYSTEM cannot read a user login Keychain.
+		backend = "file"
+	}
+	setMapBool(xdr, "enabled", true)
+	setMapString(xdr, "enrollment_host", host)
+	setMapStringList(xdr, "ingest_hosts", ingest)
+	setMapString(xdr, "secure_storage", backend)
+	setMapString(xdr, "enrollment_token", "")
+	if err := writeYAMLRoot(path, root, 0o644); err != nil {
+		return err
+	}
+	return WriteXDRRuntimeEnv(filepath.Dir(path), true, backend)
+}
+
+// WriteXDRRuntimeEnv merges XDR_ENABLED / XDR_SECURE_STORAGE into configDir/.env
+// so launchd loads them. Viper BindEnv otherwise treats unset XDR_ENABLED as
+// false and ignores xdr.enabled in YAML.
+func WriteXDRRuntimeEnv(configDir string, enabled bool, backend string) error {
+	configDir = strings.TrimSpace(configDir)
+	if configDir == "" {
+		return fmt.Errorf("config dir required")
+	}
+	backend = strings.TrimSpace(backend)
+	if backend == "" {
+		backend = "file"
+	}
+	path := filepath.Join(configDir, ".env")
+	kv := map[string]string{}
+	if raw, err := os.ReadFile(path); err == nil {
+		for _, line := range strings.Split(string(raw), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			k, v, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			kv[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+	if enabled {
+		kv["XDR_ENABLED"] = "true"
+	} else {
+		kv["XDR_ENABLED"] = "false"
+	}
+	kv["XDR_SECURE_STORAGE"] = backend
+	var b strings.Builder
+	for _, k := range []string{"XDR_ENABLED", "XDR_SECURE_STORAGE"} {
+		if v, ok := kv[k]; ok {
+			b.WriteString(k)
+			b.WriteByte('=')
+			b.WriteString(v)
+			b.WriteByte('\n')
+			delete(kv, k)
+		}
+	}
+	for k, v := range kv {
+		if k == "" {
+			continue
+		}
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(v)
+		b.WriteByte('\n')
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+// PinSecureStorage sets xdr.secure_storage without touching enrollment tokens.
+func PinSecureStorage(path, backend string) error {
+	root, doc, err := parseYAMLMapping(path)
+	if err != nil {
+		return err
+	}
+	xdr := ensureXDRMap(doc)
+	setMapString(xdr, "secure_storage", strings.TrimSpace(backend))
+	return writeYAMLRoot(path, root, 0o644)
+}
+
+func parseYAMLMapping(path string) (*yaml.Node, *yaml.Node, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return nil, nil, err
+	}
+	doc := &root
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		doc = root.Content[0]
+	}
+	if doc.Kind != yaml.MappingNode {
+		return nil, nil, fmt.Errorf("config root is not a mapping")
+	}
+	return &root, doc, nil
+}
+
+func ensureXDRMap(doc *yaml.Node) *yaml.Node {
+	xdr := mapValue(doc, "xdr")
+	if xdr != nil {
+		return xdr
+	}
+	xdr = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	doc.Content = append(doc.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "xdr"},
+		xdr,
+	)
+	return xdr
+}
+
+func writeYAMLRoot(path string, root *yaml.Node, perm os.FileMode) error {
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, perm)
+}
+
 func setMapString(m *yaml.Node, key, value string) {
 	if n := mapValue(m, key); n != nil {
 		n.Kind = yaml.ScalarNode

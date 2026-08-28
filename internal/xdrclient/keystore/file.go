@@ -34,7 +34,7 @@ func newFileStore(dir, dataDir string) *fileStore {
 func (s *fileStore) Name() string { return BackendFile }
 
 func (s *fileStore) ensureDir() error {
-	return os.MkdirAll(s.dir, 0o700)
+	return os.MkdirAll(s.dir, 0o755)
 }
 
 func (s *fileStore) Save(m Material) error {
@@ -67,6 +67,16 @@ func (s *fileStore) Has() bool {
 	_, errK := os.Stat(filepath.Join(s.dir, encKeyFile))
 	_, errC := os.Stat(filepath.Join(s.dir, encCertFile))
 	return errK == nil && errC == nil
+}
+
+func (s *fileStore) Clear() error {
+	for _, name := range []string{
+		encKeyFile, encCertFile, encCSRFile,
+		"agent.key", "agent.crt", "agent.csr",
+	} {
+		_ = os.Remove(filepath.Join(s.dir, name))
+	}
+	return nil
 }
 
 func (s *fileStore) writeSealed(name string, plain []byte) error {

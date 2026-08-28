@@ -2,20 +2,36 @@ package main
 
 import (
 	"image/color"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 )
 
 // Same frame as the native design lab (nativeTheme.width = 440, 8pt grid).
 const (
 	wizardW  float32 = 440
-	wizardH  float32 = 640
-	popoverW float32 = 336
-	popoverH float32 = 500
+	wizardH  float32 = 540
+	popoverW float32 = dashW
+	popoverH float32 = dashH
 )
+
+func wizardHeight(id uistate.Screen) float32 {
+	switch id {
+	case uistate.Identity:
+		return 600
+	case uistate.Permissions:
+		return 520
+	case uistate.Setup:
+		return 580
+	default:
+		return wizardH
+	}
+}
 
 func (c *console) lockSize(w, h float32) {
 	c.win.SetFixedSize(false)
@@ -34,9 +50,49 @@ func pageHeader(kick string, kickCol color.Color, title, body string) fyne.Canva
 	return container.NewVBox(items...)
 }
 
-// wizardPage is a fixed sheet: header, filling body, pinned footer. No page scroll.
+func osBadgeLabel() string {
+	switch {
+	case isDarwin():
+		return "macOS"
+	case isWindows():
+		return "Windows"
+	default:
+		return "Linux"
+	}
+}
+
+func productHeader() fyne.CanvasObject {
+	well := canvas.NewRectangle(color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0x2E})
+	well.CornerRadius = 10
+	well.SetMinSize(fyne.NewSize(40, 40))
+	ico := canvas.NewImageFromResource(heroResource(colorAccent, heroOK))
+	ico.FillMode = canvas.ImageFillContain
+	ico.SetMinSize(fyne.NewSize(40, 40))
+	mark := canvas.NewText(productName, colorText)
+	mark.TextSize = 17
+	mark.TextStyle = fyne.TextStyle{Bold: true}
+	ver := canvas.NewText("Version "+productVersion, colorMuted)
+	ver.TextSize = 13
+	badgeTxt := canvas.NewText(osBadgeLabel(), colorMuted)
+	badgeTxt.TextSize = 11
+	badgeBg := canvas.NewRectangle(color.Transparent)
+	badgeBg.StrokeColor = colorSep
+	badgeBg.StrokeWidth = 1
+	badgeBg.CornerRadius = 6
+	badge := container.NewStack(badgeBg, container.NewPadded(badgeTxt))
+	row := container.NewBorder(nil, nil,
+		container.NewCenter(container.NewStack(well, ico)),
+		badge,
+		container.NewPadded(container.NewVBox(mark, ver)),
+	)
+	rule := canvas.NewRectangle(colorHairline)
+	rule.SetMinSize(fyne.NewSize(1, 1))
+	return container.NewVBox(container.NewPadded(row), rule)
+}
+
+// wizardPage is a fixed sheet: product chrome, header, filling body, pinned footer.
 func wizardPage(header, body, footer fyne.CanvasObject) fyne.CanvasObject {
-	top := container.NewPadded(header)
+	top := container.NewVBox(productHeader(), container.NewPadded(header))
 	var bot fyne.CanvasObject
 	if footer != nil {
 		bot = container.NewPadded(footer)
@@ -47,30 +103,38 @@ func wizardPage(header, body, footer fyne.CanvasObject) fyne.CanvasObject {
 
 func statusMark(state checkState) fyne.CanvasObject {
 	slot := canvas.NewRectangle(color.Transparent)
-	slot.SetMinSize(fyne.NewSize(22, 22))
+	slot.SetMinSize(fyne.NewSize(28, 28))
 	well := canvas.NewRectangle(colorInput)
-	well.CornerRadius = 11
-	well.SetMinSize(fyne.NewSize(22, 22))
-	dot := canvas.NewRectangle(color.Transparent)
-	dot.CornerRadius = 4
-	dot.SetMinSize(fyne.NewSize(8, 8))
+	well.CornerRadius = 14
+	well.SetMinSize(fyne.NewSize(28, 28))
+	var glyph fyne.CanvasObject
 	switch state {
 	case checkOK:
-		well.FillColor = color.NRGBA{R: 0x30, G: 0xD1, B: 0x58, A: 0x28}
-		dot.FillColor = colorOK
+		well.FillColor = color.NRGBA{R: 0x30, G: 0xD1, B: 0x58, A: 0x29}
+		img := canvas.NewImageFromResource(drawMiniIcon("check", color.NRGBA{R: 0x30, G: 0xD1, B: 0x58, A: 0xFF}))
+		img.FillMode = canvas.ImageFillContain
+		img.SetMinSize(fyne.NewSize(14, 14))
+		glyph = img
 	case checkRun:
 		well.FillColor = color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0x2E}
-		dot.FillColor = colorAccent
+		glyph = newRadialSpin()
 	case checkFail:
 		well.FillColor = color.NRGBA{R: 0xFF, G: 0x45, B: 0x3A, A: 0x28}
-		dot.FillColor = colorDanger
+		img := canvas.NewImageFromResource(drawMiniIcon("alert", colorDanger))
+		img.FillMode = canvas.ImageFillContain
+		img.SetMinSize(fyne.NewSize(14, 14))
+		glyph = img
 	default:
 		well.FillColor = colorInput
-		dot.FillColor = color.Transparent
-		dot.StrokeColor = colorMuted
-		dot.StrokeWidth = 1.5
+		ring := canvas.NewCircle(color.Transparent)
+		ring.StrokeColor = colorTertiary
+		ring.StrokeWidth = 2
+		ring.Resize(fyne.NewSize(14, 14))
+		pad := canvas.NewRectangle(color.Transparent)
+		pad.SetMinSize(fyne.NewSize(14, 14))
+		glyph = container.NewCenter(container.NewStack(pad, ring))
 	}
-	return container.NewCenter(container.NewStack(slot, well, container.NewCenter(dot)))
+	return container.NewCenter(container.NewStack(slot, well, container.NewCenter(glyph)))
 }
 
 func listRow(mark fyne.CanvasObject, title, detail string, titleMuted bool) fyne.CanvasObject {
@@ -93,4 +157,68 @@ func kvCell(label, value string) fyne.CanvasObject {
 	v := widget.NewLabel(value)
 	v.Wrapping = fyne.TextWrapWord
 	return container.NewVBox(l, v)
+}
+
+func compactTitle(s string, muted bool) *canvas.Text {
+	col := colorText
+	if muted {
+		col = colorMuted
+	}
+	t := canvas.NewText(s, col)
+	t.TextSize = 13
+	return t
+}
+
+type radialSpin struct {
+	widget.BaseWidget
+	img  *canvas.Image
+	anim *fyne.Animation
+}
+
+func newRadialSpin() *radialSpin {
+	s := &radialSpin{}
+	s.ExtendBaseWidget(s)
+	s.img = canvas.NewImageFromResource(drawSpinnerPhase(0))
+	s.img.FillMode = canvas.ImageFillContain
+	s.img.SetMinSize(fyne.NewSize(14, 14))
+	s.anim = fyne.NewAnimation(800*time.Millisecond, func(done float32) {
+		ph := int(done*8) % 8
+		s.img.Resource = drawSpinnerPhase(ph)
+		s.img.Refresh()
+	})
+	s.anim.RepeatCount = fyne.AnimationRepeatForever
+	s.anim.Curve = fyne.AnimationLinear
+	s.anim.Start()
+	return s
+}
+
+func (s *radialSpin) CreateRenderer() fyne.WidgetRenderer {
+	return &spinRender{s: s, objs: []fyne.CanvasObject{s.img}}
+}
+
+type spinRender struct {
+	s    *radialSpin
+	objs []fyne.CanvasObject
+}
+
+func (r *spinRender) Destroy() {
+	if r.s != nil && r.s.anim != nil {
+		r.s.anim.Stop()
+	}
+}
+
+func (r *spinRender) Layout(sz fyne.Size) {
+	if len(r.objs) > 0 {
+		r.objs[0].Resize(sz)
+	}
+}
+
+func (r *spinRender) MinSize() fyne.Size { return fyne.NewSize(14, 14) }
+
+func (r *spinRender) Objects() []fyne.CanvasObject { return r.objs }
+
+func (r *spinRender) Refresh() {
+	for _, o := range r.objs {
+		o.Refresh()
+	}
 }

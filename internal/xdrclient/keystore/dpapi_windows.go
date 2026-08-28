@@ -22,7 +22,7 @@ type dpapiStore struct {
 }
 
 func newDPAPIStore(dir string) (Store, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	// Probe DPAPI with a tiny round-trip.
@@ -66,6 +66,17 @@ func (s *dpapiStore) Has() bool {
 	_, errK := os.Stat(filepath.Join(s.dir, dpapiKeyFile))
 	_, errC := os.Stat(filepath.Join(s.dir, dpapiCertFile))
 	return errK == nil && errC == nil
+}
+
+func (s *dpapiStore) Clear() error {
+	for _, name := range []string{
+		dpapiKeyFile, dpapiCertFile, dpapiCSRFile,
+		"agent.key", "agent.crt", "agent.csr",
+		"agent.key.enc", "agent.crt.enc", "agent.csr.enc",
+	} {
+		_ = os.Remove(filepath.Join(s.dir, name))
+	}
+	return nil
 }
 
 func (s *dpapiStore) write(name string, plain []byte) error {

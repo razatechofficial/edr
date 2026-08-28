@@ -91,10 +91,14 @@ type operatorStatus struct {
 	CertExpiry string              `json:"cert_not_after,omitempty"`
 	CPUPercent float64             `json:"cpu_percent,omitempty"`
 	MemoryMB   float64             `json:"memory_mb,omitempty"`
-	Isolated   bool                `json:"isolated"`
-	ControlAPI string              `json:"control_api"`
-	Hosts      []operatorHostProbe `json:"hosts,omitempty"`
-	UpdatedAt  string              `json:"updated_at"`
+	Isolated         bool                `json:"isolated"`
+	ControlAPI       string              `json:"control_api"`
+	IngestConfigured bool                `json:"ingest_configured"`
+	IngestEnv        bool                `json:"ingest_env"`
+	IngestOK         bool                `json:"ingest_ok"`
+	IngestFault      string              `json:"ingest_fault,omitempty"`
+	Hosts            []operatorHostProbe `json:"hosts,omitempty"`
+	UpdatedAt        string              `json:"updated_at"`
 }
 
 func collectOperatorStatus(probeHosts bool) operatorStatus {
@@ -108,6 +112,10 @@ func collectOperatorStatus(probeHosts bool) operatorStatus {
 	st.MachineID, st.CertExpiry = enrollmentIdentity()
 	st.SpoolBytes = dirSize(filepath.Join(peekDataDir(), "telemetry-queue"))
 	st.Blocks = countFiles(filepath.Join(peekDataDir(), "quarantine"))
+	st.IngestConfigured = xdrIngestConfigured()
+	st.IngestEnv = xdrRuntimeEnvEnabled()
+	st.IngestOK = ingestStreamLive()
+	st.IngestFault = ingestStreamFault()
 
 	body, err := agentRequest("GET", "/api/v1/status", nil)
 	if err == nil {
@@ -222,11 +230,11 @@ func emptyDash(s string) string {
 }
 
 type enrollMeta struct {
-	AgentID        string    `json:"agent_id"`
-	MachineID      string    `json:"machine_id"`
-	IngestHosts    []string  `json:"ingest_hosts"`
-	CertNotAfter   time.Time `json:"cert_not_after"`
-	SecureStorage  string    `json:"secure_storage"`
+	AgentID       string    `json:"agent_id"`
+	MachineID     string    `json:"machine_id"`
+	IngestHosts   []string  `json:"ingest_hosts"`
+	CertNotAfter  time.Time `json:"cert_not_after"`
+	SecureStorage string    `json:"secure_storage"`
 }
 
 func peekDataDir() string {
@@ -291,22 +299,24 @@ func enrollmentSnapshot() (enrolled bool, agentID, ingest string) {
 	_ = yaml.Unmarshal(data, &peek)
 	dataDir := peek.Agent.DataDir
 	if dataDir == "" {
-		return peek.Agent.ID != "", peek.Agent.ID, ""
+		return false, "", ""
 	}
 	raw, err := os.ReadFile(filepath.Join(dataDir, "xdr-tls", "enrollment.json"))
 	if err != nil {
-		return peek.Agent.ID != "", peek.Agent.ID, ""
+		// Installer Agent.ID is not enrollment. Missing/unreadable json = not enrolled
+		// (common when the GUI user cannot read a root-only 0600 sidecar).
+		return false, "", ""
 	}
 	var meta enrollMeta
 	if json.Unmarshal(raw, &meta) != nil {
-		return peek.Agent.ID != "", peek.Agent.ID, ""
+		return false, "", ""
 	}
 	ingest = strings.Join(meta.IngestHosts, ",")
 	id := meta.AgentID
 	if id == "" {
 		id = peek.Agent.ID
 	}
-	return id != "" && len(meta.IngestHosts) > 0, id, ingest
+	return id != "", id, ingest
 }
 
 func connectionTargets() ([]string, error) {
@@ -349,6 +359,101 @@ func connectionTargets() ([]string, error) {
 		return nil, fmt.Errorf("no enrollment/ingest hosts configured")
 	}
 	return out, nil
+}
+
+func xdrRuntimeEnvEnabled() bool {
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(configFile), ".env"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "XDR_ENABLED=true" || strings.HasPrefix(line, "XDR_ENABLED=true") {
+			return true
+		}
+	}
+	return false
+}
+
+func xdrIngestConfigured() bool {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return false
+	}
+	var cfg struct {
+		XDR struct {
+			Enabled     bool     `yaml:"enabled"`
+			IngestHosts []string `yaml:"ingest_hosts"`
+		} `yaml:"xdr"`
+	}
+	if yaml.Unmarshal(data, &cfg) != nil {
+		return false
+	}
+	if cfg.XDR.Enabled {
+		return true
+	}
+	return len(cfg.XDR.IngestHosts) > 0
+}
+
+func ingestStreamLive() bool {
+	st, ok := readIngestStatus()
+	return ok && st.OK
+}
+
+func ingestStreamFault() string {
+	st, ok := readIngestStatus()
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(st.Detail)
+}
+
+type ingestStatusFile struct {
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+func readIngestStatus() (ingestStatusFile, bool) {
+	raw, err := os.ReadFile(filepath.Join(peekDataDir(), "xdr-tls", "ingest.status"))
+	if err != nil {
+		return ingestStatusFile{}, false
+	}
+	var st ingestStatusFile
+	if json.Unmarshal(raw, &st) != nil {
+		return ingestStatusFile{}, false
+	}
+	return st, true
+}
+
+func ingestReachable(ingestCSV string) bool {
+	var hosts []string
+	for _, h := range strings.Split(ingestCSV, ",") {
+		if t := strings.TrimSpace(h); t != "" {
+			hosts = append(hosts, t)
+		}
+	}
+	if len(hosts) == 0 {
+		data, err := os.ReadFile(configFile)
+		if err == nil {
+			var cfg struct {
+				XDR struct {
+					IngestHosts []string `yaml:"ingest_hosts"`
+				} `yaml:"xdr"`
+			}
+			if yaml.Unmarshal(data, &cfg) == nil {
+				hosts = append(hosts, cfg.XDR.IngestHosts...)
+			}
+		}
+	}
+	if len(hosts) == 0 {
+		hosts = []string{xdrclient.DefaultIngestHost}
+	}
+	for _, h := range hosts {
+		if err := probeTCP(h, 3*time.Second); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func probeTCP(host string, timeout time.Duration) error {

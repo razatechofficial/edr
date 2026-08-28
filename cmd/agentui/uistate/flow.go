@@ -72,8 +72,8 @@ func HealthCopy(k Health) Lamps {
 		return Lamps{
 			Title:  "On this device",
 			Sensor: "Running",
-			Stream: "Queued",
-			Banner: "Telemetry queued. Local detections continue.",
+			Stream: "Idle",
+			Banner: "Ingest is not connected. Local detections continue.",
 		}
 	default:
 		return Lamps{Title: "Unprotected", Sensor: "Stopped", Stream: "Idle", Banner: "This host is not monitored."}

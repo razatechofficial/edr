@@ -48,6 +48,20 @@ func TestNormalizeServerEndpoint(t *testing.T) {
 	}
 }
 
+func TestEnsureAgentIdentityPermissionDenied(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, agentIDFileName)
+	if err := os.WriteFile(path, []byte("keep-me\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Defaults()
+	cfg.Agent.DataDir = dir
+	if err := EnsureAgentIdentity(&cfg); err != nil {
+		t.Fatalf("permission on agent_id must not fail Load: %v", err)
+	}
+}
+
 func TestValidateRequiresAgentID(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

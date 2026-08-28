@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
@@ -15,21 +17,58 @@ import (
 )
 
 func (c *console) buildIdentity() fyne.CanvasObject {
-	c.identityBox = container.NewVBox()
 	c.identityHint = widget.NewLabel("This device creates a key, sends a certificate request, and stores the signed cert in the OS keystore. The private key never leaves this computer.")
 	c.identityHint.Wrapping = fyne.TextWrapWord
 
-	lock := bodyText("Private key never leaves this device. Only the certificate request is sent.")
-	header := pageHeader("Enrolling", colorAccent, "Securing device identity", "")
-	header = container.NewVBox(header, c.identityHint)
-	body := card(c.identityBox)
-	c.identityContent = wizardPage(header, body, card(lock))
+	hero := canvas.NewImageFromResource(heroResource(colorAccent, heroOK))
+	hero.FillMode = canvas.ImageFillContain
+	hero.SetMinSize(fyne.NewSize(56, 56))
+	kick := kicker("ENROLLING", colorAccent)
+	title := heading("Securing device identity")
+	header := container.NewVBox(
+		container.NewBorder(nil, nil, hero, nil, container.NewPadded(container.NewVBox(kick, title))),
+		c.identityHint,
+	)
+
+	c.identityBar = widget.NewProgressBar()
+	c.identityBar.Min = 0
+	c.identityBar.Max = 1
+	c.identityBar.TextFormatter = func() string { return "" }
+	c.identityCount = canvas.NewText("0/7", colorTertiary)
+	c.identityCount.TextSize = 11
+	c.identityDoing = canvas.NewText("Validating the enrollment token…", colorMuted)
+	c.identityDoing.TextSize = 12
+
+	c.identityBox = container.NewVBox()
+	meter := container.NewBorder(nil, nil, nil, c.identityCount, c.identityBar)
+	body := container.NewVBox(meter, c.identityDoing, c.identityBox)
+
+	lockIco := canvas.NewImageFromResource(drawMiniIcon("lock", colorAccent))
+	lockIco.FillMode = canvas.ImageFillContain
+	lockIco.SetMinSize(fyne.NewSize(14, 14))
+	lockTxt := widget.NewLabel("Private key never leaves this device. Only the certificate request is sent.")
+	lockTxt.Wrapping = fyne.TextWrapWord
+	lockTxt.Importance = widget.LowImportance
+	lockBg := canvas.NewRectangle(color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0x1A})
+	lockBg.CornerRadius = 12
+	lockBg.StrokeColor = color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0x38}
+	lockBg.StrokeWidth = 1
+	lock := container.NewStack(lockBg, container.NewPadded(
+		container.NewBorder(nil, nil, container.NewPadded(lockIco), nil, lockTxt),
+	))
+
+	c.identityContent = wizardPage(header, body, lock)
 	return c.identityContent
 }
 
 func (c *console) renderIdentity(active int, done bool, failed bool) {
 	c.identityBox.Objects = nil
 	titles := identityTitles()
+	n := len(titles)
+	passed := active
+	if done {
+		passed = n
+	}
 	for i, title := range titles {
 		st := checkWait
 		switch {
@@ -40,12 +79,40 @@ func (c *console) renderIdentity(active int, done bool, failed bool) {
 		case i == active:
 			st = checkRun
 		}
-		c.identityBox.Add(listRow(statusMark(st), title, "", st == checkWait))
+		row := container.NewPadded(container.NewBorder(nil, nil, statusMark(st), nil, compactTitle(title, st == checkWait || st == checkOK)))
+		c.identityBox.Add(row)
 	}
-	if done {
-		c.identityHint.SetText("Identity bound. Opening receipt…")
-	} else if active >= 0 && active < len(titles) {
-		c.identityHint.SetText(fmt.Sprintf("%d / %d  ·  Enter an administrator password if the system asks. The private key never leaves this computer.", active+1, len(titles)))
+	frac := float64(passed) / float64(n)
+	if !done && !failed && active < n {
+		frac = (float64(passed) + 0.45) / float64(n)
+	}
+	if c.identityBar != nil {
+		c.identityBar.SetValue(frac)
+	}
+	shown := passed
+	if !done && active < n {
+		shown = passed + 1
+	}
+	if shown > n {
+		shown = n
+	}
+	if c.identityCount != nil {
+		c.identityCount.Text = fmt.Sprintf("%d/%d", shown, n)
+		c.identityCount.Refresh()
+	}
+	if c.identityDoing != nil {
+		switch {
+		case failed:
+			c.identityDoing.Text = "Enrollment did not finish."
+			c.identityDoing.Color = colorDanger
+		case done:
+			c.identityDoing.Text = "Identity bound. Opening receipt…"
+			c.identityDoing.Color = colorOK
+		default:
+			c.identityDoing.Text = identityDoing(active)
+			c.identityDoing.Color = colorMuted
+		}
+		c.identityDoing.Refresh()
 	}
 	c.identityBox.Refresh()
 }
@@ -62,7 +129,7 @@ func (c *console) startIdentity(host, token string) {
 		st  operatorStatus
 	}, 1)
 	go func() {
-		out, err := runEdrctlPrivileged("enroll", "--host", host, "--token", token)
+		out, err := runEdrctlPrivileged("enroll", "--force", "--host", host, "--token", token)
 		st := loadStatus()
 		doneCh <- struct {
 			out string
@@ -80,19 +147,22 @@ func (c *console) startIdentity(host, token string) {
 			case res := <-doneCh:
 				fyne.Do(func() {
 					c.setBusy(false)
-					c.last = res.st
-					if res.err != nil && !res.st.Enrolled {
+					if !enrollLooksSuccessful(res.out, res.err, res.st) {
 						msg := strings.TrimSpace(res.out)
 						if msg == "" && res.err != nil {
 							msg = res.err.Error()
+						}
+						if msg == "" {
+							msg = "Enrollment did not return a device certificate."
 						}
 						c.renderIdentity(active, false, true)
 						c.show(uistate.Enroll)
 						c.setEnrollFault(classifyEnrollError(msg))
 						return
 					}
-					c.renderIdentity(len(titles), true, false)
 					c.receipt = receiptFromEnroll(res.out, res.st)
+					c.applyEnrolled(res.st, c.receipt)
+					c.renderIdentity(len(titles), true, false)
 					c.refreshReceipt()
 					c.token.SetText("")
 					c.show(uistate.Receipt)

@@ -45,11 +45,15 @@ type EnrollResult struct {
 	Fresh bool // true if Register was called this run
 }
 
-func resolveCertDir(cfg config.XDRConfig, dataDir string) string {
+func ResolveCertDir(cfg config.XDRConfig, dataDir string) string {
 	if d := strings.TrimSpace(cfg.CertDir); d != "" {
 		return d
 	}
 	return filepath.Join(dataDir, "xdr-tls")
+}
+
+func resolveCertDir(cfg config.XDRConfig, dataDir string) string {
+	return ResolveCertDir(cfg, dataDir)
 }
 
 // EnsureEnrolled loads existing credentials or calls EnrollmentService/Register.
@@ -78,6 +82,10 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 			if err := EnsureTrustCA(ctx, store, opt.Config.EnrollmentHost, opt.Config.InsecureSkipTLS); err != nil {
 				log.Warn("xdr trust CA missing; ingest mTLS may fail", "error", err)
 			}
+			if err := store.RebindDaemonReadable(st); err != nil {
+				log.Warn("xdr could not rebind identity for the sensor service", "error", err)
+			}
+			enableIngestYAML(opt, st, log)
 			WriteEnrollProgress(opt.DataDir, "done")
 			return &EnrollResult{State: st, Store: store, Fresh: false}, nil
 		}
@@ -101,6 +109,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 			} else {
 				log.Info("xdr trust CA ready for ingest", "ca_path", store.CAPath())
 			}
+			enableIngestYAML(opt, recovered, log)
 			WriteEnrollProgress(opt.DataDir, "done")
 			return &EnrollResult{State: recovered, Store: store, Fresh: false}, nil
 		}
@@ -222,8 +231,19 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		"heartbeat_sec", st.HeartbeatSec,
 		"cert_not_after", st.CertNotAfter,
 	)
+	enableIngestYAML(opt, st, log)
 	WriteEnrollProgress(opt.DataDir, "done")
 	return &EnrollResult{State: st, Store: store, Fresh: true}, nil
+}
+
+func enableIngestYAML(opt EnrollOptions, st State, log *slog.Logger) {
+	p := strings.TrimSpace(opt.ConfigPath)
+	if p == "" {
+		return
+	}
+	if err := EnableIngestFromEnrollment(p, st); err != nil {
+		log.Warn("xdr could not enable ingest in agent.yaml", "error", err)
+	}
 }
 
 // recoverStateFromCredentials rebuilds State from keystore cert + config when

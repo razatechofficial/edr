@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -35,13 +37,14 @@ type IngestClient struct {
 	onCommand CommandHandler
 	posture   PostureProvider
 
-	mu      sync.Mutex
-	conn    *grpc.ClientConn
-	stream  telemetryv1.TelemetryService_StreamTelemetryClient
-	seq     atomic.Int64
-	hostIdx int
-	pending map[int64]chan *telemetryv1.TelemetryAck
-	closed  atomic.Bool
+	mu       sync.Mutex
+	conn     *grpc.ClientConn
+	stream   telemetryv1.TelemetryService_StreamTelemetryClient
+	seq      atomic.Int64
+	hostIdx  int
+	lastHost string
+	pending  map[int64]chan *telemetryv1.TelemetryAck
+	closed   atomic.Bool
 }
 
 // NewIngestClient builds a client. Call Connect before Send, or Send will connect lazily.
@@ -88,14 +91,47 @@ func (c *IngestClient) SetPostureProvider(p PostureProvider) {
 // RunHeartbeat sends a liveness keepalive so ingest refreshes last_seen.
 // Ingest intentionally does not publish these to Kafka/ClickHouse (not hunt events).
 // Optional posture labels (monitoring health summary) ride in unmapped.posture.
+// RunHeartbeat sends a liveness keepalive so ingest refreshes last_seen.
+// Ingest intentionally does not publish these to Kafka/ClickHouse (not hunt events).
+// Optional posture labels (monitoring health summary) ride in unmapped.posture.
+//
+// When the stream drops, a 2s probe reconnects with exponential backoff
+// (CrowdStrike / MDE pattern: never wait for the next operator action).
 func (c *IngestClient) RunHeartbeat(ctx context.Context) {
+	_ = c.Send(ctx, c.heartbeatPayload())
 	t := time.NewTicker(c.heartbeat)
+	fast := time.NewTicker(2 * time.Second)
 	defer t.Stop()
+	defer fast.Stop()
+	fail := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			_ = c.Send(ctx, c.heartbeatPayload())
+		case <-fast.C:
+			if c.closed.Load() {
+				return
+			}
+			c.mu.Lock()
+			down := c.stream == nil
+			c.mu.Unlock()
+			if !down {
+				fail = 0
+				continue
+			}
+			if err := c.ensureStream(ctx); err != nil {
+				c.log.Info("ingest reconnect scheduled", "attempt", fail+1, "error", err)
+				if !sleepBackoff(ctx, fail) {
+					return
+				}
+				if fail < 6 {
+					fail++
+				}
+				continue
+			}
+			fail = 0
 			_ = c.Send(ctx, c.heartbeatPayload())
 		}
 	}
@@ -109,12 +145,12 @@ func (c *IngestClient) heartbeatPayload() []byte {
 		}
 	}
 	body := map[string]any{
-		"class_uid":    0,
-		"type_uid":     0,
-		"activity_id":  0,
+		"class_uid":   0,
+		"type_uid":    0,
+		"activity_id": 0,
 		"severity_id": 1,
 		"severity":    "Informational",
-		"unmapped":     unmapped,
+		"unmapped":    unmapped,
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -260,6 +296,7 @@ func (c *IngestClient) ensureStream(ctx context.Context) error {
 		c.conn = conn
 		c.stream = stream
 		c.hostIdx = idx
+		c.lastHost = host
 		c.mu.Unlock()
 		c.log.Info("ingest stream connected", "host", host)
 		go c.recvLoop()
@@ -317,6 +354,10 @@ func (c *IngestClient) recvLoop() {
 		frame, err := stream.Recv()
 		if err != nil {
 			c.log.Warn("ingest recv ended", "error", err)
+			c.mu.Lock()
+			host := c.lastHost
+			c.mu.Unlock()
+			c.persistStreamStatus(false, host, err.Error())
 			c.resetStream()
 			return
 		}
@@ -326,7 +367,9 @@ func (c *IngestClient) recvLoop() {
 			c.mu.Lock()
 			ch := c.pending[ack.GetSequence()]
 			delete(c.pending, ack.GetSequence())
+			host := c.lastHost
 			c.mu.Unlock()
+			c.persistStreamStatus(true, host, "")
 			if ch != nil {
 				ch <- ack
 				close(ch)
@@ -422,4 +465,25 @@ func ParseCommandPayload(raw []byte) map[string]interface{} {
 	}
 	_ = json.Unmarshal(raw, &out)
 	return out
+}
+
+const ingestStatusFileName = "ingest.status"
+
+func (c *IngestClient) persistStreamStatus(ok bool, host, detail string) {
+	if c == nil || strings.TrimSpace(c.store.Dir) == "" {
+		return
+	}
+	st := map[string]any{
+		"ok":         ok,
+		"host":       host,
+		"updated_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	if strings.TrimSpace(detail) != "" {
+		st["detail"] = detail
+	}
+	b, err := json.Marshal(st)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(c.store.Dir, ingestStatusFileName), b, 0o644)
 }

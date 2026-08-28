@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	stateFileName    = "enrollment.json"
-	caFileName       = "ca-chain.pem"
+	stateFileName     = "enrollment.json"
+	caFileName        = "ca-chain.pem"
 	ingestSeqFileName = "ingest.seq"
 )
 
@@ -54,7 +54,7 @@ func (s Store) ensureDir() error {
 	if strings.TrimSpace(s.Dir) == "" {
 		return fmt.Errorf("xdr cert_dir is required")
 	}
-	return os.MkdirAll(s.Dir, 0o700)
+	return os.MkdirAll(s.Dir, 0o755)
 }
 
 func (s Store) statePath() string { return filepath.Join(s.Dir, stateFileName) }
@@ -106,19 +106,13 @@ func (s Store) SaveWithCSR(st State, keyPEM []byte, csrPEM string) error {
 		caBuf.WriteString(strings.TrimSpace(pemBlock))
 		caBuf.WriteByte('\n')
 	}
-	if err := os.WriteFile(s.caPath(), []byte(caBuf.String()), 0o600); err != nil {
-		return fmt.Errorf("write ca chain: %w", err)
+	if caBuf.Len() > 0 {
+		if err := os.WriteFile(s.caPath(), []byte(caBuf.String()), 0o600); err != nil {
+			return fmt.Errorf("write ca chain: %w", err)
+		}
 	}
 	st.SecureStorage = ks.Name()
-	meta, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.statePath() + ".tmp"
-	if err := os.WriteFile(tmp, meta, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.statePath())
+	return s.persistMetadata(st)
 }
 
 // LoadPrivateKeyPEM returns the on-device private key (into memory only).
@@ -176,15 +170,46 @@ func (s Store) SaveMetadata(st State) error {
 		return err
 	}
 	st.SecureStorage = s.BackendName()
+	return s.persistMetadata(st)
+}
+
+// persistMetadata writes enrollment.json so the local console user can read
+// identity fields (no private key). Ingest hosts stay on disk for the sensor.
+func (s Store) persistMetadata(st State) error {
 	meta, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
 	tmp := s.statePath() + ".tmp"
-	if err := os.WriteFile(tmp, meta, 0o600); err != nil {
+	if err := os.WriteFile(tmp, meta, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.statePath())
+	if err := os.Rename(tmp, s.statePath()); err != nil {
+		return err
+	}
+	s.relaxIdentityPerms()
+	return os.Chmod(s.statePath(), 0o644)
+}
+
+// RebindDaemonReadable rewrites key+cert+metadata so the machine-wide sensor
+// can load identity (System keychain + sealed files, world-readable sidecar).
+func (s Store) RebindDaemonReadable(st State) error {
+	key, err := s.LoadPrivateKeyPEM()
+	if err != nil {
+		return err
+	}
+	csr, _ := s.LoadCSRPEM()
+	return s.SaveWithCSR(st, key, string(csr))
+}
+
+// relaxIdentityPerms lets the local console user read enrollment.json.
+// Private key/cert blobs stay 0600; only the directory and metadata open up.
+func (s Store) relaxIdentityPerms() {
+	if strings.TrimSpace(s.DataDir) != "" {
+		_ = os.Chmod(s.DataDir, 0o755)
+		_ = os.Chmod(filepath.Join(s.DataDir, "agent_id"), 0o644)
+	}
+	_ = os.Chmod(s.Dir, 0o755)
 }
 
 // LoadCAChainPEM reads the on-disk CA chain when present.

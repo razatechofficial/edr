@@ -1,10 +1,11 @@
 package main
 
 import (
-	"fmt"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/systray"
+
+	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 )
 
 func (c *console) hasTray() bool {
@@ -17,39 +18,34 @@ func (c *console) setupTray() {
 	if !ok {
 		return
 	}
-	c.trayStatus = fyne.NewMenuItem("Status: …", nil)
-	c.trayStatus.Disabled = true
-	c.trayDetail = fyne.NewMenuItem("Sensor · Stream", nil)
-	c.trayDetail.Disabled = true
-	c.trayRes = fyne.NewMenuItem("Resources —", nil)
-	c.trayRes.Disabled = true
-	open := fyne.NewMenuItem("Open", func() {
-		c.showPopover()
-	})
-	quit := fyne.NewMenuItem("Quit", func() { c.app.Quit() })
-	c.trayMenu = fyne.NewMenu(productName,
-		open,
-		fyne.NewMenuItemSeparator(),
-		c.trayStatus,
-		c.trayDetail,
-		c.trayRes,
-		fyne.NewMenuItemSeparator(),
-		quit,
-	)
-	desk.SetSystemTrayMenu(c.trayMenu)
 	desk.SetSystemTrayIcon(edrIcon())
+	open := fyne.NewMenuItem("Open", func() {
+		c.showDash()
+	})
+	perms := fyne.NewMenuItem("Permissions", func() { c.show(uistate.Permissions) })
+	updates := fyne.NewMenuItem("Check for updates", c.onCheckUpdates)
+	uninstall := fyne.NewMenuItem("Uninstall…", c.onUninstall)
+	quit := fyne.NewMenuItem("Quit", func() { c.app.Quit() })
+	c.trayMenu = fyne.NewMenu(productName, open, fyne.NewMenuItemSeparator(), perms, updates, uninstall, fyne.NewMenuItemSeparator(), quit)
+	desk.SetSystemTrayMenu(c.trayMenu)
+	if c.pop != nil {
+		desk.SetSystemTrayWindow(c.pop)
+		systray.SetOnTapped(func() {
+			fyne.Do(c.onTrayClick)
+		})
+	}
 }
 
-func (c *console) refreshTray(st operatorStatus, res resourceSnapshot) {
-	if c.trayMenu == nil {
+func (c *console) onTrayClick() {
+	if c.flyoutOpen {
+		c.flyoutOpen = false
+		if c.pop != nil {
+			c.pop.Hide()
+		}
 		return
 	}
-	_, lamps := decorateHealth(st)
-	c.trayStatus.Label = lamps.Title
-	c.trayDetail.Label = fmt.Sprintf("Sensor %s · Stream %s", lamps.Sensor, lamps.Stream)
-	if lamps.Banner != "" {
-		c.trayDetail.Label = lamps.Banner
-	}
-	c.trayRes.Label = fmt.Sprintf("CPU %.1f%% agent · RAM %.0f MB", res.AgentCPU, res.AgentMemMB)
-	c.trayMenu.Refresh()
+	c.showPopover()
+}
+
+func (c *console) refreshTray(_ operatorStatus, _ resourceSnapshot) {
 }

@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>EDR Agent</string>
+	<string>edr</string>
 	<key>CFBundleExecutable</key>
 	<string>edr-agent-ui</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>EDR Agent</string>
+	<string>edr</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -29,8 +29,8 @@
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>EDR Agent uses administrator privileges to enroll, start, and stop the sensor.</string>
+	<string>edr uses administrator privileges to enroll, start, and stop the sensor.</string>
 	<key>NSSystemAdministrationUsageDescription</key>
-	<string>Administrator authentication is required to enroll or stop the EDR sensor.</string>
+	<string>Administrator authentication is required to enroll or stop the edr sensor.</string>
 </dict>
 </plist>

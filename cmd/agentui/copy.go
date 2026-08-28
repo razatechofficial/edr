@@ -3,10 +3,10 @@ package main
 import "runtime"
 
 const (
-	productName    = "EDR Agent"
+	productName    = "edr"
 	productVersion = "1.0.0"
 	apexSaaS       = "xdr.averox.com"
-	eulaText       = "EDR Agent is installed for all users of this computer (per-machine). It cannot be installed for a single account: host monitoring must cover every session on the device.\n\nTelemetry is sent only to your organization’s XDR tenant. Stopping or removing the agent requires administrator credentials.\n\nBy choosing Accept you agree to the license terms. In enterprise fleets this screen is skipped: the organization accepts the license by deploying the package silently."
+	eulaText       = "edr is installed for all users of this computer (per-machine). It cannot be installed for a single account: host monitoring must cover every session on the device.\n\nTelemetry is sent only to your organization’s XDR tenant. Stopping or removing the agent requires administrator credentials.\n\nBy choosing Accept you agree to the license terms. In enterprise fleets this screen is skipped: the organization accepts the license by deploying the package silently."
 )
 
 func storageLabel() string {
@@ -36,7 +36,7 @@ func permBody() string {
 	case "darwin":
 		return "Grant access in System Settings, then Recheck. The sensor cannot start until every item is green."
 	case "windows":
-		return "Allow EDR Agent through Windows Firewall if prompted, then Recheck."
+		return "Allow edr through Windows Firewall if prompted, then Recheck."
 	default:
 		return "Linux has no grant wizard. Capabilities are checked at Start."
 	}

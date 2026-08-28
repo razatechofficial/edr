@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -15,7 +16,7 @@ type identityReceipt struct {
 }
 
 func receiptFromEnroll(out string, st operatorStatus) identityReceipt {
-	fields := parseEqualsFields(out)
+	fields := parseEnrollReceipt(out)
 	storage := fields["secure_storage"]
 	switch strings.ToLower(storage) {
 	case "keychain":
@@ -25,10 +26,7 @@ func receiptFromEnroll(out string, st operatorStatus) identityReceipt {
 	case "file", "":
 		storage = storageLabel()
 	}
-	valid := fields["cert_not_after"]
-	if valid == "" {
-		valid = st.CertExpiry
-	}
+	valid := firstNonEmpty(fields["cert_not_after"], st.CertExpiry)
 	if t, err := time.Parse(time.RFC3339, valid); err == nil {
 		valid = t.UTC().Format("02 Jan 2006, 15:04 UTC")
 	}
@@ -37,8 +35,8 @@ func receiptFromEnroll(out string, st operatorStatus) identityReceipt {
 	}
 	issued := "Averox RA"
 	return identityReceipt{
-		DeviceID:   dash(firstNonEmpty(st.AgentID, fields["agent_id"])),
-		MachineID:  dash(firstNonEmpty(st.MachineID, fields["machine_id"])),
+		DeviceID:   dash(firstNonEmpty(fields["agent_id"], st.AgentID)),
+		MachineID:  dash(firstNonEmpty(fields["machine_id"], st.MachineID)),
 		IssuedBy:   issued,
 		ValidUntil: valid,
 		Storage:    storage,
@@ -46,17 +44,49 @@ func receiptFromEnroll(out string, st operatorStatus) identityReceipt {
 	}
 }
 
-func parseEqualsFields(s string) map[string]string {
+var enrollKV = regexp.MustCompile(`(agent_id|machine_id|secure_storage|cert_not_after)=(\S+)`)
+
+func parseEnrollReceipt(s string) map[string]string {
+	s = strings.ReplaceAll(s, "\r", "\n")
 	out := map[string]string{}
-	for _, part := range strings.Fields(s) {
-		k, v, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-		v = strings.Trim(v, "[]")
-		out[k] = v
+	for _, m := range enrollKV.FindAllStringSubmatch(s, -1) {
+		out[m[1]] = strings.Trim(m[2], `[]"`)
 	}
 	return out
+}
+
+func enrollLooksSuccessful(out string, err error, st operatorStatus) bool {
+	if st.Enrolled && strings.TrimSpace(st.AgentID) != "" {
+		return true
+	}
+	if parseEnrollReceipt(out)["agent_id"] != "" {
+		return true
+	}
+	return err == nil && strings.TrimSpace(st.AgentID) != ""
+}
+
+func (c *console) applyEnrolled(st operatorStatus, r identityReceipt) {
+	st.Enrolled = true
+	if id := undash(r.DeviceID); id != "" {
+		st.AgentID = id
+	}
+	if id := undash(r.MachineID); id != "" {
+		st.MachineID = id
+	}
+	if r.ValidUntil != "" && r.ValidUntil != "—" {
+		if t, err := time.Parse("02 Jan 2006, 15:04 UTC", r.ValidUntil); err == nil {
+			st.CertExpiry = t.Format(time.RFC3339)
+		}
+	}
+	c.last = st
+}
+
+func undash(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "—" {
+		return ""
+	}
+	return s
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -90,7 +120,30 @@ func identityKeyTitle() string {
 }
 
 func identityStoreTitle() string {
-	return "Store cert in " + storageLabel()
+	switch {
+	case isDarwin():
+		return "Store cert in macOS Keychain (encrypted)"
+	case isWindows():
+		return "Store cert in Windows Certificate Store (DPAPI)"
+	default:
+		return "Store cert in sealed local keystore"
+	}
+}
+
+func identityDoing(i int) string {
+	doings := []string{
+		"Validating the enrollment token…",
+		"Generating the device identity key pair…",
+		"Building the certificate signing request…",
+		"Signing the CSR with the private PKI…",
+		"Receiving the signed certificate and CA chain…",
+		"Storing the certificate in the OS keystore…",
+		"Connecting to ingest with the device certificate…",
+	}
+	if i < 0 || i >= len(doings) {
+		return ""
+	}
+	return doings[i]
 }
 
 func identityTitles() []string {

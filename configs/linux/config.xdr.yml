@@ -19,5 +19,5 @@ xdr:
   renew_before_days: 7
   # Local/dev: enrollment bootstrap and ingest often run without TLS
   insecure_skip_tls: true
-  spool_max_bytes: 1073741824
-  spool_max_age_days: 7
+	spool_max_bytes: 3221225472
+	spool_max_age_days: 7

@@ -22,6 +22,12 @@ var (
 	colorHover    = color.NRGBA{R: 0x3A, G: 0x3A, B: 0x3C, A: 0xFF}
 	colorSep      = color.NRGBA{R: 0x48, G: 0x48, B: 0x4A, A: 0xFF}
 	colorCyan     = color.NRGBA{R: 0x5A, G: 0xC8, B: 0xFF, A: 0xFF}
+	colorPurple   = color.NRGBA{R: 0xBF, G: 0x5A, B: 0xF2, A: 0xFF}
+	colorTile     = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x10}
+	colorPill     = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x14}
+	colorTertiary = color.NRGBA{R: 0xEB, G: 0xEB, B: 0xF5, A: 0x73}
+	colorHairline = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x1A}
+	colorWell     = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0x47}
 )
 
 type edrTheme struct{}
@@ -65,7 +71,7 @@ func (edrTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color
 }
 
 func (edrTheme) Font(style fyne.TextStyle) fyne.Resource {
-	return theme.DefaultTheme().Font(style)
+	return nativeFont(style)
 }
 
 func (edrTheme) Icon(name fyne.ThemeIconName) fyne.Resource {

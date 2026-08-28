@@ -18,6 +18,7 @@ import (
 
 	"github.com/razatechofficial/edr/internal/agent"
 	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/hostperm"
 	"github.com/razatechofficial/edr/internal/xdrclient"
 )
 
@@ -45,6 +46,12 @@ var (
 )
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "fda-probe" {
+		if hostperm.ProcessHasFDA() {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
 	if handled, code := tryRunWindowsService(); handled {
 		os.Exit(code)
 	}
@@ -56,9 +63,9 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgent()
 		},
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		Args:          cobra.ArbitraryArgs,
+		SilenceUsage:       true,
+		SilenceErrors:      true,
+		Args:               cobra.ArbitraryArgs,
 		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 	}
 
@@ -255,6 +262,9 @@ func runAgentCore(ctx context.Context, cfgPath string) error {
 		if err := checkRequiredHostAccess(); err != nil {
 			logger.Error("required host permissions missing", zap.Error(err))
 			return err
+		}
+		if warn := hostAccessWarning(); warn != "" {
+			logger.Warn(warn)
 		}
 	}
 

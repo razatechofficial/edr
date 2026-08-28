@@ -66,10 +66,7 @@ func (a *Agent) initXDR() error {
 		_ = os.WriteFile(filepath.Join(a.cfg.Agent.DataDir, "agent_id"), []byte(id+"\n"), 0o600)
 	}
 
-	maxBytes := a.cfg.XDR.SpoolMaxBytes
-	if maxBytes <= 0 {
-		maxBytes = 1 << 30
-	}
+	maxBytes := telemetryqueue.EffectiveMaxBytes(a.cfg.XDR.SpoolMaxBytes)
 	qdir := filepath.Join(a.cfg.Agent.DataDir, "telemetry-queue")
 	qm, qerr := telemetryqueue.NewManager(qdir, maxBytes)
 	if qerr != nil {

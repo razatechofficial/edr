@@ -15,7 +15,8 @@ Merge `configs/linux/config.xdr.yml` into your agent config (or set env vars):
 | `xdr.secure_storage` | `XDR_SECURE_STORAGE` | `auto\|keychain\|dpapi\|file` |
 | `xdr.insecure_skip_tls` | — | `true` for local/dev (plain gRPC) |
 | `xdr.spool_max_age_days` | — | Default **7** (drop oldest spool segments) |
-| `xdr.spool_max_bytes` | — | Default **1 GiB** |
+| `xdr.spool_max_bytes` | — | Default **3 GiB** (2–4 GiB enterprise offline cache) |
+| `xdr.update_catalog_url` | — | HTTPS JSON catalog for the in-app update checker (empty = MDM owns updates) |
 | `xdr.renew_before_days` | — | Default **7** (cert watch) |
 
 ## Install + enroll (production)

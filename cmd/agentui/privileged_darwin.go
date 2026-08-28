@@ -13,7 +13,7 @@ func runEdrctlPrivileged(args ...string) (string, error) {
 	for _, a := range args {
 		cmd += " " + shellQuote(a)
 	}
-	script := fmt.Sprintf(`do shell script %s with administrator privileges`, applescriptString(cmd))
+	script := fmt.Sprintf(`do shell script %s with administrator privileges`, applescriptString(cmd+" 2>&1"))
 	out, err := exec.Command("/usr/bin/osascript", "-e", script).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
@@ -23,7 +23,7 @@ func runInstallerPrivileged(args ...string) (string, error) {
 	for _, a := range args {
 		cmd += " " + shellQuote(a)
 	}
-	script := fmt.Sprintf(`do shell script %s with administrator privileges`, applescriptString(cmd))
+	script := fmt.Sprintf(`do shell script %s with administrator privileges`, applescriptString(cmd+" 2>&1"))
 	out, err := exec.Command("/usr/bin/osascript", "-e", script).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }

@@ -2,41 +2,18 @@
 
 package main
 
-import (
-	"os"
-	"os/exec"
-)
+import "github.com/razatechofficial/edr/internal/hostperm"
 
 func needsFullDiskAccess() bool { return true }
 
 func hasFullDiskAccess() bool {
-	paths := []string{
-		"/Library/Application Support/com.apple.TCC/TCC.db",
-		"/var/db/locationd/clients.plist",
-	}
-	for _, p := range paths {
-		f, err := os.Open(p)
-		if err == nil {
-			_ = f.Close()
-			return true
+	rep := hostperm.EvaluateQuick()
+	for _, it := range rep.Items {
+		if it.ID == hostperm.IDFDA {
+			return it.Status == hostperm.StatusOK
 		}
 	}
 	return false
 }
 
-func openFullDiskAccessSettings() error {
-	urls := []string{
-		"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles",
-		"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
-	}
-	var last error
-	for _, u := range urls {
-		last = exec.Command("/usr/bin/open", u).Start()
-		if last == nil {
-			return nil
-		}
-	}
-	return last
-}
-
-func openOSGrantSettings() error { return openFullDiskAccessSettings() }
+func openOSGrantSettings() error { return hostperm.OpenSettings(hostperm.IDFDA) }

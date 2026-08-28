@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/hostperm"
 	"image/color"
 
 	"fyne.io/fyne/v2"
@@ -53,8 +54,11 @@ func newPreflightItems() []preflightItem {
 func runOneCheck(id string, st operatorStatus) (ok bool, detail string) {
 	switch id {
 	case "cert":
-		if !st.Enrolled {
+		if !st.Enrolled && strings.TrimSpace(st.AgentID) == "" {
 			return false, "This host is not enrolled. Return to Enroll with a new token."
+		}
+		if !st.Enrolled {
+			return true, "Device identity from this session. Certificate is in the OS keystore."
 		}
 		if st.CertExpiry != "" {
 			t, err := time.Parse(time.RFC3339, st.CertExpiry)
@@ -70,22 +74,40 @@ func runOneCheck(id string, st operatorStatus) (ok bool, detail string) {
 		}
 		return true, "Device identity certificate is present"
 	case "grants":
-		if needsFullDiskAccess() && !hasFullDiskAccess() {
-			return false, "Full Disk Access was revoked. Open System Settings, then Recheck."
+		rep := hostperm.EvaluateQuick()
+		if !hostperm.GrantsReady(rep) {
+			id := ""
+			detail := "Required OS access was revoked."
+			for _, it := range hostperm.GrantItems(rep) {
+				if it.Required && it.Status != hostperm.StatusOK && it.Status != hostperm.StatusNA {
+					id = it.Title
+					if it.Doing != "" {
+						detail = it.Doing
+					}
+					break
+				}
+			}
+			if id != "" {
+				return false, id + " — " + detail
+			}
+			return false, detail
 		}
 		if isDarwin() {
-			return true, "System Extension and Full Disk Access are granted"
+			return true, "OS permissions are granted"
 		}
 		if isWindows() {
 			return true, "Service rights look healthy"
 		}
 		return true, "Required capabilities are present"
 	case "svc":
-		s := st.Service
-		if s == "" || s == "unknown" || strings.Contains(strings.ToLower(s), "not installed") || strings.Contains(strings.ToLower(s), "missing") {
+		s := strings.ToLower(strings.TrimSpace(st.Service))
+		if s == "" || s == "unknown" || strings.Contains(s, "not installed") || strings.Contains(s, "missing") {
 			return false, "The machine-wide sensor service is not registered. Reinstall as administrator."
 		}
-		return true, "Service: " + s
+		if s == "not loaded" || s == "not running" || s == "stopped" {
+			return true, "Service is installed. Start loads the sensor."
+		}
+		return true, "Service: " + st.Service
 	case "spool":
 		return storageCheck()
 	default:

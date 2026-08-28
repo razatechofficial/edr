@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
+	"github.com/razatechofficial/edr/internal/installprogress"
 )
 
 func (c *console) buildSetup() fyne.CanvasObject {
@@ -15,6 +16,9 @@ func (c *console) buildSetup() fyne.CanvasObject {
 	c.setupHint.Wrapping = fyne.TextWrapWord
 	c.setupFaultBox = container.NewVBox()
 	c.setupSteps = container.NewVBox()
+	c.setupProcess = widget.NewLabel("")
+	c.setupProcess.Wrapping = fyne.TextWrapWord
+	c.setupProcess.Hide()
 
 	eula := widget.NewLabel(eulaText)
 	eula.Wrapping = fyne.TextWrapWord
@@ -26,7 +30,12 @@ func (c *console) buildSetup() fyne.CanvasObject {
 	c.setupDecline = widget.NewButton("Decline", c.onSetupDecline)
 	c.setupActions = container.NewGridWithColumns(2, c.setupDecline, c.setupAccept)
 
-	c.setupLaunch = widget.NewButton("Launch EDR Agent", func() {
+	c.setupWorking = widget.NewButton("Working…", nil)
+	c.setupWorking.Importance = widget.MediumImportance
+	c.setupWorking.Disable()
+	c.setupWorking.Hide()
+
+	c.setupLaunch = widget.NewButton("Launch "+productName, func() {
 		c.show(uistate.Enroll)
 	})
 	c.setupLaunch.Importance = widget.HighImportance
@@ -45,8 +54,8 @@ func (c *console) buildSetup() fyne.CanvasObject {
 
 	header := pageHeader("License agreement", colorAccent, "Software license", "")
 	header = container.NewVBox(header, c.setupHint)
-	body := container.NewVBox(card(eulaScroll), card(per), c.setupFaultBox, c.setupSteps)
-	foot := container.NewVBox(c.setupActions, c.setupLaunch, c.setupLaunchHint, c.setupClose)
+	body := container.NewVBox(card(eulaScroll), card(per), c.setupFaultBox, c.setupSteps, c.setupProcess)
+	foot := container.NewVBox(c.setupActions, c.setupWorking, c.setupLaunch, c.setupLaunchHint, c.setupClose)
 	c.setupBody = body
 	c.setupContent = wizardPage(header, body, foot)
 	return c.setupContent
@@ -76,6 +85,9 @@ func (c *console) onSetupDecline() {
 	if c.setupLaunchHint != nil {
 		c.setupLaunchHint.Hide()
 	}
+	if c.setupWorking != nil {
+		c.setupWorking.Hide()
+	}
 	c.setupClose.Show()
 	c.setupHint.SetText("You can run setup again when you are ready to accept the license.")
 }
@@ -96,7 +108,16 @@ func (c *console) onSetupAccept() {
 	c.setSetupFault(uiFault{})
 	c.setupActions.Hide()
 	c.setupHint.SetText("Copies files and registers the machine-wide service. No token on this screen.")
+	if c.setupProcess != nil {
+		c.setupProcess.SetText(setupStepDoing(0))
+		c.setupProcess.Show()
+	}
+	if c.setupWorking != nil {
+		c.setupWorking.SetText("Working…")
+		c.setupWorking.Show()
+	}
 	c.setBusy(true)
+	installprogress.Clear()
 	c.renderSetupSteps(0, false, false)
 
 	done := make(chan struct {
@@ -111,36 +132,64 @@ func (c *console) onSetupAccept() {
 		}{out, err}
 	}()
 	go func() {
-		active := 0
-		tick := time.NewTicker(900 * time.Millisecond)
+		tick := time.NewTicker(250 * time.Millisecond)
 		defer tick.Stop()
+		n := len(setupStepTitles())
 		for {
 			select {
 			case res := <-done:
 				fyne.Do(func() {
 					c.setBusy(false)
 					if res.err != nil {
-						c.renderSetupSteps(active, false, true)
+						step := installprogress.Index(installprogress.Read(), n)
+						if step < 0 {
+							step = 0
+						}
+						c.renderSetupSteps(step, false, true)
+						if c.setupProcess != nil {
+							c.setupProcess.SetText("Install did not finish.")
+						}
+						if c.setupWorking != nil {
+							c.setupWorking.Hide()
+						}
 						c.setSetupFault(classifyInstallError(res.out + "\n" + res.err.Error()))
 						c.setupActions.Show()
 						c.setupAccept.Enable()
 						return
 					}
-					c.renderSetupSteps(3, true, false)
+					c.renderSetupSteps(n, true, false)
+					if c.setupProcess != nil {
+						c.setupProcess.SetText("All checks passed.")
+					}
+					if c.setupWorking != nil {
+						c.setupWorking.Hide()
+					}
 					c.setupHint.SetText(installedBody())
 					c.setupLaunch.Show()
 					if c.setupLaunchHint != nil {
 						c.setupLaunchHint.Show()
 					}
 					c.setupActions.Hide()
+					installprogress.Clear()
 				})
 				return
 			case <-tick.C:
-				if active < 2 {
-					active++
-					a := active
-					fyne.Do(func() { c.renderSetupSteps(a, false, false) })
+				step := installprogress.Read()
+				idx := installprogress.Index(step, n)
+				if idx < 0 {
+					continue
 				}
+				if idx >= n {
+					idx = n - 1
+				}
+				i := idx
+				line := setupStepDoing(i)
+				fyne.Do(func() {
+					c.renderSetupSteps(i, false, false)
+					if c.setupProcess != nil {
+						c.setupProcess.SetText(line)
+					}
+				})
 			}
 		}
 	}()
@@ -149,9 +198,9 @@ func (c *console) onSetupAccept() {
 func installedBody() string {
 	switch {
 	case isDarwin():
-		return "This Mac is not enrolled yet. Launch EDR Agent to bind device identity, then grant access in System Settings."
+		return "This Mac is not enrolled yet. Launch edr to bind device identity, then grant access in System Settings."
 	case isWindows():
-		return "This PC is not enrolled yet. Launch EDR Agent to bind device identity, then allow the firewall if Windows asks."
+		return "This PC is not enrolled yet. Launch edr to bind device identity, then allow the firewall if Windows asks."
 	default:
 		return "This host is not enrolled yet. Run sudo edrctl enroll to bind device identity."
 	}
@@ -166,6 +215,39 @@ func setupStepTitles() []string {
 	default:
 		return []string{"Kernel and disk space", "Install deb/rpm package", "Register systemd unit"}
 	}
+}
+
+func setupStepDoing(i int) string {
+	switch {
+	case isDarwin():
+		d := []string{
+			"Checking macOS 12+ and available disk space…",
+			"Installing EDR Agent.app for all users…",
+			"Registering the sensor LaunchDaemon…",
+		}
+		if i >= 0 && i < len(d) {
+			return d[i]
+		}
+	case isWindows():
+		d := []string{
+			"Checking Windows 10+ and available disk space…",
+			"Copying files to Program Files\\EDR Agent (all users)…",
+			"Registering the per-machine EDRAgent service…",
+		}
+		if i >= 0 && i < len(d) {
+			return d[i]
+		}
+	default:
+		d := []string{
+			"Checking Linux kernel and available disk space…",
+			"Installing the machine-wide agent package…",
+			"Registering the systemd unit…",
+		}
+		if i >= 0 && i < len(d) {
+			return d[i]
+		}
+	}
+	return "Working…"
 }
 
 func (c *console) renderSetupSteps(active int, done, failed bool) {

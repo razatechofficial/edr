@@ -18,12 +18,21 @@ type resourceSnapshot struct {
 
 func sampleResources(st operatorStatus) resourceSnapshot {
 	cpu, used, total := sampleSystem()
+	agentCPU, agentMem := st.CPUPercent, st.MemoryMB
+	if c, m, _, ok := sampleAgentProcess(); ok {
+		if agentCPU == 0 {
+			agentCPU = c
+		}
+		if agentMem == 0 {
+			agentMem = m
+		}
+	}
 	return resourceSnapshot{
 		SysCPU:     cpu,
 		SysMemUsed: used,
 		SysMemTot:  total,
-		AgentCPU:   st.CPUPercent,
-		AgentMemMB: st.MemoryMB,
+		AgentCPU:   agentCPU,
+		AgentMemMB: agentMem,
 	}
 }
 
@@ -49,23 +58,27 @@ func diskFreeBytes(path string) (uint64, error) {
 }
 
 func storageCheck() (ok bool, detail string) {
-	dir := filepath.Join(platform.DataDir(), "telemetry-queue")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return false, "Cannot create the offline event spool directory."
+	data := platform.DataDir()
+	dir := filepath.Join(data, "telemetry-queue")
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		if _, perr := os.Stat(data); perr != nil {
+			return false, "Agent data directory is missing. Reinstall as administrator."
+		}
+		free, ferr := diskFreeBytes(data)
+		if ferr == nil && free < 64*1024*1024 {
+			return false, fmt.Sprintf("Only %.0f MB free on the data volume.", float64(free)/(1<<20))
+		}
+		return true, "Data directory is present. The sensor creates the offline queue on start."
 	}
-	probe := filepath.Join(dir, ".write-test")
-	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
-		return false, "Offline event spool is not writable."
-	}
-	_ = os.Remove(probe)
-	free, err := diskFreeBytes(dir)
-	if err == nil && free < 64*1024*1024 {
+	free, ferr := diskFreeBytes(dir)
+	if ferr == nil && free < 64*1024*1024 {
 		return false, fmt.Sprintf("Only %.0f MB free; spool needs room for offline events.", float64(free)/(1<<20))
 	}
-	if err == nil {
-		return true, fmt.Sprintf("Writable · %.1f GB free", float64(free)/float64(1<<30))
+	if ferr == nil {
+		return true, fmt.Sprintf("Present · %.1f GB free", float64(free)/float64(1<<30))
 	}
-	return true, "Spool directory is writable"
+	return true, "Offline event spool path is present"
 }
 
 func formatBytesGB(n uint64) string {

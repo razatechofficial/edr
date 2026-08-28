@@ -20,6 +20,8 @@ detection:
   yara:
     enabled: true
     rules_dir: "/Library/Application Support/EDR/config/rules/yara"
+    scan_on_write: true
+    scan_on_exec: true
   custom_rules:
     enabled: true
     rules_path: "/Library/Application Support/EDR/config/rules/custom"
@@ -68,7 +70,11 @@ ml:
 llm:
   enabled: false
   rag:
-    enabled: true
+    enabled: false
+
+xdr:
+  spool_max_bytes: 3221225472
+  spool_max_age_days: 7
 
 self_protect:
   enabled: true
