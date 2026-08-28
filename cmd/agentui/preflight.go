@@ -24,29 +24,30 @@ const (
 type preflightItem struct {
 	ID     string
 	Title  string
+	Doing  string
 	Detail string
 	State  checkState
 }
 
 func newPreflightItems() []preflightItem {
 	items := []preflightItem{
-		{ID: "cert", Title: "Device certificate valid"},
+		{ID: "cert", Title: "Device certificate valid", Doing: "Checking device identity certificate…"},
 	}
 	switch {
 	case isDarwin():
-		items = append(items, preflightItem{ID: "grants", Title: "OS permissions still granted"})
+		items = append(items, preflightItem{ID: "grants", Title: "OS permissions still granted", Doing: "Re-checking System Extension and Full Disk Access…"})
 	case isWindows():
-		items = append(items, preflightItem{ID: "grants", Title: "Firewall and service rights"})
+		items = append(items, preflightItem{ID: "grants", Title: "Firewall and service rights", Doing: "Re-checking Windows Firewall and service rights…"})
 	default:
-		items = append(items, preflightItem{ID: "grants", Title: "Kernel and audit capabilities"})
+		items = append(items, preflightItem{ID: "grants", Title: "Kernel and audit capabilities", Doing: "Re-checking Linux capabilities…"})
 	}
 	svc := "Sensor service registered"
 	if isWindows() {
 		svc = "EDRAgent service registered"
 	}
 	items = append(items,
-		preflightItem{ID: "svc", Title: svc},
-		preflightItem{ID: "spool", Title: "Local event spool writable"},
+		preflightItem{ID: "svc", Title: svc, Doing: "Checking the machine-wide sensor service…"},
+		preflightItem{ID: "spool", Title: "Local event spool writable", Doing: "Checking offline telemetry spool…"},
 	)
 	return items
 }
