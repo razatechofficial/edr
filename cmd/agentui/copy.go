@@ -43,10 +43,9 @@ func permBody() string {
 }
 
 func enrollBody() string {
-	return "Paste the one-time token from the console. Leave domain blank to use " + apexSaaS +
-		". The agent maps it to enroll." + apexSaaS + ". Ingest is returned by Register, not typed."
+	return "Paste the one-time token from the console. Leave the management domain blank to use the default " + apexSaaS + "."
 }
 
 func domainCaption() string {
-	return "Blank uses " + apexSaaS + ". Maps to enroll." + apexSaaS + ":443. Not ingest or API URLs."
+	return "Leave blank to use the default " + apexSaaS + "."
 }

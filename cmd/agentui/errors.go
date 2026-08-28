@@ -24,8 +24,8 @@ func faultTokenMissing() uiFault {
 func faultDomainInvalid() uiFault {
 	return uiFault{
 		Title:  "Enter a hostname, not a URL list",
-		Body:   "Use one domain such as xdr.averox.com or xdr.company.com. The agent adds enroll. itself.",
-		Detail: "Do not paste https://, ports, or ingest hosts.",
+		Body:   "Use a hostname such as xdr.example.com.",
+		Detail: "Do not paste a URL or a port number.",
 		Action: "OK",
 	}
 }
@@ -183,7 +183,7 @@ func networkDetail() string {
 	case isWindows():
 		return "Check network and Windows Firewall. Allow EDR Agent if prompted."
 	default:
-		return "Check network, DNS, and that this host can reach enroll.<domain>:443."
+		return "Check network and DNS, then try again."
 	}
 }
 
