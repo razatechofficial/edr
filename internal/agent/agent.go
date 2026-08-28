@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -97,6 +98,8 @@ type Agent struct {
 
 	healthMu           sync.Mutex
 	lastHealthSnapshot time.Time
+	lastRuntimeStats   time.Time
+	eventsProcessed    atomic.Uint64
 	validationMu       sync.RWMutex
 	validationSink     func(detection.Detection)
 	noisyAlertMu       sync.Mutex
@@ -1240,6 +1243,7 @@ func (a *Agent) ProcessCycle(ctx context.Context) (err error) {
 		}
 		a.healthMu.Unlock()
 	}
+	a.maybeWriteRuntimeStats()
 	return nil
 }
 

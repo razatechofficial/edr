@@ -117,6 +117,9 @@ func enrichStatus(st *operatorStatus) {
 	if st.Blocks == 0 {
 		st.Blocks = localBlockCount()
 	}
+	if st.EventsProc == 0 {
+		st.EventsProc = platform.ReadRuntimeStatsEvents(platform.DataDir())
+	}
 }
 
 func processStartUptime(start time.Time) string {

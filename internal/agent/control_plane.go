@@ -120,6 +120,9 @@ func (a *Agent) flushControlPlaneAlerts(ctx context.Context) {
 }
 
 func (a *Agent) recordControlPlaneEvent() {
+	if a != nil {
+		a.eventsProcessed.Add(1)
+	}
 	if hb := a.controlPlaneHeartbeat(); hb != nil {
 		hb.RecordEvent()
 	}
