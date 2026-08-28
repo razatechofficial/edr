@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -122,31 +123,75 @@ func (r *liveDotRender) Refresh() {
 
 type glowBG struct {
 	widget.BaseWidget
-	hero   color.NRGBA
-	raster *canvas.Raster
+	hero color.NRGBA
+	srcW int
+	srcH int
+	img  *canvas.Image
 }
 
 func newGlowBG(hero color.NRGBA) *glowBG {
 	g := &glowBG{hero: hero}
-	g.raster = canvas.NewRaster(func(w, h int) image.Image {
-		return drawGlow(w, h, g.hero)
-	})
+	g.img = canvas.NewImageFromImage(drawGlow(1, 1, hero))
+	g.img.FillMode = canvas.ImageFillStretch
+	g.img.ScaleMode = canvas.ImageScaleFastest
 	g.ExtendBaseWidget(g)
 	return g
 }
 
 func (g *glowBG) SetHero(c color.NRGBA) {
-	g.hero = c
-	if g.raster != nil {
-		g.raster.Refresh()
+	if g.hero == c {
+		return
 	}
-	g.Refresh()
+	g.hero = c
+	g.paint()
+}
+
+func (g *glowBG) paint() {
+	if g.img == nil || g.srcW < 1 || g.srcH < 1 {
+		return
+	}
+	g.img.Image = drawGlow(g.srcW, g.srcH, g.hero)
+	g.img.Refresh()
+}
+
+func (g *glowBG) MinSize() fyne.Size {
+	return fyne.NewSize(1, 1)
 }
 
 func (g *glowBG) CreateRenderer() fyne.WidgetRenderer {
-	g.raster.SetMinSize(fyne.NewSize(popoverW, popoverH))
-	return widget.NewSimpleRenderer(g.raster)
+	return &glowRender{g: g, objs: []fyne.CanvasObject{g.img}}
 }
+
+type glowRender struct {
+	g    *glowBG
+	objs []fyne.CanvasObject
+}
+
+func (r *glowRender) Destroy() {}
+
+func (r *glowRender) Layout(sz fyne.Size) {
+	w := int(sz.Width)
+	h := int(sz.Height)
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	if r.g.srcW != w || r.g.srcH != h {
+		r.g.srcW = w
+		r.g.srcH = h
+		r.g.paint()
+	}
+	r.g.img.Move(fyne.NewPos(0, 0))
+	r.g.img.Resize(sz)
+}
+
+func (r *glowRender) MinSize() fyne.Size { return fyne.NewSize(1, 1) }
+
+func (r *glowRender) Objects() []fyne.CanvasObject { return r.objs }
+
+func (r *glowRender) Refresh() {}
 
 type areaSpark struct {
 	widget.BaseWidget
@@ -210,13 +255,78 @@ func (b *ramBar) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (b *ramBar) MinSize() fyne.Size {
-	return fyne.NewSize(40, 6)
+	return fyne.NewSize(80, 6)
+}
+
+type smoothBar struct {
+	widget.BaseWidget
+	frac   float64
+	raster *canvas.Raster
+	anim   *fyne.Animation
+}
+
+func newSmoothBar() *smoothBar {
+	s := &smoothBar{}
+	s.raster = canvas.NewRaster(func(w, h int) image.Image {
+		return drawProgressBar(w, h, s.frac)
+	})
+	s.ExtendBaseWidget(s)
+	return s
+}
+
+func (s *smoothBar) SetValue(v float64) {
+	if v < 0 {
+		v = 0
+	}
+	if v > 1 {
+		v = 1
+	}
+	from := s.frac
+	if s.anim != nil {
+		s.anim.Stop()
+	}
+	s.anim = fyne.NewAnimation(400*time.Millisecond, func(f float32) {
+		s.frac = from + (v-from)*float64(f)
+		if s.raster != nil {
+			s.raster.Refresh()
+		}
+	})
+	s.anim.Curve = fyne.AnimationEaseOut
+	s.anim.Start()
+}
+
+func (s *smoothBar) MinSize() fyne.Size {
+	return fyne.NewSize(80, 4)
+}
+
+func (s *smoothBar) CreateRenderer() fyne.WidgetRenderer {
+	s.raster.SetMinSize(fyne.NewSize(80, 4))
+	return widget.NewSimpleRenderer(s.raster)
+}
+
+func lucide14(kind string, col color.NRGBA) fyne.CanvasObject {
+	img := canvas.NewImageFromResource(drawMiniIcon(kind, col))
+	img.FillMode = canvas.ImageFillContain
+	img.SetMinSize(fyne.NewSize(14, 14))
+	slot := canvas.NewRectangle(color.Transparent)
+	slot.SetMinSize(fyne.NewSize(14, 14))
+	return container.NewCenter(container.NewStack(slot, img))
+}
+
+func metricWell(kind string, col color.NRGBA) fyne.CanvasObject {
+	well := canvas.NewRectangle(withAlpha(col, 0x22))
+	well.CornerRadius = 14
+	well.SetMinSize(fyne.NewSize(dashIconWell, dashIconWell))
+	slot := canvas.NewRectangle(color.Transparent)
+	slot.SetMinSize(fyne.NewSize(dashIconWell, dashIconWell))
+	return container.NewCenter(container.NewStack(slot, well, lucide14(kind, col)))
 }
 
 type dragFrame struct {
 	widget.BaseWidget
-	content fyne.CanvasObject
-	host    func() fyne.Window
+	content    fyne.CanvasObject
+	host       func() fyne.Window
+	nativeDrag bool
 }
 
 func newDragFrame(content fyne.CanvasObject, host func() fyne.Window) *dragFrame {
@@ -229,20 +339,50 @@ func (d *dragFrame) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(d.content)
 }
 
-func (d *dragFrame) Dragged(ev *fyne.DragEvent) {
-	if d.host == nil {
+func (d *dragFrame) MouseDown(ev *desktop.MouseEvent) {
+	if ev.Button != desktop.MouseButtonPrimary || d.host == nil {
 		return
 	}
 	w := d.host()
 	if w == nil {
 		return
 	}
+	if startNativeWindowDrag(w) {
+		d.nativeDrag = true
+	}
+}
+
+func (d *dragFrame) MouseUp(*desktop.MouseEvent) {}
+
+func (d *dragFrame) Dragged(ev *fyne.DragEvent) {
+	if d.nativeDrag {
+		return
+	}
+	if d.host == nil {
+		return
+	}
+	if ev.Dragged.DX == 0 && ev.Dragged.DY == 0 {
+		return
+	}
+	w := d.host()
+	if w == nil {
+		return
+	}
+	if startNativeWindowDrag(w) {
+		d.nativeDrag = true
+		return
+	}
 	moveNativeWindow(w, ev.Dragged.DX, ev.Dragged.DY)
 }
 
-func (d *dragFrame) DragEnd() {}
+func (d *dragFrame) DragEnd() {
+	d.nativeDrag = false
+}
 
-var _ fyne.Draggable = (*dragFrame)(nil)
+var (
+	_ fyne.Draggable    = (*dragFrame)(nil)
+	_ desktop.Mouseable = (*dragFrame)(nil)
+)
 
 func labelCaps(s string, size float32, col color.Color) *canvas.Text {
 	t := canvas.NewText(s, col)
@@ -287,6 +427,39 @@ func lockH(h float32, obj fyne.CanvasObject) fyne.CanvasObject {
 	return container.New(stripLayout{height: h}, obj)
 }
 
+type meterLay struct{}
+
+func (meterLay) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	cw := float32(28)
+	ch := float32(14)
+	if len(objects) > 1 && objects[1] != nil {
+		m := objects[1].MinSize()
+		cw, ch = m.Width, m.Height
+	}
+	h := float32(4)
+	if ch > h {
+		h = ch
+	}
+	return fyne.NewSize(80+12+cw, h)
+}
+
+func (meterLay) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) < 2 {
+		return
+	}
+	bar, count := objects[0], objects[1]
+	cm := count.MinSize()
+	count.Move(fyne.NewPos(size.Width-cm.Width, (size.Height-cm.Height)/2))
+	count.Resize(cm)
+	const bh float32 = 4
+	bar.Move(fyne.NewPos(0, (size.Height-bh)/2))
+	bw := size.Width - cm.Width - 12
+	if bw < 8 {
+		bw = 8
+	}
+	bar.Resize(fyne.NewSize(bw, bh))
+}
+
 type heroFace struct {
 	widget.BaseWidget
 	tone   color.NRGBA
@@ -311,12 +484,14 @@ func newHeroFace() *heroFace {
 }
 
 func (h *heroFace) Set(tone color.NRGBA, kind heroKind) {
+	if h.tone == tone && h.kind == kind {
+		return
+	}
 	h.tone = tone
 	h.kind = kind
 	if h.raster != nil {
 		h.raster.Refresh()
 	}
-	h.Refresh()
 }
 
 func (h *heroFace) CreateRenderer() fyne.WidgetRenderer {
@@ -345,12 +520,14 @@ func newIconDot(kind string, col color.NRGBA) *iconDot {
 }
 
 func (d *iconDot) Set(kind string, col color.NRGBA) {
+	if d.kind == kind && d.col == col {
+		return
+	}
 	d.kind = kind
 	d.col = col
 	if d.raster != nil {
 		d.raster.Refresh()
 	}
-	d.Refresh()
 }
 
 func (d *iconDot) CreateRenderer() fyne.WidgetRenderer {
