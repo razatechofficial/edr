@@ -367,6 +367,64 @@ func inPill(x, y, w, h, r float64) bool {
 	return dx*dx+dy*dy <= r*r
 }
 
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func pillCoverage(px, py, w, h float64) float64 {
+	if w < 0.5 || h < 0.5 {
+		return 0
+	}
+	r := math.Min(h, w) / 2
+	dx := math.Abs(px-w/2) - (w/2 - r)
+	dy := math.Abs(py-h/2) - (h/2 - r)
+	if dx < 0 {
+		dx = 0
+	}
+	if dy < 0 {
+		dy = 0
+	}
+	return clamp01(0.5 - (math.Hypot(dx, dy) - r))
+}
+
+func withCover(c color.NRGBA, cover float64) color.NRGBA {
+	if cover <= 0 {
+		return color.NRGBA{}
+	}
+	if cover < 1 {
+		c.A = uint8(math.Round(float64(c.A) * cover))
+	}
+	return c
+}
+
+func srcOver(dst, src color.NRGBA) color.NRGBA {
+	sa := float64(src.A) / 255
+	if sa <= 0 {
+		return dst
+	}
+	if sa >= 1 {
+		return src
+	}
+	da := float64(dst.A) / 255
+	outA := sa + da*(1-sa)
+	if outA <= 0 {
+		return color.NRGBA{}
+	}
+	inv := 1 - sa
+	return color.NRGBA{
+		R: uint8(math.Round((float64(src.R)*sa + float64(dst.R)*da*inv) / outA)),
+		G: uint8(math.Round((float64(src.G)*sa + float64(dst.G)*da*inv) / outA)),
+		B: uint8(math.Round((float64(src.B)*sa + float64(dst.B)*da*inv) / outA)),
+		A: uint8(math.Round(outA * 255)),
+	}
+}
+
 func drawShareBar(w, h int, edr, other, free float64) *image.NRGBA {
 	if w < 2 {
 		w = 2
@@ -389,40 +447,40 @@ func drawShareBar(w, h int, edr, other, free float64) *image.NRGBA {
 		sum = 1
 	}
 	edr, other, free = edr/sum, other/sum, free/sum
+
+	fw, fh := float64(w), float64(h)
+	minCap := fh
+	edrPx := fw * edr
+	usedPx := fw * (edr + other)
+	if edr > 0 && edrPx < minCap {
+		edrPx = minCap
+	}
+	if edr+other > 0 && usedPx < minCap {
+		usedPx = minCap
+	}
+	if usedPx < edrPx {
+		usedPx = edrPx
+	}
+	if usedPx > fw {
+		usedPx = fw
+	}
+	if edrPx > usedPx {
+		edrPx = usedPx
+	}
+
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	track := color.NRGBA{R: 255, G: 255, B: 255, A: 22}
-	otherCol := color.NRGBA{R: 235, G: 235, B: 245, A: 0x73}
-	r := float64(h) / 2
-	minEdr := 3
-	if w < 24 {
-		minEdr = 2
-	}
-	edrW := int(math.Round(float64(w) * edr))
-	if edr > 0 && edrW < minEdr {
-		edrW = minEdr
-	}
-	otherW := int(math.Round(float64(w) * other))
-	if edrW+otherW > w {
-		otherW = w - edrW
-		if otherW < 0 {
-			otherW = 0
-		}
-	}
+	track := color.NRGBA{R: 255, G: 255, B: 255, A: 20} // web: rgba(255,255,255,0.08)
+	edrFill := colorCyan
+	otherFill := colorPurple
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			if !inPill(float64(x), float64(y), float64(w), float64(h), r) {
-				continue
+			px, py := float64(x)+0.5, float64(y)+0.5
+			c := withCover(track, pillCoverage(px, py, fw, fh))
+			if usedPx > 0.5 {
+				c = srcOver(c, withCover(otherFill, pillCoverage(px, py, usedPx, fh)))
 			}
-			var c color.NRGBA
-			switch {
-			case x < edrW:
-				t := float64(x) / math.Max(1, float64(edrW-1))
-				c = mixNRGBA(colorCyan, colorAccent, t)
-				c.A = 255
-			case x < edrW+otherW:
-				c = otherCol
-			default:
-				c = track
+			if edrPx > 0.5 {
+				c = srcOver(c, withCover(edrFill, pillCoverage(px, py, edrPx, fh)))
 			}
 			img.SetNRGBA(x, y, c)
 		}
