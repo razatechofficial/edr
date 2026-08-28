@@ -39,6 +39,59 @@ func mixNRGBA(a, b color.NRGBA, t float64) color.NRGBA {
 	}
 }
 
+func drawHeroWell(w, h int, tone color.NRGBA) *image.NRGBA {
+	if w < 8 {
+		w = 8
+	}
+	if h < 8 {
+		h = 8
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	rad := 16.0
+	if float64(w) < rad*2 {
+		rad = float64(w) / 2
+	}
+	start := withAlpha(tone, 0x70)
+	end := colorBg
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if !roundRect(float64(x), float64(y), float64(w), float64(h), rad) {
+				continue
+			}
+			t := (float64(x)*0.35 + float64(y)*0.94) / math.Max(1, math.Hypot(float64(w), float64(h)))
+			if t > 1 {
+				t = 1
+			}
+			c := mixNRGBA(start, end, t)
+			c.A = 255
+			img.SetNRGBA(x, y, c)
+		}
+	}
+	hi := color.NRGBA{R: 255, G: 255, B: 255, A: 0x24}
+	for x := int(rad / 2); x < w-int(rad/2); x++ {
+		img.SetNRGBA(x, 1, hi)
+	}
+	return img
+}
+
+func roundRect(x, y, w, h, r float64) bool {
+	if x >= r && x < w-r {
+		return y >= 0 && y < h
+	}
+	if y >= r && y < h-r {
+		return x >= 0 && x < w
+	}
+	cx, cy := r, r
+	if x >= w-r {
+		cx = w - r
+	}
+	if y >= h-r {
+		cy = h - r
+	}
+	dx, dy := x-cx, y-cy
+	return dx*dx+dy*dy <= r*r
+}
+
 func drawGlow(w, h int, hero color.NRGBA) *image.NRGBA {
 	if w < 1 {
 		w = 1
@@ -262,7 +315,7 @@ func drawAreaSpark(w, h int, vals []float64, col color.NRGBA) *image.NRGBA {
 	return img
 }
 
-func drawRamBar(w, h int, ratio float64) *image.NRGBA {
+func drawProgressBar(w, h int, ratio float64) *image.NRGBA {
 	if w < 2 {
 		w = 2
 	}
@@ -276,23 +329,46 @@ func drawRamBar(w, h int, ratio float64) *image.NRGBA {
 		ratio = 1
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	track := color.NRGBA{R: 255, G: 255, B: 255, A: 20}
+	track := color.NRGBA{R: 255, G: 255, B: 255, A: 22}
+	fillW := int(math.Round(float64(w) * ratio))
+	r := float64(h) / 2
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			img.SetNRGBA(x, y, track)
-		}
-	}
-	fillW := int(float64(w) * ratio)
-	cyan, purple := colorCyan, colorPurple
-	for x := 0; x < fillW; x++ {
-		t := float64(x) / math.Max(1, float64(w))
-		c := mixNRGBA(cyan, purple, t)
-		c.A = 255
-		for y := 0; y < h; y++ {
+			if !inPill(float64(x), float64(y), float64(w), float64(h), r) {
+				continue
+			}
+			if x >= fillW {
+				img.SetNRGBA(x, y, track)
+				continue
+			}
+			t := float64(x) / math.Max(1, float64(w-1))
+			var c color.NRGBA
+			if t < 0.5 {
+				c = mixNRGBA(colorCyan, colorAccent, t*2)
+			} else {
+				c = mixNRGBA(colorAccent, colorPurple, (t-0.5)*2)
+			}
+			c.A = 255
 			img.SetNRGBA(x, y, c)
 		}
 	}
 	return img
+}
+
+func inPill(x, y, w, h, r float64) bool {
+	if x >= r && x < w-r {
+		return true
+	}
+	cx := r
+	if x >= w-r {
+		cx = w - r
+	}
+	dx, dy := x-cx, y-r
+	return dx*dx+dy*dy <= r*r
+}
+
+func drawRamBar(w, h int, ratio float64) *image.NRGBA {
+	return drawProgressBar(w, h, ratio)
 }
 
 func pngResource(name string, img image.Image) fyne.Resource {
@@ -346,6 +422,14 @@ func paintMiniIconAt(kind string, col color.NRGBA, w, h int) *image.NRGBA {
 		paintWifi(img, s, sw, col, false)
 	case "wifi-off":
 		paintWifi(img, s, sw, col, true)
+	case "chevron-right":
+		pts := lucidePts(s, [][2]float64{{9, 18}, {15, 12}, {9, 6}})
+		strokeLine(img, pts[0][0], pts[0][1], pts[1][0], pts[1][1], col, sw)
+		strokeLine(img, pts[1][0], pts[1][1], pts[2][0], pts[2][1], col, sw)
+	case "chevron-down":
+		pts := lucidePts(s, [][2]float64{{6, 9}, {12, 15}, {18, 9}})
+		strokeLine(img, pts[0][0], pts[0][1], pts[1][0], pts[1][1], col, sw)
+		strokeLine(img, pts[1][0], pts[1][1], pts[2][0], pts[2][1], col, sw)
 	case "check":
 		pts := lucidePts(s, [][2]float64{{20, 6}, {9, 17}, {4, 12}})
 		strokeLine(img, pts[0][0], pts[0][1], pts[1][0], pts[1][1], col, sw*1.2)
@@ -359,6 +443,12 @@ func paintMiniIconAt(kind string, col color.NRGBA, w, h int) *image.NRGBA {
 		strokeLine(img, x1, y0, x1, y1, col, sw)
 		strokeLine(img, x1, y1, x0, y1, col, sw)
 		strokeLine(img, x0, y1, x0, y0, col, sw)
+	case "fingerprint":
+		strokeArc(img, s*12/24, s*13/24, s*3.2/24, 0.4, math.Pi*1.6, col, sw)
+		strokeArc(img, s*12/24, s*13/24, s*5.6/24, 0.25, math.Pi*1.75, col, sw)
+		strokeArc(img, s*12/24, s*13/24, s*8.0/24, 0.15, math.Pi*1.85, col, sw)
+	case "shield":
+		strokePoly(img, lucidePts(s, [][2]float64{{12, 22}, {20, 18}, {20, 8}, {12, 4}, {4, 8}, {4, 18}}), col, sw)
 	}
 	return img
 }
