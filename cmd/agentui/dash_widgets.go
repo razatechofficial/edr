@@ -228,21 +228,21 @@ func (s *areaSpark) MinSize() fyne.Size {
 
 type ramBar struct {
 	widget.BaseWidget
-	ratio  float64
-	raster *canvas.Raster
+	edr, other, free float64
+	raster           *canvas.Raster
 }
 
 func newRamBar() *ramBar {
-	b := &ramBar{ratio: 0.12}
+	b := &ramBar{free: 1}
 	b.raster = canvas.NewRaster(func(w, h int) image.Image {
-		return drawRamBar(w, h, b.ratio)
+		return drawShareBar(w, h, b.edr, b.other, b.free)
 	})
 	b.ExtendBaseWidget(b)
 	return b
 }
 
-func (b *ramBar) SetRatio(r float64) {
-	b.ratio = r
+func (b *ramBar) SetShares(edr, other, free float64) {
+	b.edr, b.other, b.free = edr, other, free
 	if b.raster != nil {
 		b.raster.Refresh()
 	}
@@ -250,12 +250,12 @@ func (b *ramBar) SetRatio(r float64) {
 }
 
 func (b *ramBar) CreateRenderer() fyne.WidgetRenderer {
-	b.raster.SetMinSize(fyne.NewSize(80, 6))
+	b.raster.SetMinSize(fyne.NewSize(80, 8))
 	return widget.NewSimpleRenderer(b.raster)
 }
 
 func (b *ramBar) MinSize() fyne.Size {
-	return fyne.NewSize(80, 6)
+	return fyne.NewSize(80, 8)
 }
 
 type smoothBar struct {

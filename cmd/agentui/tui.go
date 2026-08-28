@@ -239,7 +239,9 @@ func printLinuxStatus(st operatorStatus) {
 	if lamps.Banner != "" {
 		fmt.Printf("! %s\n", lamps.Banner)
 	}
-	fmt.Printf("AGENT CPU  %.1f%%    AGENT RAM  %.0f MB\n", res.AgentCPU, res.AgentMemMB)
+	fmt.Printf("EDR CPU  %.1f%%  (other %.0f%% · system %.0f%%)\n", res.AgentCPU, res.OtherCPU, res.SysCPU)
+	v, u := formatAgentRAM(res.AgentMemMB)
+	fmt.Printf("EDR RAM  %s %s  (%s)\n", v, u, ramBreakdown(res))
 	fmt.Printf("%d events   %d threats   %d blocked\n", st.EventsProc, st.Detections, st.Blocks)
 	rules := "Rules —"
 	if st.RulesCount > 0 {

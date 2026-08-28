@@ -50,6 +50,41 @@ func TestRamHint(t *testing.T) {
 	}
 }
 
+func TestRamBreakdown(t *testing.T) {
+	res := resourceSnapshot{
+		AgentMemMB: 140,
+		OtherMem:   24 << 30,
+		SysMemTot:  32 << 30,
+		FreeMem:    8 << 30,
+	}
+	got := ramBreakdown(res)
+	if got != "other 24 GB · total 32 GB" {
+		t.Fatalf("got %q", got)
+	}
+	v, u := formatAgentRAM(140)
+	if v != "140" || u != "MB" {
+		t.Fatalf("agent ram %s %s", v, u)
+	}
+}
+
+func TestCpuBreakdown(t *testing.T) {
+	got := cpuBreakdown(resourceSnapshot{AgentCPU: 0.4, OtherCPU: 23.6, SysCPU: 24})
+	if got != "other 24% · system 24%" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestBusyCPU(t *testing.T) {
+	if got := busyCPU(10, 10, 10, 10); got != 0 {
+		t.Fatalf("no delta = %v", got)
+	}
+	// 80 idle of 100 ticks → 20% busy
+	got := busyCPU(0, 0, 80, 100)
+	if got < 19.9 || got > 20.1 {
+		t.Fatalf("busy = %v", got)
+	}
+}
+
 func TestParseEtime(t *testing.T) {
 	if got := parseEtime("04:12"); got != "4m" {
 		t.Fatalf("mm:ss = %q", got)

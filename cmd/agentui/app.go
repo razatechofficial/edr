@@ -194,9 +194,18 @@ func runDashboard() error {
 	})
 
 	go func() {
-		t := time.NewTicker(8 * time.Second)
+		t := time.NewTicker(time.Second)
 		defer t.Stop()
+		n := 0
 		for range t.C {
+			n++
+			dashLive := false
+			fyne.DoAndWait(func() {
+				dashLive = c.screen == uistate.Dash && c.flyoutOpen
+			})
+			if !dashLive && n%8 != 0 {
+				continue
+			}
 			st := loadStatus()
 			res := sampleResources(st)
 			fyne.Do(func() {

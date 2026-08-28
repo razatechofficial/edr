@@ -83,8 +83,8 @@ func (c *console) buildDashboard() fyne.CanvasObject {
 	titleCol := vstack(0, c.healthTitle, gapH(dashPillsMT), pills)
 	header := vstack(dashBannerMT, heroRow(c.heroFace, titleCol), c.bannerWrap)
 
-	cpuTile := resourceTile("AGENT CPU", c.cpuVal, c.cpuUnit, c.cpuHint, lockH(dashSparkH, c.spark))
-	ramTile := resourceTile("AGENT RAM", c.ramVal, c.ramUnit, c.ramHint, pinTopH(dashSparkH, c.ramBar))
+	cpuTile := resourceTile("EDR CPU", c.cpuVal, c.cpuUnit, c.cpuHint, lockH(dashSparkH, c.spark))
+	ramTile := resourceTile("EDR RAM", c.ramVal, c.ramUnit, c.ramHint, pinTopH(dashSparkH, c.ramBar))
 	tiles := splitRow(dashTileGap, cpuTile, ramTile)
 
 	sep := func() fyne.CanvasObject {
@@ -235,25 +235,29 @@ func (c *console) applyDashboard(st operatorStatus, res resourceSnapshot) {
 	switch {
 	case stopped:
 		c.cpuVal.Text = "0.0"
+		c.cpuUnit.Text = "%"
 		c.cpuHint.Text = "Sensor idle"
-		c.ramVal.Text = fmt.Sprintf("%.0f", res.AgentMemMB)
+		c.ramVal.Text, c.ramUnit.Text = formatAgentRAM(res.AgentMemMB)
 		c.eventsVal.Text = "—"
 		c.threatsVal.Text = "—"
 		c.blocksVal.Text = "—"
 		c.uptimeVal.Text = "— · Rules —"
 	default:
 		c.cpuVal.Text = fmt.Sprintf("%.1f", res.AgentCPU)
-		c.cpuHint.Text = systemCPUHint(res.SysCPU)
-		c.ramVal.Text = fmt.Sprintf("%.0f", res.AgentMemMB)
+		c.cpuUnit.Text = "%"
+		c.cpuHint.Text = cpuBreakdown(res)
+		c.ramVal.Text, c.ramUnit.Text = formatAgentRAM(res.AgentMemMB)
 		c.eventsVal.Text = formatCount(st.EventsProc)
 		c.threatsVal.Text = formatCount(st.Detections)
 		c.blocksVal.Text = formatCount(st.Blocks)
 		c.uptimeVal.Text = rulesLine(st.Uptime, st.RulesCount)
 	}
 	c.cpuVal.Refresh()
+	c.cpuUnit.Refresh()
 	c.cpuHint.Refresh()
 	c.ramVal.Refresh()
-	c.ramHint.Text = ramHint(res.SysMemUsed, res.SysMemTot)
+	c.ramUnit.Refresh()
+	c.ramHint.Text = ramBreakdown(res)
 	c.ramHint.Refresh()
 	c.eventsVal.Refresh()
 	c.threatsVal.Refresh()
@@ -262,20 +266,14 @@ func (c *console) applyDashboard(st operatorStatus, res resourceSnapshot) {
 	c.agentLine.Text = compactAgentID(st.AgentID)
 	c.agentLine.Refresh()
 
-	ratio := 0.12
-	if res.AgentMemMB > 0 {
-		ratio = res.AgentMemMB / 256
-		if ratio < 0.08 {
-			ratio = 0.08
-		}
-		if ratio > 1 {
-			ratio = 1
-		}
-	}
+	edr, other, free := res.memShares()
 	if stopped {
-		ratio = 0.12
+		edr, other, free = 0, other, free
+		if edr+other+free == 0 {
+			free = 1
+		}
 	}
-	c.ramBar.SetRatio(ratio)
+	c.ramBar.SetShares(edr, other, free)
 	c.pushCPU(res.AgentCPU, stopped)
 	c.updateDashAction(st)
 }

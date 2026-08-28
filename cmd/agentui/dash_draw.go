@@ -367,8 +367,67 @@ func inPill(x, y, w, h, r float64) bool {
 	return dx*dx+dy*dy <= r*r
 }
 
-func drawRamBar(w, h int, ratio float64) *image.NRGBA {
-	return drawProgressBar(w, h, ratio)
+func drawShareBar(w, h int, edr, other, free float64) *image.NRGBA {
+	if w < 2 {
+		w = 2
+	}
+	if h < 2 {
+		h = 2
+	}
+	if edr < 0 {
+		edr = 0
+	}
+	if other < 0 {
+		other = 0
+	}
+	if free < 0 {
+		free = 0
+	}
+	sum := edr + other + free
+	if sum <= 0 {
+		free = 1
+		sum = 1
+	}
+	edr, other, free = edr/sum, other/sum, free/sum
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	track := color.NRGBA{R: 255, G: 255, B: 255, A: 22}
+	otherCol := color.NRGBA{R: 235, G: 235, B: 245, A: 0x73}
+	r := float64(h) / 2
+	minEdr := 3
+	if w < 24 {
+		minEdr = 2
+	}
+	edrW := int(math.Round(float64(w) * edr))
+	if edr > 0 && edrW < minEdr {
+		edrW = minEdr
+	}
+	otherW := int(math.Round(float64(w) * other))
+	if edrW+otherW > w {
+		otherW = w - edrW
+		if otherW < 0 {
+			otherW = 0
+		}
+	}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if !inPill(float64(x), float64(y), float64(w), float64(h), r) {
+				continue
+			}
+			var c color.NRGBA
+			switch {
+			case x < edrW:
+				t := float64(x) / math.Max(1, float64(edrW-1))
+				c = mixNRGBA(colorCyan, colorAccent, t)
+				c.A = 255
+			case x < edrW+otherW:
+				c = otherCol
+			default:
+				c = track
+			}
+			img.SetNRGBA(x, y, c)
+		}
+	}
+	return img
 }
 
 func pngResource(name string, img image.Image) fyne.Resource {

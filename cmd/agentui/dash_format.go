@@ -44,8 +44,43 @@ func ramHint(used, total uint64) string {
 	return fmt.Sprintf("%.1f / %.0f GB", float64(used)/float64(1<<30), float64(total)/float64(1<<30))
 }
 
-func systemCPUHint(pct float64) string {
-	return fmt.Sprintf("System %.0f%%", pct)
+func formatMemShort(bytes uint64) string {
+	mb := float64(bytes) / (1024 * 1024)
+	if mb < 1024 {
+		if mb < 10 {
+			return fmt.Sprintf("%.1f MB", mb)
+		}
+		return fmt.Sprintf("%.0f MB", mb)
+	}
+	gb := mb / 1024
+	if gb < 10 {
+		return fmt.Sprintf("%.1f GB", gb)
+	}
+	return fmt.Sprintf("%.0f GB", gb)
+}
+
+func formatAgentRAM(mb float64) (value, unit string) {
+	if mb < 0 {
+		mb = 0
+	}
+	if mb < 1024 {
+		if mb < 10 {
+			return fmt.Sprintf("%.1f", mb), "MB"
+		}
+		return fmt.Sprintf("%.0f", mb), "MB"
+	}
+	return fmt.Sprintf("%.1f", mb/1024), "GB"
+}
+
+func ramBreakdown(res resourceSnapshot) string {
+	if res.SysMemTot == 0 {
+		return "—"
+	}
+	return "other " + formatMemShort(res.OtherMem) + " · total " + formatMemShort(res.SysMemTot)
+}
+
+func cpuBreakdown(res resourceSnapshot) string {
+	return fmt.Sprintf("other %.0f%% · system %.0f%%", res.OtherCPU, res.SysCPU)
 }
 
 func rulesLine(uptime string, rules int) string {
