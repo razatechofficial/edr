@@ -43,7 +43,7 @@ jobs:
       release_tag: ${{ steps.meta.outputs.release_tag }}
       is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
           fetch-depth: 0
@@ -108,7 +108,7 @@ jobs:
     needs: [release_meta]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
       - name: Ensure ONNX models
@@ -149,7 +149,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
       EDR_MACOS_ARCH: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
       - name: Ensure ONNX models
@@ -221,7 +221,7 @@ jobs:
     # windows-latest is moving to VS2026-based images; WiX v3 zip tools are more reliable on windows-2022.
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
       - name: Ensure ONNX models

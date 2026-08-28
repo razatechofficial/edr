@@ -3,7 +3,6 @@
 package hostperm
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"

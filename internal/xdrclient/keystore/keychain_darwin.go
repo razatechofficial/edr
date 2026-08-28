@@ -2,8 +2,14 @@
 
 package keystore
 
+// System.keychain trusted-app ACLs still require SecKeychainOpen,
+// SecTrustedApplicationCreateFromPath, and SecAccessCreate. Apple marked
+// those deprecated in 10.10 with no SecItem replacement for LaunchDaemon
+// identity, so this file silences -Wdeprecated-declarations.
+
 /*
 #cgo LDFLAGS: -framework Security -framework CoreFoundation
+#cgo CFLAGS: -Wno-deprecated-declarations
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
 #include <stdlib.h>
