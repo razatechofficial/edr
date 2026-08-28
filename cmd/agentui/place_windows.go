@@ -82,6 +82,24 @@ func placeNearTray(win fyne.Window, width, height float32, nearCursor, _ bool) {
 	procSetWindowPos.Call(hwnd, 0, uintptr(x), uintptr(y), 0, 0, flags)
 }
 
+func nativeResizeKeepTop(win fyne.Window, width, height float32) bool {
+	hwnd := nativeHWND(win)
+	if hwnd == 0 {
+		return false
+	}
+	scale := float32(1)
+	if win.Canvas() != nil {
+		scale = win.Canvas().Scale()
+	}
+	ww := int(width * scale)
+	hh := int(height * scale)
+	const swpNoMove = 0x0002
+	procSetWindowPos.Call(hwnd, 0, 0, 0, uintptr(ww), uintptr(hh), swpNoMove|swpNoZOrder|swpNoActivate)
+	return true
+}
+
+func startNativeWindowDrag(fyne.Window) bool { return false }
+
 func moveNativeWindow(win fyne.Window, dx, dy float32) {
 	hwnd := nativeHWND(win)
 	if hwnd == 0 {

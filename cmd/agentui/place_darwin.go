@@ -25,6 +25,7 @@ static void edrPlaceWindow(void *nswindow, int width, int height, int nearCursor
 		return;
 	}
 	NSWindow *w = (NSWindow *)nswindow;
+	[w setAnimationBehavior:NSWindowAnimationBehaviorNone];
 	if (flyout) {
 		[w setHasShadow:YES];
 		[w setOpaque:YES];
@@ -64,7 +65,7 @@ static void edrPlaceWindow(void *nswindow, int width, int height, int nearCursor
 	if (y + hh > NSMaxY(vf) - 8.0) {
 		y = NSMaxY(vf) - hh - 8.0;
 	}
-	[w setFrame:NSMakeRect(x, y, ww, hh) display:YES];
+	[w setFrame:NSMakeRect(x, y, ww, hh) display:YES animate:NO];
 }
 
 static void edrBringFront(void *nswindow) {
@@ -84,18 +85,62 @@ static void edrMoveWindow(void *nswindow, float dx, float dy) {
 	}
 	NSWindow *w = (NSWindow *)nswindow;
 	NSRect f = [w frame];
-	f.origin.x += (CGFloat)dx;
-	f.origin.y -= (CGFloat)dy;
-	[w setFrame:f display:YES];
+	[w setFrameOrigin:NSMakePoint(f.origin.x + (CGFloat)dx, f.origin.y - (CGFloat)dy)];
+}
+
+static void edrResizeKeepTop(void *nswindow, int width, int height) {
+	if (nswindow == NULL) {
+		return;
+	}
+	NSWindow *w = (NSWindow *)nswindow;
+	[w setAnimationBehavior:NSWindowAnimationBehaviorNone];
+	NSRect f = [w frame];
+	CGFloat ww = (CGFloat)width;
+	CGFloat hh = (CGFloat)height;
+	CGFloat dw = f.size.width - ww;
+	CGFloat dh = f.size.height - hh;
+	if (dw < 0) {
+		dw = -dw;
+	}
+	if (dh < 0) {
+		dh = -dh;
+	}
+	if (dw < 0.5 && dh < 0.5) {
+		return;
+	}
+	CGFloat y = NSMaxY(f) - hh;
+	[w setFrame:NSMakeRect(f.origin.x, y, ww, hh) display:NO animate:NO];
+}
+
+static void edrStartWindowDrag(void *nswindow) {
+	if (nswindow == NULL) {
+		return;
+	}
+	NSWindow *w = (NSWindow *)nswindow;
+	NSEvent *e = [NSApp currentEvent];
+	if (e == nil) {
+		return;
+	}
+	NSEventType t = [e type];
+	if (t != NSEventTypeLeftMouseDown && t != NSEventTypeLeftMouseDragged) {
+		return;
+	}
+	[w performWindowDragWithEvent:e];
 }
 */
 import "C"
 
 import (
+	"sync"
 	"unsafe"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver"
+)
+
+var (
+	nsWinMu sync.Mutex
+	nsWins  = map[fyne.Window]unsafe.Pointer{}
 )
 
 //export goEDRBecameActive
@@ -108,6 +153,16 @@ func registerAppActivate() {
 }
 
 func nativeNSWindow(win fyne.Window) unsafe.Pointer {
+	if win == nil {
+		return nil
+	}
+	nsWinMu.Lock()
+	if p, ok := nsWins[win]; ok && p != nil {
+		nsWinMu.Unlock()
+		return p
+	}
+	nsWinMu.Unlock()
+
 	var p unsafe.Pointer
 	nw, ok := win.(driver.NativeWindow)
 	if !ok {
@@ -119,6 +174,12 @@ func nativeNSWindow(win fyne.Window) unsafe.Pointer {
 			p = unsafe.Pointer(mc.NSWindow)
 		}
 	})
+	if p == nil {
+		return nil
+	}
+	nsWinMu.Lock()
+	nsWins[win] = p
+	nsWinMu.Unlock()
 	return p
 }
 
@@ -143,6 +204,24 @@ func moveNativeWindow(win fyne.Window, dx, dy float32) {
 		return
 	}
 	C.edrMoveWindow(p, C.float(dx), C.float(dy))
+}
+
+func nativeResizeKeepTop(win fyne.Window, width, height float32) bool {
+	p := nativeNSWindow(win)
+	if p == nil {
+		return false
+	}
+	C.edrResizeKeepTop(p, C.int(width), C.int(height))
+	return true
+}
+
+func startNativeWindowDrag(win fyne.Window) bool {
+	p := nativeNSWindow(win)
+	if p == nil {
+		return false
+	}
+	C.edrStartWindowDrag(p)
+	return true
 }
 
 func bringNativeWindow(win fyne.Window) {
