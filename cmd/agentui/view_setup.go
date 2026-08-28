@@ -320,7 +320,7 @@ func (c *console) renderSetupSteps(active int, done, failed bool) {
 		case i == active:
 			st = checkRun
 		}
-		c.setupSteps.Add(checkRow(statusMark(st), title, "", st == checkWait || st == checkOK))
+		c.setupSteps.Add(checkRow(statusMark(st), title, "", st))
 	}
 	c.setupSteps.Refresh()
 }

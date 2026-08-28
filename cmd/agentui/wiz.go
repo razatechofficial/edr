@@ -75,12 +75,16 @@ func elevatedWell(radius float32, inner fyne.CanvasObject) fyne.CanvasObject {
 	return container.NewStack(bg, inner)
 }
 
-func checkRow(mark fyne.CanvasObject, title, badge string, muted bool) fyne.CanvasObject {
-	t := widget.NewLabel(title)
-	t.Wrapping = fyne.TextWrapWord
-	if muted {
-		t.Importance = widget.LowImportance
+func checkRow(mark fyne.CanvasObject, title, badge string, st checkState) fyne.CanvasObject {
+	col := colorMuted
+	switch st {
+	case checkOK:
+		col = colorTertiary
+	case checkRun, checkFail:
+		col = colorText
 	}
+	t := canvas.NewText(title, col)
+	t.TextSize = 13
 	head := fyne.CanvasObject(t)
 	if badge != "" {
 		b := canvas.NewText(badge, colorWarn)
@@ -88,15 +92,15 @@ func checkRow(mark fyne.CanvasObject, title, badge string, muted bool) fyne.Canv
 		b.TextStyle = fyne.TextStyle{Bold: true}
 		head = container.NewBorder(nil, nil, nil, b, t)
 	}
-	return inset(wizPad2, 0, wizPad2, 0, iconBand(wizMark, wizPad3, mark, head))
+	return inset(8, 0, 8, 0, iconBand(wizMark, wizPad3, mark, head))
 }
 
 // timelineRow matches IdentityProgress: 28px StatusIcon, 12px gap, text pt-1.
 func timelineRow(st checkState, title string, last, passedLine bool) fyne.CanvasObject {
-	col := colorTertiary
+	col := colorMuted
 	switch st {
 	case checkOK:
-		col = colorMuted
+		col = colorTertiary
 	case checkRun, checkFail:
 		col = colorText
 	}
@@ -159,7 +163,9 @@ func checklistSheet(intro, list, foot fyne.CanvasObject) fyne.CanvasObject {
 	if top == nil {
 		top = canvas.NewRectangle(color.Transparent)
 	}
-	return container.NewBorder(top, foot, nil, nil, list)
+	// Pack intro + rows at the top so leftover height sits above the footer,
+	// not between checklist items.
+	return container.NewBorder(nil, foot, nil, nil, vstack(0, top, list))
 }
 
 func heroWell(size float32, tone color.NRGBA, kind string) fyne.CanvasObject {

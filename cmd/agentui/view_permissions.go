@@ -118,7 +118,7 @@ func (c *console) paintPermChecking() {
 		default:
 			st = checkRun
 		}
-		c.permBox.Add(checkRow(statusMark(st), it.Title, "", it.Status == hostperm.StatusOK || it.Status == hostperm.StatusNA))
+		c.permBox.Add(checkRow(statusMark(st), it.Title, "", st))
 	}
 	c.permBox.Refresh()
 }
@@ -171,7 +171,7 @@ func (c *console) renderPermissions(rep hostperm.Report) {
 		if it.Status == hostperm.StatusAction {
 			badge = "Action required"
 		}
-		c.permBox.Add(checkRow(statusMark(st), it.Title, badge, it.Status == hostperm.StatusOK || it.Status == hostperm.StatusNA))
+		c.permBox.Add(checkRow(statusMark(st), it.Title, badge, st))
 	}
 	c.permBox.Refresh()
 
