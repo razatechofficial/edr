@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/installprogress"
 	"github.com/razatechofficial/edr/internal/platform"
 	"github.com/razatechofficial/edr/internal/xdrclient"
 )
@@ -71,29 +72,188 @@ func linuxAskRetry(in *bufio.Reader) bool {
 }
 
 func linuxSetup(in *bufio.Reader) (continueWizard bool, err error) {
-	fmt.Println("EDR Agent — license agreement")
-	fmt.Println()
-	fmt.Println(eulaText)
-	fmt.Println()
-	fmt.Println("Installs for all users of this computer.")
-	fmt.Print("Accept? [y/N]: ")
-	ans, _ := in.ReadString('\n')
-	ans = strings.TrimSpace(strings.ToLower(ans))
-	if ans != "y" && ans != "yes" {
-		fmt.Println("Setup was cancelled. EDR Agent was not installed.")
+	linuxPrintLicense()
+	if !linuxAskAccept(in) {
+		linuxPrintDeclined()
 		return false, nil
 	}
 	if !installerPresent() {
 		return false, fmt.Errorf("edr-installer not found; deploy the rpm/deb or place edr-installer on PATH")
 	}
-	fmt.Println("Installing (package + systemd). No token on this step…")
-	out, ierr := runInstallerPrivileged("install", "--no-start")
-	if ierr != nil {
-		f := classifyInstallError(out + "\n" + ierr.Error())
-		return false, fmt.Errorf("%s: %s", f.Title, f.Detail)
+
+	n := len(setupStepTitles())
+	installprogress.Clear()
+	linuxPrintInstall(0, false, false, setupStepDoing(0))
+
+	type installRes struct {
+		out string
+		err error
 	}
-	fmt.Println("Files are installed. Next: enroll this device.")
-	return true, nil
+	done := make(chan installRes, 1)
+	go func() {
+		out, ierr := runInstallerPrivileged("install", "--no-start")
+		done <- installRes{out, ierr}
+	}()
+
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	last := -1
+	for {
+		select {
+		case res := <-done:
+			if res.err != nil {
+				step := installprogress.Index(installprogress.Read(), n)
+				if step < 0 {
+					step = 0
+				}
+				linuxPrintInstall(step, false, true, "Install did not finish.")
+				f := classifyInstallError(res.out + "\n" + res.err.Error())
+				fmt.Println()
+				fmt.Println(tuiS("\x1b[31m", f.Title))
+				fmt.Println(f.Body)
+				fmt.Println(tuiS("\x1b[2m", f.Detail))
+				return false, fmt.Errorf("%s: %s", f.Title, f.Detail)
+			}
+			linuxPrintInstall(n, true, false, allChecksPassed)
+			linuxPrintFinish()
+			fmt.Print(tuiLaunchEnroll + "? [Y/n]: ")
+			ans, _ := in.ReadString('\n')
+			ans = strings.TrimSpace(strings.ToLower(ans))
+			installprogress.Clear()
+			if ans == "n" || ans == "no" {
+				return false, nil
+			}
+			return true, nil
+		case <-tick.C:
+			step := installprogress.Read()
+			idx := installprogress.Index(step, n)
+			if idx < 0 || idx == last {
+				continue
+			}
+			if idx >= n {
+				idx = n - 1
+			}
+			last = idx
+			linuxPrintInstall(idx, false, false, setupStepDoing(idx))
+		}
+	}
+}
+
+func linuxAskAccept(in *bufio.Reader) bool {
+	fmt.Print("Accept? [y/N]  (q quit): ")
+	ans, _ := in.ReadString('\n')
+	ans = strings.TrimSpace(strings.ToLower(ans))
+	return ans == "y" || ans == "yes"
+}
+
+func linuxPrintLicense() {
+	tuiFrame("sudo edrctl install", tuiFooterInstall, func() {
+		fmt.Println(tuiS("\x1b[36m", "license agreement"))
+		fmt.Println(tuiS("\x1b[1m", titleLicense))
+		fmt.Println()
+		fmt.Println(tuiS("\x1b[2m", tuiBodyLicense))
+		fmt.Println()
+		fmt.Println(tuiS("\x1b[2m", "┌─ license ───────────────────────────────────────────┐"))
+		for _, line := range strings.Split(eulaText, "\n") {
+			fmt.Println("  " + line)
+		}
+		fmt.Println(tuiS("\x1b[2m", "└─────────────────────────────────────────────────────┘"))
+		fmt.Println()
+		fmt.Println("■ " + perMachineTitle)
+		fmt.Println(tuiS("\x1b[2m", tuiPerMachineBody))
+		fmt.Println()
+		fmt.Println("  Decline          " + tuiS("\x1b[1m", "Accept"))
+	})
+}
+
+func linuxPrintDeclined() {
+	tuiFrame("sudo edrctl install", tuiFooterInstall, func() {
+		f := copyErrorDeclined()
+		fmt.Println(tuiS("\x1b[31m", f.Title))
+		fmt.Println()
+		fmt.Println(tuiS("\x1b[2m", f.Body))
+		fmt.Println()
+		fmt.Println(tuiS("\x1b[2m", f.Detail))
+	})
+}
+
+func linuxPrintInstall(active int, done, failed bool, line string) {
+	titles := setupStepTitles()
+	tuiFrame("sudo edrctl install", tuiFooterWait, func() {
+		fmt.Println(tuiS("\x1b[36m", tuiInstallKicker))
+		fmt.Println(tuiS("\x1b[1m", tuiInstallTitle))
+		fmt.Println()
+		fmt.Println(tuiS("\x1b[2m", tuiInstallHint))
+		fmt.Println()
+		fmt.Println(tuiS("\x1b[2m", "┌─ steps ─────────────────────────────────────────────┐"))
+		for i, title := range titles {
+			mark, col := "○", "\x1b[2m"
+			switch {
+			case failed && i == active:
+				mark, col = "✕", "\x1b[31m"
+			case done || i < active:
+				mark, col = "✓", "\x1b[32m"
+			case i == active:
+				mark, col = "●", "\x1b[36m"
+			}
+			fmt.Printf("  %s %s\n", tuiS(col, mark), title)
+		}
+		fmt.Println(tuiS("\x1b[2m", "└─────────────────────────────────────────────────────┘"))
+		fmt.Println()
+		if done {
+			fmt.Println(tuiS("\x1b[32m", line))
+			fmt.Println()
+			fmt.Println(tuiS("\x1b[1m", tuiLaunchEnroll))
+		} else {
+			fmt.Println(tuiS("\x1b[36m", line))
+			fmt.Println()
+			fmt.Println(tuiS("\x1b[2m", "Processing…"))
+		}
+	})
+}
+
+func linuxPrintFinish() {
+	tuiFrame("sudo edrctl install", tuiFooterNext, func() {
+		fmt.Println(tuiS("\x1b[32m", "setup complete"))
+		fmt.Println(tuiS("\x1b[1m", titleInstalled))
+		fmt.Println()
+		fmt.Println(tuiS("\x1b[2m", tuiFinishBody))
+		fmt.Println()
+		fmt.Println(tuiS("\x1b[1m", tuiLaunchEnroll))
+	})
+}
+
+func tuiIsTTY() bool {
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+func tuiS(code, s string) string {
+	if !tuiIsTTY() {
+		return s
+	}
+	return code + s + "\x1b[0m"
+}
+
+func tuiFrame(cmd, footer string, body func()) {
+	if tuiIsTTY() {
+		fmt.Print("\033[H\033[2J")
+	}
+	fmt.Println()
+	fmt.Printf("%s%s%s%s  %s\n",
+		tuiS("\x1b[2m", "user@host"),
+		tuiS("\x1b[2m", ":"),
+		tuiS("\x1b[34m", "~"),
+		"$ "+cmd,
+		tuiS("\x1b[2m", "linux · tty"),
+	)
+	fmt.Println(tuiS("\x1b[2m", strings.Repeat("─", 58)))
+	fmt.Println()
+	body()
+	fmt.Println()
+	fmt.Println(tuiS("\x1b[2m", strings.Repeat("─", 58)))
+	fmt.Println(tuiS("\x1b[2m", footer))
+	fmt.Println()
 }
 
 func linuxEnroll(in *bufio.Reader) error {

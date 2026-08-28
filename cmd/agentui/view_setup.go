@@ -13,8 +13,7 @@ import (
 )
 
 func (c *console) buildSetup() fyne.CanvasObject {
-	c.setupHint = widget.NewLabel("Read and accept to install. Silent fleet skips this screen — the organization accepts by deploying the package.")
-	c.setupHint.Wrapping = fyne.TextWrapWord
+	c.setupHint = bodyText(bodyLicense)
 	c.setupFaultBox = container.NewVBox()
 	c.setupSteps = container.NewVBox()
 	c.setupProcess = processLine("")
@@ -35,9 +34,10 @@ func (c *console) buildSetup() fyne.CanvasObject {
 	})
 	c.setupLaunch.Importance = widget.HighImportance
 
-	c.setupLaunchHint = widget.NewLabel("Launch opens first-run enrollment. The sensor starts after identity and checks pass.")
+	c.setupLaunchHint = widget.NewLabel(launchHint)
 	c.setupLaunchHint.Wrapping = fyne.TextWrapWord
 	c.setupLaunchHint.Alignment = fyne.TextAlignCenter
+	c.setupLaunchHint.Importance = widget.LowImportance
 
 	c.setupClose = widget.NewButton("Close", func() { c.app.Quit() })
 
@@ -60,15 +60,15 @@ func (c *console) paintSetupLicense() {
 	c.setupPhase = "license"
 	eula := widget.NewLabel(eulaText)
 	eula.Wrapping = fyne.TextWrapWord
+	eula.Importance = widget.LowImportance
 	eulaScroll := container.NewVScroll(eula)
 	eulaScroll.SetMinSize(fyne.NewSize(0, wizEulaH))
 	eulaWell := elevatedWell(8, inset(12, 12, 12, 12, eulaScroll))
 
-	perTitle := canvas.NewText("Installs for all users of this computer", colorText)
+	perTitle := canvas.NewText(perMachineTitle, colorText)
 	perTitle.TextSize = 13
 	perTitle.TextStyle = fyne.TextStyle{Bold: true}
-	per := elevatedWell(8, inset(12, 12, 12, 12, vstack(4, perTitle,
-		bodyText("Required for host monitoring. This is not a “this user only” app."))))
+	per := elevatedWell(8, inset(12, 12, 12, 12, vstack(4, perTitle, captionBlock(perMachineBody))))
 
 	c.setupAccept.Show()
 	c.setupDecline.Show()
@@ -80,14 +80,11 @@ func (c *console) paintSetupLicense() {
 	c.setupProcess.Hide()
 
 	inner := pad5(vstack(0,
-		pageHeader("License agreement", colorMuted, "Software license", ""),
-		gapH(8),
-		c.setupHint,
+		pageHeader(kickerLicense, colorMuted, titleLicense, bodyLicense),
 		gapH(16),
 		eulaWell,
 		gapH(16),
 		per,
-		gapH(16),
 		c.setupFaultBox,
 		gapH(20),
 		c.setupActions,
@@ -103,9 +100,16 @@ func (c *console) paintSetupInstall() {
 	c.setupLaunch.Hide()
 	c.setupLaunchHint.Hide()
 	c.setupClose.Hide()
+	intro := inset(wizPad, wizPad, 8, wizPad, vstack(0,
+		kicker(progressKicker, colorMuted),
+		gapH(4),
+		heading(progressTitle),
+		gapH(8),
+		bodyText(installProgressHint()),
+	))
 	foot := checklistFooter(c.setupProcess, c.setupWorking)
-	inner := checklistSheet(nil, inset(8, wizPad, 8, wizPad, c.setupSteps), foot)
-	c.setSetupSheet(inner, 420)
+	inner := checklistSheet(intro, inset(8, wizPad, 8, wizPad, c.setupSteps), foot)
+	c.setSetupSheet(inner, 520)
 }
 
 func (c *console) paintSetupFinish() {
@@ -116,9 +120,9 @@ func (c *console) paintSetupFinish() {
 	c.setupProcess.Hide()
 	c.setupLaunch.Show()
 	c.setupLaunchHint.Show()
-	kick := kicker("Setup complete", colorMuted)
+	kick := kicker(kickerSetup, colorMuted)
 	kick.Alignment = fyne.TextAlignCenter
-	title := heading("Files are installed")
+	title := heading(titleInstalled)
 	title.Alignment = fyne.TextAlignCenter
 	body := bodyText(installedBody())
 	body.Alignment = fyne.TextAlignCenter
@@ -227,7 +231,7 @@ func (c *console) onSetupAccept() {
 						return
 					}
 					c.renderSetupSteps(n, true, false)
-					c.setupProcess.SetText("All checks passed.")
+					c.setupProcess.SetText(allChecksPassed)
 					c.paintSetupFinish()
 					installprogress.Clear()
 				})
@@ -250,61 +254,6 @@ func (c *console) onSetupAccept() {
 			}
 		}
 	}()
-}
-
-func installedBody() string {
-	switch {
-	case isDarwin():
-		return "This Mac is not enrolled yet. Launch edr to bind device identity, then grant access in System Settings."
-	case isWindows():
-		return "This PC is not enrolled yet. Launch edr to bind device identity, then allow the firewall if Windows asks."
-	default:
-		return "This host is not enrolled yet. Run sudo edrctl enroll to bind device identity."
-	}
-}
-
-func setupStepTitles() []string {
-	switch {
-	case isDarwin():
-		return []string{"macOS 12+ and disk space", "Install EDR Agent.app", "Register LaunchDaemon"}
-	case isWindows():
-		return []string{"Windows 10+ and disk space", "Install to Program Files", "Register EDRAgent service"}
-	default:
-		return []string{"Kernel and disk space", "Install deb/rpm package", "Register systemd unit"}
-	}
-}
-
-func setupStepDoing(i int) string {
-	switch {
-	case isDarwin():
-		d := []string{
-			"Checking macOS 12+ and available disk space…",
-			"Installing EDR Agent.app for all users…",
-			"Registering the sensor LaunchDaemon…",
-		}
-		if i >= 0 && i < len(d) {
-			return d[i]
-		}
-	case isWindows():
-		d := []string{
-			"Checking Windows 10+ and available disk space…",
-			"Copying files to Program Files\\EDR Agent (all users)…",
-			"Registering the per-machine EDRAgent service…",
-		}
-		if i >= 0 && i < len(d) {
-			return d[i]
-		}
-	default:
-		d := []string{
-			"Checking Linux kernel and available disk space…",
-			"Installing the machine-wide agent package…",
-			"Registering the systemd unit…",
-		}
-		if i >= 0 && i < len(d) {
-			return d[i]
-		}
-	}
-	return "Working…"
 }
 
 func (c *console) renderSetupSteps(active int, done, failed bool) {

@@ -23,6 +23,19 @@ func caption(s string) *canvas.Text {
 	return t
 }
 
+func captionBlock(s string) fyne.CanvasObject {
+	r := widget.NewRichText(&widget.TextSegment{
+		Text: s,
+		Style: widget.RichTextStyle{
+			ColorName: theme.ColorNameDisabled,
+			SizeName:  theme.SizeNameCaptionText,
+		},
+	})
+	r.Wrapping = fyne.TextWrapWord
+	r.Scroll = container.ScrollNone
+	return r
+}
+
 func heading(s string) *canvas.Text {
 	t := canvas.NewText(s, colorText)
 	t.TextSize = 22
