@@ -9,17 +9,20 @@ import (
 
 // Native host chrome — system dark, not the XDR console (no mint, no pink).
 var (
-	colorBg       = color.NRGBA{R: 0x1C, G: 0x1C, B: 0x1E, A: 0xFF}
-	colorCard     = color.NRGBA{R: 0x2C, G: 0x2C, B: 0x2E, A: 0xFF}
-	colorInput    = color.NRGBA{R: 0x3A, G: 0x3A, B: 0x3C, A: 0xFF}
-	colorAccent   = color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0xFF}
-	colorText     = color.NRGBA{R: 0xF5, G: 0xF5, B: 0xF7, A: 0xFF}
-	colorMuted    = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF}
-	colorOK       = color.NRGBA{R: 0x32, G: 0xD7, B: 0x4B, A: 0xFF}
-	colorWarn     = color.NRGBA{R: 0xFF, G: 0xD6, B: 0x0A, A: 0xFF}
-	colorDanger   = color.NRGBA{R: 0xFF, G: 0x45, B: 0x3A, A: 0xFF}
-	colorOnAccent = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
-	colorHover    = color.NRGBA{R: 0x3A, G: 0x3A, B: 0x3C, A: 0xFF}
+	colorBg          = color.NRGBA{R: 0x1C, G: 0x1C, B: 0x1E, A: 0xFF}
+	colorCard        = color.NRGBA{R: 0x2C, G: 0x2C, B: 0x2E, A: 0xFF}
+	colorInput       = color.NRGBA{R: 0x3A, G: 0x3A, B: 0x3C, A: 0xFF}
+	colorAccent      = color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0xFF}
+	colorText        = color.NRGBA{R: 0xF5, G: 0xF5, B: 0xF7, A: 0xFF}
+	colorMuted       = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF}
+	colorOK          = color.NRGBA{R: 0x32, G: 0xD7, B: 0x4B, A: 0xFF}
+	colorWarn        = color.NRGBA{R: 0xFF, G: 0xD6, B: 0x0A, A: 0xFF}
+	colorDanger      = color.NRGBA{R: 0xFF, G: 0x45, B: 0x3A, A: 0xFF}
+	colorOnAccent    = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+	colorAccentHover = color.NRGBA{R: 0x40, G: 0x9C, B: 0xFF, A: 0xFF}
+	// Hover/press are overlays blended onto the control, not replacement fills.
+	colorHover    = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x2E}
+	colorPressed  = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0x33}
 	colorSep      = color.NRGBA{R: 0x48, G: 0x48, B: 0x4A, A: 0xFF}
 	colorCyan     = color.NRGBA{R: 0x5A, G: 0xC8, B: 0xFF, A: 0xFF}
 	colorPurple   = color.NRGBA{R: 0xBF, G: 0x5A, B: 0xF2, A: 0xFF}
@@ -58,8 +61,10 @@ func (edrTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color
 		return colorWarn
 	case theme.ColorNameFocus:
 		return colorAccent
-	case theme.ColorNameHover, theme.ColorNamePressed:
+	case theme.ColorNameHover:
 		return colorHover
+	case theme.ColorNamePressed:
+		return colorPressed
 	case theme.ColorNameSelection:
 		return color.NRGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0x40}
 	case theme.ColorNameSeparator, theme.ColorNameShadow:
@@ -83,7 +88,7 @@ func (edrTheme) Size(name fyne.ThemeSizeName) float32 {
 	case theme.SizeNamePadding:
 		return 8
 	case theme.SizeNameInnerPadding:
-		return 6
+		return 12
 	case theme.SizeNameText:
 		return 13
 	case theme.SizeNameHeadingText:
