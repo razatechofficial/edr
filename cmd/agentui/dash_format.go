@@ -79,8 +79,29 @@ func ramBreakdown(res resourceSnapshot) string {
 	return "other " + formatMemShort(res.OtherMem) + " · total " + formatMemShort(res.SysMemTot)
 }
 
+func formatCPUPct(v float64) string {
+	if v < 0 {
+		v = 0
+	}
+	if v > 100 {
+		v = 100
+	}
+	if v < 10 {
+		return fmt.Sprintf("%.1f%%", v)
+	}
+	return fmt.Sprintf("%.0f%%", v)
+}
+
 func cpuBreakdown(res resourceSnapshot) string {
-	return fmt.Sprintf("other %.0f%% · system %.0f%%", res.OtherCPU, res.SysCPU)
+	other, sys := formatCPUPct(res.OtherCPU), formatCPUPct(res.SysCPU)
+	if other == sys {
+		idle := 100 - res.SysCPU
+		if idle < 0 {
+			idle = 0
+		}
+		return "system " + sys + " · idle " + formatCPUPct(idle)
+	}
+	return "other " + other + " · system " + sys
 }
 
 func rulesLine(uptime string, rules int) string {

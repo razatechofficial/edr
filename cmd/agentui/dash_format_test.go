@@ -68,9 +68,13 @@ func TestRamBreakdown(t *testing.T) {
 }
 
 func TestCpuBreakdown(t *testing.T) {
-	got := cpuBreakdown(resourceSnapshot{AgentCPU: 0.4, OtherCPU: 23.6, SysCPU: 24})
-	if got != "other 24% · system 24%" {
-		t.Fatalf("got %q", got)
+	got := cpuBreakdown(resourceSnapshot{AgentCPU: 0.6, OtherCPU: 20.94, SysCPU: 21})
+	if got != "system 21% · idle 79%" {
+		t.Fatalf("rounded-equal = %q", got)
+	}
+	got = cpuBreakdown(resourceSnapshot{AgentCPU: 8, OtherCPU: 16, SysCPU: 24})
+	if got != "other 16% · system 24%" {
+		t.Fatalf("distinct = %q", got)
 	}
 }
 
