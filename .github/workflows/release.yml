@@ -10,7 +10,7 @@
 #   macOS  EDR-Agent-Setup_apple-silicon.pkg / EDR-Agent-Setup_intel.pkg
 #   Windows EDR-Agent-Setup.exe  (custom wizard → dashboard)
 #   Linux  .deb / .rpm
-# Fleet/MDM still attach edr-agent_*-mdm.pkg and the MSI.
+# Windows MSI remains for GPO/silent. No separate macOS MDM pkg.
 # macOS signed release secrets:
 #   APPLE_SIGN_IDENTITY, APPLE_INSTALLER_SIGN_IDENTITY
 #   APPLE_CERTIFICATE_P12 (base64 .p12), APPLE_CERTIFICATE_PASSWORD
@@ -180,16 +180,11 @@ jobs:
       - name: Package macOS installer (${{ matrix.arch }})
         env:
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
-        run: |
-          bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "${{ needs.release_meta.outputs.pkg_version }}" "${{ matrix.arch }}"
-          EDR_PKG_MODE=fleet EDR_PKG_SUFFIX=-mdm \
-            bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "${{ needs.release_meta.outputs.pkg_version }}" "${{ matrix.arch }}"
+        run: bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "${{ needs.release_meta.outputs.pkg_version }}" "${{ matrix.arch }}"
       - name: Verify macOS package (${{ matrix.arch }})
         run: |
           PKG="dist/edr-agent_${{ needs.release_meta.outputs.pkg_version }}_${{ matrix.arch }}.pkg"
           bash scripts/verify_macos_pkg.sh "${PKG}"
-          MDM="dist/edr-agent_${{ needs.release_meta.outputs.pkg_version }}_${{ matrix.arch }}-mdm.pkg"
-          bash scripts/verify_macos_pkg.sh "${MDM}"
       - name: Sign and notarize pkg (${{ matrix.arch }})
         env:
           SIGN_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGN_IDENTITY }}
@@ -204,19 +199,14 @@ jobs:
             exit 0
           fi
           bash scripts/ci/setup_apple_notary.sh
-          for PKG in \
-            "dist/edr-agent_${{ needs.release_meta.outputs.pkg_version }}_${{ matrix.arch }}.pkg" \
-            "dist/edr-agent_${{ needs.release_meta.outputs.pkg_version }}_${{ matrix.arch }}-mdm.pkg"
-          do
-            [[ -f "${PKG}" ]] || continue
-            bash scripts/ci/macos_run_build.sh bash scripts/notarize_macos_pkg.sh "${PKG}"
-          done
+          PKG="dist/edr-agent_${{ needs.release_meta.outputs.pkg_version }}_${{ matrix.arch }}.pkg"
+          bash scripts/ci/macos_run_build.sh bash scripts/notarize_macos_pkg.sh "${PKG}"
       - name: Attach macOS package to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          files=(dist/edr-agent_*_${{ matrix.arch }}.pkg dist/edr-agent_*_${{ matrix.arch }}-mdm.pkg)
+          files=(dist/edr-agent_*_${{ matrix.arch }}.pkg)
           if [[ "${{ matrix.arch }}" == "arm64" ]]; then
             for f in dist/edr-agent_*_arm64.pkg; do
               [[ -f "${f}" ]] || continue
