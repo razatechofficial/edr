@@ -48,6 +48,9 @@ func edrctlPath() string {
 }
 
 func installerPath() string {
+	if p := embeddedSetupInstallerPath(); p != "" {
+		return p
+	}
 	var cands []string
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
@@ -57,7 +60,10 @@ func installerPath() string {
 		)
 	}
 	if runtime.GOOS == "darwin" {
-		cands = append(cands, "/usr/local/bin/edr-installer")
+		cands = append(cands,
+			"/Applications/EDR Agent.app/Contents/MacOS/edr-installer",
+			"/usr/local/bin/edr-installer",
+		)
 	}
 	if runtime.GOOS == "windows" {
 		if pf := os.Getenv("ProgramFiles"); pf != "" {
@@ -78,16 +84,35 @@ func installerPath() string {
 	return "edr-installer"
 }
 
-func agentInstalled() bool {
-	p := edrctlPath()
-	if p == "edrctl" {
-		if _, err := exec.LookPath("edrctl"); err != nil {
-			return false
+// systemAgentCandidates is where a finished per-machine install puts the sensor.
+// Sibling binaries inside EDR Agent.app / Setup.exe do not count — those are
+// the payload the attended wizard copies on Accept.
+func systemAgentCandidates() []string {
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{
+			"/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent",
+			"/Library/Application Support/EDR/bin/edr-agent",
+			"/usr/local/bin/edr-agent",
 		}
-		return true
+	case "windows":
+		pf := os.Getenv("ProgramFiles")
+		if pf == "" {
+			pf = `C:\Program Files`
+		}
+		return []string{filepath.Join(pf, "EDR Agent", "edr-agent.exe")}
+	default:
+		return []string{"/usr/local/bin/edr-agent", "/usr/bin/edr-agent"}
 	}
-	st, err := os.Stat(p)
-	return err == nil && !st.IsDir()
+}
+
+func agentInstalled() bool {
+	for _, p := range systemAgentCandidates() {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func installerPresent() bool {

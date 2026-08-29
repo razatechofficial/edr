@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <!--
-    One-click Windows sensor MSI:
-      C:\Program Files\EDR Agent\edr-agent.exe + edrctl.exe
-      C:\ProgramData\EDR Agent\config.yml + rules\
-    Post-install custom action registers the EDRAgent service but does not
-    start it (starting loads detection models and hangs Setup). The operator
-    console starts streaming after enrollment.
+    Fleet MSI (GPO / silent): copies sensor + console, then opens the Fyne
+    console for enroll → dashboard. Attended testers should use
+    EDR-Agent-Setup.exe (custom license + copy-files in the same process).
+    Service is registered but not started until the operator launches it.
   -->
   <Product Id="*"
            Name="EDR Agent"
@@ -19,15 +17,9 @@
              InstallScope="perMachine"
              InstallPrivileges="elevated"/>
 
-    <WixVariable Id="WixUILicenseRtf" Value="$(var.EdrLicenseRtf)"/>
-    <UI>
-      <UIRef Id="WixUI_Minimal"/>
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication" Order="2">
-        WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed
-      </Publish>
-    </UI>
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open the EDR Agent console"/>
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1"/>
+    <!-- Progress-only MSI (no WiX license wizard). The Fyne console owns
+         first-run: enroll → grants → preflight → dashboard. Testers who want
+         the custom copy-files wizard should run EDR-Agent-Setup.exe instead. -->
     <CustomAction Id="LaunchApplication"
                   FileKey="EdrUIExe"
                   ExeCommand=""
@@ -64,6 +56,7 @@
     <InstallExecuteSequence>
       <Custom Action="CaUninstallService" Before="RemoveFiles">REMOVE="ALL"</Custom>
       <Custom Action="CaInstallService" After="InstallFiles">NOT REMOVE</Custom>
+      <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE</Custom>
     </InstallExecuteSequence>
   </Product>
 

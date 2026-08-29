@@ -118,9 +118,6 @@ $applyTenantBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/
 $applyTenantTlsBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_tenant_tls_config.bat'))
 $applyPPLBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_am_ppl_config.bat'))
 $licenseRtf = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/License.rtf'))
-if (-not (Test-Path -LiteralPath $licenseRtf)) {
-    throw "Missing EULA: $licenseRtf"
-}
 $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wxs'))
 $modelsWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wxs'))
 $rulesStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-rules'))
@@ -179,7 +176,6 @@ $lightLog = Join-Path $root 'build/windows/light.log'
 
 $candleArgList = @(
     '-nologo', '-arch', 'x64',
-    '-ext', 'WixUIExtension',
     "-dMsiProductVersion=$Version",
     "-dEdrAgentExe=$agentExe",
     "-dEdrCtlExe=$edrCtlExe",
@@ -273,7 +269,6 @@ if ($yaraDlls.Count -gt 0) {
 
 $lightArgList = @(
     '-nologo', '-sval', '-sw1076',
-    '-ext', 'WixUIExtension',
     "-dRulesStage=$rulesStage",
     "-dModelsStage=$modelsStage",
     $lightInputs,

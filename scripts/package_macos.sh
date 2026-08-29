@@ -113,8 +113,11 @@ cp "${EDRCTL_BIN}" "${STAGE}/usr/local/bin/edrctl"
 cp "${EDRCTL_BIN}" "${STAGE}/usr/local/bin/edr"
 chmod 755 "${STAGE}/usr/local/bin/edr-agent" "${STAGE}/usr/local/bin/edrctl" "${STAGE}/usr/local/bin/edr"
 
+INSTALLER_BIN="${ROOT}/bin/edr-installer-darwin-${ARCH}"
+GOOS=darwin GOARCH="${ARCH}" bash "${ROOT}/scripts/ci/stage_embedded_installer.sh" \
+	"${AGENT_BIN}" "${EDRCTL_BIN}" "${INSTALLER_BIN}"
 mkdir -p "${STAGE}/Applications"
-bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${EDRCTL_BIN}" "${STAGE}/Applications/EDR Agent.app"
+bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${EDRCTL_BIN}" "${STAGE}/Applications/EDR Agent.app" "${INSTALLER_BIN}"
 
 cp "${ROOT}/deploy/macos/first-run-permissions.sh" "${STAGE}/Library/Application Support/EDR/first-run-permissions.sh"
 chmod 755 "${STAGE}/Library/Application Support/EDR/first-run-permissions.sh"
@@ -328,16 +331,10 @@ pkgbuild \
 	"${COMPONENT}"
 
 DIST_XML="${WORK}/distribution.xml"
-RES="${WORK}/resources"
-mkdir -p "${RES}"
-cp "${ROOT}/build/macos/welcome.html" "${RES}/welcome.html"
-cp "${ROOT}/build/macos/conclusion.html" "${RES}/conclusion.html"
 cat > "${DIST_XML}" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="1">
 	<title>EDR Agent (${ARCH_TITLE})</title>
-	<welcome file="welcome.html" mime-type="text/html"/>
-	<conclusion file="conclusion.html" mime-type="text/html"/>
 	<domains enable_localSystem="true"/>
 	<options customize="never" require-scripts="false" rootVolumeOnly="true" hostArchitectures="${HOST_ARCHS}"/>
 	<choices-outline>
@@ -352,7 +349,7 @@ EOF
 
 OUT_SAFE_VER="${VERSION//\//-}"
 OUT="${ROOT}/dist/edr-agent-${OUT_SAFE_VER}-darwin-${ARCH}.pkg"
-productbuild --distribution "${DIST_XML}" --resources "${RES}" --package-path "${WORK}" "${OUT}"
+productbuild --distribution "${DIST_XML}" --package-path "${WORK}" "${OUT}"
 
 rm -rf "${WORK}"
 echo "${OUT}"

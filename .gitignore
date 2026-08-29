@@ -31,6 +31,10 @@ ml/training/.venv/
 cmd/installer/bundle/models/
 cmd/installer/bundle/rules/
 cmd/installer/bundle/bin/
+
+# Populated only when building EDR-Agent-Setup.exe (-tags embedsetup)
+cmd/agentui/payload/*
+!cmd/agentui/payload/.gitkeep
 rules/ioc/raw/
 
 # Python build/test artifacts

@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Lightweight macOS .pkg builder (dev/CI). Production packaging uses scripts/package_macos.sh.
+# macOS .pkg builder (release CI).
+# Default EDR_PKG_MODE=attended: the pkg only drops EDR Agent.app (UI +
+# embedded installer). Apple Installer authenticates; our wizard is license
+# → copy files → enroll → dashboard.
+# EDR_PKG_MODE=fleet EDR_PKG_SUFFIX=-mdm: also ships LaunchDaemon + models
+# for MDM. Silent: /Applications/EDR Agent.app/Contents/MacOS/edr-installer install
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -31,6 +36,8 @@ fi
 
 UI_BIN="bin/edr-agent-ui-darwin-${ARCH}"
 CTL_BIN="bin/edrctl-darwin-${ARCH}"
+PKG_MODE="${EDR_PKG_MODE:-attended}"
+PKG_SUFFIX="${EDR_PKG_SUFFIX:-}"
 if [[ ! -f "${UI_BIN}" ]]; then
 	echo "missing ${UI_BIN}; run build_macos_production.sh first" >&2
 	exit 1
@@ -40,18 +47,42 @@ if [[ ! -f "${CTL_BIN}" ]]; then
 	exit 1
 fi
 
+# One .app holds the wizard through the dashboard. The privileged installer
+# embeds agent + models + rules so testers do not need a zip of loose binaries.
+INSTALLER_BIN="bin/edr-installer-darwin-${ARCH}"
+AGENT_FOR_EMBED=""
+if [[ -f "${APP_BUNDLE}/Contents/MacOS/edr-agent" ]]; then
+	AGENT_FOR_EMBED="${APP_BUNDLE}/Contents/MacOS/edr-agent"
+elif [[ -f "${BINARY}" ]]; then
+	AGENT_FOR_EMBED="${BINARY}"
+fi
+if [[ -n "${AGENT_FOR_EMBED}" ]]; then
+	GOOS=darwin GOARCH="${ARCH}" bash "${ROOT}/scripts/ci/stage_embedded_installer.sh" \
+		"${AGENT_FOR_EMBED}" "${CTL_BIN}" "${INSTALLER_BIN}"
+	if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
+		codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${INSTALLER_BIN}" || true
+	fi
+fi
+if [[ ! -f "${INSTALLER_BIN}" ]]; then
+	echo "missing ${INSTALLER_BIN}; attended setup needs the embedded installer" >&2
+	exit 1
+fi
+
 EDR_BASE="/Library/Application Support/EDR"
 RULES_BASELINE="${EDR_BASE}/config/rules/baseline.yaml"
 PKG_ROOT="pkg/macos/root"
 
-rm -rf "${PKG_ROOT}/etc/edr-agent" "${PKG_ROOT}/usr/local/libexec" "${PKG_ROOT}/Applications"
+rm -rf "${PKG_ROOT}/etc/edr-agent" "${PKG_ROOT}/usr/local/libexec" "${PKG_ROOT}/Applications" \
+	"${PKG_ROOT}/Library"
 AGENT_APP="/usr/local/libexec/edr-agent.app"
 AGENT_BIN="${AGENT_APP}/Contents/MacOS/edr-agent"
 
+mkdir -p "${PKG_ROOT}/Applications"
+
+if [[ "${PKG_MODE}" == "fleet" ]]; then
 mkdir -p \
 	"${PKG_ROOT}/usr/local/libexec" \
 	"${PKG_ROOT}/usr/local/bin" \
-	"${PKG_ROOT}/Applications" \
 	"${PKG_ROOT}/Library/LaunchDaemons" \
 	"${PKG_ROOT}/Library/Application Support/EDR/config/rules" \
 	"${PKG_ROOT}/Library/Application Support/EDR/models" \
@@ -96,9 +127,11 @@ if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
 	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edrctl"
 	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edr"
 fi
+fi
 
-bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${CTL_BIN}" "${PKG_ROOT}/Applications/EDR Agent.app"
+bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${CTL_BIN}" "${PKG_ROOT}/Applications/EDR Agent.app" "${INSTALLER_BIN}"
 
+if [[ "${PKG_MODE}" == "fleet" ]]; then
 if [[ -f "${ROOT}/deploy/macos/first-run-permissions.sh" ]]; then
 	cp "${ROOT}/deploy/macos/first-run-permissions.sh" "${PKG_ROOT}/Library/Application Support/EDR/first-run-permissions.sh"
 	chmod 755 "${PKG_ROOT}/Library/Application Support/EDR/first-run-permissions.sh"
@@ -177,48 +210,27 @@ cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" <<'EOF'
 </dict>
 </plist>
 EOF
+fi
 
 mkdir -p pkg/macos/scripts
 
+# Attended: Apple Installer only drops EDR Agent.app. The Fyne wizard copies
+# the sensor on Accept and continues through enroll to the dashboard.
+# Fleet: files are already on disk; still do not start the daemon — Launch does.
 cat > pkg/macos/scripts/postinstall <<'EOF'
 #!/bin/bash
 set -e
-BASE="/Library/Application Support/EDR"
-CONFIG_DIR="${BASE}/config"
-CONFIG_FILE="${CONFIG_DIR}/agent.yaml"
-LOG_DIR="/Library/Logs/EDR"
-PLIST="/Library/LaunchDaemons/com.razatech.edr-agent.plist"
-RULES_BASELINE="${CONFIG_DIR}/rules/baseline.yaml"
-
-mkdir -p "${CONFIG_DIR}" "${BASE}/alerts" "${BASE}/models" "${LOG_DIR}"
-chmod 755 "${BASE}" "${CONFIG_DIR}" 2>/dev/null || true
-
-if [[ -f "${CONFIG_FILE}" ]]; then
-	tmpf="$(mktemp "${TMPDIR:-/tmp}/edr-postinstall.XXXXXX")"
-	sed "s|^rules_file:.*|rules_file: \"${RULES_BASELINE}\"|" "${CONFIG_FILE}" > "${tmpf}" && mv "${tmpf}" "${CONFIG_FILE}"
-	chmod 644 "${CONFIG_FILE}"
+APP="/Applications/EDR Agent.app"
+if [[ ! -d "${APP}" ]]; then
+	exit 0
 fi
-
-launchctl bootout system "${PLIST}" 2>/dev/null || true
-launchctl unload "${PLIST}" 2>/dev/null || true
-if [[ -x "/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent" ]]; then
-	ln -sf "../libexec/edr-agent.app/Contents/MacOS/edr-agent" /usr/local/bin/edr-agent
+LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+CONSOLE_USER="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
+if [[ -x "${LSREG}" ]]; then
+	"${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
 fi
-launchctl bootstrap system "${PLIST}" 2>/dev/null || launchctl load "${PLIST}"
-launchctl enable "system/com.razatech.edr-agent" 2>/dev/null || true
-if [[ -f "${BASE}/xdr-tls/enrollment.json" ]]; then
-	launchctl kickstart -k "system/com.razatech.edr-agent" 2>/dev/null || true
-fi
-if [[ -d "/Applications/EDR Agent.app" ]]; then
-	LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-	CONSOLE_USER="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
-	if [[ -x "${LSREG}" ]]; then
-		"${LSREG}" -f "/Applications/EDR Agent.app" >/dev/null 2>&1 || true
-		if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
-			/usr/bin/sudo -u "${CONSOLE_USER}" "${LSREG}" -f "/Applications/EDR Agent.app" >/dev/null 2>&1 || true
-			/usr/bin/sudo -u "${CONSOLE_USER}" /usr/bin/open "/Applications/EDR Agent.app" >/dev/null 2>&1 || true
-		fi
-	fi
+if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
+	/usr/bin/sudo -u "${CONSOLE_USER}" /usr/bin/open "${APP}" >/dev/null 2>&1 || true
 fi
 EOF
 chmod 755 pkg/macos/scripts/postinstall
@@ -248,11 +260,6 @@ if [[ "\${HOST}" != "${NEED_UNAME}" ]]; then
 	osascript -e "display dialog \"\${MSG}\" buttons {\"OK\"} default button \"OK\" with title \"EDR Agent\"" >/dev/null 2>&1 || true
 	exit 1
 fi
-PLIST="/Library/LaunchDaemons/com.razatech.edr-agent.plist"
-if launchctl print "system/com.razatech.edr-agent" &>/dev/null; then
-	launchctl bootout system "\${PLIST}" 2>/dev/null || true
-fi
-launchctl unload "\${PLIST}" 2>/dev/null || true
 EOF
 chmod 755 pkg/macos/scripts/preinstall
 
@@ -267,16 +274,12 @@ pkgbuild \
 	"${COMPONENT}"
 
 DIST_XML="pkg/macos/distribution.xml"
-RES_DIR="pkg/macos/resources"
-mkdir -p "${RES_DIR}"
-cp "${ROOT}/build/macos/welcome.html" "${RES_DIR}/welcome.html"
-cp "${ROOT}/build/macos/conclusion.html" "${RES_DIR}/conclusion.html"
+# No welcome/license pages: Installer.app only authenticates and copies the
+# .app. License + copy-files + enroll + dashboard live in EDR Agent.app.
 cat > "${DIST_XML}" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
 	<title>EDR Agent (${ARCH_TITLE})</title>
-	<welcome file="welcome.html" mime-type="text/html"/>
-	<conclusion file="conclusion.html" mime-type="text/html"/>
 	<domains enable_localSystem="true"/>
 	<options customize="never" require-scripts="false" hostArchitectures="${HOST_ARCHS}"/>
 	<choices-outline>
@@ -289,10 +292,10 @@ cat > "${DIST_XML}" <<EOF
 </installer-gui-script>
 EOF
 
+PKG_OUT="dist/edr-agent_${VERSION}_${ARCH}${PKG_SUFFIX}.pkg"
 productbuild \
 	--distribution "${DIST_XML}" \
-	--resources "${RES_DIR}" \
 	--package-path pkg/macos \
-	"dist/edr-agent_${VERSION}_${ARCH}.pkg"
+	"${PKG_OUT}"
 
-echo "macOS package: dist/edr-agent_${VERSION}_${ARCH}.pkg (${ARCH_TITLE})"
+echo "macOS package: ${PKG_OUT} (${ARCH_TITLE}, ${PKG_MODE})"

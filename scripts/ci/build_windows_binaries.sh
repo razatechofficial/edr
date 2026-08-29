@@ -44,6 +44,20 @@ GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o dist/wind
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o bin/edr-agent-ui-windows-amd64.exe ./cmd/agentui
 
+# One-file attended setup: UI + privileged installer (agent + models + rules).
+EMBED_INST="${ROOT}/bin/edr-installer-embedded.exe"
+GOOS=windows GOARCH=amd64 LDFLAGS="${LDFLAGS}" \
+	bash "${ROOT}/scripts/ci/stage_embedded_installer.sh" \
+	"${ROOT}/dist/windows-amd64/edr-agent.exe" \
+	"${ROOT}/dist/windows-amd64/edrctl.exe" \
+	"${EMBED_INST}"
+mkdir -p "${ROOT}/cmd/agentui/payload"
+cp "${EMBED_INST}" "${ROOT}/cmd/agentui/payload/installer.bin"
+CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -tags embedsetup \
+	-ldflags "${LDFLAGS} -H windowsgui" -o dist/windows-amd64/EDR-Agent-Setup.exe ./cmd/agentui
+cp dist/windows-amd64/EDR-Agent-Setup.exe dist/EDR-Agent-Setup.exe
+cp dist/windows-amd64/EDR-Agent-Setup.exe bin/EDR-Agent-Setup.exe
+
 if [[ "${EDR_WINDOWS_YARA:-0}" == "1" ]]; then
 	if command -v pwsh >/dev/null 2>&1; then
 		pwsh -NoProfile -File "${ROOT}/scripts/ci/bundle_windows_yara.ps1" -Root "${ROOT}"

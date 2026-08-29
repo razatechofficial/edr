@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Verify a built macOS .pkg includes fleet rollout profiles and core agent paths.
+# Verify a built macOS .pkg.
+# Attended (default): EDR Agent.app contains UI + embedded installer + edrctl.
+# Fleet (*-mdm.pkg): also ships system paths, LaunchDaemon, and ONNX models.
 set -euo pipefail
 
 PKG_PATH="${1:-}"
@@ -16,6 +18,12 @@ if ! command -v pkgutil >/dev/null 2>&1; then
 	exit 1
 fi
 
+base="$(basename "${PKG_PATH}")"
+fleet=0
+case "${base}" in
+*-mdm.pkg) fleet=1 ;;
+esac
+
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "${tmpdir}"' EXIT
 pkgutil --expand-full "${PKG_PATH}" "${tmpdir}/expanded"
@@ -25,17 +33,23 @@ find_payload() {
 }
 
 required=(
-	"*/Library/Application Support/EDR/config/agent.yaml"
-	"*/Library/Application Support/EDR/config/config.tenant.yml"
-	"*/Library/Application Support/EDR/config/config.tenant.tls.yml"
-	"*/Library/Application Support/EDR/config/config.fleet.tls.yml"
-	"*/Library/Application Support/EDR/config/rules/baseline.yaml"
-	"*/Library/Application Support/EDR/config/rules/yara/exploits/cve_2021_44228_log4j.yar"
-	"*/Library/LaunchDaemons/com.razatech.edr-agent.plist"
-	"*/Library/Application Support/EDR/models/manifest.json"
 	"*/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui"
-	"*/usr/local/bin/edrctl"
+	"*/Applications/EDR Agent.app/Contents/MacOS/edr-installer"
+	"*/Applications/EDR Agent.app/Contents/MacOS/edrctl"
 )
+if [[ "${fleet}" -eq 1 ]]; then
+	required+=(
+		"*/Library/Application Support/EDR/config/agent.yaml"
+		"*/Library/Application Support/EDR/config/config.tenant.yml"
+		"*/Library/Application Support/EDR/config/config.tenant.tls.yml"
+		"*/Library/Application Support/EDR/config/config.fleet.tls.yml"
+		"*/Library/Application Support/EDR/config/rules/baseline.yaml"
+		"*/Library/Application Support/EDR/config/rules/yara/exploits/cve_2021_44228_log4j.yar"
+		"*/Library/LaunchDaemons/com.razatech.edr-agent.plist"
+		"*/Library/Application Support/EDR/models/manifest.json"
+		"*/usr/local/bin/edrctl"
+	)
+fi
 
 for pattern in "${required[@]}"; do
 	if [[ -z "$(find_payload "${pattern}")" ]]; then
@@ -44,48 +58,61 @@ for pattern in "${required[@]}"; do
 	fi
 done
 
+installer_bin="$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edr-installer')"
+if [[ -z "${installer_bin}" ]]; then
+	echo "missing edr-installer inside EDR Agent.app" >&2
+	exit 1
+fi
+inst_size="$(wc -c < "${installer_bin}" | tr -d ' ')"
+if [[ "${inst_size}" -lt 8000000 ]]; then
+	echo "edr-installer looks too small to embed models (${inst_size} bytes)" >&2
+	exit 1
+fi
+
 agent_bin="$(find "${tmpdir}/expanded" -path '*/edr-agent.app/Contents/MacOS/edr-agent' -print -quit)"
 if [[ -z "${agent_bin}" ]]; then
 	agent_bin="$(find "${tmpdir}/expanded" -path '*/usr/local/bin/edr-agent' -print -quit)"
 fi
-if [[ -z "${agent_bin}" ]]; then
-	echo "missing edr-agent binary in pkg payload" >&2
+if [[ "${fleet}" -eq 1 && -z "${agent_bin}" ]]; then
+	echo "missing edr-agent binary in fleet pkg payload" >&2
 	exit 1
 fi
 
-base="$(basename "${PKG_PATH}")"
 want_arch=""
 case "${base}" in
 *_amd64.pkg|*_intel.pkg|*darwin-amd64*) want_arch=x86_64 ;;
 *_arm64.pkg|*_apple-silicon.pkg|*darwin-arm64*) want_arch=arm64 ;;
 esac
-if [[ -n "${want_arch}" ]] && command -v lipo >/dev/null 2>&1; then
-	got="$(lipo -archs "${agent_bin}" 2>/dev/null || true)"
+
+check_arch_and_yara() {
+	local bin="$1"
+	local label="$2"
+	if [[ -z "${bin}" || -z "${want_arch}" ]] || ! command -v lipo >/dev/null 2>&1; then
+		return 0
+	fi
+	local got
+	got="$(lipo -archs "${bin}" 2>/dev/null || true)"
 	if ! grep -qw "${want_arch}" <<<"${got}"; then
-		echo "package ${base} should contain ${want_arch}, lipo reported: ${got:-unknown}" >&2
+		echo "${label} should contain ${want_arch}, lipo reported: ${got:-unknown}" >&2
 		exit 1
 	fi
-	ui_bin="$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui')"
-	if [[ -n "${ui_bin}" ]]; then
-		ui_got="$(lipo -archs "${ui_bin}" 2>/dev/null || true)"
-		if ! grep -qw "${want_arch}" <<<"${ui_got}"; then
-			echo "EDR Agent.app should contain ${want_arch}, lipo reported: ${ui_got:-unknown}" >&2
-			exit 1
-		fi
-		if command -v otool >/dev/null 2>&1 && otool -L "${ui_bin}" | grep -Eiq 'libyara|/opt/yara/|/Cellar/yara/'; then
-			echo "EDR Agent.app must not link Homebrew libyara (Hardened Runtime rejects unsigned brew dylibs)" >&2
-			otool -L "${ui_bin}" >&2 || true
-			exit 1
-		fi
-	fi
-	ctl_bin="$(find_payload '*/usr/local/bin/edrctl')"
-	if [[ -n "${ctl_bin}" ]] && command -v otool >/dev/null 2>&1 && otool -L "${ctl_bin}" | grep -Eiq 'libyara|/opt/yara/|/Cellar/yara/'; then
-		echo "edrctl must not link Homebrew libyara" >&2
-		otool -L "${ctl_bin}" >&2 || true
+	if command -v otool >/dev/null 2>&1 && otool -L "${bin}" | grep -Eiq 'libyara|/opt/yara/|/Cellar/yara/'; then
+		echo "${label} must not link Homebrew libyara" >&2
+		otool -L "${bin}" >&2 || true
 		exit 1
 	fi
-else
-	"${agent_bin}" --version >/dev/null
+}
+
+if [[ -n "${want_arch}" ]] && command -v lipo >/dev/null 2>&1; then
+	if [[ -n "${agent_bin}" ]]; then
+		check_arch_and_yara "${agent_bin}" "edr-agent"
+	fi
+	check_arch_and_yara "$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui')" "EDR Agent.app UI"
+	check_arch_and_yara "$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edrctl')" "EDR Agent.app edrctl"
+	check_arch_and_yara "${installer_bin}" "EDR Agent.app installer"
+	if [[ "${fleet}" -eq 1 ]]; then
+		check_arch_and_yara "$(find_payload '*/usr/local/bin/edrctl')" "usr/local/bin/edrctl"
+	fi
 fi
 
 dist="$(find "${tmpdir}/expanded" -name Distribution -print -quit)"
@@ -94,26 +121,32 @@ if [[ -n "${dist}" && -n "${want_arch}" ]]; then
 		echo "Distribution.xml must set hostArchitectures=${want_arch} so the wrong CPU cannot install this pkg" >&2
 		exit 1
 	fi
+	if grep -Eq '<welcome |<license |<conclusion ' "${dist}"; then
+		echo "Distribution.xml must not show Apple welcome/license/conclusion (custom UI owns first-run)" >&2
+		exit 1
+	fi
 fi
 
-cfg="$(find "${tmpdir}/expanded" -path '*/Library/Application Support/EDR/config/agent.yaml' -print -quit)"
-if [[ -z "${cfg}" ]]; then
-	echo "missing staged agent.yaml" >&2
-	exit 1
-fi
-if ! awk '
-  $0 ~ /^ml:/ { in_ml=1; next }
-  in_ml && /^[^ ]/ { in_ml=0 }
-  in_ml && $0 ~ /enabled: true/ { found=1 }
-  END { exit found ? 0 : 1 }
-' "${cfg}"; then
-	echo "agent.yaml must set ml.enabled: true" >&2
-	exit 1
-fi
-onnx_count="$(find "${tmpdir}/expanded" \( -iname '*.onnx' -o -iname '*.onn' \) | wc -l | tr -d ' ')"
-if [ "${onnx_count}" -lt 12 ]; then
-	echo "expected 12 ONNX models in pkg, found ${onnx_count}" >&2
-	exit 1
+if [[ "${fleet}" -eq 1 ]]; then
+	cfg="$(find "${tmpdir}/expanded" -path '*/Library/Application Support/EDR/config/agent.yaml' -print -quit)"
+	if [[ -z "${cfg}" ]]; then
+		echo "missing staged agent.yaml" >&2
+		exit 1
+	fi
+	if ! awk '
+	  $0 ~ /^ml:/ { in_ml=1; next }
+	  in_ml && /^[^ ]/ { in_ml=0 }
+	  in_ml && $0 ~ /enabled: true/ { found=1 }
+	  END { exit found ? 0 : 1 }
+	' "${cfg}"; then
+		echo "agent.yaml must set ml.enabled: true" >&2
+		exit 1
+	fi
+	onnx_count="$(find "${tmpdir}/expanded" \( -iname '*.onnx' -o -iname '*.onn' \) | wc -l | tr -d ' ')"
+	if [ "${onnx_count}" -lt 12 ]; then
+		echo "expected 12 ONNX models in fleet pkg, found ${onnx_count}" >&2
+		exit 1
+	fi
 fi
 
 echo "macOS package verification passed: ${PKG_PATH}"

@@ -30,6 +30,10 @@ function Test-AuthenticodeSigned([string]$Path) {
 }
 
 $agentExe = Join-Path $root 'dist/windows-amd64/edr-agent.exe'
+$setupExe = Join-Path $root 'dist/EDR-Agent-Setup.exe'
+if (-not (Test-Path -LiteralPath $setupExe)) {
+	$setupExe = Join-Path $root 'dist/windows-amd64/EDR-Agent-Setup.exe'
+}
 $msiFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'dist') -Filter 'edr-agent_*.msi' -ErrorAction SilentlyContinue)
 
 if ($VerifyOnly) {
@@ -81,6 +85,7 @@ function Invoke-SignFile([string]$Target) {
 try {
 	if (-not $MsiOnly) {
 		Invoke-SignFile $agentExe
+		Invoke-SignFile $setupExe
 	}
 	foreach ($msi in $msiFiles) {
 		Invoke-SignFile $msi.FullName

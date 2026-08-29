@@ -183,7 +183,7 @@ func (c *console) onSetupAccept() {
 	if !installerPresent() {
 		c.setSetupFault(uiFault{
 			Title:  "Installer not found",
-			Body:   "Place edr-installer next to this app and try again, or deploy the package silently.",
+			Body:   "Download EDR-Agent-Setup again (one file). It already contains the installer.",
 			Detail: adminDetail(),
 			Action: "OK",
 		})

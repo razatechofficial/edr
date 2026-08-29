@@ -736,19 +736,12 @@ bundle-enterprise: build
 # Single self-contained edr-installer binary (models + rules embedded via go:embed).
 # Requires ./models/*.onnx and ./rules/ — same as training release artifacts.
 build-installer-embedded: build
-	@test -d $(MODELS_DIR) && ls $(MODELS_DIR)/*.onnx >/dev/null 2>&1 || (echo "error: $(MODELS_DIR) must contain at least one .onnx"; exit 1)
-	@test -d $(RULES_DIR) || (echo "error: $(RULES_DIR) missing"; exit 1)
-	@test -f $(BIN_DIR)/edr-agent || (echo "error: run make build first (need $(BIN_DIR)/edr-agent)"; exit 1)
-	@mkdir -p cmd/installer/bundle/bin
-	rsync -a --delete $(MODELS_DIR)/ cmd/installer/bundle/models/
-	rsync -a --delete $(RULES_DIR)/ cmd/installer/bundle/rules/
-	cp $(BIN_DIR)/edr-agent cmd/installer/bundle/bin/
-	-cp $(BIN_DIR)/edrctl cmd/installer/bundle/bin/
-	GOOS=$$(go env GOOS) GOARCH=$$(go env GOARCH) go build $(GOFLAGS) -tags embedbundle -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-installer-embedded ./cmd/installer
+	@chmod +x ./scripts/ci/stage_embedded_installer.sh
+	./scripts/ci/stage_embedded_installer.sh $(BIN_DIR)/edr-agent $(BIN_DIR)/edrctl $(BIN_DIR)/edr-installer-embedded
 	@echo "==> $(BIN_DIR)/edr-installer-embedded — single file (agent+models+rules embedded). Run: sudo ./edr-installer-embedded install"
 
 package-pkg: build-darwin
-	@echo "==> Creating macOS .pkg installer (bundles ./models ONNX + configs/agent.yaml)"
+	@echo "==> Creating macOS .pkg (EDR Agent.app = wizard through dashboard)"
 	@echo "    Requires ./models/*.onnx — train first or set REQUIRE_MODELS=0"
 	./scripts/package_macos.sh
 

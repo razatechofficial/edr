@@ -102,7 +102,7 @@ func classifyInstallError(raw string) uiFault {
 	if strings.Contains(s, "agent binary not found") || (strings.Contains(s, "not found") && strings.Contains(s, "edr-agent")) {
 		return uiFault{
 			Title:  "Setup could not find the agent files",
-			Body:   "Put edr-installer in the same folder as edr-agent and edrctl, then Accept again.",
+			Body:   "This setup file is missing the sensor payload. Download EDR-Agent-Setup again, then Accept.",
 			Detail: adminDetail(),
 			Action: "Try again",
 		}

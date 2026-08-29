@@ -2,18 +2,21 @@
 # Assemble /Applications/EDR Agent.app from the arch-specific Go UI binary.
 # Do not wrap with a universal AppleScript applet: that opens on the wrong CPU
 # and then execs edrctl of a different architecture (Bad CPU type).
-# Usage: macos_console_app.sh <ui-binary> <edrctl-binary> <dest.app>
+# Usage: macos_console_app.sh <ui-binary> <edrctl-binary> <dest.app> [installer]
+# The optional installer (prefer embedbundle) lives next to the UI so Accept
+# can copy the sensor without a zip of loose binaries.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UI_BIN="${1:-}"
 CTL_BIN="${2:-}"
 APP_OUT="${3:-}"
+INSTALLER_BIN="${4:-${INSTALLER_BIN:-}}"
 INFO_PLIST="${ROOT}/build/macos/Info-console.plist"
 ENTITLEMENTS="${ROOT}/build/macos/edr-console.entitlements.plist"
 
 if [[ -z "${UI_BIN}" || ! -f "${UI_BIN}" || -z "${APP_OUT}" ]]; then
-	echo "usage: macos_console_app.sh path/to/edr-agent-ui path/to/edrctl dest/EDR Agent.app" >&2
+	echo "usage: macos_console_app.sh path/to/edr-agent-ui path/to/edrctl dest/EDR Agent.app [installer]" >&2
 	exit 1
 fi
 
@@ -61,6 +64,11 @@ if [[ -n "${CTL_BIN}" && -f "${CTL_BIN}" ]]; then
 	cp "${CTL_BIN}" "${APP_OUT}/Contents/MacOS/edrctl"
 	chmod 755 "${APP_OUT}/Contents/MacOS/edrctl"
 	sign_target "${APP_OUT}/Contents/MacOS/edrctl"
+fi
+if [[ -n "${INSTALLER_BIN}" && -f "${INSTALLER_BIN}" ]]; then
+	cp "${INSTALLER_BIN}" "${APP_OUT}/Contents/MacOS/edr-installer"
+	chmod 755 "${APP_OUT}/Contents/MacOS/edr-installer"
+	sign_target "${APP_OUT}/Contents/MacOS/edr-installer"
 fi
 cp "${INFO_PLIST}" "${APP_OUT}/Contents/Info.plist"
 printf 'APPL????' > "${APP_OUT}/Contents/PkgInfo"
