@@ -53,6 +53,14 @@ elif ! pkgutil --check-signature "${PKG}" 2>/dev/null | grep -q "Developer ID In
 	exit 1
 fi
 
+# Prod-branch prereleases: Developer ID sign only. Apple has been leaving the
+# 63MB embedded Setup pkg In Progress for >90 minutes (scanner stall, not a
+# bad cert). Testers open with right-click → Open. Tag releases still notarize.
+if [[ "${NOTARY_SKIP:-}" == "1" || "${NOTARY_SKIP:-}" == "true" ]]; then
+	echo "==> Skipping Apple notary (NOTARY_SKIP=${NOTARY_SKIP}); pkg is Developer ID signed"
+	exit 0
+fi
+
 notary_auth=()
 if [[ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
 	notary_auth=(--keychain-profile "${NOTARY_KEYCHAIN_PROFILE}")
