@@ -54,6 +54,8 @@ fi
 for pattern in "${required[@]}"; do
 	if [[ -z "$(find_payload "${pattern}")" ]]; then
 		echo "missing required packaged path: ${pattern}" >&2
+		echo "payload tree:" >&2
+		find "${tmpdir}/expanded" -print | head -n 80 >&2
 		exit 1
 	fi
 done

@@ -263,8 +263,15 @@ fi
 EOF
 chmod 755 pkg/macos/scripts/preinstall
 
+UI_IN_ROOT="${PKG_ROOT}/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui"
+if [[ ! -x "${UI_IN_ROOT}" ]]; then
+	echo "missing ${UI_IN_ROOT} — EDR Agent.app was not staged" >&2
+	exit 1
+fi
+
 mkdir -p dist pkg/macos
 COMPONENT="pkg/macos/edr-agent-component-${PKG_MODE}.pkg"
+COMPONENT_NAME="$(basename "${COMPONENT}")"
 pkgbuild \
 	--root "${PKG_ROOT}" \
 	--scripts pkg/macos/scripts \
@@ -288,7 +295,7 @@ cat > "${DIST_XML}" <<EOF
 	<choice id="com.razatech.edr-agent" visible="false">
 		<pkg-ref id="com.razatech.edr-agent"/>
 	</choice>
-	<pkg-ref id="com.razatech.edr-agent" version="${VERSION}" onConclusion="none">edr-agent-component.pkg</pkg-ref>
+	<pkg-ref id="com.razatech.edr-agent" version="${VERSION}" onConclusion="none">${COMPONENT_NAME}</pkg-ref>
 </installer-gui-script>
 EOF
 
