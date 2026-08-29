@@ -200,7 +200,9 @@ jobs:
           fi
           bash scripts/ci/setup_apple_notary.sh
           PKG="dist/edr-agent_${{ needs.release_meta.outputs.pkg_version }}_${{ matrix.arch }}.pkg"
-          bash scripts/ci/macos_run_build.sh bash scripts/notarize_macos_pkg.sh "${PKG}"
+          # Native arch: notarytool under Rosetta on Apple Silicon runners
+          # often dies with NSURLError -1009 (no network route) while polling.
+          bash scripts/notarize_macos_pkg.sh "${PKG}"
       - name: Attach macOS package to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

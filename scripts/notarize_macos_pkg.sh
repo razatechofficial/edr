@@ -53,28 +53,68 @@ elif ! pkgutil --check-signature "${PKG}" 2>/dev/null | grep -q "Developer ID In
 	exit 1
 fi
 
-echo "==> Submitting to Apple Notary Service: ${PKG}"
-
-SUBMIT_JSON="$(mktemp "${TMPDIR:-/tmp}/edr-notary-submit.XXXXXX")"
-trap 'rm -f "${SUBMIT_JSON}"' EXIT
-
+notary_auth=()
 if [[ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
-	xcrun notarytool submit "${PKG}" \
-		--keychain-profile "${NOTARY_KEYCHAIN_PROFILE}" \
-		--output-format json --wait >"${SUBMIT_JSON}"
+	notary_auth=(--keychain-profile "${NOTARY_KEYCHAIN_PROFILE}")
 elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
-	xcrun notarytool submit "${PKG}" \
-		--apple-id "${APPLE_ID}" \
-		--team-id "${APPLE_TEAM_ID}" \
-		--password "${APPLE_APP_SPECIFIC_PASSWORD}" \
-		--output-format json --wait >"${SUBMIT_JSON}"
+	notary_auth=(--apple-id "${APPLE_ID}" --team-id "${APPLE_TEAM_ID}" --password "${APPLE_APP_SPECIFIC_PASSWORD}")
 else
 	echo "Set NOTARY_KEYCHAIN_PROFILE or APPLE_ID + APPLE_TEAM_ID + APPLE_APP_SPECIFIC_PASSWORD" >&2
 	exit 1
 fi
 
-SUBMISSION_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "${SUBMIT_JSON}")"
-NOTARY_STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "${SUBMIT_JSON}")"
+json_field() {
+	python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"
+}
+
+SUBMIT_JSON="$(mktemp "${TMPDIR:-/tmp}/edr-notary-submit.XXXXXX")"
+INFO_JSON="$(mktemp "${TMPDIR:-/tmp}/edr-notary-info.XXXXXX")"
+trap 'rm -f "${SUBMIT_JSON}" "${INFO_JSON}"' EXIT
+
+PKG_SIZE="$(du -h "${PKG}" | awk '{print $1}')"
+echo "==> Submitting to Apple Notary Service: ${PKG} (${PKG_SIZE})"
+echo "    upload, then poll status (transient network errors are retried)"
+
+submit_ok=0
+for attempt in 1 2 3; do
+	echo "==> notarytool submit (attempt ${attempt}/3)"
+	# No --wait: upload returns an id, then we poll. --wait + Rosetta/GHA
+	# often dies with NSURLError -1009 after the upload already succeeded.
+	if xcrun notarytool submit "${PKG}" "${notary_auth[@]}" --output-format json | tee "${SUBMIT_JSON}"; then
+		if [[ -n "$(json_field "${SUBMIT_JSON}" id)" ]]; then
+			submit_ok=1
+			break
+		fi
+	fi
+	echo "submit attempt ${attempt} failed; retry in 30s" >&2
+	sleep 30
+done
+if [[ "${submit_ok}" -ne 1 ]]; then
+	echo "notarytool submit failed after retries" >&2
+	exit 1
+fi
+
+SUBMISSION_ID="$(json_field "${SUBMIT_JSON}" id)"
+echo "==> Submission ${SUBMISSION_ID}; polling Apple"
+
+NOTARY_STATUS=""
+for poll in $(seq 1 80); do
+	if xcrun notarytool info "${SUBMISSION_ID}" "${notary_auth[@]}" --output-format json >"${INFO_JSON}"; then
+		NOTARY_STATUS="$(json_field "${INFO_JSON}" status)"
+		echo "    poll ${poll}: ${NOTARY_STATUS}"
+		case "${NOTARY_STATUS}" in
+		Accepted) break ;;
+		Invalid | Rejected)
+			echo "notarization failed: status=${NOTARY_STATUS} id=${SUBMISSION_ID}" >&2
+			NOTARY_STATUS="${NOTARY_STATUS}"
+			break
+			;;
+		esac
+	else
+		echo "    poll ${poll}: network error, retrying"
+	fi
+	sleep 20
+done
 
 if [[ "${NOTARY_STATUS}" != "Accepted" ]]; then
 	echo "notarization failed: status=${NOTARY_STATUS} id=${SUBMISSION_ID}" >&2
