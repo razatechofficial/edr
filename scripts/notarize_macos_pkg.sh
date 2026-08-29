@@ -95,29 +95,33 @@ if [[ "${submit_ok}" -ne 1 ]]; then
 fi
 
 SUBMISSION_ID="$(json_field "${SUBMIT_JSON}" id)"
-echo "==> Submission ${SUBMISSION_ID}; polling Apple"
+POLL_MAX="${NOTARY_POLL_MAX:-180}"
+POLL_SEC="${NOTARY_POLL_SEC:-30}"
+echo "==> Submission ${SUBMISSION_ID}; polling Apple (up to $((POLL_MAX * POLL_SEC / 60)) min)"
 
 NOTARY_STATUS=""
-for poll in $(seq 1 80); do
+started="${SECONDS}"
+for poll in $(seq 1 "${POLL_MAX}"); do
 	if xcrun notarytool info "${SUBMISSION_ID}" "${notary_auth[@]}" --output-format json >"${INFO_JSON}"; then
 		NOTARY_STATUS="$(json_field "${INFO_JSON}" status)"
-		echo "    poll ${poll}: ${NOTARY_STATUS}"
+		echo "    poll ${poll}/${POLL_MAX} (+$((SECONDS - started))s): ${NOTARY_STATUS}"
 		case "${NOTARY_STATUS}" in
 		Accepted) break ;;
-		Invalid | Rejected)
-			echo "notarization failed: status=${NOTARY_STATUS} id=${SUBMISSION_ID}" >&2
-			NOTARY_STATUS="${NOTARY_STATUS}"
-			break
-			;;
+		Invalid | Rejected) break ;;
 		esac
 	else
-		echo "    poll ${poll}: network error, retrying"
+		echo "    poll ${poll}/${POLL_MAX}: network error, retrying"
 	fi
-	sleep 20
+	sleep "${POLL_SEC}"
 done
 
 if [[ "${NOTARY_STATUS}" != "Accepted" ]]; then
-	echo "notarization failed: status=${NOTARY_STATUS} id=${SUBMISSION_ID}" >&2
+	if [[ "${NOTARY_STATUS}" == "In Progress" || -z "${NOTARY_STATUS}" ]]; then
+		echo "notarization still In Progress after $((SECONDS - started))s id=${SUBMISSION_ID}" >&2
+		echo "Apple has the upload; the poll window expired. Re-run notarize or check:" >&2
+	else
+		echo "notarization failed: status=${NOTARY_STATUS} id=${SUBMISSION_ID}" >&2
+	fi
 	LOG_JSON="$(mktemp "${TMPDIR:-/tmp}/edr-notary-log.XXXXXX")"
 	if [[ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
 		xcrun notarytool log "${SUBMISSION_ID}" \
