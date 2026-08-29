@@ -20,6 +20,19 @@ if [[ -z "${AGENT}" || ! -f "${AGENT}" ]]; then
 	exit 1
 fi
 
+want_lipo=""
+case "${GOARCH:-$(go env GOARCH)}" in
+amd64) want_lipo=x86_64 ;;
+arm64 | aarch64) want_lipo=arm64 ;;
+esac
+if [[ -n "${want_lipo}" ]] && command -v lipo >/dev/null 2>&1; then
+	got_lipo="$(lipo -archs "${AGENT}" 2>/dev/null || true)"
+	if ! grep -qw "${want_lipo}" <<<"${got_lipo}"; then
+		echo "error: ${AGENT} is ${got_lipo:-unknown}, need ${want_lipo} (GOARCH=${GOARCH:-})" >&2
+		exit 1
+	fi
+fi
+
 if [[ -z "${OUT}" ]]; then
 	if [[ "${GOOS:-$(go env GOOS)}" == "windows" ]]; then
 		OUT="${ROOT}/bin/edr-installer-embedded.exe"

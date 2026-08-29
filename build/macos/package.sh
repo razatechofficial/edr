@@ -70,10 +70,10 @@ fi
 
 EDR_BASE="/Library/Application Support/EDR"
 RULES_BASELINE="${EDR_BASE}/config/rules/baseline.yaml"
-PKG_ROOT="pkg/macos/root"
-
-rm -rf "${PKG_ROOT}/etc/edr-agent" "${PKG_ROOT}/usr/local/libexec" "${PKG_ROOT}/Applications" \
-	"${PKG_ROOT}/Library"
+# Separate roots so attended cannot pick up a leftover Intel/Homebrew sensor
+# from a previous fleet staging pass (or a dirty runner workspace).
+PKG_ROOT="pkg/macos/root-${PKG_MODE}"
+rm -rf "${PKG_ROOT}"
 AGENT_APP="/usr/local/libexec/edr-agent.app"
 AGENT_BIN="${AGENT_APP}/Contents/MacOS/edr-agent"
 
@@ -264,7 +264,7 @@ EOF
 chmod 755 pkg/macos/scripts/preinstall
 
 mkdir -p dist pkg/macos
-COMPONENT="pkg/macos/edr-agent-component.pkg"
+COMPONENT="pkg/macos/edr-agent-component-${PKG_MODE}.pkg"
 pkgbuild \
 	--root "${PKG_ROOT}" \
 	--scripts pkg/macos/scripts \

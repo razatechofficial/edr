@@ -69,13 +69,29 @@ if [[ "${inst_size}" -lt 8000000 ]]; then
 	exit 1
 fi
 
-agent_bin="$(find "${tmpdir}/expanded" -path '*/edr-agent.app/Contents/MacOS/edr-agent' -print -quit)"
-if [[ -z "${agent_bin}" ]]; then
-	agent_bin="$(find "${tmpdir}/expanded" -path '*/usr/local/bin/edr-agent' -print -quit)"
+# Attended must not pre-install the sensor — that leftover is how the wrong
+# slice / Homebrew libyara binary leaked into Setup.pkg.
+if [[ "${fleet}" -eq 0 ]]; then
+	stale="$(find "${tmpdir}/expanded" \( \
+		-path '*/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent' -o \
+		-path '*/usr/local/bin/edr-agent' \
+	\) -print -quit)"
+	if [[ -n "${stale}" ]]; then
+		echo "attended pkg must not contain a preinstalled sensor: ${stale}" >&2
+		exit 1
+	fi
 fi
-if [[ "${fleet}" -eq 1 && -z "${agent_bin}" ]]; then
-	echo "missing edr-agent binary in fleet pkg payload" >&2
-	exit 1
+
+agent_bin=""
+if [[ "${fleet}" -eq 1 ]]; then
+	agent_bin="$(find "${tmpdir}/expanded" -path '*/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent' -print -quit)"
+	if [[ -z "${agent_bin}" ]]; then
+		agent_bin="$(find "${tmpdir}/expanded" -path '*/usr/local/bin/edr-agent' -print -quit)"
+	fi
+	if [[ -z "${agent_bin}" ]]; then
+		echo "missing edr-agent binary in fleet pkg payload" >&2
+		exit 1
+	fi
 fi
 
 want_arch=""
@@ -84,7 +100,7 @@ case "${base}" in
 *_arm64.pkg|*_apple-silicon.pkg|*darwin-arm64*) want_arch=arm64 ;;
 esac
 
-check_arch_and_yara() {
+check_arch() {
 	local bin="$1"
 	local label="$2"
 	if [[ -z "${bin}" || -z "${want_arch}" ]] || ! command -v lipo >/dev/null 2>&1; then
@@ -93,10 +109,20 @@ check_arch_and_yara() {
 	local got
 	got="$(lipo -archs "${bin}" 2>/dev/null || true)"
 	if ! grep -qw "${want_arch}" <<<"${got}"; then
-		echo "${label} should contain ${want_arch}, lipo reported: ${got:-unknown}" >&2
+		echo "${label} should contain ${want_arch}, lipo reported: ${got:-unknown} (${bin})" >&2
 		exit 1
 	fi
-	if command -v otool >/dev/null 2>&1 && otool -L "${bin}" | grep -Eiq 'libyara|/opt/yara/|/Cellar/yara/'; then
+}
+
+# Console/installer must not link Homebrew YARA. The sensor may link a
+# bundled libyara.dylib under @executable_path/../Frameworks.
+check_no_homebrew_yara() {
+	local bin="$1"
+	local label="$2"
+	if [[ -z "${bin}" ]] || ! command -v otool >/dev/null 2>&1; then
+		return 0
+	fi
+	if otool -L "${bin}" | grep -Eiq '/opt/yara/|/Cellar/yara/|/usr/local/opt/yara/'; then
 		echo "${label} must not link Homebrew libyara" >&2
 		otool -L "${bin}" >&2 || true
 		exit 1
@@ -105,13 +131,20 @@ check_arch_and_yara() {
 
 if [[ -n "${want_arch}" ]] && command -v lipo >/dev/null 2>&1; then
 	if [[ -n "${agent_bin}" ]]; then
-		check_arch_and_yara "${agent_bin}" "edr-agent"
+		check_arch "${agent_bin}" "edr-agent"
+		check_no_homebrew_yara "${agent_bin}" "edr-agent"
 	fi
-	check_arch_and_yara "$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui')" "EDR Agent.app UI"
-	check_arch_and_yara "$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edrctl')" "EDR Agent.app edrctl"
-	check_arch_and_yara "${installer_bin}" "EDR Agent.app installer"
+	ui_bin="$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui')"
+	ctl_app="$(find_payload '*/Applications/EDR Agent.app/Contents/MacOS/edrctl')"
+	check_arch "${ui_bin}" "EDR Agent.app UI"
+	check_arch "${ctl_app}" "EDR Agent.app edrctl"
+	check_arch "${installer_bin}" "EDR Agent.app installer"
+	check_no_homebrew_yara "${ui_bin}" "EDR Agent.app UI"
+	check_no_homebrew_yara "${ctl_app}" "EDR Agent.app edrctl"
+	check_no_homebrew_yara "${installer_bin}" "EDR Agent.app installer"
 	if [[ "${fleet}" -eq 1 ]]; then
-		check_arch_and_yara "$(find_payload '*/usr/local/bin/edrctl')" "usr/local/bin/edrctl"
+		check_arch "$(find_payload '*/usr/local/bin/edrctl')" "usr/local/bin/edrctl"
+		check_no_homebrew_yara "$(find_payload '*/usr/local/bin/edrctl')" "usr/local/bin/edrctl"
 	fi
 fi
 
