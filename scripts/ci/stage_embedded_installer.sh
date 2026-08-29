@@ -82,8 +82,26 @@ if [[ -n "${CTL}" && -f "${CTL}" ]]; then
 fi
 
 mkdir -p "$(dirname "${OUT}")"
-GOOS="${GOOS:-$(go env GOOS)}" GOARCH="${GOARCH:-$(go env GOARCH)}" \
+# setup_macos_build.sh exports CGO_* with Homebrew libyara for the sensor.
+# The installer only needs Security.framework (Keychain). Inheriting -lyara
+# makes Hardened Runtime reject EDR Agent.app and fails verify_macos_pkg.sh.
+export CGO_CFLAGS=
+export CGO_CPPFLAGS=
+export CGO_LDFLAGS=
+target_os="${GOOS:-$(go env GOOS)}"
+if [[ "${target_os}" == "darwin" ]]; then
+	export CGO_ENABLED=1
+fi
+GOOS="${target_os}" GOARCH="${GOARCH:-$(go env GOARCH)}" \
 	go build -trimpath -tags embedbundle -ldflags "${LDFLAGS:-}" \
 	-o "${OUT}" ./cmd/installer
+
+if [[ "${target_os}" == "darwin" ]] && command -v otool >/dev/null 2>&1; then
+	if otool -L "${OUT}" | grep -Eiq '/opt/yara/|/Cellar/yara/|/usr/local/opt/yara/'; then
+		echo "error: ${OUT} linked Homebrew libyara; CGO flags leaked into the installer" >&2
+		otool -L "${OUT}" >&2 || true
+		exit 1
+	fi
+fi
 
 echo "embedded installer: ${OUT}"
