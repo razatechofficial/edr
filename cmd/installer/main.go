@@ -361,6 +361,9 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		fmt.Printf("    warning: %v\n", err)
 	}
 
+	fmt.Println("==> Stopping leftover sensor processes")
+	stopProductProcesses()
+
 	fmt.Println("==> Removing login autostart")
 	removeLoginAutostart()
 
@@ -390,11 +393,8 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("    removed %s\n", p)
 		}
 	}
-	if runtime.GOOS == "darwin" {
-		if err := os.RemoveAll("/Applications/EDR Agent.app"); err != nil && !os.IsNotExist(err) {
-			fmt.Printf("    warning: removing EDR Agent.app: %v\n", err)
-		}
-	}
+	fmt.Println("==> Removing leftover install trees")
+	purgeTrees(extraPurgeTrees())
 
 	fmt.Println("==> Removing configuration")
 	for _, name := range []string{installedConfigFileName(), "agent.yaml", "config.yml", "enrollment.token", "com.razatech.edr.enrollment-token"} {
@@ -423,9 +423,17 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		if runtime.GOOS == "windows" {
 			_ = runCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name=EDR Agent")
 		}
+		purgeUserConsoleState()
 	} else {
 		fmt.Printf("    --keep-data: left %s in place\n", paths.dataDir)
 	}
+
+	fmt.Println("==> Forgetting installer receipts")
+	forgetPackageReceipts()
+	removeInstanceLocks()
+
+	fmt.Println("==> Closing the installed console")
+	quitInstalledConsole()
 
 	fmt.Println("==> Uninstallation complete")
 	return nil

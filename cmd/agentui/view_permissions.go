@@ -59,6 +59,7 @@ func (c *console) onOpenSettings() {
 	c.permOpened = true
 	c.permRecheck.Enable()
 	c.permLine.SetText("Open the system pane, grant access, then Recheck. Do not skip.")
+	c.applyGrantButtonLabel()
 	go func() {
 		err := hostperm.OpenSettings(id)
 		if err == nil {
@@ -66,6 +67,23 @@ func (c *console) onOpenSettings() {
 		}
 		fyne.Do(func() {
 			c.setPermGuide("Could not open System Settings. " + permGuide())
+		})
+	}()
+}
+
+func (c *console) refreshPermissionsAndPrompt(openSettings bool) {
+	c.paintPermChecking()
+	go func() {
+		hostperm.EnsurePromptedItems()
+		rep := hostperm.Evaluate()
+		fyne.Do(func() {
+			c.applyPermReport(rep, true)
+			if !openSettings {
+				return
+			}
+			if c.currentPermActionID() != "" {
+				c.onOpenSettings()
+			}
 		})
 	}()
 }
@@ -108,7 +126,7 @@ func (c *console) paintPermChecking() {
 	c.permBox.Objects = nil
 	items := c.permItems
 	if len(items) == 0 {
-		items = hostperm.GrantItems(hostperm.EvaluateQuick())
+		items = hostperm.PromptItems(hostperm.EvaluateQuick())
 	}
 	for _, it := range items {
 		st := checkWait
@@ -124,7 +142,7 @@ func (c *console) paintPermChecking() {
 }
 
 func (c *console) applyPermReport(rep hostperm.Report, fromUser bool) {
-	c.permItems = hostperm.GrantItems(rep)
+	c.permItems = hostperm.PromptItems(rep)
 	c.renderPermissions(rep)
 	if hostperm.GrantsReady(rep) {
 		c.setPermGuide("")
@@ -149,7 +167,7 @@ func (c *console) renderPermissions(rep hostperm.Report) {
 		return
 	}
 	c.permBox.Objects = nil
-	items := hostperm.GrantItems(rep)
+	items := hostperm.PromptItems(rep)
 	optionalAction := false
 	waiting := false
 	for _, it := range items {
@@ -177,6 +195,7 @@ func (c *console) renderPermissions(rep hostperm.Report) {
 
 	c.grantBtn.Enable()
 	c.permRecheck.Enable()
+	c.applyGrantButtonLabel()
 	ready := hostperm.GrantsReady(rep)
 	if ready {
 		if optionalAction {
@@ -226,6 +245,20 @@ func (c *console) setPermFault(f uiFault) {
 		return
 	}
 	c.setPermGuide(f.Detail)
+}
+
+func (c *console) applyGrantButtonLabel() {
+	if c.grantBtn == nil {
+		return
+	}
+	id := c.currentPermActionID()
+	for _, it := range c.permItems {
+		if it.ID == id && it.SettingsLabel != "" {
+			c.grantBtn.SetText(it.SettingsLabel)
+			return
+		}
+	}
+	c.grantBtn.SetText(openSettingsLabel())
 }
 
 func permGuide() string {

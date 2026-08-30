@@ -30,8 +30,18 @@ func invokeUIShow() {
 	}
 }
 
+// instancePortFile is per entry point so Setup never activates the installed
+// console (and the console never swallows a Setup launch). Chrome / Falcon /
+// WiX Modify keep the installer and the product UI on separate locks.
 func instancePortFile() string {
-	return filepath.Join(os.TempDir(), "com.razatech.edr.console.port")
+	return filepath.Join(os.TempDir(), instancePortName(flagSetup))
+}
+
+func instancePortName(setup bool) string {
+	if setup {
+		return "com.razatech.edr.setup.port"
+	}
+	return "com.razatech.edr.console.port"
 }
 
 // claimUIInstance holds a localhost listener so a second launch (Applications /

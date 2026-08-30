@@ -44,13 +44,14 @@ type console struct {
 	receiptBox      *fyne.Container
 	receiptContinue *widget.Button
 
-	permHint     *widget.Label
-	permLine     *widget.Label
-	permBox      *fyne.Container
-	permFaultBox *fyne.Container
-	permItems    []hostperm.Item
-	permOpened   bool
-	grantBtn     *widget.Button
+	permHint       *widget.Label
+	permLine       *widget.Label
+	permBox        *fyne.Container
+	permFaultBox   *fyne.Container
+	permItems      []hostperm.Item
+	permOpened     bool
+	permAutoOpened bool
+	grantBtn       *widget.Button
 	permRecheck  *widget.Button
 	permContinue *widget.Button
 
@@ -111,6 +112,7 @@ type console struct {
 
 	screen     uistate.Screen
 	busy       bool
+	removed    bool
 	last       operatorStatus
 	flyoutOpen bool
 }
@@ -122,7 +124,11 @@ func runDashboard() error {
 	}
 	defer release()
 
-	a := app.NewWithID("com.razatech.edr.console")
+	appID := "com.razatech.edr.console"
+	if flagSetup {
+		appID = "com.razatech.edr.setup"
+	}
+	a := app.NewWithID(appID)
 	a.Settings().SetTheme(edrTheme{})
 	a.SetIcon(edrIcon())
 
@@ -156,6 +162,9 @@ func runDashboard() error {
 	c.setupTray()
 	registerAppActivate()
 	setBecomeActive(func() {
+		if c.removed {
+			return
+		}
 		if c.screen != uistate.Dash {
 			return
 		}
@@ -174,7 +183,17 @@ func runDashboard() error {
 		c.showDash()
 	})
 	setUIShow(func() {
-		fyne.Do(func() { c.showDecoratedDash() })
+		fyne.Do(func() {
+			if c.removed {
+				c.enterRemovedState()
+				return
+			}
+			if flagSetup {
+				c.routeSetupEntry()
+				return
+			}
+			c.showDecoratedDash()
+		})
 	})
 
 	go func() {
@@ -186,11 +205,11 @@ func runDashboard() error {
 	}()
 
 	w.SetCloseIntercept(func() {
-		if c.hasTray() {
-			w.Hide()
+		if c.removed || !c.hasTray() {
+			a.Quit()
 			return
 		}
-		a.Quit()
+		w.Hide()
 	})
 
 	go func() {
@@ -209,6 +228,9 @@ func runDashboard() error {
 			st := loadStatus()
 			res := sampleResources(st)
 			fyne.Do(func() {
+				if c.removed {
+					return
+				}
 				c.last = st
 				if c.screen == uistate.Dash {
 					c.applyDashboard(st, res)
@@ -226,13 +248,21 @@ func runDashboard() error {
 }
 
 func (c *console) routeInitial() {
+	if c.removed {
+		c.enterRemovedState()
+		return
+	}
 	installed := agentInstalled()
-	if flagSetup && installed {
-		c.paintSetupManage()
+	next := uistate.Route(flagSetup, installed, c.last.Enrolled, needsOSGrants(), serviceHealthy(c.last.Service))
+	if flagSetup {
+		c.routeSetupEntry()
+		return
+	}
+	if !installed {
+		c.paintOrphanConsole()
 		c.show(uistate.Setup)
 		return
 	}
-	next := uistate.InitialScreen(installed, c.last.Enrolled, needsOSGrants(), serviceHealthy(c.last.Service))
 	if next == uistate.Dash {
 		if flagTray {
 			c.screen = uistate.Dash
@@ -245,7 +275,20 @@ func (c *console) routeInitial() {
 	c.show(next)
 }
 
+func (c *console) routeSetupEntry() {
+	if agentInstalled() {
+		c.paintSetupManage()
+	} else {
+		c.paintSetupLicense()
+	}
+	c.show(uistate.Setup)
+}
+
 func (c *console) show(id uistate.Screen) {
+	if c.removed && id != uistate.Setup {
+		c.enterRemovedState()
+		return
+	}
 	c.screen = id
 	if id == uistate.Dash {
 		c.returnToDash()
@@ -275,7 +318,12 @@ func (c *console) show(id uistate.Screen) {
 		c.win.SetContent(c.receiptContent)
 	case uistate.Permissions:
 		c.win.SetContent(c.permContent)
-		c.refreshPermissions(false)
+		if !c.permAutoOpened {
+			c.permAutoOpened = true
+			c.refreshPermissionsAndPrompt(true)
+		} else {
+			c.refreshPermissions(false)
+		}
 	case uistate.Preflight:
 		c.win.SetContent(c.preflightContent)
 		go c.runPreflight()

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -156,11 +158,12 @@ func (c *console) startSensor() {
 				if f.Detail == "" && err != nil {
 					f.Detail = err.Error()
 				}
-				c.setPreflightFault(f)
+				c.setPreflightFault(uiFault{})
 				c.setDashFault(f)
 				if c.preflightLine != nil {
-					c.preflightLine.SetText(f.Title)
+					c.preflightLine.SetText("Start did not finish.")
 				}
+				c.presentStartFault(f)
 				c.applyDashboard(st, sampleResources(st))
 				return
 			}
@@ -181,4 +184,12 @@ func (c *console) setPreflightFault(f uiFault) {
 		c.preflightFaultBox.Add(faultCard(f))
 	}
 	c.preflightFaultBox.Refresh()
+}
+
+func (c *console) presentStartFault(f uiFault) {
+	msg := widget.NewLabel(strings.TrimSpace(f.Body + "\n\n" + f.Detail))
+	msg.Wrapping = fyne.TextWrapWord
+	d := dialog.NewCustom(f.Title, firstNonEmpty(f.Action, "OK"), msg, c.win)
+	d.Resize(fyne.NewSize(400, 220))
+	d.Show()
 }

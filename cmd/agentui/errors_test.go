@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestClassifyEnrollError(t *testing.T) {
 	if classifyEnrollError("dial enrollment: i/o timeout").Title != "Can’t reach the enrollment service" {
@@ -17,6 +20,9 @@ func TestClassifyEnrollError(t *testing.T) {
 	}
 	if classifyStartError("sensor did not stay running (status not running)").Title != "The sensor could not start" {
 		t.Fatal("start running")
+	}
+	if !strings.Contains(classifyStartError("local sensor binary not found next to edrctl").Body, "EDR-Agent-Setup") {
+		t.Fatal("missing sensor copy")
 	}
 }
 

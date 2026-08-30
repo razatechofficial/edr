@@ -174,6 +174,9 @@ func metricCell(kind string, wellCol color.NRGBA, value *canvas.Text, label stri
 }
 
 func (c *console) applyDashboard(st operatorStatus, res resourceSnapshot) {
+	if c.removed {
+		return
+	}
 	k, lamps := decorateHealth(st)
 	hero := colorOK
 	kind := heroOK
@@ -297,6 +300,10 @@ func (c *console) updateDashAction(st operatorStatus) {
 	if c.dashAction == nil {
 		return
 	}
+	if c.removed {
+		c.dashAction.Hide()
+		return
+	}
 	was := c.dashTail != nil && c.dashTail.Visible()
 	show := false
 	if !st.Enrolled {
@@ -386,6 +393,10 @@ func (c *console) flyoutWindow() fyne.Window {
 }
 
 func (c *console) showDash() {
+	if c.removed {
+		c.enterRemovedState()
+		return
+	}
 	c.screen = uistate.Dash
 	lastTrayTap = time.Now()
 	if c.win != nil && c.win != c.flyoutWindow() {
@@ -527,11 +538,7 @@ func (c *console) onUninstall() {
 						c.setDashFault(classifyInstallError(out + "\n" + err.Error()))
 						return
 					}
-					c.setDashFault(uiFault{
-						Title:  "EDR Agent was removed",
-						Body:   "This computer is no longer protected. You can close this window.",
-						Action: "Close",
-					})
+					c.enterRemovedState()
 				})
 			}()
 		},

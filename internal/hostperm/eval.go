@@ -13,11 +13,29 @@ func IsGrantID(id string) bool {
 	}
 }
 
+// IsPromptID is true for rows the first-run grants screen should show and
+// open System Settings for: OS grants plus the login-item / startup prompt.
+func IsPromptID(id string) bool {
+	return IsGrantID(id) || id == IDLoginUI
+}
+
 // GrantItems returns the OS-grant subset of a catalog report.
 func GrantItems(r Report) []Item {
 	out := make([]Item, 0, 4)
 	for _, it := range r.Items {
 		if IsGrantID(it.ID) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// PromptItems is the first-run grants list: FDA / firewall / extensions
+// plus Login Items so the operator is asked to allow the console at login.
+func PromptItems(r Report) []Item {
+	out := make([]Item, 0, 6)
+	for _, it := range r.Items {
+		if IsPromptID(it.ID) {
 			out = append(out, it)
 		}
 	}
@@ -73,6 +91,12 @@ func evaluate(quick bool) Report {
 		}
 	}
 	return r
+}
+
+// EnsurePromptedItems registers OS login/startup hooks so the system can
+// show its native prompt (macOS Login Items, etc.) before Recheck.
+func EnsurePromptedItems() {
+	ensureLoginItem()
 }
 
 // NeedsGrants is true when a required OS grant (FDA / firewall / caps) is

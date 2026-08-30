@@ -288,10 +288,45 @@ func siblingTool(name string) string {
 	return p
 }
 
+func sensorBinaryCandidates() []string {
+	var out []string
+	if s := siblingTool("edr-agent"); s != "" {
+		out = append(out, s)
+	}
+	out = append(out,
+		"/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent",
+		"/Library/Application Support/EDR/bin/edr-agent",
+		"/usr/local/bin/edr-agent",
+	)
+	return out
+}
+
+func resolveSensorBinary() (string, error) {
+	for _, p := range sensorBinaryCandidates() {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("local sensor binary not found (expected edr-agent in /usr/local/bin or Application Support)")
+}
+
+func isSiblingOfSelf(p string) bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return filepath.Clean(filepath.Dir(p)) == filepath.Clean(filepath.Dir(exe))
+}
+
 func installLocalSensorBinary() (string, error) {
-	src := siblingTool("edr-agent")
-	if src == "" {
-		return "", fmt.Errorf("local sensor binary not found next to edrctl (expected edr-agent)")
+	src, err := resolveSensorBinary()
+	if err != nil {
+		return "", err
+	}
+	// Attended Setup already copied the sensor to a system path. Use it.
+	// Only copy when this is a loose zip (edr-agent next to edrctl).
+	if !isSiblingOfSelf(src) {
+		return src, nil
 	}
 	// Do not write into the signed .app — macOS and self-protect deny that (EPERM).
 	dst := "/Library/Application Support/EDR/bin/edr-agent"

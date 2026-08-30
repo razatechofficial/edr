@@ -24,8 +24,13 @@ sc stop EDRAgent >nul 2>&1
 sc delete EDRAgent >nul 2>&1
 reg delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "EDR Agent" /f >nul 2>&1
 
+taskkill /F /IM edr-agent.exe >nul 2>&1
+taskkill /F /IM edr-agent-ui.exe >nul 2>&1
+
 if exist "%INSTALLDIR%" rmdir /s /q "%INSTALLDIR%" >nul 2>&1
 if exist "%ProgramData%\EDR Agent" rmdir /s /q "%ProgramData%\EDR Agent" >nul 2>&1
+if exist "%ProgramData%\EDR\setup" rmdir /s /q "%ProgramData%\EDR\setup" >nul 2>&1
+if exist "%ProgramData%\EDR" rmdir /s /q "%ProgramData%\EDR" >nul 2>&1
 
 netsh advfirewall firewall delete rule name="EDR Agent" >nul 2>&1
 

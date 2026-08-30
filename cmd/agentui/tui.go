@@ -92,7 +92,15 @@ func linuxManage(in *bufio.Reader) (continueWizard bool, err error) {
 		if uerr != nil {
 			return false, fmt.Errorf("%s", classifyInstallError(out + "\n" + uerr.Error()).Title)
 		}
-		return linuxSetupFresh(in)
+		fmt.Println()
+		fmt.Println("EDR Agent was removed. This host is no longer protected.")
+		fmt.Print("Install again? [y/N]: ")
+		again, _ := in.ReadString('\n')
+		again = strings.TrimSpace(strings.ToLower(again))
+		if again == "y" || again == "yes" {
+			return linuxSetupFresh(in)
+		}
+		return false, nil
 	case "q", "quit":
 		return false, nil
 	default:

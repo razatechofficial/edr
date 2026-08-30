@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
@@ -441,8 +442,7 @@ func (c *console) onUninstallFromSetup() {
 						c.presentSetupFault(classifyInstallError(out + "\n" + err.Error()))
 						return
 					}
-					c.last = operatorStatus{}
-					c.paintSetupLicense()
+					c.enterRemovedState()
 				})
 			}()
 		},
@@ -451,4 +451,72 @@ func (c *console) onUninstallFromSetup() {
 	d.SetDismissText("Cancel")
 	d.SetConfirmText("Uninstall")
 	d.Show()
+}
+
+func (c *console) enterRemovedState() {
+	c.removed = true
+	c.last = operatorStatus{}
+	c.busy = false
+	c.flyoutOpen = false
+	if c.pop != nil {
+		c.pop.Hide()
+	}
+	if desk, ok := c.app.(desktop.App); ok {
+		desk.SetSystemTrayMenu(nil)
+	}
+	if c.dashAction != nil {
+		c.dashAction.Hide()
+	}
+	c.paintSetupRemoved()
+	c.show(uistate.Setup)
+}
+
+func (c *console) paintSetupRemoved() {
+	c.setupPhase = "removed"
+	c.setupActions.Hide()
+	c.setupWorking.Hide()
+	c.setupLaunch.Hide()
+	c.setupLaunchHint.Hide()
+	c.setupProcess.Hide()
+	c.setupClose.Show()
+	c.setSetupFault(uiFault{})
+
+	closeBtn := widget.NewButton("Close", func() { c.app.Quit() })
+	closeBtn.Importance = widget.HighImportance
+	actions := []fyne.CanvasObject{closeBtn}
+	if flagSetup {
+		again := widget.NewButton("Install again", func() {
+			c.removed = false
+			c.permAutoOpened = false
+			c.paintSetupLicense()
+			c.show(uistate.Setup)
+		})
+		actions = []fyne.CanvasObject{again, closeBtn}
+	}
+
+	inner := pad5(vstack(0,
+		pageHeader("Uninstalled", colorDanger, "EDR Agent was removed", "This computer is no longer protected. The sensor, login items, and leftover files were removed."),
+		gapH(24),
+		vstack(8, actions...),
+	))
+	c.setSetupSheet(inner, 420)
+}
+
+func (c *console) paintOrphanConsole() {
+	c.setupPhase = "orphan"
+	c.setupActions.Hide()
+	c.setupWorking.Hide()
+	c.setupLaunch.Hide()
+	c.setupLaunchHint.Hide()
+	c.setupProcess.Hide()
+	c.setupClose.Show()
+	c.setSetupFault(uiFault{})
+	closeBtn := widget.NewButton("Close", func() { c.app.Quit() })
+	closeBtn.Importance = widget.HighImportance
+	inner := pad5(vstack(0,
+		pageHeader("Not installed", colorMuted, "edr is not on this computer", "Open EDR-Agent-Setup to install, or this window if you already uninstalled."),
+		gapH(24),
+		closeBtn,
+	))
+	c.setSetupSheet(inner, 400)
 }

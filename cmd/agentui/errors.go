@@ -165,7 +165,7 @@ func classifyStartError(raw string) uiFault {
 	case strings.Contains(s, "local sensor binary not found") || strings.Contains(s, "sensor binary missing"):
 		return uiFault{
 			Title:  "The sensor program is missing",
-			Body:   "Quit this window and launch the UI from the same folder as edr-agent.",
+			Body:   "Setup did not finish copying the sensor. Run EDR-Agent-Setup again and choose Update or Accept.",
 			Detail: firstLine(raw),
 			Action: "Try again",
 		}

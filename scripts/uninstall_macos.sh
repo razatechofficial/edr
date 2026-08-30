@@ -44,8 +44,18 @@ fi
 rm -f "${UI_PLIST}"
 rm -f /Library/LaunchAgents/com.razatech.edr.firstrun.plist
 
+killall -TERM edr-agent 2>/dev/null || true
+sleep 0.3
+killall -KILL edr-agent 2>/dev/null || true
+pkill -f "/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui" 2>/dev/null || true
+pkill -f "/usr/local/bin/edr-agent-ui" 2>/dev/null || true
+
 rm -f /usr/local/bin/edr-agent /usr/local/bin/edrctl /usr/local/bin/edr /usr/local/bin/edr-installer /usr/local/bin/edr-agent-ui
 rm -rf "/Applications/EDR Agent.app"
+rm -rf /usr/local/libexec/edr-agent.app
+pkgutil --forget com.razatech.edr-agent >/dev/null 2>&1 || true
+pkgutil --forget com.razatech.edr.consumer >/dev/null 2>&1 || true
+rm -f /tmp/com.razatech.edr.console.port /tmp/com.razatech.edr.setup.port /var/tmp/com.razatech.edr.console.port /var/tmp/com.razatech.edr.setup.port
 
 if [[ "${KEEP_DATA}" != "1" ]]; then
 	rm -rf "/Library/Application Support/EDR"

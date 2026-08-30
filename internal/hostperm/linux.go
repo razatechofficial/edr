@@ -96,9 +96,11 @@ func evaluateBoot(it Item) Item {
 	return ok(it, "systemd unit: "+out)
 }
 
+func ensureLoginItem() {}
+
 func evaluateLoginUI(it Item) Item {
 	if _, err := os.Stat("/etc/xdg/autostart/edr-agent-ui.desktop"); err != nil {
-		return na(it, "All-users autostart desktop entry is not installed yet.")
+		return action(it, "Autostart desktop entry is missing. Reinstall the package.")
 	}
 	return ok(it, "EDR Agent opens at graphical login for every user.")
 }

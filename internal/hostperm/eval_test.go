@@ -33,6 +33,27 @@ func TestIsGrantID(t *testing.T) {
 	}
 }
 
+func TestPromptItemsIncludesLogin(t *testing.T) {
+	if !IsPromptID(IDFDA) || !IsPromptID(IDLoginUI) {
+		t.Fatal("FDA and login items must be promptable")
+	}
+	if IsPromptID(IDBootStart) || IsPromptID(IDSpool) {
+		t.Fatal("boot/spool stay on preflight")
+	}
+	r := Report{Items: []Item{
+		{ID: IDFDA, Required: true, Status: StatusAction},
+		{ID: IDLoginUI, Required: false, Status: StatusAction},
+		{ID: IDSpool, Required: true, Status: StatusOK},
+	}}
+	got := PromptItems(r)
+	if len(got) != 2 || got[0].ID != IDFDA || got[1].ID != IDLoginUI {
+		t.Fatalf("%+v", got)
+	}
+	if !GrantsReady(Report{Items: r.Items[1:]}) {
+		t.Fatal("optional login item must not block Start")
+	}
+}
+
 func TestGrantsReadyIgnoresBoot(t *testing.T) {
 	r := Report{Items: []Item{
 		{ID: IDFDA, Required: true, Status: StatusOK},

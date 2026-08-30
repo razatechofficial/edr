@@ -40,6 +40,27 @@ func InitialScreen(installed, enrolled, needsGrants, serviceOK bool) Screen {
 	return Dash
 }
 
+// Route is the enterprise entry state machine:
+//
+//	Setup file, nothing installed  → license
+//	Setup file, already installed  → manage (update / reinstall / uninstall)
+//	Installed app, leftover / gone → orphan (not the running dashboard)
+//	Installed app, not enrolled    → enroll
+//	Installed app, grants missing  → permissions (FDA / login items)
+//	Installed app, sensor stopped  → preflight
+//	Installed app, healthy         → dashboard
+//
+// fromSetup is true for EDR-Agent-Setup.app / .exe / --setup only.
+func Route(fromSetup, installed, enrolled, needsGrants, serviceOK bool) Screen {
+	if fromSetup {
+		return Setup
+	}
+	if !installed {
+		return Setup
+	}
+	return InitialScreen(true, enrolled, needsGrants, serviceOK)
+}
+
 // ClassifyHealth splits sensor (local monitoring) from stream (ingest).
 // A running sensor with a down stream is degraded, not unprotected (NIST SI-4).
 func ClassifyHealth(enrolled, serviceOK, streamOK, isolated bool) Health {

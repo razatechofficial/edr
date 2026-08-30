@@ -63,9 +63,9 @@ func openSettingsLabel() string {
 func permBody() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "Grant access in System Settings, then Recheck. The sensor cannot start until every item is green."
+		return "System Settings opens to Full Disk Access and Login Items. Enable edr, then Recheck. The sensor cannot start until required items are green."
 	case "windows":
-		return "Allow edr through Windows Firewall if prompted, then Recheck."
+		return "Allow edr through Windows Firewall if prompted, then Recheck. Startup apps can be opened from this screen."
 	default:
 		return "Linux has no grant wizard. Capabilities are checked at Start."
 	}

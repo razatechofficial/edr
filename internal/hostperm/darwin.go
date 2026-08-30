@@ -86,11 +86,12 @@ func catalog() []Item {
 			Required: true,
 		},
 		{
-			ID:       IDLoginUI,
-			Title:    "Console at user login",
-			Doing:    "Checking the all-users Login Item…",
-			Guide:    "A LaunchAgent in /Library/LaunchAgents opens edr at login for every user. Reinstall if this is missing.",
-			Required: false,
+			ID:            IDLoginUI,
+			Title:         "Console at user login",
+			Doing:         "Waiting for the Login Item…",
+			SettingsLabel: "Open Login Items",
+			Guide:         "System Settings → General → Login Items → allow edr in the Background. Then Recheck.",
+			Required:      false,
 		},
 		{
 			ID:       IDService,
@@ -213,21 +214,38 @@ func evaluateBoot(it Item) Item {
 	return ok(it, "LaunchDaemon starts at boot for every user of this Mac.")
 }
 
-func evaluateLoginUI(it Item) Item {
+func ensureLoginItem() {
 	plist := "/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
 	if _, err := os.Stat(plist); err != nil {
-		return na(it, "")
+		return
+	}
+	uid := os.Getuid()
+	domain := fmt.Sprintf("gui/%d", uid)
+	label := domain + "/com.razatech.edr-agent-ui"
+	out, err := runOutput(2*time.Second, "launchctl", "print", label)
+	low := strings.ToLower(out)
+	if err == nil && !strings.Contains(low, "could not find") && !strings.Contains(low, "service not found") {
+		return
+	}
+	_ = exec.Command("launchctl", "bootstrap", domain, plist).Start()
+}
+
+func evaluateLoginUI(it Item) Item {
+	it.SettingsLabel = "Open Login Items"
+	it.Guide = "System Settings → General → Login Items → allow edr in the Background. Then Recheck."
+	plist := "/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
+	if _, err := os.Stat(plist); err != nil {
+		return action(it, "Login item is not registered. Reinstall from Setup, then allow edr in Login Items.")
 	}
 	uid := os.Getuid()
 	label := fmt.Sprintf("gui/%d/com.razatech.edr-agent-ui", uid)
 	out, err := runOutput(2*time.Second, "launchctl", "print", label)
 	low := strings.ToLower(out)
 	if err != nil || strings.Contains(low, "could not find") || strings.Contains(low, "service not found") {
-		it.Guide = "System Settings → General → Login Items → enable edr, then Recheck."
 		it.Doing = "Waiting for the login item…"
-		return action(it, "")
+		return action(it, "Allow edr under Login Items & Extensions, then Recheck.")
 	}
-	return ok(it, "")
+	return ok(it, "Console opens at login for every user.")
 }
 
 func evaluateService(it Item) Item {

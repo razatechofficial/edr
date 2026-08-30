@@ -32,10 +32,12 @@ func catalog() []Item {
 			Required: true,
 		},
 		{
-			ID:       IDLoginUI,
-			Title:    "Console at user login",
-			Doing:    "Checking the all-users startup entry…",
-			Required: false,
+			ID:            IDLoginUI,
+			Title:         "Console at user login",
+			Doing:         "Checking the all-users startup entry…",
+			SettingsLabel: "Open Startup apps",
+			Guide:         "Settings → Apps → Startup → enable EDR Agent. Then Recheck.",
+			Required:      false,
 		},
 		{
 			ID:       IDService,
@@ -102,10 +104,14 @@ func evaluateBoot(it Item) Item {
 	return ok(it, "EDRAgent service is registered.")
 }
 
+func ensureLoginItem() {}
+
 func evaluateLoginUI(it Item) Item {
+	it.SettingsLabel = "Open Startup apps"
+	it.Guide = "Settings → Apps → Startup → enable EDR Agent. Then Recheck."
 	out, err := runOutput(0, "reg", "query", `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "EDR Agent")
 	if err != nil || strings.TrimSpace(out) == "" {
-		return na(it, "All-users startup entry is not installed yet.")
+		return action(it, "Startup entry is missing. Reinstall from Setup, then allow EDR Agent at login.")
 	}
 	return ok(it, "EDR Agent opens at login for every user.")
 }
@@ -121,9 +127,11 @@ func evaluateService(it Item) Item {
 	return ok(it, "Service is installed. Start loads the sensor.")
 }
 
-// OpenSettings opens Windows Security / firewall.
+// OpenSettings opens Windows Security / firewall or Startup apps.
 func OpenSettings(id string) error {
-	_ = id
+	if id == IDLoginUI {
+		return exec.Command("cmd", "/c", "start", "", "ms-settings:startupapps").Start()
+	}
 	_ = exec.Command("cmd", "/c", "start", "", "windowsdefender:").Start()
 	_ = exec.Command("cmd", "/c", "start", "", "ms-settings:windowsdefender").Start()
 	return exec.Command("control", "firewall.cpl").Start()
