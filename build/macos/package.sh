@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# macOS .pkg builder (release CI).
-# Default EDR_PKG_MODE=attended: the pkg only drops EDR Agent.app (UI +
-# embedded installer). Apple Installer authenticates; our wizard is license
-# → copy files → enroll → dashboard.
+# macOS package builder (release CI).
+# Attended download is EDR-Agent-Setup.app (zip/dmg) — custom Fyne wizard.
+# The .pkg is optional (Apple Installer.app); testers should not use it.
 # EDR_PKG_MODE=fleet EDR_PKG_SUFFIX=-mdm: also ships LaunchDaemon + models
 # for MDM. Silent: /Applications/EDR Agent.app/Contents/MacOS/edr-installer install
 set -euo pipefail
@@ -130,6 +129,8 @@ fi
 fi
 
 bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${CTL_BIN}" "${PKG_ROOT}/Applications/EDR Agent.app" "${INSTALLER_BIN}"
+# Same payload as a double-clickable Setup.app (no Apple Installer.app chrome).
+bash "${ROOT}/scripts/ci/macos_setup_archive.sh" "${UI_BIN}" "${CTL_BIN}" "${INSTALLER_BIN}" "${ARCH}"
 
 if [[ "${PKG_MODE}" == "fleet" ]]; then
 if [[ -f "${ROOT}/deploy/macos/first-run-permissions.sh" ]]; then
@@ -306,3 +307,12 @@ productbuild \
 	"${PKG_OUT}"
 
 echo "macOS package: ${PKG_OUT} (${ARCH_TITLE}, ${PKG_MODE})"
+SETUP_ZIP="dist/EDR-Agent-Setup_apple-silicon.zip"
+if [[ "${ARCH}" == "amd64" ]]; then
+	SETUP_ZIP="dist/EDR-Agent-Setup_intel.zip"
+fi
+if [[ ! -f "${SETUP_ZIP}" ]]; then
+	echo "missing attended Setup zip: ${SETUP_ZIP}" >&2
+	exit 1
+fi
+echo "macOS attended setup: ${SETUP_ZIP} (open the .app — not the .pkg)"

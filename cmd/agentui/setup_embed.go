@@ -22,6 +22,13 @@ var (
 )
 
 func setupPayloadDir() string {
+	// Prefer a machine path after elevation. Writing an unsigned exe under
+	// %LOCALAPPDATA% and then running it elevated looks like a dropper to Defender.
+	if runtime.GOOS == "windows" {
+		if pd := os.Getenv("ProgramData"); pd != "" {
+			return filepath.Join(pd, "EDR", "setup")
+		}
+	}
 	if d, err := os.UserCacheDir(); err == nil && d != "" {
 		return filepath.Join(d, "EDR", "setup")
 	}

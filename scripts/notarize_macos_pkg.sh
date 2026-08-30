@@ -53,9 +53,9 @@ elif ! pkgutil --check-signature "${PKG}" 2>/dev/null | grep -q "Developer ID In
 	exit 1
 fi
 
-# Prod-branch prereleases: Developer ID sign only. Apple has been leaving the
-# 63MB embedded Setup pkg In Progress for >90 minutes (scanner stall, not a
-# bad cert). Testers open with right-click → Open. Tag releases still notarize.
+# NOTARY_SKIP is a last-resort escape hatch. Prod prereleases should still
+# submit (see NOTARY_ALLOW_TIMEOUT) so testers get a stapled ticket when Apple
+# finishes; we no longer skip after store-credentials.
 if [[ "${NOTARY_SKIP:-}" == "1" || "${NOTARY_SKIP:-}" == "true" ]]; then
 	echo "==> Skipping Apple notary (NOTARY_SKIP=${NOTARY_SKIP}); pkg is Developer ID signed"
 	exit 0
@@ -103,7 +103,11 @@ if [[ "${submit_ok}" -ne 1 ]]; then
 fi
 
 SUBMISSION_ID="$(json_field "${SUBMIT_JSON}" id)"
-POLL_MAX="${NOTARY_POLL_MAX:-180}"
+if [[ "${NOTARY_ALLOW_TIMEOUT:-}" == "1" || "${NOTARY_ALLOW_TIMEOUT:-}" == "true" ]]; then
+	POLL_MAX="${NOTARY_POLL_MAX:-40}"
+else
+	POLL_MAX="${NOTARY_POLL_MAX:-180}"
+fi
 POLL_SEC="${NOTARY_POLL_SEC:-30}"
 echo "==> Submission ${SUBMISSION_ID}; polling Apple (up to $((POLL_MAX * POLL_SEC / 60)) min)"
 
@@ -126,6 +130,12 @@ done
 if [[ "${NOTARY_STATUS}" != "Accepted" ]]; then
 	if [[ "${NOTARY_STATUS}" == "In Progress" || -z "${NOTARY_STATUS}" ]]; then
 		echo "notarization still In Progress after $((SECONDS - started))s id=${SUBMISSION_ID}" >&2
+		if [[ "${NOTARY_ALLOW_TIMEOUT:-}" == "1" || "${NOTARY_ALLOW_TIMEOUT:-}" == "true" ]]; then
+			echo "NOTARY_ALLOW_TIMEOUT: keeping Developer ID signed pkg; Apple is still scanning." >&2
+			echo "  xcrun notarytool info ${SUBMISSION_ID} --keychain-profile ${NOTARY_KEYCHAIN_PROFILE:-<profile>}" >&2
+			echo "  xcrun stapler staple ${PKG}   # after Accepted" >&2
+			exit 0
+		fi
 		echo "Apple has the upload; the poll window expired. Re-run notarize or check:" >&2
 	else
 		echo "notarization failed: status=${NOTARY_STATUS} id=${SUBMISSION_ID}" >&2

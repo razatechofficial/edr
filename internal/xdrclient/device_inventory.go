@@ -145,7 +145,9 @@ func readFileTrim(paths ...string) string {
 }
 
 func runTrim(name string, args ...string) string {
-	out, err := exec.Command(name, args...).Output()
+	cmd := exec.Command(name, args...)
+	hideConsole(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

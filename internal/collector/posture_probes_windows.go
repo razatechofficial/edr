@@ -45,6 +45,7 @@ func WMIPersistenceSnapshot() map[string]any {
 	out := map[string]any{}
 	q := func(label, root, query string) {
 		cmd := exec.Command("wmic", "/namespace:\\\\"+root, "path", query, "get", "/format:list")
+		hideConsole(cmd)
 		b, err := cmd.CombinedOutput()
 		if err != nil {
 			out[label+"_error"] = err.Error()
@@ -69,7 +70,9 @@ func WMIPersistenceSnapshot() map[string]any {
 
 // PostureWindowsBcdSecureBoot runs bcdedit /enum {current} (best-effort).
 func PostureWindowsBcdSecureBoot() map[string]any {
-	out, err := exec.Command("bcdedit", "/enum", "{current}").CombinedOutput()
+	cmd := exec.Command("bcdedit", "/enum", "{current}")
+	hideConsole(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return map[string]any{"error": err.Error(), "detail": string(out)}
 	}
@@ -83,7 +86,9 @@ func PostureWindowsBcdSecureBoot() map[string]any {
 // PostureWindowsDefenderExclusionCount estimates exclusion richness via PowerShell (best-effort).
 func PostureWindowsDefenderExclusionCount() map[string]any {
 	ps := `try { (Get-MpPreference).ExclusionPath.Count } catch { -1 }`
-	out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).CombinedOutput()
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", ps)
+	hideConsole(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return map[string]any{"error": err.Error(), "detail": strings.TrimSpace(string(out))}
 	}
@@ -92,7 +97,9 @@ func PostureWindowsDefenderExclusionCount() map[string]any {
 
 // PostureWindowsScheduledTasksCount uses schtasks query (bounded).
 func PostureWindowsScheduledTasksCount() map[string]any {
-	out, err := exec.Command("schtasks", "/query", "/fo", "LIST", "/v").CombinedOutput()
+	cmd := exec.Command("schtasks", "/query", "/fo", "LIST", "/v")
+	hideConsole(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}

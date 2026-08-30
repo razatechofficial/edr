@@ -30,6 +30,9 @@ func main() {
 			os.Exit(0)
 		}
 	}
+	if runningAttendedSetup() {
+		flagSetup = true
+	}
 	if err := maybeElevate(); err != nil {
 		fmt.Fprintf(os.Stderr, "EDR Agent UI: %v\n", err)
 		os.Exit(1)

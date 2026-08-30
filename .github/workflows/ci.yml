@@ -222,7 +222,9 @@ jobs:
         run: bash scripts/ci/macos_run_build.sh bash build/macos/package.sh "$(git describe --tags --always --dirty)" "${{ matrix.arch }}"
 
       - name: Verify macOS package exists
-        run: ls -lh dist/edr-agent_*_${{ matrix.arch }}.pkg
+        run: |
+          ls -lh dist/edr-agent_*_${{ matrix.arch }}.pkg
+          ls -lh dist/EDR-Agent-Setup_*.zip dist/EDR-Agent-Setup.app/Contents/MacOS/edr-agent-ui
 
   windows-monitoring-smoke:
     name: Windows monitoring smoke

@@ -16,6 +16,7 @@ func scanHostInventory(ctx context.Context) (map[string]any, error) {
 
 	ps := func(script string) string {
 		c := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+		hideConsole(c)
 		b, err := c.Output()
 		if err != nil {
 			return ""

@@ -524,9 +524,7 @@ func requirePrivileged() error {
 			return fmt.Errorf("this operation requires root privileges (uid=%d); re-run with sudo", os.Getuid())
 		}
 	case "windows":
-		out, err := exec.Command("net", "session").CombinedOutput()
-		if err != nil {
-			_ = out
+		if !windowsIsAdmin() {
 			return fmt.Errorf("this operation requires administrator privileges; re-run in an elevated prompt")
 		}
 	}
@@ -762,7 +760,7 @@ func stopService() error {
 		}
 		return nil
 	case "windows":
-		return runCmd("sc", "stop", "EDRAgent")
+		return stopWindowsService()
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
@@ -815,7 +813,7 @@ func removeService(paths installPaths) error {
 		}
 		return os.Remove(darwinAgentLaunchdPlist)
 	case "windows":
-		return runCmd("sc", "delete", "EDRAgent")
+		return removeWindowsService()
 	default:
 		return nil
 	}
@@ -999,46 +997,6 @@ func installLaunchDaemon(agentBin, configPath string) error {
 	return nil
 }
 
-// installWindowsService registers the agent as a Windows Service using sc.exe.
-func installWindowsService(agentBin, configPath string) error {
-	binPath := fmt.Sprintf(`"%s" run --config "%s"`, agentBin, configPath)
-	if err := runCmd("sc", "create", "EDRAgent",
-		"binPath=", binPath,
-		"start=", "auto",
-		"DisplayName=", "EDR Agent",
-	); err != nil {
-		return fmt.Errorf("sc create: %w", err)
-	}
-
-	if err := runCmd("sc", "description", "EDRAgent",
-		"Endpoint Detection and Response agent by RazaTech",
-	); err != nil {
-		fmt.Printf("    warning: setting description: %v\n", err)
-	}
-
-	if err := runCmd("sc", "failure", "EDRAgent",
-		"reset=", "86400",
-		"actions=", "restart/5000/restart/10000/restart/30000",
-	); err != nil {
-		fmt.Printf("    warning: setting recovery: %v\n", err)
-	}
-
-	_ = runCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name=EDR Agent")
-	_ = runCmd("netsh", "advfirewall", "firewall", "add", "rule",
-		"name=EDR Agent", "dir=out", "action=allow", "program="+agentBin, "enable=yes", "profile=any")
-	_ = runCmd("netsh", "advfirewall", "firewall", "add", "rule",
-		"name=EDR Agent", "dir=in", "action=allow", "program="+agentBin, "enable=yes", "profile=any")
-
-	if flagNoStart {
-		fmt.Println("    Windows Service installed (not started; --no-start)")
-		return nil
-	}
-	if err := runCmd("sc", "start", "EDRAgent"); err != nil {
-		return fmt.Errorf("sc start: %w", err)
-	}
-	fmt.Println("    Windows Service installed and started")
-	return nil
-}
 
 // agentBinaryName returns the platform-specific agent binary name.
 func agentBinaryName() string {
@@ -1166,6 +1124,7 @@ func hostname() string {
 // runCmd executes a command and returns any error.
 func runCmd(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
+	hideConsole(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

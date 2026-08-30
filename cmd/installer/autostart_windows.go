@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/sys/windows/registry"
 )
+
+const windowsRunKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 
 func installLoginAutostart(paths installPaths) error {
 	ui := filepath.Join(paths.binDir, agentUIBinaryName())
@@ -14,9 +18,13 @@ func installLoginAutostart(paths installPaths) error {
 		fmt.Println("    skip login item: edr-agent-ui.exe not installed")
 		return nil
 	}
-	quoted := `"` + ui + `" --tray`
-	if err := runCmd("reg", "add", `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`,
-		"/v", "EDR Agent", "/t", "REG_SZ", "/d", quoted, "/f"); err != nil {
+	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, windowsRunKey, registry.SET_VALUE)
+	if err != nil {
+		fmt.Printf("    warning: HKLM Run: %v\n", err)
+		return nil
+	}
+	defer k.Close()
+	if err := k.SetStringValue("EDR Agent", `"`+ui+`" --tray`); err != nil {
 		fmt.Printf("    warning: HKLM Run: %v\n", err)
 		return nil
 	}
@@ -25,5 +33,10 @@ func installLoginAutostart(paths installPaths) error {
 }
 
 func removeLoginAutostart() {
-	_ = runCmd("reg", "delete", `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "EDR Agent", "/f")
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, windowsRunKey, registry.SET_VALUE)
+	if err != nil {
+		return
+	}
+	defer k.Close()
+	_ = k.DeleteValue("EDR Agent")
 }

@@ -80,6 +80,7 @@ func (s *WMIPersistenceWatchSource) dump(ctx context.Context, sink *StreamingSin
 		script := fmt.Sprintf(
 			"$e=Get-CimInstance -Namespace root/subscription -ClassName %s -ErrorAction SilentlyContinue; if($null -ne $e){$e|ConvertTo-Csv -NoTypeInformation}", cn)
 		cmd := exec.CommandContext(ctx, psPath, "-NoProfile", "-STA", "-Command", script)
+		hideConsole(cmd)
 		b, err := cmd.CombinedOutput()
 		if err != nil || len(b) == 0 {
 			continue

@@ -92,8 +92,14 @@ target_os="${GOOS:-$(go env GOOS)}"
 if [[ "${target_os}" == "darwin" ]]; then
 	export CGO_ENABLED=1
 fi
+embed_ldflags="${LDFLAGS:-}"
+if [[ "${target_os}" == "windows" ]]; then
+	# Setup launches this as a child. Console subsystem + sc/net/netsh
+	# flashes cmd windows and looks like malware to Defender.
+	embed_ldflags="${embed_ldflags} -H windowsgui"
+fi
 GOOS="${target_os}" GOARCH="${GOARCH:-$(go env GOARCH)}" \
-	go build -trimpath -tags embedbundle -ldflags "${LDFLAGS:-}" \
+	go build -trimpath -tags embedbundle -ldflags "${embed_ldflags}" \
 	-o "${OUT}" ./cmd/installer
 
 if [[ "${target_os}" == "darwin" ]] && command -v otool >/dev/null 2>&1; then

@@ -71,6 +71,15 @@ if [[ -n "${INSTALLER_BIN}" && -f "${INSTALLER_BIN}" ]]; then
 	sign_target "${APP_OUT}/Contents/MacOS/edr-installer"
 fi
 cp "${INFO_PLIST}" "${APP_OUT}/Contents/Info.plist"
+if [[ -n "${EDR_BUNDLE_ID:-}" ]]; then
+	/usr/bin/sed -i '' "s|<string>com.razatech.edr.console</string>|<string>${EDR_BUNDLE_ID}</string>|" \
+		"${APP_OUT}/Contents/Info.plist"
+fi
+if [[ -n "${EDR_DISPLAY_NAME:-}" ]]; then
+	/usr/bin/sed -i '' \
+		-e "s|<string>edr</string>|<string>${EDR_DISPLAY_NAME}</string>|" \
+		"${APP_OUT}/Contents/Info.plist"
+fi
 printf 'APPL????' > "${APP_OUT}/Contents/PkgInfo"
 sign_target "${APP_OUT}/Contents/MacOS/edr-agent-ui"
 if [[ -f "${ENTITLEMENTS}" ]]; then

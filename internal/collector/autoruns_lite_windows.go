@@ -605,6 +605,7 @@ func (s *AutorunsLiteSource) emitSchtasks(ctx context.Context, sink *StreamingSi
 		return
 	}
 	cmd := exec.CommandContext(ctx, "schtasks", "/Query", "/FO", "CSV", "/NH")
+	hideConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil || len(out) == 0 {
 		return

@@ -149,7 +149,9 @@ func (d *SysmonDetector) probeBinary(ctx context.Context, st *SysmonStatus) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(cctx, bin, "-?", "-nologo").CombinedOutput()
+	cmd := exec.CommandContext(cctx, bin, "-?", "-nologo")
+	hideConsole(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		st.LastError = fmt.Sprintf("sysmon -?: %v", err)
 		return
