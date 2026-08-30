@@ -1,15 +1,18 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 	"github.com/razatechofficial/edr/internal/installprogress"
+	"github.com/razatechofficial/edr/internal/updatecheck"
 )
 
 func (c *console) buildSetup() fyne.CanvasObject {
@@ -29,9 +32,7 @@ func (c *console) buildSetup() fyne.CanvasObject {
 	c.setupWorking.Disable()
 	c.setupWorking.Hide()
 
-	c.setupLaunch = widget.NewButton("Launch "+productName, func() {
-		c.show(uistate.Enroll)
-	})
+	c.setupLaunch = widget.NewButton("Launch "+productName, c.continueAfterSetup)
 	c.setupLaunch.Importance = widget.HighImportance
 
 	c.setupLaunchHint = widget.NewLabel(launchHint)
@@ -78,6 +79,7 @@ func (c *console) paintSetupLicense() {
 	c.setupLaunchHint.Hide()
 	c.setupClose.Hide()
 	c.setupProcess.Hide()
+	c.setSetupFault(uiFault{})
 
 	inner := pad5(vstack(0,
 		pageHeader(kickerLicense, colorMuted, titleLicense, bodyLicense),
@@ -85,11 +87,10 @@ func (c *console) paintSetupLicense() {
 		eulaWell,
 		gapH(16),
 		per,
-		c.setupFaultBox,
 		gapH(20),
 		c.setupActions,
 	))
-	c.setSetupSheet(inner, 640)
+	c.setSetupSheet(inner, 600)
 }
 
 func (c *console) paintSetupInstall() {
@@ -122,9 +123,18 @@ func (c *console) paintSetupFinish() {
 	c.setupLaunchHint.Show()
 	kick := kicker(kickerSetup, colorMuted)
 	kick.Alignment = fyne.TextAlignCenter
-	title := heading(titleInstalled)
+	titleTxt := titleInstalled
+	bodyTxt := installedBody()
+	if c.last.Enrolled {
+		titleTxt = "edr is up to date"
+		bodyTxt = "Files were replaced. This device is already enrolled."
+		c.setupLaunch.SetText("Open edr")
+	} else {
+		c.setupLaunch.SetText("Launch " + productName)
+	}
+	title := heading(titleTxt)
 	title.Alignment = fyne.TextAlignCenter
-	body := bodyText(installedBody())
+	body := bodyText(bodyTxt)
 	body.Alignment = fyne.TextAlignCenter
 	inner := inset(wizPad8, wizPad, wizPad8, wizPad, vstack(0,
 		kick,
@@ -225,13 +235,12 @@ func (c *console) onSetupAccept() {
 						}
 						c.renderSetupSteps(step, false, true)
 						c.setupProcess.SetText("Install did not finish.")
-						c.setSetupFault(classifyInstallError(res.out + "\n" + res.err.Error()))
-						c.paintSetupLicense()
-						c.setupAccept.Enable()
+						c.presentSetupFault(classifyInstallError(res.out + "\n" + res.err.Error()))
 						return
 					}
 					c.renderSetupSteps(n, true, false)
 					c.setupProcess.SetText(allChecksPassed)
+					c.last = loadStatus()
 					c.paintSetupFinish()
 					installprogress.Clear()
 				})
@@ -272,4 +281,174 @@ func (c *console) renderSetupSteps(active int, done, failed bool) {
 		c.setupSteps.Add(checkRow(statusMark(st), title, "", st))
 	}
 	c.setupSteps.Refresh()
+}
+
+func installedAgentVersion(st operatorStatus) string {
+	if v := strings.TrimSpace(st.Version); v != "" {
+		return v
+	}
+	out, err := runEdrctl("version")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) >= 2 && (strings.EqualFold(fields[0], "edrctl") || strings.EqualFold(fields[0], "edr-agent")) {
+			return fields[1]
+		}
+	}
+	return ""
+}
+
+func (c *console) paintSetupManage() {
+	c.setupPhase = "manage"
+	c.setupActions.Hide()
+	c.setupWorking.Hide()
+	c.setupLaunch.Hide()
+	c.setupLaunchHint.Hide()
+	c.setupProcess.Hide()
+	c.setupClose.Hide()
+	c.setSetupFault(uiFault{})
+
+	have := installedAgentVersion(c.last)
+	pkg := packageVersion()
+	cmp := updatecheck.Compare(have, pkg)
+	enrolled := c.last.Enrolled
+
+	var kick, title, body string
+	primary := widget.NewButton("Continue", c.continueAfterSetup)
+	primary.Importance = widget.HighImportance
+	repair := widget.NewButton("Reinstall", func() { c.onSetupAccept() })
+	remove := widget.NewButton("Uninstall…", c.onUninstallFromSetup)
+
+	switch {
+	case have != "" && cmp < 0:
+		kick = "Update available"
+		title = "A newer package is ready"
+		if have != "" {
+			body = "This computer has edr " + have + ". This package is " + pkg + "."
+		} else {
+			body = "This package (" + pkg + ") can replace the installed files."
+		}
+		primary.SetText("Update")
+		primary.OnTapped = func() { c.onSetupAccept() }
+		repair.Hide()
+	case have != "" && cmp > 0:
+		kick = "Already installed"
+		title = "A newer version is already installed"
+		body = "This computer has edr " + have + ". This package is " + pkg + "."
+		if enrolled {
+			primary.SetText("Open edr")
+		} else {
+			primary.SetText("Continue enrollment")
+		}
+		repair.SetText("Replace with this package")
+	default:
+		kick = "Already installed"
+		title = "edr is already on this computer"
+		if have != "" {
+			body = "Installed version " + have + ". This package is " + pkg + "."
+		} else {
+			body = "The sensor is already installed. You can continue, replace the files, or remove it."
+		}
+		if enrolled {
+			primary.SetText("Open edr")
+		} else {
+			primary.SetText("Continue enrollment")
+		}
+	}
+
+	actions := []fyne.CanvasObject{primary}
+	if repair.Visible() {
+		actions = append(actions, repair)
+	}
+	actions = append(actions, remove)
+
+	inner := pad5(vstack(0,
+		pageHeader(kick, colorMuted, title, body),
+		gapH(24),
+		vstack(8, actions...),
+	))
+	c.setSetupSheet(inner, 480)
+}
+
+func (c *console) continueAfterSetup() {
+	c.last = loadStatus()
+	if !c.last.Enrolled {
+		c.show(uistate.Enroll)
+		return
+	}
+	next := uistate.InitialScreen(true, true, needsOSGrants(), serviceHealthy(c.last.Service))
+	if next == uistate.Dash {
+		c.showDecoratedDash()
+		return
+	}
+	c.show(next)
+}
+
+func (c *console) paintSetupFailed(f uiFault) {
+	c.setupPhase = "failed"
+	c.setupActions.Hide()
+	c.setupWorking.Hide()
+	c.setupLaunch.Hide()
+	c.setupLaunchHint.Hide()
+	c.setupProcess.Hide()
+	retry := widget.NewButton(firstNonEmpty(f.Action, "Try again"), func() {
+		c.setSetupFault(uiFault{})
+		if agentInstalled() && flagSetup {
+			c.paintSetupManage()
+			return
+		}
+		c.paintSetupLicense()
+	})
+	retry.Importance = widget.HighImportance
+	closeBtn := widget.NewButton("Close", func() { c.app.Quit() })
+	inner := pad5(vstack(0,
+		pageHeader("Setup did not finish", colorDanger, f.Title, f.Body),
+		gapH(12),
+		captionBlock(f.Detail),
+		gapH(24),
+		retry,
+		gapH(8),
+		closeBtn,
+	))
+	c.setSetupSheet(inner, 460)
+}
+
+func (c *console) presentSetupFault(f uiFault) {
+	c.paintSetupFailed(f)
+	msg := widget.NewLabel(strings.TrimSpace(f.Body + "\n\n" + f.Detail))
+	msg.Wrapping = fyne.TextWrapWord
+	d := dialog.NewCustom(f.Title, firstNonEmpty(f.Action, "OK"), msg, c.win)
+	d.Resize(fyne.NewSize(400, 220))
+	d.Show()
+}
+
+func (c *console) onUninstallFromSetup() {
+	d := dialog.NewConfirm(
+		"Uninstall EDR Agent",
+		"This removes the sensor, rules, models, certificates, keys, and data. Administrator authentication is required.",
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			c.setBusy(true)
+			go func() {
+				out, err := runInstallerPrivileged("uninstall")
+				fyne.Do(func() {
+					c.setBusy(false)
+					if err != nil {
+						c.presentSetupFault(classifyInstallError(out + "\n" + err.Error()))
+						return
+					}
+					c.last = operatorStatus{}
+					c.paintSetupLicense()
+				})
+			}()
+		},
+		c.win,
+	)
+	d.SetDismissText("Cancel")
+	d.SetConfirmText("Uninstall")
+	d.Show()
 }

@@ -99,6 +99,17 @@ func classifyEnrollError(raw string) uiFault {
 
 func classifyInstallError(raw string) uiFault {
 	s := strings.ToLower(raw)
+	if strings.Contains(s, "virus") || strings.Contains(s, "potentially unwanted") ||
+		strings.Contains(s, "threat") && strings.Contains(s, "blocked") ||
+		strings.Contains(s, "quarantine") || strings.Contains(s, "windows defender") ||
+		strings.Contains(s, "operation did not complete successfully because the file contains") {
+		return uiFault{
+			Title:  "Windows blocked this installer",
+			Body:   "Microsoft Defender treated the setup payload as unwanted software. That is common for unsigned security tools.",
+			Detail: "Open Windows Security → Protection history, allow EDR Agent, then Try again. A signed Authenticode build stops this warning.",
+			Action: "Try again",
+		}
+	}
 	if strings.Contains(s, "agent binary not found") || (strings.Contains(s, "not found") && strings.Contains(s, "edr-agent")) {
 		return uiFault{
 			Title:  "Setup could not find the agent files",

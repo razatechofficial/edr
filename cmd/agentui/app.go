@@ -228,7 +228,8 @@ func runDashboard() error {
 func (c *console) routeInitial() {
 	installed := agentInstalled()
 	if flagSetup && installed {
-		c.show(uistate.Enroll)
+		c.paintSetupManage()
+		c.show(uistate.Setup)
 		return
 	}
 	next := uistate.InitialScreen(installed, c.last.Enrolled, needsOSGrants(), serviceHealthy(c.last.Service))

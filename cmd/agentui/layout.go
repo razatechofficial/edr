@@ -39,10 +39,25 @@ func wizardHeight(id uistate.Screen) float32 {
 	}
 }
 
+func clampWizardSize(win fyne.Window, w, h float32) (float32, float32) {
+	aw, ah := nativeWorkLogical(win)
+	if ah > 200 && h > ah-32 {
+		h = ah - 32
+	}
+	if aw > 200 && w > aw-32 {
+		w = aw - 32
+	}
+	if h < 360 {
+		h = 360
+	}
+	return w, h
+}
+
 func (c *console) lockSize(w, h float32) {
 	if c.win == nil {
 		return
 	}
+	w, h = clampWizardSize(c.win, w, h)
 	want := fyne.NewSize(w, h)
 	if c.win.Content() != nil {
 		got := c.win.Canvas().Size()
@@ -110,7 +125,7 @@ func productHeader() fyne.CanvasObject {
 	mark := canvas.NewText(productName, colorText)
 	mark.TextSize = 17
 	mark.TextStyle = fyne.TextStyle{Bold: true}
-	ver := canvas.NewText("Version "+productVersion, colorMuted)
+	ver := canvas.NewText("Version "+packageVersion(), colorMuted)
 	ver.TextSize = 13
 	badgeTxt := canvas.NewText(osBadgeLabel(), colorMuted)
 	badgeTxt.TextSize = 11

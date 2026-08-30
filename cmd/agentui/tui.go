@@ -71,7 +71,43 @@ func linuxAskRetry(in *bufio.Reader) bool {
 	return ans != "n" && ans != "no"
 }
 
+func linuxManage(in *bufio.Reader) (continueWizard bool, err error) {
+	have := installedAgentVersion(loadStatus())
+	pkg := packageVersion()
+	fmt.Println()
+	fmt.Println(tuiS("\x1b[36m", "already installed"))
+	if have != "" {
+		fmt.Printf("This host has %s. This package is %s.\n", have, pkg)
+	} else {
+		fmt.Println("The sensor is already installed.")
+	}
+	fmt.Println("[c] continue   [u] update   [x] uninstall   [q] quit")
+	fmt.Print("> ")
+	ans, _ := in.ReadString('\n')
+	switch strings.TrimSpace(strings.ToLower(ans)) {
+	case "u", "update":
+		return linuxSetupFresh(in)
+	case "x", "remove", "uninstall":
+		out, uerr := runInstallerPrivileged("uninstall")
+		if uerr != nil {
+			return false, fmt.Errorf("%s", classifyInstallError(out + "\n" + uerr.Error()).Title)
+		}
+		return linuxSetupFresh(in)
+	case "q", "quit":
+		return false, nil
+	default:
+		return true, nil
+	}
+}
+
 func linuxSetup(in *bufio.Reader) (continueWizard bool, err error) {
+	if agentInstalled() {
+		return linuxManage(in)
+	}
+	return linuxSetupFresh(in)
+}
+
+func linuxSetupFresh(in *bufio.Reader) (continueWizard bool, err error) {
 	linuxPrintLicense()
 	if !linuxAskAccept(in) {
 		linuxPrintDeclined()

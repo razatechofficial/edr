@@ -22,12 +22,13 @@ var (
 )
 
 func setupPayloadDir() string {
-	// Prefer a machine path after elevation. Writing an unsigned exe under
-	// %LOCALAPPDATA% and then running it elevated looks like a dropper to Defender.
+	// Never write the payload under the user profile on Windows. Defender
+	// treats %LOCALAPPDATA%\…\exe + elevated run as a dropper.
 	if runtime.GOOS == "windows" {
 		if pd := os.Getenv("ProgramData"); pd != "" {
 			return filepath.Join(pd, "EDR", "setup")
 		}
+		return `C:\ProgramData\EDR\setup`
 	}
 	if d, err := os.UserCacheDir(); err == nil && d != "" {
 		return filepath.Join(d, "EDR", "setup")

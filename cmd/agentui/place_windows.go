@@ -82,6 +82,18 @@ func placeNearTray(win fyne.Window, width, height float32, nearCursor, _ bool) {
 	procSetWindowPos.Call(hwnd, 0, uintptr(x), uintptr(y), 0, 0, flags)
 }
 
+func nativeWorkLogical(win fyne.Window) (float32, float32) {
+	_, _, ww, hh := workArea()
+	if ww <= 0 || hh <= 0 {
+		return 0, 0
+	}
+	scale := float32(1)
+	if win != nil && win.Canvas() != nil && win.Canvas().Scale() > 0.1 {
+		scale = win.Canvas().Scale()
+	}
+	return float32(ww) / scale, float32(hh) / scale
+}
+
 func nativeResizeKeepTop(win fyne.Window, width, height float32) bool {
 	hwnd := nativeHWND(win)
 	if hwnd == 0 {
@@ -93,8 +105,27 @@ func nativeResizeKeepTop(win fyne.Window, width, height float32) bool {
 	}
 	ww := int(width * scale)
 	hh := int(height * scale)
-	const swpNoMove = 0x0002
-	procSetWindowPos.Call(hwnd, 0, 0, 0, uintptr(ww), uintptr(hh), swpNoMove|swpNoZOrder|swpNoActivate)
+	vaX, vaY, vaW, vaH := workArea()
+	if vaH > 48 && hh > vaH-24 {
+		hh = vaH - 24
+	}
+	var r winRECT
+	procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+	x, y := int(r.Left), int(r.Top)
+	if y+hh > vaY+vaH {
+		y = vaY + vaH - hh
+	}
+	if y < vaY {
+		y = vaY
+	}
+	if x < vaX {
+		x = vaX
+	}
+	if x+ww > vaX+vaW && vaW > ww {
+		x = vaX + vaW - ww
+	}
+	procSetWindowPos.Call(hwnd, 0, uintptr(x), uintptr(y), uintptr(ww), uintptr(hh), swpNoZOrder|swpNoActivate)
+	_ = vaW
 	return true
 }
 

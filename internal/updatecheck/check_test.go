@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func TestCompare(t *testing.T) {
+	if Compare("1.0.0", "1.1.0") >= 0 {
+		t.Fatal("older")
+	}
+	if Compare("1.2.0", "1.2.0") != 0 {
+		t.Fatal("equal")
+	}
+	if Compare("prod-1", "prod-1") != 0 {
+		t.Fatal("git equal")
+	}
+	if Compare("prod-1", "prod-2") != -1 {
+		t.Fatal("git differ")
+	}
+}
+
 func TestCompareVersion(t *testing.T) {
 	cmp, err := compareVersion("1.0.0", "1.1.0")
 	if err != nil || cmp >= 0 {

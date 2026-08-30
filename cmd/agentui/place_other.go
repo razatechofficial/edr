@@ -12,6 +12,8 @@ func moveNativeWindow(fyne.Window, float32, float32) {}
 
 func nativeResizeKeepTop(fyne.Window, float32, float32) bool { return false }
 
+func nativeWorkLogical(fyne.Window) (float32, float32) { return 0, 0 }
+
 func startNativeWindowDrag(fyne.Window) bool { return false }
 
 func bringNativeWindow(fyne.Window) {}

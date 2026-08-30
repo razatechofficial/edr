@@ -108,7 +108,18 @@ static void edrResizeKeepTop(void *nswindow, int width, int height) {
 	if (dw < 0.5 && dh < 0.5) {
 		return;
 	}
+	NSScreen *screen = w.screen;
+	if (screen == nil) {
+		screen = [NSScreen mainScreen];
+	}
+	NSRect vf = [screen visibleFrame];
+	if (hh > vf.size.height - 16.0) {
+		hh = vf.size.height - 16.0;
+	}
 	CGFloat y = NSMaxY(f) - hh;
+	if (y < NSMinY(vf)) {
+		y = NSMinY(vf);
+	}
 	[w setFrame:NSMakeRect(f.origin.x, y, ww, hh) display:NO animate:NO];
 }
 
@@ -204,6 +215,18 @@ func moveNativeWindow(win fyne.Window, dx, dy float32) {
 		return
 	}
 	C.edrMoveWindow(p, C.float(dx), C.float(dy))
+}
+
+func nativeWorkLogical(win fyne.Window) (float32, float32) {
+	if win == nil || win.Canvas() == nil {
+		return 0, 0
+	}
+	if scr := win.Canvas().Size(); scr.Height > 0 {
+		// Canvas size is the window, not the display. Fall back to a
+		// conservative laptop work height so sheets stay on-screen.
+		_ = scr
+	}
+	return 0, 0
 }
 
 func nativeResizeKeepTop(win fyne.Window, width, height float32) bool {

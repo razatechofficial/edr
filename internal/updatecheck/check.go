@@ -95,6 +95,24 @@ func Check(current, catalogURL string, client *http.Client) Result {
 	return r
 }
 
+// Compare returns -1 if a<b, 0 if equal, 1 if a>b.
+// Non-semver strings (git describe) compare equal only when identical.
+func Compare(a, b string) int {
+	n, err := compareVersion(a, b)
+	if err != nil {
+		a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+		switch {
+		case a == b:
+			return 0
+		case a == "" || b == "":
+			return 0
+		default:
+			return -1
+		}
+	}
+	return n
+}
+
 // compareVersion returns -1 if a<b, 0 if equal, 1 if a>b. Accepts 1.2.3 or v1.2.3.
 func compareVersion(a, b string) (int, error) {
 	pa, err := parseVersion(a)

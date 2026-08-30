@@ -61,7 +61,7 @@ func (c *console) chrome() fyne.CanvasObject {
 	mark := canvas.NewText(productName, colorText)
 	mark.TextSize = 14
 	mark.TextStyle = fyne.TextStyle{Bold: true}
-	ver := canvas.NewText("Version "+productVersion, colorMuted)
+	ver := canvas.NewText("Version "+packageVersion(), colorMuted)
 	ver.TextSize = 11
 	return container.NewVBox(mark, ver)
 }

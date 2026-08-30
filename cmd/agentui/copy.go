@@ -1,6 +1,12 @@
 package main
 
-import "runtime"
+import (
+	"runtime"
+	"strings"
+)
+
+// Set by -X main.version=… in release builds (git describe).
+var version = productVersion
 
 const (
 	productName    = "edr"
@@ -110,6 +116,14 @@ func setupStepTitlesFor(os string) []string {
 	default:
 		return []string{"Kernel and disk space", "Install deb/rpm package", "Register systemd unit"}
 	}
+}
+
+func packageVersion() string {
+	v := strings.TrimSpace(version)
+	if v == "" {
+		return productVersion
+	}
+	return v
 }
 
 func setupStepDoing(i int) string { return setupStepDoingFor(hostKind(), i) }

@@ -21,6 +21,9 @@ func TestClassifyEnrollError(t *testing.T) {
 }
 
 func TestClassifyInstallError(t *testing.T) {
+	if classifyInstallError("Operation did not complete successfully because the file contains a virus or potentially unwanted software.").Title != "Windows blocked this installer" {
+		t.Fatal("defender")
+	}
 	if classifyInstallError("agent binary not found").Title != "Setup could not find the agent files" {
 		t.Fatal("missing agent")
 	}
