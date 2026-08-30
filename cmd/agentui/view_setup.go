@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image/color"
 	"strings"
 	"time"
 
@@ -50,6 +51,7 @@ func (c *console) buildSetup() fyne.CanvasObject {
 }
 
 func (c *console) setSetupSheet(inner fyne.CanvasObject, h float32) {
+	c.setupH = h
 	c.setupRoot.Objects = []fyne.CanvasObject{installerFrame(inner)}
 	c.setupRoot.Refresh()
 	if c.screen == uistate.Setup && c.win != nil {
@@ -315,43 +317,36 @@ func (c *console) paintSetupManage() {
 	pkg := packageVersion()
 	cmp := updatecheck.Compare(have, pkg)
 	enrolled := c.last.Enrolled
+	running := installedConsoleRunning()
 
 	var kick, title, body string
 	primary := widget.NewButton("Continue", c.continueAfterSetup)
 	primary.Importance = widget.HighImportance
-	repair := widget.NewButton("Reinstall", func() { c.onSetupAccept() })
-	remove := widget.NewButton("Uninstall…", c.onUninstallFromSetup)
+	repair := widget.NewButton("Reinstall", func() { c.mutateSetup(c.onSetupAccept) })
+	remove := widget.NewButton("Uninstall…", func() { c.mutateSetup(c.onUninstallFromSetup) })
 
 	switch {
 	case have != "" && cmp < 0:
 		kick = "Update available"
 		title = "A newer package is ready"
-		if have != "" {
-			body = "This computer has edr " + have + ". This package is " + pkg + "."
-		} else {
-			body = "This package (" + pkg + ") can replace the installed files."
-		}
+		body = "Replace the installed files, then grant Full Disk Access if macOS asks."
 		primary.SetText("Update")
-		primary.OnTapped = func() { c.onSetupAccept() }
+		primary.OnTapped = func() { c.mutateSetup(c.onSetupAccept) }
 		repair.Hide()
 	case have != "" && cmp > 0:
 		kick = "Already installed"
 		title = "A newer version is already installed"
-		body = "This computer has edr " + have + ". This package is " + pkg + "."
+		body = "This package is older. Open edr, or replace the files with this build."
 		if enrolled {
 			primary.SetText("Open edr")
 		} else {
 			primary.SetText("Continue enrollment")
 		}
-		repair.SetText("Replace with this package")
+		repair.SetText("Replace files")
 	default:
 		kick = "Already installed"
 		title = "edr is already on this computer"
-		if have != "" {
-			body = "Installed version " + have + ". This package is " + pkg + "."
-		} else {
-			body = "The sensor is already installed. You can continue, replace the files, or remove it."
-		}
+		body = "Continue setup, replace the files, or remove the sensor. Full Disk Access is required for the sensor."
 		if enrolled {
 			primary.SetText("Open edr")
 		} else {
@@ -359,18 +354,123 @@ func (c *console) paintSetupManage() {
 		}
 	}
 
-	actions := []fyne.CanvasObject{primary}
-	if repair.Visible() {
-		actions = append(actions, repair)
+	verHave := have
+	if verHave == "" {
+		verHave = "—"
 	}
-	actions = append(actions, remove)
+	enrollLine := "Not enrolled"
+	if enrolled {
+		enrollLine = "Enrolled"
+	}
+	consoleLine := "Not running"
+	if running {
+		consoleLine = "Open — quit before update, reinstall, or uninstall"
+	}
 
-	inner := pad5(vstack(0,
+	status := elevatedWell(8, inset(12, 12, 12, 12, vstack(8,
+		manageKV("Installed", verHave),
+		manageKV("This package", pkg),
+		manageKV("Enrollment", enrollLine),
+		manageKV("Dashboard", consoleLine),
+	)))
+
+	var banner fyne.CanvasObject
+	if running {
+		banner = elevatedWell(8, inset(10, 12, 10, 12, captionBlock("EDR Agent is open. Quit it before you update, reinstall, or uninstall — the same Files-in-Use step as Chrome or an MSI.")))
+	}
+
+	var foot fyne.CanvasObject
+	if running {
+		quitBtn := widget.NewButton("Quit EDR Agent", c.onQuitInstalledConsole)
+		quitBtn.Importance = widget.HighImportance
+		secondaries := []fyne.CanvasObject{repair, remove}
+		if !repair.Visible() {
+			secondaries = []fyne.CanvasObject{remove}
+		}
+		foot = vstack(8, quitBtn, primary, container.New(&equalRow{gap: 8}, secondaries...))
+	} else {
+		secondaries := []fyne.CanvasObject{repair, remove}
+		if !repair.Visible() {
+			secondaries = []fyne.CanvasObject{remove}
+		}
+		foot = vstack(8, primary, container.New(&equalRow{gap: 8}, secondaries...))
+	}
+
+	introItems := []fyne.CanvasObject{
 		pageHeader(kick, colorMuted, title, body),
-		gapH(24),
-		vstack(8, actions...),
-	))
-	c.setSetupSheet(inner, 480)
+		gapH(12),
+		status,
+	}
+	if banner != nil {
+		introItems = append(introItems, gapH(8), banner)
+	}
+	intro := pad5(vstack(0, introItems...))
+	inner := checklistSheet(intro, canvas.NewRectangle(color.Transparent), checklistFooter(foot))
+	c.setSetupSheet(inner, 520)
+}
+
+func manageKV(k, v string) fyne.CanvasObject {
+	key := canvas.NewText(k, colorMuted)
+	key.TextSize = 11
+	val := widget.NewLabel(v)
+	val.Wrapping = fyne.TextWrapWord
+	val.Alignment = fyne.TextAlignTrailing
+	return container.NewBorder(nil, nil, key, nil, inset(0, 12, 0, 0, val))
+}
+
+func (c *console) mutateSetup(next func()) {
+	if installedConsoleRunning() {
+		d := dialog.NewConfirm(
+			"Quit EDR Agent first",
+			"Update, reinstall, and uninstall need the dashboard closed so files and the service can be replaced.",
+			func(ok bool) {
+				if !ok {
+					return
+				}
+				c.setBusy(true)
+				go func() {
+					err := quitInstalledConsoleUI()
+					fyne.Do(func() {
+						c.setBusy(false)
+						if err != nil {
+							c.presentSetupFault(uiFault{
+								Title:  "EDR Agent is still open",
+								Body:   err.Error(),
+								Action: "OK",
+							})
+							c.paintSetupManage()
+							return
+						}
+						next()
+					})
+				}()
+			},
+			c.win,
+		)
+		d.SetDismissText("Cancel")
+		d.SetConfirmText("Quit and continue")
+		d.Show()
+		return
+	}
+	next()
+}
+
+func (c *console) onQuitInstalledConsole() {
+	c.setBusy(true)
+	go func() {
+		err := quitInstalledConsoleUI()
+		fyne.Do(func() {
+			c.setBusy(false)
+			if err != nil {
+				c.presentSetupFault(uiFault{
+					Title:  "Could not quit EDR Agent",
+					Body:   err.Error(),
+					Action: "OK",
+				})
+			}
+			c.paintSetupManage()
+		})
+	}()
 }
 
 func (c *console) continueAfterSetup() {
@@ -379,7 +479,11 @@ func (c *console) continueAfterSetup() {
 		c.show(uistate.Enroll)
 		return
 	}
-	next := uistate.InitialScreen(true, true, needsOSGrants(), serviceHealthy(c.last.Service))
+	if needsOSGrants() {
+		c.show(uistate.Permissions)
+		return
+	}
+	next := uistate.InitialScreen(true, true, false, serviceHealthy(c.last.Service))
 	if next == uistate.Dash {
 		c.showDecoratedDash()
 		return

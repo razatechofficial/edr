@@ -261,6 +261,16 @@ if [[ "\${HOST}" != "${NEED_UNAME}" ]]; then
 	osascript -e "display dialog \"\${MSG}\" buttons {\"OK\"} default button \"OK\" with title \"EDR Agent\"" >/dev/null 2>&1 || true
 	exit 1
 fi
+if /usr/bin/pgrep -f "/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui" >/dev/null 2>&1; then
+	/usr/bin/osascript -e 'tell application "EDR Agent" to quit' >/dev/null 2>&1 || true
+	sleep 2
+	if /usr/bin/pgrep -f "/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui" >/dev/null 2>&1; then
+		MSG="Quit EDR Agent from the menu bar, then run this package again to update or reinstall."
+		echo "\${MSG}" >&2
+		osascript -e "display dialog \"\${MSG}\" buttons {\"OK\"} default button \"OK\" with title \"EDR Agent\"" >/dev/null 2>&1 || true
+		exit 1
+	fi
+fi
 EOF
 chmod 755 pkg/macos/scripts/preinstall
 

@@ -85,6 +85,10 @@ if "${LC}" print "system/com.razatech.edr-agent" &>/dev/null; then
 	"${LC}" bootout system "${AGENT_PLIST}" 2>/dev/null || true
 fi
 "${LC}" unload "${AGENT_PLIST}" 2>/dev/null || true
+if /usr/bin/pgrep -f "/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui" >/dev/null 2>&1; then
+	/usr/bin/osascript -e 'tell application "EDR Agent" to quit' >/dev/null 2>&1 || true
+	sleep 2
+fi
 PRE
 chmod 755 "${SCRIPTS}/preinstall"
 

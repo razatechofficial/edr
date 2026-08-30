@@ -175,6 +175,14 @@ if launchctl print "system/com.razatech.edr-agent" &>/dev/null; then
 	launchctl bootout system "\${PLIST}" 2>/dev/null || true
 fi
 launchctl unload "\${PLIST}" 2>/dev/null || true
+if /usr/bin/pgrep -f "/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui" >/dev/null 2>&1; then
+	/usr/bin/osascript -e 'tell application "EDR Agent" to quit' >/dev/null 2>&1 || true
+	sleep 2
+	if /usr/bin/pgrep -f "/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui" >/dev/null 2>&1; then
+		echo "Quit EDR Agent, then run this package again to update or reinstall." >&2
+		exit 1
+	fi
+fi
 PRE
 
 cat > "${SCRIPTS}/postinstall" <<'POST'

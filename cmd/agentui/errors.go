@@ -171,11 +171,15 @@ func classifyStartError(raw string) uiFault {
 		}
 	case strings.Contains(s, "did not stay running") || strings.Contains(s, "no usable local enrollment") ||
 		strings.Contains(s, "cannot read the device certificate") || strings.Contains(s, "staged identity"):
+		body := "The background sensor exited. On this Mac, grant Full Disk Access to the sensor binary, then Recheck and Start."
+		if !isDarwin() {
+			body = "The background sensor exited. Confirm the service can read the device certificate, then Start again."
+		}
 		return uiFault{
 			Title:  "The sensor could not start",
-			Body:   "This Mac is enrolled, but the background sensor exited. The device certificate must be readable by the system service.",
+			Body:   body,
 			Detail: firstLine(raw),
-			Action: "Try again",
+			Action: "Grant access",
 		}
 	default:
 		return uiFault{

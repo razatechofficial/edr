@@ -8,6 +8,8 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/razatechofficial/edr/cmd/agentui/uistate"
 )
 
 func (c *console) buildPreflight() fyne.CanvasObject {
@@ -141,6 +143,11 @@ func (c *console) startSensor() {
 		c.dashAction.SetText("Starting…")
 	}
 	c.setDashFault(uiFault{})
+	if needsOSGrants() {
+		c.setBusy(false)
+		c.show(uistate.Permissions)
+		return
+	}
 	go func() {
 		_, _ = runEdrctl("stage-identity")
 		out, err := runEdrctlPrivileged("start")
@@ -187,6 +194,10 @@ func (c *console) setPreflightFault(f uiFault) {
 }
 
 func (c *console) presentStartFault(f uiFault) {
+	if strings.EqualFold(f.Action, "Grant access") || needsOSGrants() {
+		c.show(uistate.Permissions)
+		return
+	}
 	msg := widget.NewLabel(strings.TrimSpace(f.Body + "\n\n" + f.Detail))
 	msg.Wrapping = fyne.TextWrapWord
 	d := dialog.NewCustom(f.Title, firstNonEmpty(f.Action, "OK"), msg, c.win)

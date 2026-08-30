@@ -37,8 +37,11 @@ func TestSensorListedInTCC(t *testing.T) {
 	if sensorListedInTCC(nil, sensor) {
 		t.Fatal("empty clients")
 	}
-	if !sensorListedInTCC([]string{"/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui"}, sensor) {
-		t.Fatal("console app is the same product")
+	if sensorListedInTCC([]string{"/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui"}, sensor) {
+		t.Fatal("console FDA must not satisfy the sensor")
+	}
+	if sensorListedInTCC([]string{"com.razatech.edr.console"}, sensor) {
+		t.Fatal("console bundle must not satisfy the sensor")
 	}
 	if !sensorListedInTCC([]string{sensor}, sensor) {
 		t.Fatal("exact sensor path")
@@ -49,8 +52,8 @@ func TestSensorListedInTCC(t *testing.T) {
 	if !sensorListedInTCC([]string{"com.razatech.edr-agent"}, sensor) {
 		t.Fatal("bundle id")
 	}
-	if !sensorListedInTCC([]string{"edrctl"}, sensor) {
-		t.Fatal("cli")
+	if sensorListedInTCC([]string{"edrctl"}, sensor) {
+		t.Fatal("CLI FDA is not the sensor")
 	}
 }
 

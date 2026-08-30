@@ -21,6 +21,9 @@ func TestClassifyEnrollError(t *testing.T) {
 	if classifyStartError("sensor did not stay running (status not running)").Title != "The sensor could not start" {
 		t.Fatal("start running")
 	}
+	if isDarwin() && !strings.Contains(classifyStartError("sensor did not stay running (status loaded)").Body, "Full Disk Access") {
+		t.Fatal("fda start copy")
+	}
 	if !strings.Contains(classifyStartError("local sensor binary not found next to edrctl").Body, "EDR-Agent-Setup") {
 		t.Fatal("missing sensor copy")
 	}

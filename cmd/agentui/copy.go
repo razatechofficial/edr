@@ -63,7 +63,7 @@ func openSettingsLabel() string {
 func permBody() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "System Settings opens to Full Disk Access and Login Items. Enable edr, then Recheck. The sensor cannot start until required items are green."
+		return "System Settings opens Full Disk Access. Enable the sensor binary (edr-agent), not only the dashboard. Then Recheck. The sensor cannot start until this is green."
 	case "windows":
 		return "Allow edr through Windows Firewall if prompted, then Recheck. Startup apps can be opened from this screen."
 	default:

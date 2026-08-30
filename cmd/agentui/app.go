@@ -77,6 +77,7 @@ type console struct {
 	setupWorking    *widget.Button
 	setupRoot       *fyne.Container
 	setupPhase      string
+	setupH          float32
 	cpuHist         []float64
 
 	glow        *glowBG
@@ -300,7 +301,11 @@ func (c *console) show(id uistate.Screen) {
 	}
 	c.win.SetPadded(false)
 	if id != uistate.Enroll {
-		c.lockSize(wizardW, wizardHeight(id))
+		h := wizardHeight(id)
+		if id == uistate.Setup && c.setupH > 0 {
+			h = c.setupH
+		}
+		c.lockSize(wizardW, h)
 	}
 	c.win.CenterOnScreen()
 	switch id {

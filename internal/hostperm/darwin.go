@@ -143,13 +143,16 @@ func sensorRunning() bool {
 }
 
 func fdaGuide() string {
-	return "System Settings → Privacy & Security → Full Disk Access → enable edr. Then Recheck."
+	hint := sensorBinaryHint()
+	return "System Settings → Privacy & Security → Full Disk Access → enable the sensor (" + hint + "). Granting the dashboard app is not enough. Then Recheck."
 }
 
 func evaluateFDA(it Item) Item {
 	it.Guide = fdaGuide()
 	hint := sensorBinaryHint()
-	if probeProductFDA() {
+	// Industry (Falcon / Defender / SentinelOne): FDA is on the sensor
+	// binary. The console or Setup.app having FDA does not count.
+	if probeSensorBinaryFDA() {
 		return ok(it, "")
 	}
 	clients, _ := tccFDAClients()
@@ -161,7 +164,7 @@ func evaluateFDA(it Item) Item {
 		helper.Detail = ""
 		return helper
 	}
-	return action(it, "")
+	return action(it, "Enable Full Disk Access for "+hint)
 }
 
 func evaluateSysExt(it Item) Item {

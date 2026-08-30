@@ -101,28 +101,58 @@ func isSensorTCCClient(client string) bool {
 	return isProductTCCClient(client)
 }
 
-// sensorListedInTCC reports whether TCC Full Disk Access was granted to edr.
+// sensorListedInTCC is true only when TCC granted FDA to the sensor
+// binary (or its LaunchDaemon bundle), not the operator console or Setup.
 func sensorListedInTCC(clients []string, sensorPath string) bool {
-	if productTCCGranted(clients) {
-		return true
-	}
 	sensorPath = strings.TrimSpace(sensorPath)
-	if sensorPath == "" {
-		return false
-	}
-	base := filepath.Base(sensorPath)
 	for _, c := range clients {
 		c = strings.TrimSpace(c)
-		if c == "" {
+		if c == "" || isConsoleOrSetupTCCClient(c) {
 			continue
 		}
-		if strings.EqualFold(c, sensorPath) || strings.EqualFold(filepath.Base(c), base) {
-			if isProductTCCClient(c) {
-				return true
-			}
+		if isSensorBinaryTCCClient(c, sensorPath) {
+			return true
 		}
 	}
 	return false
+}
+
+func isConsoleOrSetupTCCClient(client string) bool {
+	low := strings.ToLower(filepath.ToSlash(client))
+	switch {
+	case strings.Contains(low, "edr-agent-ui"),
+		strings.Contains(low, "com.razatech.edr.console"),
+		strings.Contains(low, "com.razatech.edr.setup"),
+		strings.Contains(low, "edr-agent-setup"):
+		return true
+	default:
+		return false
+	}
+}
+
+func isSensorBinaryTCCClient(client, sensorPath string) bool {
+	low := strings.ToLower(filepath.ToSlash(client))
+	if isConsoleOrSetupTCCClient(client) {
+		return false
+	}
+	if sensorPath != "" {
+		sp := strings.ToLower(filepath.ToSlash(sensorPath))
+		if strings.EqualFold(client, sensorPath) || strings.Contains(low, sp) {
+			return true
+		}
+		if strings.EqualFold(filepath.Base(client), filepath.Base(sensorPath)) {
+			return true
+		}
+	}
+	base := strings.ToLower(filepath.Base(client))
+	switch base {
+	case "edr-agent", "edr-agent.exe":
+		return true
+	}
+	return strings.Contains(low, "com.razatech.edr-agent") ||
+		strings.Contains(low, "/usr/local/libexec/edr-agent") ||
+		strings.Contains(low, "/library/application support/edr/bin/edr-agent") ||
+		strings.Contains(low, "edr-agent.app")
 }
 
 func parseTCCClientRows(out string) []string {

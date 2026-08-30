@@ -306,7 +306,10 @@ func (c *console) updateDashAction(st operatorStatus) {
 	}
 	was := c.dashTail != nil && c.dashTail.Visible()
 	show := false
-	if !st.Enrolled {
+	if needsOSGrants() {
+		c.dashAction.SetText("Grant Full Disk Access")
+		show = true
+	} else if !st.Enrolled {
 		c.dashAction.SetText("Enroll this device")
 		show = true
 	} else if !serviceHealthy(st.Service) {
@@ -339,6 +342,10 @@ func (c *console) updateDashAction(st operatorStatus) {
 
 func (c *console) onDashAction() {
 	if c.busy {
+		return
+	}
+	if needsOSGrants() {
+		c.show(uistate.Permissions)
 		return
 	}
 	if !c.last.Enrolled {
