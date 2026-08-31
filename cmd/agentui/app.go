@@ -62,6 +62,7 @@ type console struct {
 	startAgentBtn     *widget.Button
 	preflightItems    []preflightItem
 	checksOK          bool
+	canStart          bool
 
 	setupBody       *fyne.Container
 	setupHint       *widget.Label
@@ -185,15 +186,7 @@ func runDashboard() error {
 	})
 	setUIShow(func() {
 		fyne.Do(func() {
-			if c.removed {
-				c.enterRemovedState()
-				return
-			}
-			if flagSetup {
-				c.routeSetupEntry()
-				return
-			}
-			c.showDecoratedDash()
+			c.reveal()
 		})
 	})
 
@@ -270,7 +263,28 @@ func (c *console) routeInitial() {
 			c.dismissToTray()
 			return
 		}
-		c.showDecoratedDash()
+		c.showDash()
+		return
+	}
+	c.show(next)
+}
+
+// reveal shows the screen the operator should actually be on (NIST CM-2:
+// enroll → OS grants → preflight → running). Tray / second-instance must
+// not jump to Start if the service is missing.
+func (c *console) reveal() {
+	if c.removed {
+		c.enterRemovedState()
+		return
+	}
+	if flagSetup {
+		c.routeSetupEntry()
+		return
+	}
+	c.last = loadStatus()
+	next := uistate.Route(false, agentInstalled(), c.last.Enrolled, needsOSGrants(), serviceHealthy(c.last.Service))
+	if next == uistate.Dash {
+		c.showDash()
 		return
 	}
 	c.show(next)
@@ -349,7 +363,7 @@ func (c *console) setBusy(on bool) {
 			b.Enable()
 		}
 	}
-	if !on && c.startAgentBtn != nil && !c.checksOK {
+	if !on && c.startAgentBtn != nil && !c.canStart {
 		c.startAgentBtn.Disable()
 	}
 }

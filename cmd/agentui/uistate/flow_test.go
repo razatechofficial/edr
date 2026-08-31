@@ -18,6 +18,9 @@ func TestRouteSetupNeverOpensDash(t *testing.T) {
 	if got := Route(false, true, true, true, false); got != Permissions {
 		t.Fatalf("console grants = %v, want permissions", got)
 	}
+	if got := Route(false, true, true, false, false); got != Preflight {
+		t.Fatalf("console enrolled+stopped = %v, want preflight", got)
+	}
 }
 
 func TestInitialScreen(t *testing.T) {

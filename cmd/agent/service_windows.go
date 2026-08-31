@@ -108,8 +108,8 @@ func installService() error {
 
 	s, err := openOrCreateService(m, exePath, cfgPath)
 	if err != nil {
-		installLog("create service: %v (continuing; MSI must not roll back)", err)
-		return nil
+		installLog("create service: %v", err)
+		return fmt.Errorf("register EDRAgent service: %w", err)
 	}
 	defer s.Close()
 

@@ -56,6 +56,13 @@ func (s *edrWindowsService) Execute(_ []string, r <-chan svc.ChangeRequest, chan
 // tryRunWindowsService runs under the Service Control Manager when invoked as a service.
 // Returns (handled, exitCode).
 func tryRunWindowsService() (bool, int) {
+	// msiexec deferred custom actions run in session 0; IsWindowsService
+	// can be a false positive, which skipped --install and left no EDRAgent.
+	for _, a := range os.Args[1:] {
+		if a == "--install" || a == "--uninstall" {
+			return false, 0
+		}
+	}
 	isService, err := svc.IsWindowsService()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "windows service probe: %v\n", err)

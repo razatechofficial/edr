@@ -116,6 +116,36 @@ func runOneCheck(id string, st operatorStatus) (ok bool, detail string) {
 	}
 }
 
+func preflightCanStart(items []preflightItem) bool {
+	svcFail := false
+	for _, it := range items {
+		if it.State == checkOK {
+			continue
+		}
+		if it.ID == "svc" && it.State == checkFail {
+			svcFail = true
+			continue
+		}
+		return false
+	}
+	return len(items) > 0 || svcFail
+}
+
+func waitForService(d time.Duration) operatorStatus {
+	deadline := time.Now().Add(d)
+	var st operatorStatus
+	for {
+		st = loadStatus()
+		if serviceHealthy(st.Service) {
+			return st
+		}
+		if time.Now().After(deadline) {
+			return st
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+}
+
 func checkVisual(s checkState) (color.Color, fyne.Resource) {
 	switch s {
 	case checkOK:

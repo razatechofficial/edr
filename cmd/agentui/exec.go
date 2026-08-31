@@ -84,6 +84,27 @@ func installerPath() string {
 	return "edr-installer"
 }
 
+func sensorBinaryPath() string {
+	var cands []string
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		cands = append(cands,
+			filepath.Join(dir, "edr-agent"),
+			filepath.Join(dir, "edr-agent.exe"),
+		)
+	}
+	cands = append(cands, systemAgentCandidates()...)
+	for _, p := range cands {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	if p, err := exec.LookPath("edr-agent"); err == nil {
+		return p
+	}
+	return "edr-agent"
+}
+
 // systemAgentCandidates is where a finished per-machine install puts the sensor.
 // Sibling binaries inside EDR Agent.app / Setup.exe do not count — those are
 // the payload the attended wizard copies on Accept.

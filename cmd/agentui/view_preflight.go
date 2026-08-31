@@ -64,10 +64,16 @@ func (c *console) renderPreflight() {
 	}
 	c.preflightBox.Refresh()
 	c.checksOK = allOK
-	if allOK {
+	c.canStart = preflightCanStart(c.preflightItems)
+	if c.canStart {
 		c.startAgentBtn.Enable()
-		c.startAgentBtn.SetText("Start " + productName)
-		line = "All checks passed. Start edr to load the sensor."
+		if allOK {
+			c.startAgentBtn.SetText("Start " + productName)
+			line = "All checks passed. Start edr to load the sensor."
+		} else {
+			c.startAgentBtn.SetText("Register and start")
+			line = "Allow Administrator to register the EDRAgent service, then the sensor can start."
+		}
 	} else {
 		c.startAgentBtn.Disable()
 	}
@@ -125,7 +131,7 @@ func (c *console) sessionStatus() operatorStatus {
 }
 
 func (c *console) onStartAgent() {
-	if c.busy || !c.checksOK {
+	if c.busy || !c.canStart {
 		return
 	}
 	c.startSensor()
@@ -149,9 +155,28 @@ func (c *console) startSensor() {
 		return
 	}
 	go func() {
+		if isWindows() {
+			if err := runAgentInstallPrivileged(); err != nil {
+				st := loadStatus()
+				fyne.Do(func() {
+					c.setBusy(false)
+					f := classifyStartError(err.Error())
+					f.Title = "The sensor service is not registered"
+					f.Body = "Administrator permission is required to register EDRAgent. Allow the Windows prompt, then Start again."
+					c.setDashFault(f)
+					c.setPreflightFault(f)
+					if c.preflightLine != nil {
+						c.preflightLine.SetText("Service registration did not finish.")
+					}
+					c.presentStartFault(f)
+					c.applyDashboard(st, sampleResources(st))
+				})
+				return
+			}
+		}
 		_, _ = runEdrctl("stage-identity")
 		out, err := runEdrctlPrivileged("start")
-		st := loadStatus()
+		st := waitForService(8 * time.Second)
 		fyne.Do(func() {
 			c.setBusy(false)
 			if st.Enrolled {
@@ -160,10 +185,15 @@ func (c *console) startSensor() {
 				st.Enrolled = c.last.Enrolled
 				st.AgentID = firstNonEmpty(st.AgentID, c.last.AgentID)
 			}
-			if err != nil && !serviceHealthy(st.Service) {
+			if err != nil || !serviceHealthy(st.Service) {
 				f := classifyStartError(out)
 				if f.Detail == "" && err != nil {
 					f.Detail = err.Error()
+				}
+				if f.Title == "" {
+					f.Title = "The sensor did not start"
+					f.Body = "EDRAgent is registered but is not running. Allow Administrator if Windows asked, then Start again."
+					f.Action = "OK"
 				}
 				c.setPreflightFault(uiFault{})
 				c.setDashFault(f)

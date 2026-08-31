@@ -459,15 +459,15 @@ func (c *console) fitDash() {
 }
 
 func (c *console) showPopover() {
-	c.showDash()
+	c.reveal()
 }
 
 func (c *console) showDecoratedDash() {
-	c.showDash()
+	c.reveal()
 }
 
 func (c *console) returnToDash() {
-	c.showDash()
+	c.reveal()
 }
 
 func formatBytesMB(n int64) string {

@@ -20,7 +20,7 @@ func (c *console) setupTray() {
 	}
 	desk.SetSystemTrayIcon(edrIcon())
 	open := fyne.NewMenuItem("Open", func() {
-		c.showDash()
+		c.reveal()
 	})
 	perms := fyne.NewMenuItem("Permissions", func() { c.show(uistate.Permissions) })
 	updates := fyne.NewMenuItem("Check for updates", c.onCheckUpdates)
@@ -44,7 +44,7 @@ func (c *console) onTrayClick() {
 		}
 		return
 	}
-	c.showPopover()
+	c.reveal()
 }
 
 func (c *console) refreshTray(_ operatorStatus, _ resourceSnapshot) {

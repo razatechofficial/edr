@@ -31,7 +31,7 @@
                   Schedule="afterInstallInitialize"
                   DowngradeErrorMessage=
       "A newer version of EDR Agent is already installed."/>
-    <MediaTemplate EmbedCab="yes"/>
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high"/>
 
     <Feature Id="ProductFeature" Title="EDR Agent" Level="1">
       <ComponentGroupRef Id="ProductComponents"/>
@@ -39,23 +39,7 @@
       <ComponentGroupRef Id="ModelsComponents"/>
     </Feature>
 
-    <CustomAction Id="CaInstallService"
-                  FileKey="AgentExe"
-                  ExeCommand="--install"
-                  Execute="deferred"
-                  Impersonate="no"
-                  Return="ignore"/>
-
-    <CustomAction Id="CaUninstallService"
-                  FileKey="AgentExe"
-                  ExeCommand="--uninstall"
-                  Execute="deferred"
-                  Impersonate="no"
-                  Return="ignore"/>
-
     <InstallExecuteSequence>
-      <Custom Action="CaUninstallService" Before="RemoveFiles">REMOVE="ALL"</Custom>
-      <Custom Action="CaInstallService" After="InstallFiles">NOT REMOVE</Custom>
       <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
   </Product>
@@ -82,6 +66,23 @@
               Source="$(var.EdrAgentExe)"
               Name="edr-agent.exe"
               KeyPath="yes"/>
+        <ServiceInstall
+              Id="EDRAgentService"
+              Name="EDRAgent"
+              DisplayName="EDR Agent"
+              Description="Endpoint Detection and Response agent by RazaTech"
+              Type="ownProcess"
+              Start="auto"
+              ErrorControl="normal"
+              Account="LocalSystem"
+              Arguments='--config "[DATAROOT]config.yml"'
+              Vital="yes"/>
+        <ServiceControl
+              Id="EDRAgentServiceControl"
+              Name="EDRAgent"
+              Stop="both"
+              Remove="uninstall"
+              Wait="yes"/>
       </Component>
       <Component Id="cmpEdrCtlExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="EdrCtlExe"
@@ -94,6 +95,9 @@
               Source="$(var.EdrUIExe)"
               Name="edr-agent-ui.exe"
               KeyPath="yes"/>
+        <File Id="EdrUIManifest"
+              Source="edr-agent-ui.exe.manifest"
+              Name="edr-agent-ui.exe.manifest"/>
       </Component>
       <Component Id="cmpEdrInstallerExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="EdrInstallerExe"

@@ -40,17 +40,17 @@ func InitialScreen(installed, enrolled, needsGrants, serviceOK bool) Screen {
 	return Dash
 }
 
-// Route is the enterprise entry state machine:
+// Route is the enterprise entry state machine (CrowdStrike / Defender / NIST CM-2):
 //
-//	Setup file, nothing installed  → license
-//	Setup file, already installed  → manage (update / reinstall / uninstall)
-//	Installed app, leftover / gone → orphan (not the running dashboard)
-//	Installed app, not enrolled    → enroll
-//	Installed app, grants missing  → permissions (FDA / login items)
-//	Installed app, sensor stopped  → preflight
-//	Installed app, healthy         → dashboard
+//	not installed                         → Setup (orphan / download package)
+//	installed, not enrolled               → Enroll (token)
+//	enrolled, OS grants missing           → Permissions (FDA / firewall / PPPC)
+//	enrolled, grants OK, sensor stopped   → Preflight (register/start service)
+//	enrolled, sensor running              → Dash
 //
-// fromSetup is true for EDR-Agent-Setup.app / .exe / --setup only.
+// Setup.app / --setup always stays on Setup (license or manage:
+// update / reinstall / uninstall). Tray Open and a second launch must
+// call Route again — never skip to Dash while the service is missing.
 func Route(fromSetup, installed, enrolled, needsGrants, serviceOK bool) Screen {
 	if fromSetup {
 		return Setup

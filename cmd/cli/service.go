@@ -104,14 +104,7 @@ func clearUserLoginIdentity() {
 func controlAgentService(action string) error {
 	switch runtime.GOOS {
 	case "windows":
-		cmd := exec.Command("sc.exe", action, "EDRAgent")
-		hideConsole(cmd)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("%s service: %w (%s)", action, err, strings.TrimSpace(string(out)))
-		}
-		fmt.Printf("EDRAgent %s requested\n", action)
-		return nil
+		return windowsControlAgentService(action)
 	case "linux":
 		out, err := exec.Command("systemctl", action, "edr-agent").CombinedOutput()
 		if err != nil {

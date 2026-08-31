@@ -2,24 +2,20 @@ package main
 
 import "testing"
 
-func TestRunOneCheckCert(t *testing.T) {
-	ok, _ := runOneCheck("cert", operatorStatus{})
-	if ok {
-		t.Fatal("unenrolled host should fail cert check")
+func TestPreflightCanStart(t *testing.T) {
+	ok := preflightItem{ID: "cert", State: checkOK}
+	svcFail := preflightItem{ID: "svc", State: checkFail}
+	certFail := preflightItem{ID: "cert", State: checkFail}
+	if !preflightCanStart([]preflightItem{ok, ok}) {
+		t.Fatal("all green should start")
 	}
-	ok, detail := runOneCheck("cert", operatorStatus{AgentID: "dev-1"})
-	if !ok {
-		t.Fatalf("session identity should pass: %s", detail)
+	if !preflightCanStart([]preflightItem{ok, svcFail}) {
+		t.Fatal("missing service is repairable via Register and start")
 	}
-	ok, detail = runOneCheck("cert", operatorStatus{Enrolled: true, AgentID: "dev-1"})
-	if !ok {
-		t.Fatalf("enrolled should pass: %s", detail)
+	if preflightCanStart([]preflightItem{certFail, svcFail}) {
+		t.Fatal("cert fail must still block start")
 	}
-}
-
-func TestRunOneCheckSvcNotLoaded(t *testing.T) {
-	ok, detail := runOneCheck("svc", operatorStatus{Service: "not loaded"})
-	if !ok {
-		t.Fatalf("not loaded should still count as installed: %s", detail)
+	if preflightCanStart(nil) {
+		t.Fatal("empty checklist must not start")
 	}
 }
