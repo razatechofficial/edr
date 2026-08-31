@@ -99,13 +99,8 @@
       <Component Id="cmpEdrUIManifest" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="EdrUIManifest"
               Source="edr-agent-ui.exe.manifest"
-              Name="edr-agent-ui.exe.manifest"/>
-        <RegistryValue Root="HKLM"
-                       Key="Software\RazaTech\EDR Agent"
-                       Name="ui_manifest"
-                       Type="integer"
-                       Value="1"
-                       KeyPath="yes"/>
+              Name="edr-agent-ui.exe.manifest"
+              KeyPath="yes"/>
       </Component>
       <Component Id="cmpEdrInstallerExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="EdrInstallerExe"
