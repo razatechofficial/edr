@@ -52,8 +52,8 @@ func TestSensorListedInTCC(t *testing.T) {
 	if !sensorListedInTCC([]string{"com.razatech.edr-agent"}, sensor) {
 		t.Fatal("bundle id")
 	}
-	if sensorListedInTCC([]string{"edrctl"}, sensor) {
-		t.Fatal("CLI FDA is not the sensor")
+	if !sensorListedInTCC([]string{"/usr/local/libexec/edr-agent.app"}, sensor) {
+		t.Fatal("sensor app bundle")
 	}
 }
 
@@ -70,11 +70,22 @@ func TestTccRawGrantsSensor(t *testing.T) {
 	if !tccRawGrantsSensor([]byte("edr-agent-55554944560e2f9119a136c3d3008c04d26ae1f7")) {
 		t.Fatal("adhoc")
 	}
-	if !tccRawGrantsSensor([]byte("com.razatech.edr.console")) {
-		t.Fatal("console bundle")
+	if tccRawGrantsSensor([]byte("com.razatech.edr.console")) {
+		t.Fatal("console bundle is not the sensor")
+	}
+	if tccRawGrantsSensor([]byte("EDR-Agent-Setup.app")) {
+		t.Fatal("Setup.app is not the sensor")
 	}
 }
 
+func TestConsoleOrSetupTCCClient(t *testing.T) {
+	if !isConsoleOrSetupTCCClient("/Users/me/Downloads/EDR-Agent-Setup.app") {
+		t.Fatal("setup app")
+	}
+	if isConsoleOrSetupTCCClient("/usr/local/libexec/edr-agent.app") {
+		t.Fatal("sensor app is not setup")
+	}
+}
 func TestProtectedReadLooksGranted(t *testing.T) {
 	if protectedReadLooksGranted("reading config /x: open /x: operation not permitted") {
 		t.Fatal("denied")

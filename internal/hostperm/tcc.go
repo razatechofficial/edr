@@ -16,7 +16,21 @@ var (
 // tccRawGrantsProduct is a schema-independent fallback: sqlite3 on a temp copy
 // can miss Sequoia columns, but the client string is still in the DB bytes.
 func tccRawGrantsSensor(raw []byte) bool {
-	return tccRawGrantsProduct(raw)
+	if len(raw) == 0 {
+		return false
+	}
+	low := bytes.ToLower(raw)
+	for _, n := range [][]byte{
+		[]byte("/library/application support/edr/bin/edr-agent"),
+		[]byte("/usr/local/libexec/edr-agent.app"),
+		[]byte("/usr/local/bin/edr-agent"),
+		[]byte("com.razatech.edr-agent"),
+	} {
+		if bytes.Contains(low, n) {
+			return true
+		}
+	}
+	return adhocSensorTCC.Match(raw)
 }
 
 func tccRawGrantsProduct(raw []byte) bool {

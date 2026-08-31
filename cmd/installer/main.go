@@ -184,6 +184,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("    %s -> %s\n", agentSrc, agentDst)
 
+	if runtime.GOOS == "darwin" {
+		if wrapped, err := wrapDarwinSensorApp(agentDst); err != nil {
+			fmt.Printf("    warning: sensor app bundle: %v\n", err)
+		} else {
+			agentDst = wrapped
+			fmt.Printf("    Full Disk Access item: /usr/local/libexec/edr-agent.app\n")
+		}
+	}
+
 	edrctlSrc := findEdrctlBinary(&paths)
 	if edrctlSrc != "" {
 		edrctlDst := filepath.Join(paths.binDir, edrctlBinaryName())

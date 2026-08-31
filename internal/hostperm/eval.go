@@ -97,6 +97,7 @@ func evaluate(quick bool) Report {
 // show its native prompt (macOS Login Items, etc.) before Recheck.
 func EnsurePromptedItems() {
 	ensureLoginItem()
+	revealSensorForFDA()
 }
 
 // NeedsGrants is true when a required OS grant (FDA / firewall / caps) is

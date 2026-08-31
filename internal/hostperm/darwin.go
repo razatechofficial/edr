@@ -143,15 +143,13 @@ func sensorRunning() bool {
 }
 
 func fdaGuide() string {
-	hint := sensorBinaryHint()
-	return "System Settings → Privacy & Security → Full Disk Access → enable the sensor (" + hint + "). Granting the dashboard app is not enough. Then Recheck."
+	item := SensorFDAItemPath()
+	return "In Full Disk Access click +, press Cmd-Shift-G, paste " + item + ", then enable EDR Sensor. Leave EDR-Agent-Setup off. Then Recheck."
 }
 
 func evaluateFDA(it Item) Item {
 	it.Guide = fdaGuide()
 	hint := sensorBinaryHint()
-	// Industry (Falcon / Defender / SentinelOne): FDA is on the sensor
-	// binary. The console or Setup.app having FDA does not count.
 	if probeSensorBinaryFDA() {
 		return ok(it, "")
 	}
@@ -164,7 +162,7 @@ func evaluateFDA(it Item) Item {
 		helper.Detail = ""
 		return helper
 	}
-	return action(it, "Enable Full Disk Access for "+hint)
+	return action(it, "Add "+SensorFDAItemPath()+" with +, then enable it.")
 }
 
 func evaluateSysExt(it Item) Item {
@@ -269,8 +267,14 @@ func OpenSettings(id string) error {
 	for _, u := range settingsURLs(id) {
 		last = exec.Command("/usr/bin/open", u).Run()
 		if last == nil {
+			if id == IDFDA {
+				revealSensorForFDA()
+			}
 			return nil
 		}
+	}
+	if id == IDFDA {
+		revealSensorForFDA()
 	}
 	last = exec.Command("/usr/bin/osascript", "-e", `tell application "System Settings" to activate`).Run()
 	if last != nil {

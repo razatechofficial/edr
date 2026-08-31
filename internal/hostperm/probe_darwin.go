@@ -13,11 +13,12 @@ import (
 )
 
 func probeSensorBinaryFDA() bool {
-	bin := sensorBinaryHint()
-	if bin == "" {
-		return false
+	for _, bin := range sensorProbeCandidates() {
+		if probeFDADetached(bin) {
+			return true
+		}
 	}
-	return probeFDAProbeArg(bin, "fda-probe")
+	return false
 }
 
 func probeProductFDA() bool {

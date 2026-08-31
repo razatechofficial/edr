@@ -264,7 +264,7 @@ func (c *console) applyGrantButtonLabel() {
 func permGuide() string {
 	switch {
 	case isDarwin():
-		return "System Settings → Privacy & Security → Full Disk Access → enable the sensor (edr-agent). Then Recheck."
+		return "In Full Disk Access click +, press Cmd-Shift-G, paste the sensor path, enable EDR Sensor. Leave Setup off. Then Recheck."
 	case isWindows():
 		return "Allow edr through Windows Defender Firewall if prompted. Then Recheck."
 	default:
