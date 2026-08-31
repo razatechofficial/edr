@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <!--
-    Fleet MSI (GPO / silent): copies sensor + console, then opens the Fyne
-    console for enroll → dashboard. Attended testers should use
-    EDR-Agent-Setup.exe (custom license + copy-files in the same process).
+    Native MSI (same pattern as Microsoft Defender / CrowdStrike Falcon):
+    copies sensor + console + models. Attended: Windows Installer UI.
+    Silent/GPO: msiexec /qn /i edr-agent.msi
+    First-run enroll lives in EDR Agent.exe, not a fat Setup.exe.
     Service is registered but not started until the operator launches it.
   -->
   <Product Id="*"
@@ -17,9 +18,8 @@
              InstallScope="perMachine"
              InstallPrivileges="elevated"/>
 
-    <!-- Progress-only MSI (no WiX license wizard). The Fyne console owns
-         first-run: enroll → grants → preflight → dashboard. Testers who want
-         the custom copy-files wizard should run EDR-Agent-Setup.exe instead. -->
+    <!-- Progress-only MSI. The installed console owns first-run:
+         enroll → grants → preflight → dashboard. Skip GUI on silent msiexec. -->
     <CustomAction Id="LaunchApplication"
                   FileKey="EdrUIExe"
                   ExeCommand=""
@@ -56,7 +56,7 @@
     <InstallExecuteSequence>
       <Custom Action="CaUninstallService" Before="RemoveFiles">REMOVE="ALL"</Custom>
       <Custom Action="CaInstallService" After="InstallFiles">NOT REMOVE</Custom>
-      <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE</Custom>
+      <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
   </Product>
 

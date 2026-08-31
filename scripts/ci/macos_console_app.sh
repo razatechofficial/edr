@@ -3,8 +3,8 @@
 # Do not wrap with a universal AppleScript applet: that opens on the wrong CPU
 # and then execs edrctl of a different architecture (Bad CPU type).
 # Usage: macos_console_app.sh <ui-binary> <edrctl-binary> <dest.app> [installer]
-# The optional installer (prefer embedbundle) lives next to the UI so Accept
-# can copy the sensor without a zip of loose binaries.
+# Do not pass the embedbundle installer here on prod — that inflates the .app.
+# Thin edr-installer lives in /usr/local/bin (see build/macos/package.sh).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

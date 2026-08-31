@@ -63,7 +63,7 @@ func openSettingsLabel() string {
 func permBody() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "In Full Disk Access click +, press Cmd-Shift-G, and paste the sensor app path (copied for you). Enable EDR Sensor — not EDR-Agent-Setup. Then Recheck."
+		return "In Full Disk Access click +, press Cmd-Shift-G, and paste the sensor app path (copied for you). Enable EDR Sensor. Then Recheck."
 	case "windows":
 		return "Allow edr through Windows Firewall if prompted, then Recheck. Startup apps can be opened from this screen."
 	default:

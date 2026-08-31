@@ -224,7 +224,6 @@ jobs:
       - name: Verify macOS package exists
         run: |
           ls -lh dist/edr-agent_*_${{ matrix.arch }}.pkg
-          ls -lh dist/EDR-Agent-Setup_*.zip dist/EDR-Agent-Setup.app/Contents/MacOS/edr-agent-ui
 
   windows-monitoring-smoke:
     name: Windows monitoring smoke

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # macOS package builder (release CI).
-# Attended download is EDR-Agent-Setup.app (zip/dmg) — custom Fyne wizard.
-# The .pkg is optional (Apple Installer.app); testers should not use it.
-# EDR_PKG_MODE=fleet EDR_PKG_SUFFIX=-mdm: also ships LaunchDaemon + models
-# for MDM. Silent: /Applications/EDR Agent.app/Contents/MacOS/edr-installer install
+# Product is a signed .pkg (Apple Installer.app / `installer -pkg`):
+# sensor + LaunchDaemon + models + thin edr-installer + EDR Agent.app.
+# First-run enroll, FDA, and dashboard live in the installed console — not a
+# fat custom Setup.app. That wizard lives on the attended-setup branch.
+# Silent/MDM: installer -pkg … -target /  (COMMAND_LINE_INSTALL skips GUI).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -35,8 +36,12 @@ fi
 
 UI_BIN="bin/edr-agent-ui-darwin-${ARCH}"
 CTL_BIN="bin/edrctl-darwin-${ARCH}"
-PKG_MODE="${EDR_PKG_MODE:-attended}"
+PKG_MODE="${EDR_PKG_MODE:-fleet}"
 PKG_SUFFIX="${EDR_PKG_SUFFIX:-}"
+# "attended" used to mean UI-only pkg + Setup.app. prod always ships a complete pkg.
+if [[ "${PKG_MODE}" == "attended" ]]; then
+	PKG_MODE=fleet
+fi
 if [[ ! -f "${UI_BIN}" ]]; then
 	echo "missing ${UI_BIN}; run build_macos_production.sh first" >&2
 	exit 1
@@ -46,25 +51,11 @@ if [[ ! -f "${CTL_BIN}" ]]; then
 	exit 1
 fi
 
-# One .app holds the wizard through the dashboard. The privileged installer
-# embeds agent + models + rules so testers do not need a zip of loose binaries.
+# Thin privileged helper for uninstall/repair. Payload is in the pkg, not this binary.
 INSTALLER_BIN="bin/edr-installer-darwin-${ARCH}"
-AGENT_FOR_EMBED=""
-if [[ -f "${APP_BUNDLE}/Contents/MacOS/edr-agent" ]]; then
-	AGENT_FOR_EMBED="${APP_BUNDLE}/Contents/MacOS/edr-agent"
-elif [[ -f "${BINARY}" ]]; then
-	AGENT_FOR_EMBED="${BINARY}"
-fi
-if [[ -n "${AGENT_FOR_EMBED}" ]]; then
-	GOOS=darwin GOARCH="${ARCH}" bash "${ROOT}/scripts/ci/stage_embedded_installer.sh" \
-		"${AGENT_FOR_EMBED}" "${CTL_BIN}" "${INSTALLER_BIN}"
-	if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
-		codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${INSTALLER_BIN}" || true
-	fi
-fi
-if [[ ! -f "${INSTALLER_BIN}" ]]; then
-	echo "missing ${INSTALLER_BIN}; attended setup needs the embedded installer" >&2
-	exit 1
+CGO_ENABLED=0 GOOS=darwin GOARCH="${ARCH}" go build -trimpath -o "${INSTALLER_BIN}" ./cmd/installer
+if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
+	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${INSTALLER_BIN}" || true
 fi
 
 EDR_BASE="/Library/Application Support/EDR"
@@ -121,16 +112,17 @@ fi
 
 cp "${CTL_BIN}" "${PKG_ROOT}/usr/local/bin/edrctl"
 cp "${CTL_BIN}" "${PKG_ROOT}/usr/local/bin/edr"
-chmod 755 "${PKG_ROOT}/usr/local/bin/edrctl" "${PKG_ROOT}/usr/local/bin/edr"
+cp "${INSTALLER_BIN}" "${PKG_ROOT}/usr/local/bin/edr-installer"
+chmod 755 "${PKG_ROOT}/usr/local/bin/edrctl" "${PKG_ROOT}/usr/local/bin/edr" "${PKG_ROOT}/usr/local/bin/edr-installer"
 if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
 	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edrctl"
 	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edr"
+	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edr-installer"
 fi
 fi
 
-bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${CTL_BIN}" "${PKG_ROOT}/Applications/EDR Agent.app" "${INSTALLER_BIN}"
-# Same payload as a double-clickable Setup.app (no Apple Installer.app chrome).
-bash "${ROOT}/scripts/ci/macos_setup_archive.sh" "${UI_BIN}" "${CTL_BIN}" "${INSTALLER_BIN}" "${ARCH}"
+# Console only — do not embed the installer (that inflated the .app past 60MB).
+bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${CTL_BIN}" "${PKG_ROOT}/Applications/EDR Agent.app"
 
 if [[ "${PKG_MODE}" == "fleet" ]]; then
 if [[ -f "${ROOT}/deploy/macos/first-run-permissions.sh" ]]; then
@@ -215,9 +207,8 @@ fi
 
 mkdir -p pkg/macos/scripts
 
-# Attended: Apple Installer only drops EDR Agent.app. The Fyne wizard copies
-# the sensor on Accept and continues through enroll to the dashboard.
-# Fleet: files are already on disk; still do not start the daemon — Launch does.
+# Files are on disk; do not start the daemon here — first-run / Launch does.
+# Silent MDM sets COMMAND_LINE_INSTALL; do not open the GUI.
 cat > pkg/macos/scripts/postinstall <<'EOF'
 #!/bin/bash
 set -e
@@ -229,6 +220,9 @@ LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServic
 CONSOLE_USER="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
 if [[ -x "${LSREG}" ]]; then
 	"${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
+fi
+if [[ -n "${COMMAND_LINE_INSTALL:-}" ]]; then
+	exit 0
 fi
 if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
 	/usr/bin/sudo -u "${CONSOLE_USER}" /usr/bin/open "${APP}" >/dev/null 2>&1 || true
@@ -292,8 +286,8 @@ pkgbuild \
 	"${COMPONENT}"
 
 DIST_XML="pkg/macos/distribution.xml"
-# No welcome/license pages: Installer.app only authenticates and copies the
-# .app. License + copy-files + enroll + dashboard live in EDR Agent.app.
+# Installer.app authenticates and copies files. First-run enroll lives in
+# EDR Agent.app (same pattern as Falcon / Microsoft Defender).
 cat > "${DIST_XML}" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
@@ -317,12 +311,3 @@ productbuild \
 	"${PKG_OUT}"
 
 echo "macOS package: ${PKG_OUT} (${ARCH_TITLE}, ${PKG_MODE})"
-SETUP_ZIP="dist/EDR-Agent-Setup_apple-silicon.zip"
-if [[ "${ARCH}" == "amd64" ]]; then
-	SETUP_ZIP="dist/EDR-Agent-Setup_intel.zip"
-fi
-if [[ ! -f "${SETUP_ZIP}" ]]; then
-	echo "missing attended Setup zip: ${SETUP_ZIP}" >&2
-	exit 1
-fi
-echo "macOS attended setup: ${SETUP_ZIP} (open the .app — not the .pkg)"

@@ -196,7 +196,7 @@ func (c *console) onSetupAccept() {
 	if !installerPresent() {
 		c.setSetupFault(uiFault{
 			Title:  "Installer not found",
-			Body:   "Download EDR-Agent-Setup again (one file). It already contains the installer.",
+			Body:   "The uninstall helper is missing. Reinstall the EDR Agent package, then try again.",
 			Detail: adminDetail(),
 			Action: "OK",
 		})
@@ -618,7 +618,7 @@ func (c *console) paintOrphanConsole() {
 	closeBtn := widget.NewButton("Close", func() { c.app.Quit() })
 	closeBtn.Importance = widget.HighImportance
 	inner := pad5(vstack(0,
-		pageHeader("Not installed", colorMuted, "edr is not on this computer", "Open EDR-Agent-Setup to install, or this window if you already uninstalled."),
+		pageHeader("Not installed", colorMuted, "edr is not on this computer", "Install the EDR Agent package from your console download, or close this window if you already uninstalled."),
 		gapH(24),
 		closeBtn,
 	))

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Build the attended macOS download: EDR-Agent-Setup.app inside a zip (and DMG).
+# prod CI does not call this. Use the attended-setup branch for the custom wizard.
 # Double-click the .app — Fyne wizard, not Apple Installer.app.
 # Usage: macos_setup_archive.sh <ui-bin> <edrctl-bin> <installer-bin> <arch>
 set -euo pipefail

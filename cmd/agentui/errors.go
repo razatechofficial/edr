@@ -113,7 +113,7 @@ func classifyInstallError(raw string) uiFault {
 	if strings.Contains(s, "agent binary not found") || (strings.Contains(s, "not found") && strings.Contains(s, "edr-agent")) {
 		return uiFault{
 			Title:  "Setup could not find the agent files",
-			Body:   "This setup file is missing the sensor payload. Download EDR-Agent-Setup again, then Accept.",
+			Body:   "This package is missing the sensor payload. Download the EDR Agent installer again.",
 			Detail: adminDetail(),
 			Action: "Try again",
 		}
@@ -165,7 +165,7 @@ func classifyStartError(raw string) uiFault {
 	case strings.Contains(s, "local sensor binary not found") || strings.Contains(s, "sensor binary missing"):
 		return uiFault{
 			Title:  "The sensor program is missing",
-			Body:   "Setup did not finish copying the sensor. Run EDR-Agent-Setup again and choose Update or Accept.",
+			Body:   "The sensor is not on this computer. Reinstall the EDR Agent package, then open EDR Agent.",
 			Detail: firstLine(raw),
 			Action: "Try again",
 		}

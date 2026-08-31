@@ -114,10 +114,11 @@ cp "${EDRCTL_BIN}" "${STAGE}/usr/local/bin/edr"
 chmod 755 "${STAGE}/usr/local/bin/edr-agent" "${STAGE}/usr/local/bin/edrctl" "${STAGE}/usr/local/bin/edr"
 
 INSTALLER_BIN="${ROOT}/bin/edr-installer-darwin-${ARCH}"
-GOOS=darwin GOARCH="${ARCH}" bash "${ROOT}/scripts/ci/stage_embedded_installer.sh" \
-	"${AGENT_BIN}" "${EDRCTL_BIN}" "${INSTALLER_BIN}"
+CGO_ENABLED=0 GOOS=darwin GOARCH="${ARCH}" go build -trimpath -o "${INSTALLER_BIN}" ./cmd/installer
+cp "${INSTALLER_BIN}" "${STAGE}/usr/local/bin/edr-installer"
+chmod 755 "${STAGE}/usr/local/bin/edr-installer"
 mkdir -p "${STAGE}/Applications"
-bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${EDRCTL_BIN}" "${STAGE}/Applications/EDR Agent.app" "${INSTALLER_BIN}"
+bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${EDRCTL_BIN}" "${STAGE}/Applications/EDR Agent.app"
 
 cp "${ROOT}/deploy/macos/first-run-permissions.sh" "${STAGE}/Library/Application Support/EDR/first-run-permissions.sh"
 chmod 755 "${STAGE}/Library/Application Support/EDR/first-run-permissions.sh"
@@ -309,7 +310,7 @@ if [[ -d "${APP}" ]]; then
 	if [[ -x "${LSREG}" ]]; then
 		"${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
 	fi
-	if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
+	if [[ -z "${COMMAND_LINE_INSTALL:-}" && -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
 		if [[ -x "${LSREG}" ]]; then
 			/usr/bin/sudo -u "${CONSOLE_USER}" "${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
 		fi

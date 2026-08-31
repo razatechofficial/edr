@@ -6,12 +6,11 @@
 #     version string from `git describe --tags --always` (falls back if no tags)
 #   - workflow_dispatch        → same as prod push semantics for the selected ref
 #
-# Testers download one attended file per OS (custom wizard, not OS Installer):
-#   macOS  EDR-Agent-Setup_apple-silicon.zip / _intel.zip  (.app inside)
-#          or the same name .dmg
-#   Windows EDR-Agent-Setup.exe
+# Testers download the vendor OS installer (Falcon / Defender pattern):
+#   macOS  edr-agent_<ver>_apple-silicon.pkg / _intel.pkg
+#   Windows edr-agent_<ver>.msi
 #   Linux  .deb / .rpm
-# macOS .pkg and Windows MSI remain for silent/GPO only.
+# Silent: installer -pkg … / msiexec /qn. Custom Setup.app/.exe is on attended-setup.
 # macOS signed release secrets:
 #   APPLE_SIGN_IDENTITY, APPLE_INSTALLER_SIGN_IDENTITY
 #   APPLE_CERTIFICATE_P12 (base64 .p12), APPLE_CERTIFICATE_PASSWORD
@@ -186,7 +185,7 @@ jobs:
         run: |
           PKG="dist/edr-agent_${{ needs.release_meta.outputs.pkg_version }}_${{ matrix.arch }}.pkg"
           bash scripts/verify_macos_pkg.sh "${PKG}"
-      - name: Sign and notarize pkg + Setup.app (${{ matrix.arch }})
+      - name: Sign and notarize pkg (${{ matrix.arch }})
         env:
           SIGN_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGN_IDENTITY }}
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
@@ -206,9 +205,6 @@ jobs:
           # Native arch: notarytool under Rosetta on Apple Silicon runners
           # often dies with NSURLError -1009 (no network route) while polling.
           bash scripts/notarize_macos_pkg.sh "${PKG}"
-          if [[ -d dist/EDR-Agent-Setup.app ]]; then
-            bash scripts/notarize_macos_app.sh dist/EDR-Agent-Setup.app
-          fi
       - name: Attach macOS package to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -221,14 +217,12 @@ jobs:
               cp "${f}" "${f%_arm64.pkg}_apple-silicon.pkg"
             done
             files+=(dist/edr-agent_*_apple-silicon.pkg)
-            files+=(dist/EDR-Agent-Setup_apple-silicon.zip dist/EDR-Agent-Setup_apple-silicon.dmg)
           else
             for f in dist/edr-agent_*_amd64.pkg; do
               [[ -f "${f}" ]] || continue
               cp "${f}" "${f%_amd64.pkg}_intel.pkg"
             done
             files+=(dist/edr-agent_*_intel.pkg)
-            files+=(dist/EDR-Agent-Setup_intel.zip dist/EDR-Agent-Setup_intel.dmg)
           fi
           existing=()
           for f in "${files[@]}"; do
@@ -315,5 +309,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          files=(dist/*.msi dist/EDR-Agent-Setup.exe)
+          files=(dist/*.msi)
           gh release upload "${{ needs.release_meta.outputs.release_tag }}" "${files[@]}" --clobber

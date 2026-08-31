@@ -144,7 +144,7 @@ func sensorRunning() bool {
 
 func fdaGuide() string {
 	item := SensorFDAItemPath()
-	return "In Full Disk Access click +, press Cmd-Shift-G, paste " + item + ", then enable EDR Sensor. Leave EDR-Agent-Setup off. Then Recheck."
+	return "In Full Disk Access click +, press Cmd-Shift-G, paste " + item + ", then enable EDR Sensor. Then Recheck."
 }
 
 func evaluateFDA(it Item) Item {
