@@ -53,9 +53,8 @@ elif ! pkgutil --check-signature "${PKG}" 2>/dev/null | grep -q "Developer ID In
 	exit 1
 fi
 
-# NOTARY_SKIP is a last-resort escape hatch. Prod prereleases should still
-# submit (see NOTARY_ALLOW_TIMEOUT) so testers get a stapled ticket when Apple
-# finishes; we no longer skip after store-credentials.
+# Release CI always notarizes and staples. NOTARY_SKIP is a local escape hatch
+# only. NOTARY_ALLOW_TIMEOUT is not used in CI — the job waits until Accepted.
 if [[ "${NOTARY_SKIP:-}" == "1" || "${NOTARY_SKIP:-}" == "true" ]]; then
 	echo "==> Skipping Apple notary (NOTARY_SKIP=${NOTARY_SKIP}); pkg is Developer ID signed"
 	exit 0
@@ -162,5 +161,6 @@ fi
 
 echo "==> Stapling ticket"
 xcrun stapler staple "${PKG}"
+xcrun stapler validate "${PKG}"
 
 echo "==> Done (notarized + stapled): ${PKG}"

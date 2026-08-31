@@ -27,4 +27,4 @@ if xcrun notarytool history --keychain-profile "${PROFILE}" >/dev/null 2>&1; the
 fi
 
 echo "Notary credentials not configured; set APPLE_ID, APPLE_TEAM_ID, and APPLE_APP_SPECIFIC_PASSWORD" >&2
-exit 0
+exit 1
