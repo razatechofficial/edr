@@ -3,9 +3,12 @@
 package hostperm
 
 import (
-	"os/exec"
 	"path/filepath"
-	"strings"
+
+	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/razatechofficial/edr/internal/platform"
 )
@@ -72,33 +75,37 @@ func evaluateItem(it Item) Item {
 }
 
 func evaluateFirewall(it Item) Item {
-	out, err := runOutput(0, "netsh", "advfirewall", "firewall", "show", "rule", "name=EDR Agent")
-	if err == nil && containsFold(out, "enabled") {
-		return ok(it, "Firewall rule EDR Agent is present.")
-	}
-	// No rule yet is normal until first outbound connect; do not block Start.
+	// Do not shell out to netsh — that flashes a console on every Recheck.
 	return ok(it, "Windows will prompt if a firewall allow is required. Allow EDR Agent if asked.")
 }
 
-func scQuery() string {
-	out, _ := runOutput(0, "sc", "query", "EDRAgent")
-	return out
-}
-
-func scQC() string {
-	out, _ := runOutput(0, "sc", "qc", "EDRAgent")
-	return out
+func openEDRService() (*mgr.Service, func(), error) {
+	m, err := mgr.Connect()
+	if err != nil {
+		return nil, nil, err
+	}
+	s, err := m.OpenService("EDRAgent")
+	if err != nil {
+		_ = m.Disconnect()
+		return nil, nil, err
+	}
+	return s, func() { _ = s.Close(); _ = m.Disconnect() }, nil
 }
 
 func evaluateBoot(it Item) Item {
-	qc := scQC()
-	if qc == "" || containsFold(qc, "does not exist") || containsFold(qc, "1060") {
+	s, done, err := openEDRService()
+	if err != nil {
 		return fail(it, "EDRAgent service is not installed. Reinstall as administrator.")
 	}
-	if containsFold(qc, "auto_start") || containsFold(qc, "automatic") {
+	defer done()
+	cfg, err := s.Config()
+	if err != nil {
+		return fail(it, "EDRAgent service is not installed. Reinstall as administrator.")
+	}
+	if cfg.StartType == mgr.StartAutomatic {
 		return ok(it, "EDRAgent starts automatically after reboot.")
 	}
-	if containsFold(qc, "demand_start") {
+	if cfg.StartType == mgr.StartManual {
 		return action(it, "EDRAgent is manual start. Reinstall so the service is Automatic.")
 	}
 	return ok(it, "EDRAgent service is registered.")
@@ -109,30 +116,42 @@ func ensureLoginItem() {}
 func evaluateLoginUI(it Item) Item {
 	it.SettingsLabel = "Open Startup apps"
 	it.Guide = "Settings → Apps → Startup → enable EDR Agent. Then Recheck."
-	out, err := runOutput(0, "reg", "query", `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "EDR Agent")
-	if err != nil || strings.TrimSpace(out) == "" {
-		return action(it, "Startup entry is missing. Reinstall from Setup, then allow EDR Agent at login.")
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.QUERY_VALUE)
+	if err != nil {
+		return action(it, "Startup entry is missing. Reinstall the EDR Agent package, then allow EDR Agent at login.")
+	}
+	defer k.Close()
+	if _, _, err := k.GetStringValue("EDR Agent"); err != nil {
+		return action(it, "Startup entry is missing. Reinstall the EDR Agent package, then allow EDR Agent at login.")
 	}
 	return ok(it, "EDR Agent opens at login for every user.")
 }
 
 func evaluateService(it Item) Item {
-	q := scQuery()
-	if q == "" || containsFold(q, "does not exist") || containsFold(q, "1060") {
+	s, done, err := openEDRService()
+	if err != nil {
 		return fail(it, "The machine-wide sensor service is not registered. Reinstall as administrator.")
 	}
-	if containsFold(q, "running") {
+	defer done()
+	st, err := s.Query()
+	if err != nil {
+		return ok(it, "Service is installed. Start loads the sensor.")
+	}
+	if st.State == svc.Running {
 		return ok(it, "Service: running")
 	}
 	return ok(it, "Service is installed. Start loads the sensor.")
 }
 
-// OpenSettings opens Windows Security / firewall or Startup apps.
+// OpenSettings opens Windows Security / firewall or Startup apps without cmd.exe.
 func OpenSettings(id string) error {
 	if id == IDLoginUI {
-		return exec.Command("cmd", "/c", "start", "", "ms-settings:startupapps").Start()
+		return shellOpen("ms-settings:startupapps")
 	}
-	_ = exec.Command("cmd", "/c", "start", "", "windowsdefender:").Start()
-	_ = exec.Command("cmd", "/c", "start", "", "ms-settings:windowsdefender").Start()
-	return exec.Command("control", "firewall.cpl").Start()
+	_ = shellOpen("ms-settings:windowsdefender")
+	return shellOpen("firewall.cpl")
+}
+
+func shellOpen(target string) error {
+	return windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(target), nil, nil, windows.SW_SHOWNORMAL)
 }

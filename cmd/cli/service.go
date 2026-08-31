@@ -225,23 +225,7 @@ func waitAgentRunning(d time.Duration) error {
 func serviceRuntimeStatus() string {
 	switch runtime.GOOS {
 	case "windows":
-		cmd := exec.Command("sc.exe", "query", "EDRAgent")
-		hideConsole(cmd)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return "unknown"
-		}
-		s := string(out)
-		switch {
-		case strings.Contains(s, "RUNNING"):
-			return "running"
-		case strings.Contains(s, "STOPPED"):
-			return "stopped"
-		case strings.Contains(s, "START_PENDING"):
-			return "starting"
-		default:
-			return "installed"
-		}
+		return windowsServiceRuntimeStatus()
 	case "linux":
 		out, err := exec.Command("systemctl", "is-active", "edr-agent").CombinedOutput()
 		if err != nil {

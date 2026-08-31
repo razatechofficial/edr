@@ -34,12 +34,14 @@ else
 	echo "==> Building Windows amd64 binaries (CGO_ENABLED=0, YARA stub)"
 fi
 
-GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o bin/edr-agent-windows-amd64.exe ./cmd/agent
+# Service + installer are WINDOWS subsystem so msiexec / --install never flash a console.
+WINSVC_LDFLAGS="${LDFLAGS} -H windowsgui"
+GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${WINSVC_LDFLAGS}" -o bin/edr-agent-windows-amd64.exe ./cmd/agent
 GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o bin/edrctl-windows-amd64.exe ./cmd/cli
-GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o bin/edr-installer-windows-amd64.exe ./cmd/installer
-GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
+GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${WINSVC_LDFLAGS}" -o bin/edr-installer-windows-amd64.exe ./cmd/installer
+GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${WINSVC_LDFLAGS}" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
 GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o dist/windows-amd64/edrctl.exe ./cmd/cli
-GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o dist/windows-amd64/edr-installer.exe ./cmd/installer
+GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${WINSVC_LDFLAGS}" -o dist/windows-amd64/edr-installer.exe ./cmd/installer
 # Console does not scan; do not inherit agent YARA CGO flags or -tags.
 # Do not build EDR-Agent-Setup.exe (embedsetup) — that lives on attended-setup.
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui

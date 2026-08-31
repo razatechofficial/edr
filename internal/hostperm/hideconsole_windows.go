@@ -1,6 +1,6 @@
 //go:build windows
 
-package collector
+package hostperm
 
 import (
 	"os/exec"

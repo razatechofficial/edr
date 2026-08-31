@@ -14,6 +14,7 @@ func runOutput(timeout time.Duration, name string, args ...string) (string, erro
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }

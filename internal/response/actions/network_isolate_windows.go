@@ -8,8 +8,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 )
+
+func hiddenNetsh(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "netsh", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW — HideWindow still flashes a console
+	}
+	return cmd
+}
 
 // NetworkIsolateAction applies Windows Advanced Firewall rules with backup and optional timed rollback.
 type NetworkIsolateAction struct {
@@ -49,13 +58,13 @@ func (a *NetworkIsolateAction) Execute(ctx context.Context) (rollback func(conte
 		a.BackupPath = filepath.Join(os.TempDir(), "edr_fw_backup.wfw")
 	}
 	// Export current
-	_ = exec.CommandContext(ctx, "netsh", "advfirewall", "export", a.BackupPath).Run()
-	_ = exec.CommandContext(ctx, "netsh", "advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,blockoutbound").Run()
+	_ = hiddenNetsh(ctx, "advfirewall", "export", a.BackupPath).Run()
+	_ = hiddenNetsh(ctx, "advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,blockoutbound").Run()
 	for _, ip := range allow {
 		if ip == "" {
 			continue
 		}
-		_ = exec.CommandContext(ctx, "netsh", "advfirewall", "firewall", "add", "rule",
+		_ = hiddenNetsh(ctx, "advfirewall", "firewall", "add", "rule",
 			`name=EDR-Allow`, "protocol=any", "remoteip="+ip, "action=allow").Run()
 	}
 	backup := a.BackupPath
@@ -63,7 +72,7 @@ func (a *NetworkIsolateAction) Execute(ctx context.Context) (rollback func(conte
 		if backup == "" {
 			return nil
 		}
-		return exec.CommandContext(rctx, "netsh", "advfirewall", "import", backup).Run()
+		return hiddenNetsh(rctx, "advfirewall", "import", backup).Run()
 	}
 	if a.DurationMinutes > 0 && rollback != nil {
 		rf := rollback

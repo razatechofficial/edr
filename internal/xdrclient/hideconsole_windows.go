@@ -12,7 +12,6 @@ func hideConsole(cmd *exec.Cmd) {
 		return
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW — HideWindow still flashes a console
 	}
 }

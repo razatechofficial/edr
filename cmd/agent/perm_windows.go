@@ -5,8 +5,8 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 )
 
@@ -15,7 +15,7 @@ func checkRequiredHostAccess() error {
 	if err == nil && isSvc {
 		return nil
 	}
-	if exec.Command("net", "session").Run() != nil {
+	if !windows.GetCurrentProcessToken().IsElevated() {
 		return fmt.Errorf("EDR Agent requires Administrator privileges; re-run the installer or start the EDRAgent service")
 	}
 	root := WindowsDataRoot()

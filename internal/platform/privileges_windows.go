@@ -4,16 +4,13 @@ package platform
 
 import (
 	"fmt"
-	"os/exec"
+
+	"golang.org/x/sys/windows"
 )
 
 // IsRoot reports whether the process is running with administrator privileges.
 func IsRoot() bool {
-	cmd := exec.Command("net", "session")
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	return true
+	return windows.GetCurrentProcessToken().IsElevated()
 }
 
 // RequireRoot returns an error if the process is not running as administrator.

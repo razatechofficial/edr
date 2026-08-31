@@ -9,7 +9,9 @@ import (
 )
 
 func sampleAgentProcess() (cpu, memMB float64, uptime string, ok bool) {
-	out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq edr-agent.exe", "/FO", "CSV", "/NH").Output()
+	cmd := exec.Command("tasklist", "/FI", "IMAGENAME eq edr-agent.exe", "/FO", "CSV", "/NH")
+	hideConsole(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return 0, 0, "", false
 	}
