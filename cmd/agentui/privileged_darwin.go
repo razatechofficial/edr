@@ -9,23 +9,25 @@ import (
 )
 
 func runEdrctlPrivileged(args ...string) (string, error) {
-	cmd := edrctlPath()
-	for _, a := range args {
-		cmd += " " + shellQuote(a)
-	}
-	script := fmt.Sprintf(`do shell script %s with administrator privileges`, applescriptString(cmd+" 2>&1"))
+	return runPrivileged(edrctlPath(), args...)
+}
+
+func runInstallerPrivileged(args ...string) (string, error) {
+	return runPrivileged(installerPath(), args...)
+}
+
+func runPrivileged(bin string, args ...string) (string, error) {
+	script := fmt.Sprintf(`do shell script %s with administrator privileges`, applescriptString(shellCommand(bin, args)))
 	out, err := exec.Command("/usr/bin/osascript", "-e", script).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
 
-func runInstallerPrivileged(args ...string) (string, error) {
-	cmd := installerPath()
+func shellCommand(bin string, args []string) string {
+	cmd := shellQuote(bin)
 	for _, a := range args {
 		cmd += " " + shellQuote(a)
 	}
-	script := fmt.Sprintf(`do shell script %s with administrator privileges`, applescriptString(cmd+" 2>&1"))
-	out, err := exec.Command("/usr/bin/osascript", "-e", script).CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+	return cmd + " 2>&1"
 }
 
 func applescriptString(s string) string {
