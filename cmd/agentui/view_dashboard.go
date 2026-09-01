@@ -390,6 +390,7 @@ func (c *console) dismissToTray() {
 	if c.pop != nil {
 		c.pop.Hide()
 	}
+	stayInMenuBar()
 }
 
 func (c *console) flyoutWindow() fyne.Window {

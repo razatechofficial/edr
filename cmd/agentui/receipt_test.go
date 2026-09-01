@@ -36,6 +36,21 @@ func TestEnrollLooksSuccessfulFromStdout(t *testing.T) {
 	}
 }
 
+func TestMergeEnrollmentKeepsSessionWhenStatusEmpty(t *testing.T) {
+	session := operatorStatus{Enrolled: true, AgentID: "dev-abc", MachineID: "mid-1", CertExpiry: "2027-01-02T03:04:05Z"}
+	st := mergeEnrollment(operatorStatus{Service: "not running"}, session)
+	if !st.Enrolled || st.AgentID != "dev-abc" || st.MachineID != "mid-1" {
+		t.Fatalf("got %#v", st)
+	}
+	if st.Service != "not running" {
+		t.Fatalf("service=%q", st.Service)
+	}
+	live := mergeEnrollment(operatorStatus{Enrolled: true, AgentID: "from-disk"}, session)
+	if live.AgentID != "from-disk" {
+		t.Fatalf("disk status should win, got %q", live.AgentID)
+	}
+}
+
 func TestReceiptFromEnrollPrefersStdout(t *testing.T) {
 	out := "enrolled agent_id=dev-abc machine_id=mid-1 secure_storage=keychain cert_not_after=2027-08-25T19:00:00Z"
 	r := receiptFromEnroll(out, operatorStatus{})

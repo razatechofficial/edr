@@ -199,7 +199,23 @@ func (s Store) RebindDaemonReadable(st State) error {
 		return err
 	}
 	csr, _ := s.LoadCSRPEM()
-	return s.SaveWithCSR(st, key, string(csr))
+	return s.ExportDaemonReadable(st, key, string(csr))
+}
+
+// ExportDaemonReadable writes a file-backend copy of key+cert so LaunchDaemon /
+// SYSTEM can load identity when YAML pins secure_storage=file (the console
+// user's login Keychain is not visible to the service).
+func (s Store) ExportDaemonReadable(st State, keyPEM []byte, csrPEM string) error {
+	if len(keyPEM) == 0 {
+		return fmt.Errorf("export identity: empty key")
+	}
+	backend := strings.ToLower(strings.TrimSpace(s.Backend))
+	if backend == keystore.BackendFile || s.BackendName() == keystore.BackendFile {
+		s.relaxIdentityPerms()
+		return os.Chmod(s.statePath(), 0o644)
+	}
+	file := Store{Dir: s.Dir, DataDir: s.DataDir, Backend: keystore.BackendFile}
+	return file.SaveWithCSR(st, keyPEM, csrPEM)
 }
 
 // relaxIdentityPerms lets the local console user read enrollment.json.

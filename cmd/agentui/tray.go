@@ -18,7 +18,7 @@ func (c *console) setupTray() {
 	if !ok {
 		return
 	}
-	desk.SetSystemTrayIcon(edrIcon())
+	desk.SetSystemTrayIcon(edrTrayResource())
 	open := fyne.NewMenuItem("Open", func() {
 		c.reveal()
 	})
@@ -34,6 +34,8 @@ func (c *console) setupTray() {
 			fyne.Do(c.onTrayClick)
 		})
 	}
+	systray.SetTooltip(productName)
+	stayInMenuBar()
 }
 
 func (c *console) onTrayClick() {
@@ -42,6 +44,11 @@ func (c *console) onTrayClick() {
 		if c.pop != nil {
 			c.pop.Hide()
 		}
+		return
+	}
+	c.last = mergeEnrollment(loadStatus(), c.last)
+	if c.last.Enrolled && serviceHealthy(c.last.Service) {
+		c.showDash()
 		return
 	}
 	c.reveal()

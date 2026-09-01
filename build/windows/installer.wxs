@@ -30,14 +30,17 @@
                   Impersonate="yes"
                   Return="asyncNoWait"/>
 
-    <!-- Immediate: must not be deferred before InstallInitialize (2762) and
-         must not share a sequence slot with RemoveExistingProducts (2613).
-         Runs elevated in InstallExecuteSequence; old edr-agent.exe is still
-         on disk until afterInstallValidate uninstalls the previous product. -->
+    <!-- Kill leftover EDRAgent (failed previous install, or upgrade) before
+         InstallValidate / RemoveExistingProducts / StopServices. Do not run
+         edr-agent.exe here: older builds ignore --msi-stop and start the
+         sensor inside msiexec, which hangs the wizard then rolls back — no
+         Programs entry. sc stop is avoided (SCM can block forever).
+         Immediate + ignore: missing service must not fail the package. -->
     <CustomAction Id="CaMsiStop"
-                  Directory="INSTALLFOLDER"
-                  ExeCommand="edr-agent.exe --msi-stop"
+                  Directory="System64Folder"
+                  ExeCommand="cmd.exe /c sc.exe failure EDRAgent reset= 0 actions= &quot;&quot; &amp; sc.exe config EDRAgent start= disabled &amp; taskkill /F /IM edr-agent-ui.exe /T &amp; taskkill /F /IM edr-agent.exe /T &amp; sc.exe delete EDRAgent &amp; exit /b 0"
                   Execute="immediate"
+                  Impersonate="no"
                   Return="ignore"/>
 
     <MajorUpgrade AllowSameVersionUpgrades="yes"
@@ -53,16 +56,14 @@
     </Feature>
 
     <InstallExecuteSequence>
-      <Custom Action="CaMsiStop" Before="InstallValidate">Installed OR WIX_UPGRADE_DETECTED</Custom>
+      <Custom Action="CaMsiStop" Before="InstallValidate"/>
       <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
-    <InstallUISequence>
-      <Custom Action="CaMsiStop" Before="ExecuteAction">Installed OR WIX_UPGRADE_DETECTED</Custom>
-    </InstallUISequence>
   </Product>
 
   <Fragment>
     <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="System64Folder" Name="System64"/>
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="EDR Agent"/>
       </Directory>
@@ -97,7 +98,7 @@
         <ServiceControl
               Id="EDRAgentServiceControl"
               Name="EDRAgent"
-              Stop="both"
+              Stop="uninstall"
               Remove="uninstall"
               Wait="no"/>
       </Component>

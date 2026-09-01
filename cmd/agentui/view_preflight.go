@@ -120,14 +120,7 @@ func (c *console) runPreflight() {
 }
 
 func (c *console) sessionStatus() operatorStatus {
-	st := loadStatus()
-	if !st.Enrolled && c.last.Enrolled {
-		st.Enrolled = true
-		st.AgentID = firstNonEmpty(st.AgentID, c.last.AgentID)
-		st.MachineID = firstNonEmpty(st.MachineID, c.last.MachineID)
-		st.CertExpiry = firstNonEmpty(st.CertExpiry, c.last.CertExpiry)
-	}
-	return st
+	return mergeEnrollment(loadStatus(), c.last)
 }
 
 func (c *console) onStartAgent() {
@@ -179,12 +172,8 @@ func (c *console) startSensor() {
 		st := waitForService(8 * time.Second)
 		fyne.Do(func() {
 			c.setBusy(false)
-			if st.Enrolled {
-				c.last = st
-			} else {
-				st.Enrolled = c.last.Enrolled
-				st.AgentID = firstNonEmpty(st.AgentID, c.last.AgentID)
-			}
+			st = mergeEnrollment(st, c.last)
+			c.last = st
 			if err != nil || !serviceHealthy(st.Service) {
 				f := classifyStartError(out)
 				if f.Detail == "" && err != nil {

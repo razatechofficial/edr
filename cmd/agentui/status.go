@@ -5,6 +5,9 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/razatechofficial/edr/internal/platform"
+	"github.com/razatechofficial/edr/internal/xdrclient"
 )
 
 type operatorHostProbe struct {
@@ -56,16 +59,46 @@ func loadStatus() operatorStatus {
 		}
 		st.UpdatedAt = time.Now().Format(time.RFC3339)
 		enrichStatus(&st)
+		applyLocalEnrollment(&st)
 		return st
 	}
 	var st operatorStatus
 	if json.Unmarshal([]byte(out), &st) != nil {
 		st = parseLegacyStatus(out)
 		enrichStatus(&st)
+		applyLocalEnrollment(&st)
 		return st
 	}
 	enrichStatus(&st)
+	applyLocalEnrollment(&st)
 	return st
+}
+
+func applyLocalEnrollment(st *operatorStatus) {
+	if st == nil {
+		return
+	}
+	hint := xdrclient.ProbeLocalEnrollment(platform.ResolveConfigFile(), platform.DataDir())
+	if hint.Enrolled {
+		st.Enrolled = true
+		if strings.TrimSpace(st.AgentID) == "" {
+			st.AgentID = hint.AgentID
+		}
+		if strings.TrimSpace(st.MachineID) == "" {
+			st.MachineID = hint.MachineID
+		}
+		if strings.TrimSpace(st.Ingest) == "" {
+			st.Ingest = hint.Ingest
+		}
+		if strings.TrimSpace(st.CertExpiry) == "" {
+			st.CertExpiry = hint.CertExpiry
+		}
+	}
+	// Live ingest or a running sensor with ingest configured means this host
+	// already registered — do not send the operator back to Enroll.
+	if st.IngestOK || (st.IngestConfigured && serviceHealthy(st.Service)) {
+		st.Enrolled = true
+	}
 }
 
 func parseLegacyStatus(raw string) operatorStatus {

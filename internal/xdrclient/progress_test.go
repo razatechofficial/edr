@@ -7,6 +7,8 @@ import (
 
 func TestEnrollProgressFile(t *testing.T) {
 	dir := t.TempDir()
+	_ = os.WriteFile(PublicEnrollProgressPath(), []byte("\n"), 0o666)
+	t.Cleanup(func() { _ = os.Remove(PublicEnrollProgressPath()) })
 	if ReadEnrollProgress(dir) != "" {
 		t.Fatal("empty dir")
 	}
@@ -21,5 +23,4 @@ func TestEnrollProgressFile(t *testing.T) {
 	if got := ReadEnrollProgress(dir); got != "" {
 		t.Fatalf("cleared %q", got)
 	}
-	t.Cleanup(func() { _ = os.Remove(PublicEnrollProgressPath()) })
 }

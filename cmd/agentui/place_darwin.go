@@ -12,12 +12,19 @@ extern void goEDRBecameActive(void);
 static void edrRegisterActive(void) {
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
+		[[NSProcessInfo processInfo] disableAutomaticTermination:@"EDR Agent menu bar"];
+		[[NSProcessInfo processInfo] disableSuddenTermination];
 		[[NSNotificationCenter defaultCenter]
 			addObserverForName:NSApplicationDidBecomeActiveNotification
 			object:nil
 			queue:nil
 			usingBlock:^(NSNotification *n) { goEDRBecameActive(); }];
 	});
+}
+
+static void edrStayInMenuBar(void) {
+	[[NSProcessInfo processInfo] disableAutomaticTermination:@"EDR Agent menu bar"];
+	[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 }
 
 static void edrPlaceWindow(void *nswindow, int width, int height, int nearCursor, int flyout) {
@@ -161,6 +168,10 @@ func goEDRBecameActive() {
 
 func registerAppActivate() {
 	C.edrRegisterActive()
+}
+
+func stayInMenuBar() {
+	C.edrStayInMenuBar()
 }
 
 func nativeNSWindow(win fyne.Window) unsafe.Pointer {

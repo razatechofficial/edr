@@ -144,8 +144,14 @@ func (c *console) startIdentity(host, token string) {
 	}
 	doneCh := make(chan result, 1)
 	go func() {
-		out, err := runEdrctlPrivileged("enroll", "--force", "--host", host, "--token", token)
+		out, err := runEdrctlPrivileged("enroll", "--host", host, "--token", token)
 		st := loadStatus()
+		if fields := parseEnrollReceipt(out); fields["agent_id"] != "" {
+			st.Enrolled = true
+			st.AgentID = firstNonEmpty(st.AgentID, fields["agent_id"])
+			st.MachineID = firstNonEmpty(st.MachineID, fields["machine_id"])
+			st.CertExpiry = firstNonEmpty(st.CertExpiry, fields["cert_not_after"])
+		}
 		doneCh <- result{out, err, st}
 	}()
 

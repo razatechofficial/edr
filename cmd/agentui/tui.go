@@ -90,7 +90,7 @@ func linuxManage(in *bufio.Reader) (continueWizard bool, err error) {
 	case "x", "remove", "uninstall":
 		out, uerr := runInstallerPrivileged("uninstall")
 		if uerr != nil {
-			return false, fmt.Errorf("%s", classifyInstallError(out + "\n" + uerr.Error()).Title)
+			return false, fmt.Errorf("%s", classifyInstallError(out+"\n"+uerr.Error()).Title)
 		}
 		fmt.Println()
 		fmt.Println("EDR Agent was removed. This host is no longer protected.")
@@ -328,7 +328,7 @@ func linuxEnroll(in *bufio.Reader) error {
 	}
 	done := make(chan enrollRes, 1)
 	go func() {
-		out, err := runEdrctlPrivileged("enroll", "--force", "--host", host, "--token", tok)
+		out, err := runEdrctlPrivileged("enroll", "--host", host, "--token", tok)
 		done <- enrollRes{out, err}
 	}()
 

@@ -134,11 +134,13 @@ func controlAgentService(action string) error {
 			DataDir: cfg.Agent.DataDir,
 			Backend: "file",
 		}
-		if err := xdrclient.InstallStagedIdentity(configFile, cfg.XDR, cfg.Agent.DataDir); err != nil {
-			if !fileStore.HasCredentials() {
-				if rerr := rebindXDRIdentity(); rerr != nil {
-					return fmt.Errorf("sensor cannot read the device certificate (%v)", err)
-				}
+		if err := xdrclient.InstallStagedIdentity(configFile, cfg.XDR, cfg.Agent.DataDir); err != nil && !fileStore.HasCredentials() {
+			if rerr := rebindXDRIdentity(); rerr != nil {
+				return fmt.Errorf("sensor cannot read the device certificate (%v)", err)
+			}
+		} else if !fileStore.HasCredentials() {
+			if rerr := rebindXDRIdentity(); rerr != nil {
+				return fmt.Errorf("sensor cannot read the device certificate: %v", rerr)
 			}
 		}
 		st, _ := fileStore.Load()
@@ -190,16 +192,44 @@ func rebindXDRIdentity() error {
 	if err != nil {
 		return err
 	}
-	store := xdrclient.Store{
-		Dir:     xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
-		DataDir: cfg.Agent.DataDir,
-		Backend: cfg.XDR.SecureStorage,
+	certDir := xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir)
+	var last error
+	seen := map[string]struct{}{}
+	for _, b := range []string{cfg.XDR.SecureStorage, "auto", "keychain", "dpapi", "file"} {
+		b = strings.ToLower(strings.TrimSpace(b))
+		if b == "" {
+			continue
+		}
+		if _, ok := seen[b]; ok {
+			continue
+		}
+		seen[b] = struct{}{}
+		store := xdrclient.Store{
+			Dir:     certDir,
+			DataDir: cfg.Agent.DataDir,
+			Backend: b,
+		}
+		st, err := store.Load()
+		if err != nil {
+			last = err
+			continue
+		}
+		key, err := store.LoadPrivateKeyPEM()
+		if err != nil {
+			last = err
+			continue
+		}
+		csr, _ := store.LoadCSRPEM()
+		if err := store.ExportDaemonReadable(st, key, string(csr)); err != nil {
+			last = err
+			continue
+		}
+		return nil
 	}
-	st, err := store.Load()
-	if err != nil {
-		return err
+	if last == nil {
+		return fmt.Errorf("no device certificate in the OS keystore")
 	}
-	return store.RebindDaemonReadable(st)
+	return last
 }
 
 func waitAgentRunning(d time.Duration) error {

@@ -52,8 +52,8 @@ type console struct {
 	permOpened     bool
 	permAutoOpened bool
 	grantBtn       *widget.Button
-	permRecheck  *widget.Button
-	permContinue *widget.Button
+	permRecheck    *widget.Button
+	permContinue   *widget.Button
 
 	preflightBox      *fyne.Container
 	preflightHint     *widget.Label
@@ -233,6 +233,7 @@ func runDashboard() error {
 				if c.removed {
 					return
 				}
+				st = mergeEnrollment(st, c.last)
 				c.last = st
 				if c.screen == uistate.Dash {
 					c.applyDashboard(st, res)
@@ -274,6 +275,11 @@ func (c *console) routeInitial() {
 		c.showDash()
 		return
 	}
+	if flagTray {
+		c.screen = next
+		c.dismissToTray()
+		return
+	}
 	c.show(next)
 }
 
@@ -289,7 +295,7 @@ func (c *console) reveal() {
 		c.routeSetupEntry()
 		return
 	}
-	c.last = loadStatus()
+	c.last = mergeEnrollment(loadStatus(), c.last)
 	next := uistate.Route(false, agentInstalled(), c.last.Enrolled, needsOSGrants(), serviceHealthy(c.last.Service))
 	if next == uistate.Dash {
 		c.showDash()

@@ -13,8 +13,9 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-// msiStopForReplace is invoked by the MSI before StopServices so upgrade /
-// uninstall can replace files. Closing the operator UI does not stop EDRAgent.
+// msiStopForReplace force-stops EDRAgent and the operator UI so files can be
+// replaced. The MSI no longer shells this binary (old builds ignored --msi-stop
+// and started the sensor inside msiexec). Keep the flag for a manual cleanup.
 func msiStopForReplace() error {
 	self := os.Getpid()
 	killImage("edr-agent-ui.exe")
@@ -27,13 +28,13 @@ func msiStopForReplace() error {
 			st, qerr := s.Query()
 			if qerr != nil || st.State != svc.Stopped {
 				_, _ = s.Control(svc.Stop)
-				deadline := time.Now().Add(8 * time.Second)
+				deadline := time.Now().Add(3 * time.Second)
 				for time.Now().Before(deadline) {
 					st, err = s.Query()
 					if err == nil && st.State == svc.Stopped {
 						break
 					}
-					time.Sleep(250 * time.Millisecond)
+					time.Sleep(200 * time.Millisecond)
 				}
 				st, err = s.Query()
 				if err == nil && st.ProcessId != 0 && int(st.ProcessId) != self {

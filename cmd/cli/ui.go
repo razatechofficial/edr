@@ -242,26 +242,31 @@ type enrollMeta struct {
 }
 
 func peekDataDir() string {
-	data, err := os.ReadFile(configFile)
+	dataDir, _ := peekEnrollmentConfig(configFile)
+	return dataDir
+}
+
+func peekEnrollmentConfig(cfgPath string) (dataDir, agentID string) {
+	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	var peek yamlConfigPeek
 	_ = yaml.Unmarshal(data, &peek)
-	return peek.Agent.DataDir
+	return strings.TrimSpace(peek.Agent.DataDir), strings.TrimSpace(peek.Agent.ID)
 }
 
 func enrollmentIdentity() (machineID, certExpiry string) {
-	dir := peekDataDir()
-	if dir == "" {
-		return "", ""
+	hint := xdrclient.ProbeLocalEnrollment(configFile, platform.DataDir())
+	if hint.MachineID != "" || hint.CertExpiry != "" {
+		return hint.MachineID, hint.CertExpiry
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "xdr-tls", "enrollment.json"))
-	if err != nil {
-		return "", ""
-	}
-	var meta enrollMeta
-	if json.Unmarshal(raw, &meta) != nil {
+	return enrollmentIdentityFrom(configFile, platform.DataDir())
+}
+
+func enrollmentIdentityFrom(cfgPath, fallbackDir string) (machineID, certExpiry string) {
+	meta, ok := loadEnrollmentMeta(enrollmentDataDir(cfgPath, fallbackDir))
+	if !ok {
 		return "", ""
 	}
 	if !meta.CertNotAfter.IsZero() {
@@ -295,30 +300,47 @@ func countFiles(root string) uint64 {
 }
 
 func enrollmentSnapshot() (enrolled bool, agentID, ingest string) {
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		return false, "", ""
+	hint := xdrclient.ProbeLocalEnrollment(configFile, platform.DataDir())
+	if hint.Enrolled {
+		return true, hint.AgentID, hint.Ingest
 	}
-	var peek yamlConfigPeek
-	_ = yaml.Unmarshal(data, &peek)
-	dataDir := peek.Agent.DataDir
-	if dataDir == "" {
-		return false, "", ""
+	return readEnrollmentSnapshot(configFile, platform.DataDir())
+}
+
+func enrollmentDataDir(cfgPath, fallbackDir string) string {
+	dataDir, _ := peekEnrollmentConfig(cfgPath)
+	if dataDir != "" {
+		return dataDir
+	}
+	return strings.TrimSpace(fallbackDir)
+}
+
+func loadEnrollmentMeta(dataDir string) (enrollMeta, bool) {
+	if strings.TrimSpace(dataDir) == "" {
+		return enrollMeta{}, false
 	}
 	raw, err := os.ReadFile(filepath.Join(dataDir, "xdr-tls", "enrollment.json"))
 	if err != nil {
-		// Installer Agent.ID is not enrollment. Missing/unreadable json = not enrolled
-		// (common when the GUI user cannot read a root-only 0600 sidecar).
-		return false, "", ""
+		return enrollMeta{}, false
 	}
 	var meta enrollMeta
 	if json.Unmarshal(raw, &meta) != nil {
+		return enrollMeta{}, false
+	}
+	return meta, true
+}
+
+func readEnrollmentSnapshot(cfgPath, fallbackDir string) (enrolled bool, agentID, ingest string) {
+	_, yamlID := peekEnrollmentConfig(cfgPath)
+	meta, ok := loadEnrollmentMeta(enrollmentDataDir(cfgPath, fallbackDir))
+	if !ok {
+		// Installer Agent.ID is not enrollment. Missing/unreadable json = not enrolled.
 		return false, "", ""
 	}
 	ingest = strings.Join(meta.IngestHosts, ",")
-	id := meta.AgentID
+	id := strings.TrimSpace(meta.AgentID)
 	if id == "" {
-		id = peek.Agent.ID
+		id = yamlID
 	}
 	return id != "", id, ingest
 }

@@ -132,6 +132,13 @@ func TestEnableIngestFromEnrollmentCreatesSection(t *testing.T) {
 	if cfg.XDR.EnrollmentToken != "" {
 		t.Fatal("token must not be embedded")
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm&0o044 != 0o044 {
+		t.Fatalf("agent.yaml should be console-readable after enroll, got %o", perm)
+	}
 	envRaw, err := os.ReadFile(filepath.Join(dir, ".env"))
 	if err != nil {
 		t.Fatal(err)

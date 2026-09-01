@@ -81,6 +81,22 @@ func (c *console) applyEnrolled(st operatorStatus, r identityReceipt) {
 	c.last = st
 }
 
+// mergeEnrollment keeps a successful in-session enroll when user-level
+// `edrctl ui` cannot read root-owned agent.yaml / enrollment.json.
+func mergeEnrollment(st, session operatorStatus) operatorStatus {
+	if st.Enrolled && strings.TrimSpace(st.AgentID) != "" {
+		return st
+	}
+	if session.Enrolled || strings.TrimSpace(session.AgentID) != "" {
+		st.Enrolled = true
+		st.AgentID = firstNonEmpty(st.AgentID, session.AgentID)
+		st.MachineID = firstNonEmpty(st.MachineID, session.MachineID)
+		st.CertExpiry = firstNonEmpty(st.CertExpiry, session.CertExpiry)
+		st.Ingest = firstNonEmpty(st.Ingest, session.Ingest)
+	}
+	return st
+}
+
 func undash(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "—" {

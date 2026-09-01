@@ -123,6 +123,9 @@ fi
 
 # Console only — do not embed the installer (that inflated the .app past 60MB).
 bash "${ROOT}/scripts/ci/macos_console_app.sh" "${UI_BIN}" "${CTL_BIN}" "${PKG_ROOT}/Applications/EDR Agent.app"
+mkdir -p "${PKG_ROOT}/Library/LaunchAgents"
+cp "${ROOT}/deploy/macos/com.razatech.edr-agent-ui.plist" "${PKG_ROOT}/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
+chmod 644 "${PKG_ROOT}/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
 
 if [[ "${PKG_MODE}" == "fleet" ]]; then
 if [[ -f "${ROOT}/deploy/macos/first-run-permissions.sh" ]]; then
@@ -168,7 +171,7 @@ sed \
 	-e "s|models_dir: \"./models\"|models_dir: \"${EDR_BASE}/models\"|" \
 	-e "s|^rules_file:.*|rules_file: \"${RULES_BASELINE}\"|" \
 	configs/agent.yaml > "${CONFIG_DST}"
-chmod 640 "${CONFIG_DST}"
+chmod 644 "${CONFIG_DST}"
 
 cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -213,6 +216,7 @@ cat > pkg/macos/scripts/postinstall <<'EOF'
 #!/bin/bash
 set -e
 APP="/Applications/EDR Agent.app"
+UI_PLIST="/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
 if [[ ! -d "${APP}" ]]; then
 	exit 0
 fi
@@ -224,11 +228,31 @@ if [[ -x "${LSREG}" ]]; then
 		"${LSREG}" -f /usr/local/libexec/edr-agent.app >/dev/null 2>&1 || true
 	fi
 fi
+bootstrap_ui_agent() {
+	local user="$1"
+	if [[ ! -f "${UI_PLIST}" ]]; then
+		return 0
+	fi
+	if [[ -z "${user}" || "${user}" == "root" || "${user}" == "loginwindow" ]]; then
+		return 0
+	fi
+	local uid
+	uid="$(/usr/bin/id -u "${user}" 2>/dev/null || true)"
+	if [[ -z "${uid}" ]]; then
+		return 0
+	fi
+	launchctl bootout "gui/${uid}/com.razatech.edr-agent-ui" 2>/dev/null || true
+	launchctl bootstrap "gui/${uid}" "${UI_PLIST}" 2>/dev/null || true
+	launchctl enable "gui/${uid}/com.razatech.edr-agent-ui" 2>/dev/null || true
+	launchctl kickstart -k "gui/${uid}/com.razatech.edr-agent-ui" 2>/dev/null || true
+}
 if [[ -n "${COMMAND_LINE_INSTALL:-}" ]]; then
+	bootstrap_ui_agent "${CONSOLE_USER}"
 	exit 0
 fi
 if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
 	/usr/bin/sudo -u "${CONSOLE_USER}" /usr/bin/open "${APP}" >/dev/null 2>&1 || true
+	bootstrap_ui_agent "${CONSOLE_USER}"
 fi
 EOF
 chmod 755 pkg/macos/scripts/postinstall

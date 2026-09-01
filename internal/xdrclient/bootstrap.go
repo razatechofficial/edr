@@ -170,7 +170,7 @@ func ClearEnrollmentTokenInConfig(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, 0o640)
+	return writeWorldReadableYAML(path, out)
 }
 
 func mapValue(m *yaml.Node, key string) *yaml.Node {
@@ -237,7 +237,7 @@ func PatchXDRConfigFile(path string, host string, insecure bool) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, 0o640)
+	return writeWorldReadableYAML(path, out)
 }
 
 // EnableIngestFromEnrollment writes xdr.enabled + ingest_hosts so the sensor
@@ -383,7 +383,22 @@ func writeYAMLRoot(path string, root *yaml.Node, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, perm)
+	if err := os.WriteFile(path, out, perm); err != nil {
+		return err
+	}
+	if perm != 0 {
+		_ = os.Chmod(path, perm)
+	}
+	return nil
+}
+
+// writeWorldReadableYAML writes agent.yaml so the local console user can read
+// enrollment status. os.WriteFile does not change the mode of an existing 0640 file.
+func writeWorldReadableYAML(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o644)
 }
 
 func setMapString(m *yaml.Node, key, value string) {

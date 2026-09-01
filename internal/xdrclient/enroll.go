@@ -209,6 +209,9 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 	if err := store.SaveWithCSR(st, keyCSR.KeyPEM, keyCSR.CSRPEM); err != nil {
 		return nil, err
 	}
+	if err := store.ExportDaemonReadable(st, keyCSR.KeyPEM, keyCSR.CSRPEM); err != nil {
+		log.Warn("xdr could not export identity for the sensor service", "error", err)
+	}
 	WriteEnrollProgress(opt.DataDir, "store")
 	st.SecureStorage = store.BackendName()
 	if !opt.SkipBootstrapClear {

@@ -37,6 +37,8 @@ type winPOINT struct {
 
 func registerAppActivate() {}
 
+func stayInMenuBar() {}
+
 func nativeHWND(win fyne.Window) uintptr {
 	var hwnd uintptr
 	nw, ok := win.(driver.NativeWindow)

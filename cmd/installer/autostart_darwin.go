@@ -26,10 +26,23 @@ const launchAgentUIPlist = `<?xml version="1.0" encoding="UTF-8"?>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
-	<false/>
+	<dict>
+		<key>Crashed</key>
+		<true/>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>15</integer>
+	<key>ProcessType</key>
+	<string>Interactive</string>
 	<key>LimitLoadToSessionType</key>
 	<array>
 		<string>Aqua</string>
+	</array>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.razatech.edr.console</string>
 	</array>
 </dict>
 </plist>
