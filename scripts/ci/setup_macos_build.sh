@@ -44,14 +44,27 @@ if [[ "${USE_ROSETTA}" == "1" ]]; then
 	export EDR_MACOS_USE_ROSETTA=1
 fi
 
+# Homebrew stopped publishing Intel bottles (Tier 3). `brew install` then exits
+# with "no bottle available" instead of compiling. Build from source in that case.
 install_brew_pkg() {
 	local pkg="$1"
-	if ! "${BREW[@]}" list "${pkg}" >/dev/null 2>&1; then
-		"${BREW[@]}" install "${pkg}"
+	if "${BREW[@]}" list "${pkg}" >/dev/null 2>&1; then
+		return 0
 	fi
+	echo "Installing ${pkg}..."
+	set +e
+	"${BREW[@]}" install "${pkg}"
+	local st=$?
+	set -e
+	if [[ "${st}" -eq 0 ]]; then
+		return 0
+	fi
+	echo "No bottle for ${pkg} (exit ${st}); building from source..."
+	"${BREW[@]}" install --build-from-source "${pkg}"
 }
 
-for pkg in yara pkg-config openssl@3 libmagic jansson; do
+# openssl@3 before yara so yara does not fail fetching an Intel openssl bottle.
+for pkg in pkg-config openssl@3 libmagic jansson yara; do
 	install_brew_pkg "${pkg}"
 done
 
