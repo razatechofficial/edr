@@ -143,8 +143,7 @@ func sensorRunning() bool {
 }
 
 func fdaGuide() string {
-	item := SensorFDAItemPath()
-	return "In Full Disk Access click +, press Cmd-Shift-G, paste " + item + ", then enable EDR Sensor. Then Recheck."
+	return "In Full Disk Access turn on EDR Sensor (listed as edr-agent.app). Leave EDR Agent and Setup off. If it is missing, click +, paste " + SensorFDAItemPath() + ", enable it, then Recheck."
 }
 
 func evaluateFDA(it Item) Item {
@@ -162,7 +161,7 @@ func evaluateFDA(it Item) Item {
 		helper.Detail = ""
 		return helper
 	}
-	return action(it, "Add "+SensorFDAItemPath()+" with +, then enable it.")
+	return action(it, "Turn on EDR Sensor in Full Disk Access, then Recheck.")
 }
 
 func evaluateSysExt(it Item) Item {
@@ -261,26 +260,14 @@ func evaluateService(it Item) Item {
 
 // OpenSettings opens the System Settings pane for the catalog row.
 func OpenSettings(id string) error {
-	_ = exec.Command("/usr/bin/open", "-a", "System Settings").Start()
-	time.Sleep(400 * time.Millisecond)
-	var last error
-	for _, u := range settingsURLs(id) {
-		last = exec.Command("/usr/bin/open", u).Run()
-		if last == nil {
-			if id == IDFDA {
-				revealSensorForFDA()
-			}
-			return nil
-		}
-	}
 	if id == IDFDA {
 		revealSensorForFDA()
 	}
-	last = exec.Command("/usr/bin/osascript", "-e", `tell application "System Settings" to activate`).Run()
-	if last != nil {
-		last = exec.Command("/usr/bin/open", "-b", "com.apple.systempreferences").Run()
+	urls := settingsURLs(id)
+	if len(urls) == 0 {
+		return exec.Command("/usr/bin/open", "-b", "com.apple.systempreferences").Run()
 	}
-	return last
+	return exec.Command("/usr/bin/open", urls[0]).Run()
 }
 
 func settingsURLs(id string) []string {
@@ -288,24 +275,18 @@ func settingsURLs(id string) []string {
 	case IDFDA:
 		return []string{
 			"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles",
-			"x-apple.systempreferences:com.apple.settings.PrivacySecurity.Privacy_AllFiles",
-			"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
-			"x-apple.systempreferences:com.apple.preference.security?Privacy",
 		}
 	case IDSysExt, IDNetExt:
 		return []string{
 			"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
-			"x-apple.systempreferences:com.apple.preference.security?General",
 		}
 	case IDLoginUI, IDBootStart:
 		return []string{
 			"x-apple.systempreferences:com.apple.LoginItems-Settings.extension",
-			"x-apple.systempreferences:com.apple.settings.LoginItems",
 		}
 	default:
 		return []string{
 			"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
-			"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
 		}
 	}
 }

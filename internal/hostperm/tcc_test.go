@@ -82,8 +82,17 @@ func TestConsoleOrSetupTCCClient(t *testing.T) {
 	if !isConsoleOrSetupTCCClient("/Users/me/Downloads/EDR-Agent-Setup.app") {
 		t.Fatal("setup app")
 	}
+	if !isConsoleOrSetupTCCClient("/Applications/EDR Agent.app") {
+		t.Fatal("console app")
+	}
+	if !isConsoleOrSetupTCCClient("/Applications/EDR Agent.app/Contents/MacOS/edr-agent-ui") {
+		t.Fatal("console binary")
+	}
 	if isConsoleOrSetupTCCClient("/usr/local/libexec/edr-agent.app") {
 		t.Fatal("sensor app is not setup")
+	}
+	if sensorListedInTCC([]string{"/Applications/EDR Agent.app"}, "/usr/local/libexec/edr-agent.app/Contents/MacOS/edr-agent") {
+		t.Fatal("console FDA must not satisfy the sensor")
 	}
 }
 func TestProtectedReadLooksGranted(t *testing.T) {

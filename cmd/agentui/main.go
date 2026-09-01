@@ -14,10 +14,7 @@ var flagTray bool
 func main() {
 	for _, a := range os.Args[1:] {
 		if a == "--fda-probe" || a == "fda-probe" {
-			if hostperm.ProcessHasFDA() {
-				os.Exit(0)
-			}
-			os.Exit(1)
+			os.Exit(hostperm.RunFDAProbe())
 		}
 		if a == "--setup" {
 			flagSetup = true

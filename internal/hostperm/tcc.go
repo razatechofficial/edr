@@ -137,7 +137,8 @@ func isConsoleOrSetupTCCClient(client string) bool {
 	case strings.Contains(low, "edr-agent-ui"),
 		strings.Contains(low, "com.razatech.edr.console"),
 		strings.Contains(low, "com.razatech.edr.setup"),
-		strings.Contains(low, "edr-agent-setup"):
+		strings.Contains(low, "edr-agent-setup"),
+		strings.Contains(low, "/applications/edr agent.app"):
 		return true
 	default:
 		return false

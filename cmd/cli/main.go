@@ -66,10 +66,7 @@ func platformDefaults() {
 
 func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "fda-probe" {
-		if hostperm.ProcessHasFDA() {
-			os.Exit(0)
-		}
-		os.Exit(1)
+		os.Exit(hostperm.RunFDAProbe())
 	}
 
 	root := &cobra.Command{

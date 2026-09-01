@@ -74,6 +74,11 @@ func evaluate(quick bool) Report {
 			continue
 		}
 		items[i] = evaluateItem(items[i])
+		if !quick && items[i].ID == IDFDA && items[i].Status != StatusOK && items[i].Status != StatusNA {
+			if confirmFDAViaApp() {
+				items[i] = ok(items[i], "")
+			}
+		}
 	}
 	r := Report{OS: runtime.GOOS, Items: items}
 	r.AllRequired = true
@@ -97,7 +102,6 @@ func evaluate(quick bool) Report {
 // show its native prompt (macOS Login Items, etc.) before Recheck.
 func EnsurePromptedItems() {
 	ensureLoginItem()
-	revealSensorForFDA()
 }
 
 // NeedsGrants is true when a required OS grant (FDA / firewall / caps) is

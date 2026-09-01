@@ -25,6 +25,8 @@ const launchAgentUIPlist = `<?xml version="1.0" encoding="UTF-8"?>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
+	<key>KeepAlive</key>
+	<false/>
 	<key>LimitLoadToSessionType</key>
 	<array>
 		<string>Aqua</string>

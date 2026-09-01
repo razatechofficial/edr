@@ -27,6 +27,16 @@
                   Impersonate="yes"
                   Return="asyncNoWait"/>
 
+    <!-- Closing the console does not stop EDRAgent. Stop (and kill if needed)
+         before Windows Installer StopServices, or upgrade fails with
+         "could not be stopped / sufficient privileges". -->
+    <CustomAction Id="CaMsiStop"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="edr-agent.exe --msi-stop"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore"/>
+
     <MajorUpgrade AllowSameVersionUpgrades="yes"
                   Schedule="afterInstallInitialize"
                   DowngradeErrorMessage=
@@ -40,6 +50,7 @@
     </Feature>
 
     <InstallExecuteSequence>
+      <Custom Action="CaMsiStop" Before="RemoveExistingProducts">Installed OR WIX_UPGRADE_DETECTED</Custom>
       <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
   </Product>

@@ -4,6 +4,7 @@ package hostperm
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,23 +15,21 @@ import (
 
 const darwinSensorApp = "/usr/local/libexec/edr-agent.app"
 
+const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
 func revealSensorForFDA() {
-	item := SensorFDAItemPath()
-	if item == "" {
+	registerSensorApp()
+	copyPasteboard(SensorFDAItemPath())
+}
+
+func registerSensorApp() {
+	if st, err := os.Stat(darwinSensorApp); err != nil || !st.IsDir() {
 		return
 	}
-	app := darwinSensorApp
-	if st, err := os.Stat(app); err == nil && st.IsDir() {
-		// Separate Launch Services launch so TCC lists EDR Sensor, not Setup.app.
-		_ = exec.Command("/usr/bin/open", "-n", "-g", "-j", app, "--args", "fda-probe").Start()
-		time.Sleep(250 * time.Millisecond)
-	} else if bin := sensorBinaryHint(); bin != "" {
-		cmd := exec.Command(bin, "fda-probe")
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		_ = cmd.Start()
+	if _, err := os.Stat(lsregister); err != nil {
+		return
 	}
-	_ = exec.Command("/usr/bin/open", "-R", item).Start()
-	copyPasteboard(item)
+	_ = exec.Command(lsregister, "-f", darwinSensorApp).Run()
 }
 
 func SensorFDAItemPath() string {
@@ -71,6 +70,26 @@ func sensorProbeCandidates() []string {
 	add("/Library/Application Support/EDR/bin/edr-agent")
 	add("/usr/local/bin/edr-agent")
 	return out
+}
+
+func confirmFDAViaApp() bool {
+	return probeFDAViaLaunchServices()
+}
+
+func probeFDAViaLaunchServices() bool {
+	if st, err := os.Stat(darwinSensorApp); err != nil || !st.IsDir() {
+		return false
+	}
+	clearFDAProbeResult()
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/bin/open", "-W", "-n", "-g", "-j", darwinSensorApp, "--args", "fda-probe")
+	_ = cmd.Run()
+	if readFDAProbeResult() {
+		return true
+	}
+	time.Sleep(400 * time.Millisecond)
+	return readFDAProbeResult()
 }
 
 func probeFDADetached(bin string) bool {

@@ -44,7 +44,7 @@ func (s *edrWindowsService) Execute(_ []string, r <-chan svc.ChangeRequest, chan
 				cancel()
 				select {
 				case <-done:
-				case <-time.After(120 * time.Second):
+				case <-time.After(20 * time.Second):
 				}
 				return false, 0
 			default:
@@ -59,7 +59,7 @@ func tryRunWindowsService() (bool, int) {
 	// msiexec deferred custom actions run in session 0; IsWindowsService
 	// can be a false positive, which skipped --install and left no EDRAgent.
 	for _, a := range os.Args[1:] {
-		if a == "--install" || a == "--uninstall" {
+		if a == "--install" || a == "--uninstall" || a == "--msi-stop" {
 			return false, 0
 		}
 	}

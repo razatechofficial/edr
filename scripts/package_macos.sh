@@ -309,6 +309,9 @@ if [[ -d "${APP}" ]]; then
 	CONSOLE_USER="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
 	if [[ -x "${LSREG}" ]]; then
 		"${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
+		if [[ -d /usr/local/libexec/edr-agent.app ]]; then
+			"${LSREG}" -f /usr/local/libexec/edr-agent.app >/dev/null 2>&1 || true
+		fi
 	fi
 	if [[ -z "${COMMAND_LINE_INSTALL:-}" && -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
 		if [[ -x "${LSREG}" ]]; then

@@ -47,10 +47,16 @@ var (
 
 func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "fda-probe" {
-		if hostperm.ProcessHasFDA() {
+		os.Exit(hostperm.RunFDAProbe())
+	}
+	for _, a := range os.Args[1:] {
+		if a == "--msi-stop" {
+			if err := msiStopForReplace(); err != nil {
+				fmt.Fprintf(os.Stderr, "msi-stop: %v\n", err)
+				os.Exit(1)
+			}
 			os.Exit(0)
 		}
-		os.Exit(1)
 	}
 	if handled, code := tryRunWindowsService(); handled {
 		os.Exit(code)

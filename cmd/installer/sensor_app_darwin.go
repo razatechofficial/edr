@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -56,5 +57,7 @@ func wrapDarwinSensorApp(bin string) (string, error) {
 	if err := os.WriteFile(filepath.Join(darwinSensorApp, "Contents", "PkgInfo"), []byte("APPL????"), 0644); err != nil {
 		return dst, err
 	}
+	lsreg := "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+	_ = exec.Command(lsreg, "-f", darwinSensorApp).Run()
 	return dst, nil
 }

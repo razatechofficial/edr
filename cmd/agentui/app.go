@@ -221,6 +221,14 @@ func runDashboard() error {
 			}
 			st := loadStatus()
 			res := sampleResources(st)
+			permRep := hostperm.Report{}
+			onPerm := false
+			fyne.DoAndWait(func() {
+				onPerm = c.screen == uistate.Permissions
+			})
+			if onPerm {
+				permRep = hostperm.EvaluateQuick()
+			}
 			fyne.Do(func() {
 				if c.removed {
 					return
@@ -230,7 +238,7 @@ func runDashboard() error {
 					c.applyDashboard(st, res)
 				}
 				if c.screen == uistate.Permissions {
-					c.refreshPermissions(false)
+					c.applyPermReport(permRep, false)
 				}
 				c.refreshTray(st, res)
 			})
@@ -339,7 +347,7 @@ func (c *console) show(id uistate.Screen) {
 		c.win.SetContent(c.permContent)
 		if !c.permAutoOpened {
 			c.permAutoOpened = true
-			c.refreshPermissionsAndPrompt(true)
+			c.refreshPermissions(true)
 		} else {
 			c.refreshPermissions(false)
 		}

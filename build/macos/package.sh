@@ -220,6 +220,9 @@ LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServic
 CONSOLE_USER="$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null || true)"
 if [[ -x "${LSREG}" ]]; then
 	"${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
+	if [[ -d /usr/local/libexec/edr-agent.app ]]; then
+		"${LSREG}" -f /usr/local/libexec/edr-agent.app >/dev/null 2>&1 || true
+	fi
 fi
 if [[ -n "${COMMAND_LINE_INSTALL:-}" ]]; then
 	exit 0
