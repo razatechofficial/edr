@@ -30,9 +30,9 @@
                   Impersonate="yes"
                   Return="asyncNoWait"/>
 
-    <!-- Closing the console does not stop EDRAgent. Stop (and kill if needed)
-         before Windows Installer StopServices, or upgrade fails with
-         "could not be stopped / sufficient privileges". -->
+    <!-- Deferred CAs can only run after InstallInitialize (2762 otherwise).
+         afterInstallInitialize puts RemoveExistingProducts after that, so
+         EDRAgent is stopped before the old MSI tries StopServices. -->
     <CustomAction Id="CaMsiStop"
                   Directory="INSTALLFOLDER"
                   ExeCommand="edr-agent.exe --msi-stop"
@@ -41,7 +41,7 @@
                   Return="ignore"/>
 
     <MajorUpgrade AllowSameVersionUpgrades="yes"
-                  Schedule="afterInstallValidate"
+                  Schedule="afterInstallInitialize"
                   DowngradeErrorMessage=
       "A newer version of EDR Agent is already installed."/>
     <MediaTemplate EmbedCab="yes" CompressionLevel="high"/>
@@ -53,7 +53,7 @@
     </Feature>
 
     <InstallExecuteSequence>
-      <Custom Action="CaMsiStop" Before="InstallValidate">Installed OR WIX_UPGRADE_DETECTED</Custom>
+      <Custom Action="CaMsiStop" After="InstallInitialize">Installed OR WIX_UPGRADE_DETECTED</Custom>
       <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
   </Product>
