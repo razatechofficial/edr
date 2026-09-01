@@ -56,6 +56,9 @@
       <Custom Action="CaMsiStop" Before="InstallValidate">Installed OR WIX_UPGRADE_DETECTED</Custom>
       <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
+    <InstallUISequence>
+      <Custom Action="CaMsiStop" Before="ExecuteAction">Installed OR WIX_UPGRADE_DETECTED</Custom>
+    </InstallUISequence>
   </Product>
 
   <Fragment>
@@ -96,7 +99,7 @@
               Name="EDRAgent"
               Stop="both"
               Remove="uninstall"
-              Wait="yes"/>
+              Wait="no"/>
       </Component>
       <Component Id="cmpEdrCtlExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="EdrCtlExe"

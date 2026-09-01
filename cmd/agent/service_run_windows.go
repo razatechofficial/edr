@@ -44,7 +44,7 @@ func (s *edrWindowsService) Execute(_ []string, r <-chan svc.ChangeRequest, chan
 				cancel()
 				select {
 				case <-done:
-				case <-time.After(20 * time.Second):
+				case <-time.After(8 * time.Second):
 				}
 				return false, 0
 			default:
