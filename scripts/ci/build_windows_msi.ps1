@@ -122,6 +122,9 @@ $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.
 $modelsWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wxs'))
 $rulesStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-rules'))
 $modelsStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-models'))
+if (-not (Test-Path -LiteralPath $licenseRtf)) {
+    throw "Missing MSI license RTF: $licenseRtf"
+}
 if (-not (Test-Path -LiteralPath $configYml)) {
     throw "Missing staged config: $configYml"
 }
@@ -267,8 +270,26 @@ if ($yaraDlls.Count -gt 0) {
     Write-Host "Including $($yaraDlls.Count) libyara DLL(s) in MSI"
 }
 
+$wixBinDir = $env:EDR_WIX_BIN
+if ([string]::IsNullOrWhiteSpace($wixBinDir)) {
+    $lightCmd = Get-Command $lightExe -ErrorAction SilentlyContinue
+    if ($null -ne $lightCmd) {
+        $wixBinDir = [System.IO.Path]::GetDirectoryName($lightCmd.Source)
+    }
+}
+$uiExt = if (-not [string]::IsNullOrWhiteSpace($wixBinDir)) {
+    Join-Path $wixBinDir 'WixUIExtension.dll'
+} else {
+    'WixUIExtension'
+}
+if ($uiExt -ne 'WixUIExtension' -and -not (Test-Path -LiteralPath $uiExt)) {
+    throw "WixUIExtension.dll not found at $uiExt (needed for the license dialog)"
+}
+
 $lightArgList = @(
     '-nologo', '-sval', '-sw1076',
+    '-ext', $uiExt,
+    '-cultures:en-us',
     "-dRulesStage=$rulesStage",
     "-dModelsStage=$modelsStage",
     $lightInputs,

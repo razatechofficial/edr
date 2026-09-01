@@ -2,8 +2,8 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <!--
     Native MSI (same pattern as Microsoft Defender / CrowdStrike Falcon):
-    copies sensor + console + models. Attended: Windows Installer UI.
-    Silent/GPO: msiexec /qn /i edr-agent.msi
+    copies sensor + console + models. Attended: license agreement then progress.
+    Silent/GPO: msiexec /qn /i edr-agent.msi (EULA accepted by deploying).
     First-run enroll lives in EDR Agent.exe, not a fat Setup.exe.
     Service is registered but not started until the operator launches it.
   -->
@@ -18,8 +18,11 @@
              InstallScope="perMachine"
              InstallPrivileges="elevated"/>
 
-    <!-- Progress-only MSI. The installed console owns first-run:
-         enroll → grants → preflight → dashboard. Skip GUI on silent msiexec. -->
+    <!-- Attended: license → progress. Silent/GPO: msiexec /qn skips this UI;
+         the organization accepts the EULA by deploying the package. -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.EdrLicenseRtf)"/>
+    <UIRef Id="WixUI_Minimal"/>
+    <UIRef Id="WixUI_ErrorProgressText"/>
     <CustomAction Id="LaunchApplication"
                   FileKey="EdrUIExe"
                   ExeCommand=""
