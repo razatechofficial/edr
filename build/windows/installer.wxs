@@ -32,7 +32,7 @@
 
     <!-- Kill leftover EDRAgent (failed previous install, or upgrade) before
          InstallValidate / RemoveExistingProducts / StopServices. Do not run
-         edr-agent.exe here: older builds ignore --msi-stop and start the
+         edr-agent.exe here: older builds ignore the msi-stop flag and start the
          sensor inside msiexec, which hangs the wizard then rolls back — no
          Programs entry. sc stop is avoided (SCM can block forever).
          Immediate + ignore: missing service must not fail the package. -->
