@@ -36,20 +36,18 @@
                   Impersonate="yes"
                   Return="asyncNoWait"/>
 
-    <!-- Force leftover edr-agent.exe down before RemoveExistingProducts /
-         StopServices. Do not run edr-agent.exe (old builds start inside
-         msiexec). Do not sc delete (marked-for-deletion / already exists).
-         Disable recovery so the service does not come back before files copy.
-         Immediate CA covers upgrade uninstall (before InstallInitialize);
-         deferred CA runs as LocalSystem before this package's StopServices. -->
+    <!-- Hidden VBScript (not cmd.exe): Type 34 against System64Folder opened a
+         console and looked for cmd.exe under the MSI SourceDir, which is why
+         testers saw a CMD window and "program not found". Do not sc delete. -->
+    <Binary Id="KillAgentVbs" SourceFile="$(var.KillAgentVbs)"/>
     <CustomAction Id="CaKillAgent"
-                  Directory="System64Folder"
-                  ExeCommand="cmd.exe /c sc.exe config EDRAgent start= demand &amp; sc.exe failure EDRAgent reset= 0 actions= // &amp; taskkill /F /IM edr-agent-ui.exe /T &amp; taskkill /F /IM edr-agent.exe /T &amp; ping -n 3 127.0.0.1 &amp; exit /b 0"
+                  BinaryKey="KillAgentVbs"
+                  VBScriptCall=""
                   Execute="immediate"
                   Return="ignore"/>
     <CustomAction Id="CaKillAgentDeferred"
-                  Directory="System64Folder"
-                  ExeCommand="cmd.exe /c sc.exe config EDRAgent start= demand &amp; sc.exe failure EDRAgent reset= 0 actions= // &amp; taskkill /F /IM edr-agent-ui.exe /T &amp; taskkill /F /IM edr-agent.exe /T &amp; ping -n 3 127.0.0.1 &amp; exit /b 0"
+                  BinaryKey="KillAgentVbs"
+                  VBScriptCall=""
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore"/>
@@ -75,7 +73,6 @@
 
   <Fragment>
     <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="System64Folder" Name="System64"/>
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="EDR Agent"/>
       </Directory>

@@ -41,8 +41,12 @@ func edrctlPath() string {
 			return p
 		}
 	}
-	if p, err := exec.LookPath("edrctl"); err == nil {
-		return p
+	// Do not LookPath on Windows: an old edrctl.exe earlier on PATH
+	// (dev GOPATH, leftover copy) is not the MSI install.
+	if runtime.GOOS != "windows" {
+		if p, err := exec.LookPath("edrctl"); err == nil {
+			return p
+		}
 	}
 	return "edrctl"
 }
@@ -78,8 +82,10 @@ func installerPath() string {
 			return p
 		}
 	}
-	if p, err := exec.LookPath("edr-installer"); err == nil {
-		return p
+	if runtime.GOOS != "windows" {
+		if p, err := exec.LookPath("edr-installer"); err == nil {
+			return p
+		}
 	}
 	return "edr-installer"
 }
@@ -99,8 +105,10 @@ func sensorBinaryPath() string {
 			return p
 		}
 	}
-	if p, err := exec.LookPath("edr-agent"); err == nil {
-		return p
+	if runtime.GOOS != "windows" {
+		if p, err := exec.LookPath("edr-agent"); err == nil {
+			return p
+		}
 	}
 	return "edr-agent"
 }

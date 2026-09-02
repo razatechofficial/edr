@@ -118,12 +118,16 @@ $applyTenantBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/
 $applyTenantTlsBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_tenant_tls_config.bat'))
 $applyPPLBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/apply_am_ppl_config.bat'))
 $licenseRtf = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/License.rtf'))
+$killAgentVbs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/kill_agent.vbs'))
 $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wxs'))
 $modelsWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wxs'))
 $rulesStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-rules'))
 $modelsStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-models'))
 if (-not (Test-Path -LiteralPath $licenseRtf)) {
     throw "Missing MSI license RTF: $licenseRtf"
+}
+if (-not (Test-Path -LiteralPath $killAgentVbs)) {
+    throw "Missing MSI kill helper: $killAgentVbs"
 }
 if (-not (Test-Path -LiteralPath $configYml)) {
     throw "Missing staged config: $configYml"
@@ -196,6 +200,7 @@ $candleArgList = @(
     "-dEdrApplyTenantTlsBat=$applyTenantTlsBat",
     "-dEdrApplyPPLBat=$applyPPLBat",
     "-dEdrLicenseRtf=$licenseRtf",
+    "-dKillAgentVbs=$killAgentVbs",
     "-dRulesStage=$rulesStage",
     "-dModelsStage=$modelsStage",
     $wxs,
