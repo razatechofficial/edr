@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/hostperm"
 	"github.com/razatechofficial/edr/internal/platform"
 	"github.com/razatechofficial/edr/internal/xdrclient"
 )
@@ -98,6 +99,9 @@ func applyLocalEnrollment(st *operatorStatus) {
 	// already registered — do not send the operator back to Enroll.
 	if st.IngestOK || (st.IngestConfigured && serviceHealthy(st.Service)) {
 		st.Enrolled = true
+	}
+	if serviceLooksMissing(st.Service) && hostperm.SensorRegistered() {
+		st.Service = "installed"
 	}
 }
 

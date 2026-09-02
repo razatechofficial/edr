@@ -104,6 +104,13 @@ func EnsurePromptedItems() {
 	ensureLoginItem()
 }
 
+// SensorRegistered is true when the machine-wide sensor service exists
+// (stopped or running). A status-string of "unknown" is not "missing".
+func SensorRegistered() bool {
+	it := evaluateService(Item{ID: IDService, Title: "service", Required: true})
+	return it.Status == StatusOK || it.Status == StatusNA
+}
+
 // NeedsGrants is true when a required OS grant (FDA / firewall / caps) is
 // missing or revoked. Boot, service, and spool are preflight checks.
 func NeedsGrants() bool {

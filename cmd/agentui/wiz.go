@@ -163,9 +163,10 @@ func checklistSheet(intro, list, foot fyne.CanvasObject) fyne.CanvasObject {
 	if top == nil {
 		top = canvas.NewRectangle(color.Transparent)
 	}
-	// Pack intro + rows at the top so leftover height sits above the footer,
-	// not between checklist items.
-	return container.NewBorder(nil, foot, nil, nil, vstack(0, top, list))
+	// Pack intro, rows, and footer as one column. Border pins the footer to
+	// the window bottom and leaves a hole (or overlaps rows) when the HWND
+	// and Fyne canvas disagree on Windows DPI.
+	return vstack(0, top, list, foot)
 }
 
 func heroWell(size float32, tone color.NRGBA, kind string) fyne.CanvasObject {
@@ -188,6 +189,6 @@ func nativeLabel(s string) *canvas.Text {
 
 func processLine(s string) *widget.Label {
 	l := widget.NewLabel(s)
-	l.Wrapping = fyne.TextWrapWord
+	l.Wrapping = fyne.TextTruncate
 	return l
 }

@@ -30,15 +30,14 @@
                   Impersonate="yes"
                   Return="asyncNoWait"/>
 
-    <!-- Kill leftover EDRAgent (failed previous install, or upgrade) before
-         InstallValidate / RemoveExistingProducts / StopServices. Do not run
-         edr-agent.exe here: older builds ignore the msi-stop flag and start the
-         sensor inside msiexec, which hangs the wizard then rolls back — no
-         Programs entry. sc stop is avoided (SCM can block forever).
-         Immediate + ignore: missing service must not fail the package. -->
+    <!-- Kill leftover agent processes before InstallValidate. Do not run
+         edr-agent.exe here: older builds ignore the msi-stop flag and start
+         the sensor inside msiexec. Do not sc delete: that marks EDRAgent for
+         deletion so ServiceInstall / later register fail with already exists.
+         Immediate + ignore: missing processes must not fail the package. -->
     <CustomAction Id="CaMsiStop"
                   Directory="System64Folder"
-                  ExeCommand="cmd.exe /c sc.exe failure EDRAgent reset= 0 actions= &quot;&quot; &amp; sc.exe config EDRAgent start= disabled &amp; taskkill /F /IM edr-agent-ui.exe /T &amp; taskkill /F /IM edr-agent.exe /T &amp; sc.exe delete EDRAgent &amp; exit /b 0"
+                  ExeCommand="cmd.exe /c taskkill /F /IM edr-agent-ui.exe /T &amp; taskkill /F /IM edr-agent.exe /T &amp; exit /b 0"
                   Execute="immediate"
                   Impersonate="no"
                   Return="ignore"/>

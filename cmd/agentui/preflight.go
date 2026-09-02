@@ -101,19 +101,34 @@ func runOneCheck(id string, st operatorStatus) (ok bool, detail string) {
 		}
 		return true, "Required capabilities are present"
 	case "svc":
-		s := strings.ToLower(strings.TrimSpace(st.Service))
-		if s == "" || s == "unknown" || strings.Contains(s, "not installed") || strings.Contains(s, "missing") {
-			return false, "The machine-wide sensor service is not registered. Reinstall as administrator."
-		}
-		if s == "not loaded" || s == "not running" || s == "stopped" {
-			return true, "Service is installed. Start loads the sensor."
-		}
-		return true, "Service: " + st.Service
+		return serviceCheck(st)
 	case "spool":
 		return storageCheck()
 	default:
 		return false, "unknown check"
 	}
+}
+
+func serviceLooksMissing(s string) bool {
+	v := strings.ToLower(strings.TrimSpace(s))
+	return v == "" || v == "unknown" || strings.Contains(v, "not installed") || strings.Contains(v, "missing")
+}
+
+func serviceCheck(st operatorStatus) (bool, string) {
+	s := strings.ToLower(strings.TrimSpace(st.Service))
+	if hostperm.SensorRegistered() {
+		if s == "running" || s == "starting" || s == "start_pending" {
+			return true, "Service: " + firstNonEmpty(st.Service, "running")
+		}
+		return true, "Service is installed. Start loads the sensor."
+	}
+	if serviceLooksMissing(st.Service) {
+		return false, "The machine-wide sensor service is not registered. Reinstall as administrator."
+	}
+	if s == "not loaded" || s == "not running" || s == "stopped" || s == "installed" {
+		return true, "Service is installed. Start loads the sensor."
+	}
+	return true, "Service: " + st.Service
 }
 
 func preflightCanStart(items []preflightItem) bool {

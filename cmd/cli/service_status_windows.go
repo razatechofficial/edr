@@ -15,7 +15,7 @@ func windowsServiceRuntimeStatus() string {
 	defer m.Disconnect()
 	s, err := m.OpenService("EDRAgent")
 	if err != nil {
-		return "unknown"
+		return "not installed"
 	}
 	defer s.Close()
 	st, err := s.Query()

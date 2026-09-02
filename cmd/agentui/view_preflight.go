@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/razatechofficial/edr/cmd/agentui/uistate"
+	"github.com/razatechofficial/edr/internal/hostperm"
 )
 
 func (c *console) buildPreflight() fyne.CanvasObject {
@@ -72,7 +73,7 @@ func (c *console) renderPreflight() {
 			line = "All checks passed. Start edr to load the sensor."
 		} else {
 			c.startAgentBtn.SetText("Register and start")
-			line = "Allow Administrator to register the EDRAgent service, then the sensor can start."
+			line = "Allow Administrator, then Start."
 		}
 	} else {
 		c.startAgentBtn.Disable()
@@ -80,6 +81,7 @@ func (c *console) renderPreflight() {
 	if c.preflightLine != nil {
 		c.preflightLine.SetText(line)
 	}
+	c.fitPreflight()
 }
 
 func (c *console) runPreflight() {
@@ -149,22 +151,23 @@ func (c *console) startSensor() {
 	}
 	go func() {
 		if isWindows() {
-			if err := runAgentInstallPrivileged(); err != nil {
-				st := loadStatus()
-				fyne.Do(func() {
-					c.setBusy(false)
-					f := classifyStartError(err.Error())
-					f.Title = "The sensor service is not registered"
-					f.Body = "Administrator permission is required to register EDRAgent. Allow the Windows prompt, then Start again."
-					c.setDashFault(f)
-					c.setPreflightFault(f)
-					if c.preflightLine != nil {
-						c.preflightLine.SetText("Service registration did not finish.")
-					}
-					c.presentStartFault(f)
-					c.applyDashboard(st, sampleResources(st))
-				})
-				return
+			needInstall := !hostperm.SensorRegistered()
+			if needInstall {
+				if err := runAgentInstallPrivileged(); err != nil && !serviceAlreadyPresentError(err.Error()) && !hostperm.SensorRegistered() {
+					st := loadStatus()
+					fyne.Do(func() {
+						c.setBusy(false)
+						f := classifyStartError(err.Error())
+						c.setDashFault(f)
+						c.setPreflightFault(f)
+						if c.preflightLine != nil {
+							c.preflightLine.SetText("Service registration did not finish.")
+						}
+						c.presentStartFault(f)
+						c.applyDashboard(st, sampleResources(st))
+					})
+					return
+				}
 			}
 		}
 		_, _ = runEdrctl("stage-identity")
@@ -210,11 +213,16 @@ func (c *console) setPreflightFault(f uiFault) {
 		c.preflightFaultBox.Add(faultCard(f))
 	}
 	c.preflightFaultBox.Refresh()
+	c.fitPreflight()
 }
 
 func (c *console) presentStartFault(f uiFault) {
 	if strings.EqualFold(f.Action, "Grant access") || needsOSGrants() {
 		c.show(uistate.Permissions)
+		return
+	}
+	if c.screen == uistate.Preflight {
+		c.fitPreflight()
 		return
 	}
 	msg := widget.NewLabel(strings.TrimSpace(f.Body + "\n\n" + f.Detail))

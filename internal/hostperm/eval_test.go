@@ -24,6 +24,10 @@ func TestEvaluateHasRequiredRows(t *testing.T) {
 	}
 }
 
+func TestSensorRegisteredDoesNotPanic(t *testing.T) {
+	_ = SensorRegistered()
+}
+
 func TestIsGrantID(t *testing.T) {
 	if !IsGrantID(IDFDA) || !IsGrantID(IDFirewall) || !IsGrantID(IDCaps) {
 		t.Fatal("grant ids")

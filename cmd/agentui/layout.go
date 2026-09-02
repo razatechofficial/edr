@@ -29,7 +29,7 @@ func wizardHeight(id uistate.Screen) float32 {
 	case uistate.Permissions:
 		return 540
 	case uistate.Preflight:
-		return 520
+		return 560
 	case uistate.Setup:
 		return 640
 	case uistate.Enroll:
@@ -84,6 +84,20 @@ func clampEnrollH(h float32) float32 {
 		h = 640
 	}
 	return h
+}
+
+func (c *console) fitPreflight() {
+	if c.win == nil || c.preflightContent == nil || c.screen != uistate.Preflight {
+		return
+	}
+	h := c.preflightContent.MinSize().Height
+	if h < 480 {
+		h = 480
+	}
+	if h > 720 {
+		h = 720
+	}
+	c.lockSize(wizardW, h)
 }
 
 func (c *console) fitEnroll() {

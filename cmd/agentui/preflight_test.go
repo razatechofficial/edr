@@ -19,3 +19,23 @@ func TestPreflightCanStart(t *testing.T) {
 		t.Fatal("empty checklist must not start")
 	}
 }
+
+func TestServiceLooksMissing(t *testing.T) {
+	for _, s := range []string{"", "unknown", "not installed", "Service missing"} {
+		if !serviceLooksMissing(s) {
+			t.Fatalf("%q should look missing", s)
+		}
+	}
+	for _, s := range []string{"stopped", "installed", "running", "not running"} {
+		if serviceLooksMissing(s) {
+			t.Fatalf("%q should not look missing", s)
+		}
+	}
+}
+
+func TestServiceCheckStopped(t *testing.T) {
+	ok, detail := serviceCheck(operatorStatus{Service: "stopped"})
+	if !ok {
+		t.Fatalf("stopped must count as registered: %s", detail)
+	}
+}

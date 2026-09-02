@@ -104,8 +104,12 @@ func runAgentInstallPrivileged() error {
 		cmd := exec.Command(bin, "--install")
 		hideConsole(cmd)
 		out, err := cmd.CombinedOutput()
+		msg := strings.TrimSpace(string(out))
 		if err != nil {
-			return fmt.Errorf("register service: %w (%s)", err, strings.TrimSpace(string(out)))
+			if serviceAlreadyPresentError(msg + " " + err.Error()) {
+				return nil
+			}
+			return fmt.Errorf("register service: %w (%s)", err, msg)
 		}
 		return nil
 	}

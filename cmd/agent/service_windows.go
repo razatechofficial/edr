@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,10 +11,24 @@ import (
 	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
 )
+
+var errServiceAlreadyPresent = errors.New("EDRAgent already registered")
+
+func serviceAlreadyPresent(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, windows.ERROR_SERVICE_EXISTS) || errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "already exists") || strings.Contains(s, "marked for deletion")
+}
 
 func installLog(format string, args ...any) {
 	p := filepath.Join(WindowsDataRoot(), "logs", "install.log")
@@ -78,6 +93,16 @@ func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, err
 	if existing, err := m.OpenService(windowsServiceName); err == nil {
 		return existing, nil
 	}
+	if serviceAlreadyPresent(last) {
+		for i := 0; i < 12; i++ {
+			time.Sleep(400 * time.Millisecond)
+			if existing, err := m.OpenService(windowsServiceName); err == nil {
+				return existing, nil
+			}
+		}
+		installLog("CreateService already exists; treating as registered")
+		return nil, errServiceAlreadyPresent
+	}
 	return nil, last
 }
 
@@ -108,6 +133,10 @@ func installService() error {
 
 	s, err := openOrCreateService(m, exePath, cfgPath)
 	if err != nil {
+		if errors.Is(err, errServiceAlreadyPresent) {
+			installLog("install complete (service already registered)")
+			return nil
+		}
 		installLog("create service: %v", err)
 		return fmt.Errorf("register EDRAgent service: %w", err)
 	}

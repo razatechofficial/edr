@@ -137,9 +137,21 @@ func classifyInstallError(raw string) uiFault {
 	return classifyStartError(raw)
 }
 
+func serviceAlreadyPresentError(raw string) bool {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	return strings.Contains(s, "already exists") || strings.Contains(s, "marked for deletion")
+}
+
 func classifyStartError(raw string) uiFault {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	switch {
+	case serviceAlreadyPresentError(raw):
+		return uiFault{
+			Title:  "The sensor service is already registered",
+			Body:   "EDRAgent is on this computer. Start loads the sensor; do not register it again.",
+			Detail: firstLine(raw),
+			Action: "Start edr",
+		}
 	case strings.Contains(s, "spool") || strings.Contains(s, "no space") || strings.Contains(s, "disk"):
 		return uiFault{
 			Title:  "Offline event spool is not writable",

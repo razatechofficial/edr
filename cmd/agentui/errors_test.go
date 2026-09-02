@@ -27,6 +27,12 @@ func TestClassifyEnrollError(t *testing.T) {
 	if !strings.Contains(classifyStartError("local sensor binary not found next to edrctl").Body, "Reinstall the EDR Agent package") {
 		t.Fatal("missing sensor copy")
 	}
+	if !serviceAlreadyPresentError("register EDRAgent service: The specified service already exists.") {
+		t.Fatal("already exists")
+	}
+	if classifyStartError("register EDRAgent service: The specified service already exists.").Title != "The sensor service is already registered" {
+		t.Fatal("already exists copy")
+	}
 }
 
 func TestClassifyInstallError(t *testing.T) {
