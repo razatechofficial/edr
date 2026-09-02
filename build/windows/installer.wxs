@@ -36,19 +36,20 @@
                   Impersonate="yes"
                   Return="asyncNoWait"/>
 
-    <!-- Hidden VBScript (not cmd.exe): Type 34 against System64Folder opened a
-         console and looked for cmd.exe under the MSI SourceDir, which is why
-         testers saw a CMD window and "program not found". Do not sc delete. -->
+    <!-- Impersonate=no is required: default immediate CAs run as the invoking
+         user and sc delete silently fails, then cached old MSIs hit 1921 at
+         RemoveExistingProducts. Deferred kill cannot run before that action. -->
     <Binary Id="KillAgentVbs" SourceFile="$(var.KillAgentVbs)"/>
     <CustomAction Id="CaKillAgent"
                   BinaryKey="KillAgentVbs"
                   VBScriptCall=""
                   Execute="immediate"
+                  Impersonate="no"
                   Return="ignore"/>
-    <CustomAction Id="CaKillAgentDeferred"
+    <CustomAction Id="CaKillAgentPreUpgrade"
                   BinaryKey="KillAgentVbs"
                   VBScriptCall=""
-                  Execute="deferred"
+                  Execute="immediate"
                   Impersonate="no"
                   Return="ignore"/>
 
@@ -82,11 +83,14 @@
 
     <InstallExecuteSequence>
       <Custom Action="CaKillAgent" Before="InstallValidate">NOT REMOVE</Custom>
-      <Custom Action="CaKillAgentDeferred" Before="InstallInitialize">NOT REMOVE</Custom>
+      <Custom Action="CaKillAgentPreUpgrade" Before="RemoveExistingProducts">NOT REMOVE</Custom>
       <Custom Action="CaRegisterService" After="InstallFiles">NOT REMOVE</Custom>
       <Custom Action="CaUnregisterService" Before="RemoveFiles">REMOVE="ALL"</Custom>
       <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
+    <InstallUISequence>
+      <Custom Action="CaKillAgent" Before="ExecuteAction">NOT REMOVE</Custom>
+    </InstallUISequence>
   </Product>
 
   <Fragment>
