@@ -18,6 +18,12 @@
              InstallScope="perMachine"
              InstallPrivileges="elevated"/>
 
+    <!-- Restart Manager also tries to stop EDRAgent and surfaces the same
+         "could not be stopped" dialog. Files are replaced after we kill the
+         process; do not ask RM to shut the service down. -->
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable"/>
+    <Property Id="MSIRMSHUTDOWN" Value="2"/>
+
     <!-- Attended: license → progress. Silent/GPO: msiexec /qn skips this UI;
          the organization accepts the EULA by deploying the package. -->
     <WixVariable Id="WixUILicenseRtf" Value="$(var.EdrLicenseRtf)"/>
@@ -30,15 +36,21 @@
                   Impersonate="yes"
                   Return="asyncNoWait"/>
 
-    <!-- Kill leftover agent processes before InstallValidate. Do not run
-         edr-agent.exe here: older builds ignore the msi-stop flag and start
-         the sensor inside msiexec. Do not sc delete: that marks EDRAgent for
-         deletion so ServiceInstall / later register fail with already exists.
-         Immediate + ignore: missing processes must not fail the package. -->
-    <CustomAction Id="CaMsiStop"
+    <!-- Force leftover edr-agent.exe down before RemoveExistingProducts /
+         StopServices. Do not run edr-agent.exe (old builds start inside
+         msiexec). Do not sc delete (marked-for-deletion / already exists).
+         Disable recovery so the service does not come back before files copy.
+         Immediate CA covers upgrade uninstall (before InstallInitialize);
+         deferred CA runs as LocalSystem before this package's StopServices. -->
+    <CustomAction Id="CaKillAgent"
                   Directory="System64Folder"
-                  ExeCommand="cmd.exe /c taskkill /F /IM edr-agent-ui.exe /T &amp; taskkill /F /IM edr-agent.exe /T &amp; exit /b 0"
+                  ExeCommand="cmd.exe /c sc.exe config EDRAgent start= demand &amp; sc.exe failure EDRAgent reset= 0 actions= // &amp; taskkill /F /IM edr-agent-ui.exe /T &amp; taskkill /F /IM edr-agent.exe /T &amp; ping -n 3 127.0.0.1 &amp; exit /b 0"
                   Execute="immediate"
+                  Return="ignore"/>
+    <CustomAction Id="CaKillAgentDeferred"
+                  Directory="System64Folder"
+                  ExeCommand="cmd.exe /c sc.exe config EDRAgent start= demand &amp; sc.exe failure EDRAgent reset= 0 actions= // &amp; taskkill /F /IM edr-agent-ui.exe /T &amp; taskkill /F /IM edr-agent.exe /T &amp; ping -n 3 127.0.0.1 &amp; exit /b 0"
+                  Execute="deferred"
                   Impersonate="no"
                   Return="ignore"/>
 
@@ -55,7 +67,8 @@
     </Feature>
 
     <InstallExecuteSequence>
-      <Custom Action="CaMsiStop" Before="InstallValidate"/>
+      <Custom Action="CaKillAgent" Before="InstallValidate"/>
+      <Custom Action="CaKillAgentDeferred" Before="StopServices"/>
       <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
   </Product>
@@ -94,10 +107,12 @@
               Account="LocalSystem"
               Arguments='--config "[DATAROOT]config.yml"'
               Vital="yes"/>
+        <!-- No Stop: MSI StopServices error 1921 is the "could not be stopped"
+             dialog. The kill CAs terminate the process; Remove still deletes
+             the service on uninstall. -->
         <ServiceControl
               Id="EDRAgentServiceControl"
               Name="EDRAgent"
-              Stop="uninstall"
               Remove="uninstall"
               Wait="no"/>
       </Component>
