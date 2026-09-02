@@ -52,6 +52,22 @@
                   Impersonate="no"
                   Return="ignore"/>
 
+    <!-- Do not use WiX ServiceInstall/ServiceControl: MSI StopServices (1921)
+         runs during upgrade uninstall of older packages that had Stop="both",
+         and can fail even when EDRAgent is stopped. Register after files. -->
+    <CustomAction Id="CaRegisterService"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="edr-agent.exe --install"
+                  Execute="immediate"
+                  Impersonate="no"
+                  Return="ignore"/>
+    <CustomAction Id="CaUnregisterService"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="edr-agent.exe --uninstall"
+                  Execute="immediate"
+                  Impersonate="no"
+                  Return="ignore"/>
+
     <MajorUpgrade AllowSameVersionUpgrades="yes"
                   Schedule="afterInstallValidate"
                   DowngradeErrorMessage=
@@ -65,8 +81,10 @@
     </Feature>
 
     <InstallExecuteSequence>
-      <Custom Action="CaKillAgent" Before="InstallValidate"/>
-      <Custom Action="CaKillAgentDeferred" Before="StopServices"/>
+      <Custom Action="CaKillAgent" Before="InstallValidate">NOT REMOVE</Custom>
+      <Custom Action="CaKillAgentDeferred" Before="InstallInitialize">NOT REMOVE</Custom>
+      <Custom Action="CaRegisterService" After="InstallFiles">NOT REMOVE</Custom>
+      <Custom Action="CaUnregisterService" Before="RemoveFiles">REMOVE="ALL"</Custom>
       <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
   </Product>
@@ -93,25 +111,6 @@
               Source="$(var.EdrAgentExe)"
               Name="edr-agent.exe"
               KeyPath="yes"/>
-        <ServiceInstall
-              Id="EDRAgentService"
-              Name="EDRAgent"
-              DisplayName="EDR Agent"
-              Description="Endpoint Detection and Response agent by RazaTech"
-              Type="ownProcess"
-              Start="auto"
-              ErrorControl="normal"
-              Account="LocalSystem"
-              Arguments='--config "[DATAROOT]config.yml"'
-              Vital="yes"/>
-        <!-- No Stop: MSI StopServices error 1921 is the "could not be stopped"
-             dialog. The kill CAs terminate the process; Remove still deletes
-             the service on uninstall. -->
-        <ServiceControl
-              Id="EDRAgentServiceControl"
-              Name="EDRAgent"
-              Remove="uninstall"
-              Wait="no"/>
       </Component>
       <Component Id="cmpEdrCtlExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="EdrCtlExe"
