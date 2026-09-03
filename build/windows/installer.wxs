@@ -57,7 +57,7 @@
          runs during upgrade uninstall of older packages that had Stop="both".
          Deferred FileKey CAs run as LocalSystem after files are on disk;
          immediate Directory=INSTALLFOLDER often ran before the copy, so
-         --install was a no-op and preflight stayed on "service registered" red. -->
+         the install flag was a no-op and preflight stayed on service red. -->
     <CustomAction Id="CaRegisterService"
                   FileKey="AgentExe"
                   ExeCommand="--install"
