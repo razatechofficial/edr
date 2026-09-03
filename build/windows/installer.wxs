@@ -3,7 +3,7 @@
   <!--
     Native MSI only (Defender / Falcon pattern): license + progress via WixUI.
     Silent/GPO: msiexec /qn. No custom Fyne Setup, no auto-launch of the console.
-    Enroll from Start Menu → EDR Agent, or: edrctl enroll --token …
+    Enroll from Start Menu, or: edrctl enroll with a token.
     Service is registered after InstallFiles; operator starts it when ready.
   -->
   <Product Id="*"
@@ -21,7 +21,7 @@
     <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable"/>
     <Property Id="MSIRMSHUTDOWN" Value="2"/>
 
-    <!-- Attended: native MSI license → progress. No custom installer screens. -->
+    <!-- Attended: native MSI license then progress. No custom installer screens. -->
     <WixVariable Id="WixUILicenseRtf" Value="$(var.EdrLicenseRtf)"/>
     <UIRef Id="WixUI_Minimal"/>
     <UIRef Id="WixUI_ErrorProgressText"/>
@@ -42,7 +42,7 @@
                   Impersonate="no"
                   Return="ignore"/>
     <!-- ARP uninstall: kill tray, drop Run key, wipe certs/queue (VBS), then
-         edr-installer uninstall --msi for DPAPI/keystore + service. -->
+         edr-installer uninstall with msi flag for DPAPI/keystore + service. -->
     <CustomAction Id="CaMsiPurge"
                   BinaryKey="MsiPurgeVbs"
                   VBScriptCall=""
@@ -57,7 +57,7 @@
                   Return="ignore"/>
 
     <!-- Do not use WiX ServiceInstall/ServiceControl (StopServices 1921 on old MSI).
-         Deferred FileKey --install after InstallFiles; Return=check so a failed
+         Deferred FileKey install flag after InstallFiles; Return=check so a failed
          register fails the install instead of leaving preflight red. -->
     <CustomAction Id="CaRegisterService"
                   FileKey="AgentExe"
