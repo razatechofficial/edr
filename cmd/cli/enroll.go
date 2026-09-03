@@ -121,6 +121,16 @@ Examples (same on Windows, macOS, and Linux; Windows may omit sudo):
 					res.State.AgentID, res.State.MachineID, res.State.SecureStorage,
 					res.State.CertNotAfter.UTC().Format(time.RFC3339))
 			}
+			// Sensor must reload identity to open the ingest stream; enroll alone
+			// only writes certs (console stays "enrolled" until restart).
+			fmt.Println("restarting sensor to open XDR ingest…")
+			_ = controlAgentService("stop")
+			time.Sleep(time.Second)
+			if err := controlAgentService("start"); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: start sensor after enroll: %v\nrun: sudo edrctl start\n", err)
+			} else {
+				fmt.Println("sensor restarted; wait a few seconds then: sudo edrctl ui")
+			}
 			return nil
 		},
 	}

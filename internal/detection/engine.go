@@ -444,6 +444,9 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 	}
 	e.mu.RUnlock()
 	e.eventsProcessed.Add(1)
+	if ctx.Err() != nil {
+		return nil
+	}
 
 	layerTimeout := e.cfg.LayerTimeout
 	if layerTimeout <= 0 {
@@ -457,54 +460,35 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 	layerCtx, layerCancel := context.WithTimeout(ctx, layerTimeout)
 	defer layerCancel()
 
-	var (
-		resultMu sync.Mutex
-		results  []*events.Alert
-	)
+	var results []*events.Alert
 	collect := func(alerts []*events.Alert) {
 		if len(alerts) == 0 {
 			return
 		}
-		resultMu.Lock()
 		results = append(results, alerts...)
-		resultMu.Unlock()
 	}
-
-	// collectWithTimeout wraps a layer function, discarding results if the
-	// context deadline is exceeded.
-	collectWithTimeout := func(lctx context.Context, layerName string, fn func() []*events.Alert) {
-		done := make(chan []*events.Alert, 1)
-		go func() {
-			defer e.recoverLayer(layerName)
-			done <- fn()
-		}()
-		select {
-		case res := <-done:
-			collect(res)
-		case <-lctx.Done():
-			e.logger.Debug("engine: layer timeout exceeded", zap.String("layer", layerName))
+	// Sequential layers on the caller goroutine. Per-event fan-out leaked
+	// workers when the timeout won (fn kept running) and grew RSS under load.
+	// YARA remains on its dedicated worker pool via EnqueueFileScan.
+	runLayer := func(lctx context.Context, name string, fn func() []*events.Alert) {
+		if lctx.Err() != nil {
+			return
 		}
+		defer e.recoverLayer(name)
+		collect(fn())
 	}
 
-	var wg sync.WaitGroup
-
-	// Layer 1: IOC — hash, IP, domain lookups.
 	if e.ioc != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			collectWithTimeout(layerCtx, "ioc", func() []*events.Alert {
-				matches := e.ioc.CheckEvent(event)
-				alerts := make([]*events.Alert, 0, len(matches))
-				for _, m := range matches {
-					alerts = append(alerts, iocMatchToAlert(m, event))
-				}
-				return alerts
-			})
-		}()
+		runLayer(layerCtx, "ioc", func() []*events.Alert {
+			matches := e.ioc.CheckEvent(event)
+			alerts := make([]*events.Alert, 0, len(matches))
+			for _, m := range matches {
+				alerts = append(alerts, iocMatchToAlert(m, event))
+			}
+			return alerts
+		})
 	}
 
-	// Layer 2: YARA — async file scan (non-blocking; results via yaraResultPump -> alertCh).
 	if e.yara != nil && isFileEvent(event) {
 		if path := extractFilePath(event); path != "" {
 			if !e.yara.EnqueueFileScan(path, event) {
@@ -513,51 +497,35 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		}
 	}
 
-	// Layer 3: Sigma + Custom CEL rules.
 	if e.sigma != nil || e.custom != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			collectWithTimeout(layerCtx, "rules", func() []*events.Alert {
-				m := rules.EventToMap(event)
-				if m == nil {
-					return nil
-				}
-				var out []*events.Alert
-				if e.sigma != nil {
-					out = append(out, e.sigma.Evaluate(m)...)
-				}
-				if e.custom != nil {
-					out = append(out, e.custom.Evaluate(m)...)
-				}
-				return out
-			})
-		}()
+		runLayer(layerCtx, "rules", func() []*events.Alert {
+			m := rules.EventToMap(event)
+			if m == nil {
+				return nil
+			}
+			var out []*events.Alert
+			if e.sigma != nil {
+				out = append(out, e.sigma.Evaluate(m)...)
+			}
+			if e.custom != nil {
+				out = append(out, e.custom.Evaluate(m)...)
+			}
+			return out
+		})
 	}
 
-	// Layer 4: Behavioral detectors + correlator + sequencer.
 	if e.correlator != nil {
 		e.correlator.AddEvent(event)
-
 		for _, det := range e.behavioral {
 			det := det
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				collectWithTimeout(layerCtx, det.Name(), func() []*events.Alert {
-					return det.Analyze(event, e.correlator)
-				})
-			}()
+			runLayer(layerCtx, det.Name(), func() []*events.Alert {
+				return det.Analyze(event, e.correlator)
+			})
 		}
-
 		if e.sequencer != nil {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				collectWithTimeout(layerCtx, "sequencer", func() []*events.Alert {
-					return e.sequencer.Analyze(event, e.correlator)
-				})
-			}()
+			runLayer(layerCtx, "sequencer", func() []*events.Alert {
+				return e.sequencer.Analyze(event, e.correlator)
+			})
 		}
 	}
 	if e.chain != nil {
@@ -566,19 +534,12 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		}
 	}
 
-	// Wait for layers 1-4 so ML (layer 5) can use prior behavioral alerts.
-	wg.Wait()
-
-	// Snapshot prior alerts for ML ransomware correlation.
-	resultMu.Lock()
 	priorAlerts := make([]*events.Alert, len(results))
 	copy(priorAlerts, results)
-	resultMu.Unlock()
 
-	// Layer 5: ML model scoring (extended timeout).
 	if e.ml != nil {
 		mlCtx, mlCancel := context.WithTimeout(ctx, mlTimeout)
-		collectWithTimeout(mlCtx, "ml", func() []*events.Alert {
+		runLayer(mlCtx, "ml", func() []*events.Alert {
 			return e.scoreWithML(mlCtx, event, priorAlerts)
 		})
 		mlCancel()

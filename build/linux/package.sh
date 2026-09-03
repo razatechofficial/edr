@@ -67,15 +67,11 @@ if [ ! -d "${RULES_SRC}" ]; then
     exit 1
 fi
 mkdir -p pkg/deb/etc/edr-agent/rules
-cp -R "${RULES_SRC}/." pkg/deb/etc/edr-agent/rules/
+bash scripts/ci/stage_os_rules.sh linux pkg/deb/etc/edr-agent/rules
 bash scripts/ci/ensure_onnx_models.sh
 if [ -d models ] && compgen -G "models/*.onnx" >/dev/null; then
     mkdir -p pkg/deb/usr/share/edr-agent/models
-    cp models/*.onnx pkg/deb/usr/share/edr-agent/models/
-    [ -f models/manifest.json ] && cp models/manifest.json pkg/deb/usr/share/edr-agent/models/
-    for sig in models/*.onnx.sig; do
-        [ -f "${sig}" ] && cp "${sig}" pkg/deb/usr/share/edr-agent/models/
-    done
+    bash scripts/ci/stage_os_models.sh linux pkg/deb/usr/share/edr-agent/models
 else
     echo "ERROR: ML models not found in models/ directory. Run 'make models-bootstrap' first." >&2
     exit 1
@@ -93,7 +89,9 @@ cat > pkg/deb/usr/share/edr-agent/sqa/SQA_INSTALL.txt <<'TXT'
 EDR SQA package for Kali Linux / Debian amd64
 
 After install:
+  sudo edrctl enroll --token <TOKEN>
   systemctl status edr-agent --no-pager
+  sudo edrctl ui
   /usr/share/edr-agent/sqa/validate_on_device.sh /usr/bin/edr-agent /etc/edr-agent/config.yml
   /usr/share/edr-agent/sqa/sqa_simulations.sh
 
@@ -135,6 +133,10 @@ Description: EDR Agent
 Depends: libc6, libyara10 | libyara9, systemd
 EOF
 
+cat > pkg/deb/DEBIAN/conffiles << 'EOF'
+/etc/edr-agent/config.yml
+EOF
+
 cat > pkg/deb/DEBIAN/postinst << 'EOF'
 #!/bin/bash
 set -e
@@ -145,7 +147,18 @@ chmod 700 /var/lib/edr-agent /var/lib/edr-agent/forensics /var/lib/edr-agent/qua
 chmod 755 /etc/edr-agent /etc/edr-agent/rules
 systemctl daemon-reload
 systemctl enable edr-agent
-systemctl start edr-agent
+# Register only — operator enrolls then starts (faster install; matches MSI).
+systemctl start edr-agent || true
+cat <<'MSG'
+
+EDR agent installed (native deb). Enroll this host to open XDR ingest:
+  sudo edrctl enroll --token <TOKEN>
+
+Then verify:
+  systemctl status edr-agent --no-pager
+  sudo edrctl ui
+
+MSG
 EOF
 chmod 755 pkg/deb/DEBIAN/postinst
 

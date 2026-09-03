@@ -264,6 +264,13 @@ func (c *console) routeInitial() {
 	if !installed {
 		c.paintOrphanConsole()
 		c.show(uistate.Setup)
+		// Leftover tray after incomplete uninstall must not keep a license/setup UI alive.
+		if flagTray {
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				c.app.Quit()
+			}()
+		}
 		return
 	}
 	if next == uistate.Dash {
@@ -305,11 +312,8 @@ func (c *console) reveal() {
 }
 
 func (c *console) routeSetupEntry() {
-	if agentInstalled() {
-		c.paintSetupManage()
-	} else {
-		c.paintSetupLicense()
-	}
+	// Attended Setup/EULA is removed; never paint license/copy-files.
+	c.paintOrphanConsole()
 	c.show(uistate.Setup)
 }
 

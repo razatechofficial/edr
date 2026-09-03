@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -175,10 +176,17 @@ func (e *YARAEngine) LoadRules() error {
 			return walkErr
 		}
 		if d.IsDir() {
+			if skipYARAPlatformDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		ext := filepath.Ext(path)
 		if ext != ".yar" && ext != ".yara" {
+			return nil
+		}
+		base := filepath.Base(path)
+		if runtime.GOOS != "windows" && (strings.HasPrefix(base, "Windows_") || strings.HasPrefix(base, "windows_")) {
 			return nil
 		}
 		ns := filepath.Base(filepath.Dir(path))
@@ -219,6 +227,21 @@ func (e *YARAEngine) LoadRules() error {
 	}
 	e.logger.Debug("yara: rules loaded", zap.Int("files", count))
 	return nil
+}
+
+// skipYARAPlatformDir skips OS-specific rule trees that cannot compile or apply
+// on the current host (e.g. Windows PE rules on Linux).
+func skipYARAPlatformDir(name string) bool {
+	switch strings.ToLower(name) {
+	case "windows", "win":
+		return runtime.GOOS != "windows"
+	case "linux":
+		return runtime.GOOS != "linux"
+	case "macos", "osx", "darwin":
+		return runtime.GOOS != "darwin"
+	default:
+		return false
+	}
 }
 
 func (e *YARAEngine) activeRules() []*yara.Rules {

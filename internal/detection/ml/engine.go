@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -201,18 +203,30 @@ func NewEngine(cfg Config, logger *zap.Logger) (*Engine, error) {
 	mgr := NewModelManager(pubKeyBytes)
 
 	modelFiles := map[string]string{
-		modelPEClassifier:        or(cfg.PEClassifierFile, defaultFilePEClassifier),
-		modelBehaviorLSTM:        or(cfg.BehaviorLSTMFile, defaultFileBehaviorLSTM),
-		modelNetworkAnomaly:      or(cfg.NetworkAnomalyFile, defaultFileNetworkAnomaly),
-		modelRansomware:          or(cfg.RansomwareFile, defaultFileRansomware),
-		modelBehaviorTransformer: or(cfg.BehaviorTransformerFile, defaultFileBehaviorTransformer),
-		modelLOLBin:              or(cfg.LOLBinFile, defaultFileLOLBin),
-		modelSupplyChain:         or(cfg.SupplyChainFile, defaultFileSupplyChain),
-		modelAIGen:               or(cfg.AIGenFile, defaultFileAIGen),
-		modelIdentity:            or(cfg.IdentityFile, defaultFileIdentity),
-		modelMemoryInjection:    or(cfg.MemoryInjectionFile, defaultFileMemoryInjection),
-		modelNetworkLGBM:        or(cfg.NetworkLGBMFile, defaultFileNetworkLGBM),
-		modelRATC2:              or(cfg.RATC2File, defaultFileRATC2),
+		modelPEClassifier:   or(cfg.PEClassifierFile, defaultFilePEClassifier),
+		modelBehaviorLSTM:   or(cfg.BehaviorLSTMFile, defaultFileBehaviorLSTM),
+		modelNetworkAnomaly: or(cfg.NetworkAnomalyFile, defaultFileNetworkAnomaly),
+		modelRansomware:     or(cfg.RansomwareFile, defaultFileRansomware),
+		modelNetworkLGBM:    or(cfg.NetworkLGBMFile, defaultFileNetworkLGBM),
+		modelRATC2:          or(cfg.RATC2File, defaultFileRATC2),
+	}
+	// Optional / heavy models: only when explicitly configured. Shipping every
+	// .onnx under models_dir used to eager-load aigen (~GB RSS) on every OS.
+	for name, file := range map[string]string{
+		modelBehaviorTransformer: strings.TrimSpace(cfg.BehaviorTransformerFile),
+		modelLOLBin:              strings.TrimSpace(cfg.LOLBinFile),
+		modelSupplyChain:         strings.TrimSpace(cfg.SupplyChainFile),
+		modelAIGen:               strings.TrimSpace(cfg.AIGenFile),
+		modelIdentity:            strings.TrimSpace(cfg.IdentityFile),
+		modelMemoryInjection:     strings.TrimSpace(cfg.MemoryInjectionFile),
+	} {
+		if file != "" {
+			modelFiles[name] = file
+		}
+	}
+	// PE classifier is Windows-centric; skip on other OSes to cut RSS.
+	if runtime.GOOS != "windows" {
+		delete(modelFiles, modelPEClassifier)
 	}
 	for name, file := range modelFiles {
 		p := filepath.Join(cfg.ModelsDir, file)

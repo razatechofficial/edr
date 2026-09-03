@@ -128,19 +128,15 @@ chmod 644 "${STAGE}/Library/LaunchAgents/com.razatech.edr.firstrun.plist"
 cp "${ROOT}/deploy/macos/com.razatech.edr-agent-ui.plist" "${STAGE}/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
 chmod 644 "${STAGE}/Library/LaunchAgents/com.razatech.edr-agent-ui.plist"
 
-# Full rules tree (sigma, yara, baseline, …)
+# Full rules tree (sigma, yara, baseline, …) — OS-local only
 if [[ -d "${ROOT}/rules" ]]; then
-	cp -R "${ROOT}/rules/." "${STAGE}/Library/Application Support/EDR/config/rules/"
+	bash "${ROOT}/scripts/ci/stage_os_rules.sh" darwin "${STAGE}/Library/Application Support/EDR/config/rules"
 fi
 
-# Bundled ML artifacts (ONNX + optional signatures + manifest)
+# Bundled ML artifacts (core ONNX only; skip aigen / Windows-only)
 if [[ -d "${MODELS_SRC}" ]]; then
-	shopt -s nullglob
-	for f in "${MODELS_SRC}"/*.onnx "${MODELS_SRC}"/*.sig "${MODELS_SRC}"/*.onnx.sig "${MODELS_SRC}"/manifest.json "${MODELS_SRC}"/*.npy; do
-		[[ -f "${f}" ]] || continue
-		cp "${f}" "${STAGE}/Library/Application Support/EDR/models/"
-	done
-	shopt -u nullglob
+	bash "${ROOT}/scripts/ci/ensure_onnx_models.sh" || true
+	bash "${ROOT}/scripts/ci/stage_os_models.sh" darwin "${STAGE}/Library/Application Support/EDR/models"
 	echo "==> Staged models from ${MODELS_SRC}"
 	ls -la "${STAGE}/Library/Application Support/EDR/models"
 fi
@@ -149,11 +145,15 @@ fi
 EDR_BASE="/Library/Application Support/EDR"
 RULES_BASELINE_ABS="${EDR_BASE}/config/rules/baseline.yaml"
 CONFIG_DST="${STAGE}/Library/Application Support/EDR/config/agent.yaml"
-sed \
-	-e "s|data_dir: \"/var/lib/edr\"|data_dir: \"${EDR_BASE}\"|" \
-	-e "s|models_dir: \"./models\"|models_dir: \"${EDR_BASE}/models\"|" \
-	-e "s|^rules_file:.*|rules_file: \"${RULES_BASELINE_ABS}\"|" \
-	"${ROOT}/configs/agent.yaml" > "${CONFIG_DST}"
+if [[ -f "${ROOT}/configs/macos/config.yml" ]]; then
+	cp "${ROOT}/configs/macos/config.yml" "${CONFIG_DST}"
+else
+	sed \
+		-e "s|data_dir: \"/var/lib/edr\"|data_dir: \"${EDR_BASE}\"|" \
+		-e "s|models_dir: \"./models\"|models_dir: \"${EDR_BASE}/models\"|" \
+		-e "s|^rules_file:.*|rules_file: \"${RULES_BASELINE_ABS}\"|" \
+		"${ROOT}/configs/agent.yaml" > "${CONFIG_DST}"
+fi
 
 if [[ "${AIRGAP}" == "1" ]]; then
 	tmpf="$(mktemp)"
@@ -317,7 +317,7 @@ if [[ -d "${APP}" ]]; then
 		if [[ -x "${LSREG}" ]]; then
 			/usr/bin/sudo -u "${CONSOLE_USER}" "${LSREG}" -f "${APP}" >/dev/null 2>&1 || true
 		fi
-		/usr/bin/sudo -u "${CONSOLE_USER}" /usr/bin/open "${APP}" >/dev/null 2>&1 || true
+		# Native pkg only — do not open a custom first-run UI window.
 		if [[ -f "${UI_PLIST}" ]]; then
 			UID_U="$(/usr/bin/id -u "${CONSOLE_USER}" 2>/dev/null || true)"
 			if [[ -n "${UID_U}" ]]; then

@@ -63,6 +63,20 @@ llm:
   enabled: false
   rag:
     enabled: true
+xdr:
+  # Public defaults; enroll with: sudo edrctl enroll --token <TOKEN>
+  # Sensor starts without credentials; ingest opens after enroll (+ auto restart).
+  enabled: true
+  enrollment_host: enroll.xdr.averox.com:443
+  ingest_hosts:
+    - ingest.xdr.averox.com:443
+  spool_max_bytes: 1073741824
+  spool_max_age_days: 7
+performance:
+  profile: low_resource
+  max_memory_mb: 512
+  worker_count: 2
+  event_buffer_size: 2048
 response:
   auto_response: true
   playbooks_path: /etc/edr-agent/rules/playbooks/playbooks.yml

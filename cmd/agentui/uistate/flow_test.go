@@ -3,11 +3,12 @@ package uistate
 import "testing"
 
 func TestRouteSetupNeverOpensDash(t *testing.T) {
-	if got := Route(true, true, true, false, true); got != Setup {
-		t.Fatalf("setup+installed = %v, want manage/setup", got)
+	// fromSetup is ignored (attended Setup removed from product path).
+	if got := Route(true, true, true, false, true); got != Dash {
+		t.Fatalf("setup flag+installed = %v, want dash", got)
 	}
 	if got := Route(true, false, false, false, false); got != Setup {
-		t.Fatalf("setup+fresh = %v, want license/setup", got)
+		t.Fatalf("setup+fresh = %v, want orphan/setup", got)
 	}
 	if got := Route(false, false, true, false, true); got != Setup {
 		t.Fatalf("console leftover = %v, want orphan/setup", got)

@@ -121,27 +121,38 @@ if (Test-Path -LiteralPath $modelsStage) {
 New-Item -ItemType Directory -Force -Path $modelsStage | Out-Null
 
 $ensureOnnx = Join-Path $root 'scripts/ci/ensure_onnx_models.sh'
-if (Test-Path -LiteralPath $ensureOnnx) {
-    $bash = Get-Command bash -ErrorAction SilentlyContinue
-    if ($bash) {
-        & $bash.Source $ensureOnnx
-        if ($LASTEXITCODE -ne 0) { throw "ensure_onnx_models.sh failed with exit $LASTEXITCODE" }
-    }
+$stageModels = Join-Path $root 'scripts/ci/stage_os_models.sh'
+$bash = Get-Command bash -ErrorAction SilentlyContinue
+if ($bash -and (Test-Path -LiteralPath $ensureOnnx)) {
+    & $bash.Source $ensureOnnx
+    if ($LASTEXITCODE -ne 0) { throw "ensure_onnx_models.sh failed with exit $LASTEXITCODE" }
 }
-$modelsSrc = Join-Path $root 'models'
-$modelFiles = @(Get-ChildItem -LiteralPath $modelsSrc -Filter '*.onnx' -ErrorAction SilentlyContinue)
-if ($modelFiles.Count -gt 0) {
-    foreach ($model in $modelFiles) {
-        Copy-Item -LiteralPath $model.FullName -Destination (Join-Path $modelsStage $model.Name) -Force
+if ($bash -and (Test-Path -LiteralPath $stageModels)) {
+    & $bash.Source $stageModels 'windows' $modelsStage
+    if ($LASTEXITCODE -ne 0) { throw "stage_os_models.sh failed with exit $LASTEXITCODE" }
+} else {
+    $modelsSrc = Join-Path $root 'models'
+    $allow = @(
+        'behavior_lstm.onnx', 'network_anomaly.onnx', 'ransomware.onnx',
+        'network_lgbm.onnx', 'rat_c2_detector.onnx', 'pe_classifier.onnx'
+    )
+    foreach ($name in $allow) {
+        $src = Join-Path $modelsSrc $name
+        if (Test-Path -LiteralPath $src) {
+            Copy-Item -LiteralPath $src -Destination (Join-Path $modelsStage $name) -Force
+            $sig = "$src.sig"
+            if (Test-Path -LiteralPath $sig) {
+                Copy-Item -LiteralPath $sig -Destination (Join-Path $modelsStage "$name.sig") -Force
+            }
+        }
     }
     $manifest = Join-Path $modelsSrc 'manifest.json'
     if (Test-Path -LiteralPath $manifest) {
         Copy-Item -LiteralPath $manifest -Destination (Join-Path $modelsStage 'manifest.json') -Force
     }
-    foreach ($sig in (Get-ChildItem -LiteralPath $modelsSrc -Filter '*.onnx.sig' -ErrorAction SilentlyContinue)) {
-        Copy-Item -LiteralPath $sig.FullName -Destination (Join-Path $modelsStage $sig.Name) -Force
-    }
-
+}
+$modelFiles = @(Get-ChildItem -LiteralPath $modelsStage -Filter '*.onnx' -ErrorAction SilentlyContinue)
+if ($modelFiles.Count -gt 0) {
     Write-Host "==> heat models fragment"
     & $heatExe dir $modelsStage `
         -cg ModelsComponents `

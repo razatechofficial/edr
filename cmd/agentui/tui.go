@@ -86,7 +86,8 @@ func linuxManage(in *bufio.Reader) (continueWizard bool, err error) {
 	ans, _ := in.ReadString('\n')
 	switch strings.TrimSpace(strings.ToLower(ans)) {
 	case "u", "update":
-		return linuxSetupFresh(in)
+		fmt.Println("Update with the native package: sudo dpkg -i edr-agent_*.deb (or rpm -Uvh)")
+		return false, nil
 	case "x", "remove", "uninstall":
 		out, uerr := runInstallerPrivileged("uninstall")
 		if uerr != nil {
@@ -94,12 +95,7 @@ func linuxManage(in *bufio.Reader) (continueWizard bool, err error) {
 		}
 		fmt.Println()
 		fmt.Println("EDR Agent was removed. This host is no longer protected.")
-		fmt.Print("Install again? [y/N]: ")
-		again, _ := in.ReadString('\n')
-		again = strings.TrimSpace(strings.ToLower(again))
-		if again == "y" || again == "yes" {
-			return linuxSetupFresh(in)
-		}
+		fmt.Println("Reinstall with: sudo dpkg -i edr-agent_*.deb")
 		return false, nil
 	case "q", "quit":
 		return false, nil
@@ -116,71 +112,15 @@ func linuxSetup(in *bufio.Reader) (continueWizard bool, err error) {
 }
 
 func linuxSetupFresh(in *bufio.Reader) (continueWizard bool, err error) {
-	linuxPrintLicense()
-	if !linuxAskAccept(in) {
-		linuxPrintDeclined()
-		return false, nil
-	}
-	if !installerPresent() {
-		return false, fmt.Errorf("edr-installer not found; deploy the rpm/deb or place edr-installer on PATH")
-	}
-
-	n := len(setupStepTitles())
-	installprogress.Clear()
-	linuxPrintInstall(0, false, false, setupStepDoing(0))
-
-	type installRes struct {
-		out string
-		err error
-	}
-	done := make(chan installRes, 1)
-	go func() {
-		out, ierr := runInstallerPrivileged("install", "--no-start")
-		done <- installRes{out, ierr}
-	}()
-
-	tick := time.NewTicker(250 * time.Millisecond)
-	defer tick.Stop()
-	last := -1
-	for {
-		select {
-		case res := <-done:
-			if res.err != nil {
-				step := installprogress.Index(installprogress.Read(), n)
-				if step < 0 {
-					step = 0
-				}
-				linuxPrintInstall(step, false, true, "Install did not finish.")
-				f := classifyInstallError(res.out + "\n" + res.err.Error())
-				fmt.Println()
-				fmt.Println(tuiS("\x1b[31m", f.Title))
-				fmt.Println(f.Body)
-				fmt.Println(tuiS("\x1b[2m", f.Detail))
-				return false, fmt.Errorf("%s: %s", f.Title, f.Detail)
-			}
-			linuxPrintInstall(n, true, false, allChecksPassed)
-			linuxPrintFinish()
-			fmt.Print(tuiLaunchEnroll + "? [Y/n]: ")
-			ans, _ := in.ReadString('\n')
-			ans = strings.TrimSpace(strings.ToLower(ans))
-			installprogress.Clear()
-			if ans == "n" || ans == "no" {
-				return false, nil
-			}
-			return true, nil
-		case <-tick.C:
-			step := installprogress.Read()
-			idx := installprogress.Index(step, n)
-			if idx < 0 || idx == last {
-				continue
-			}
-			if idx >= n {
-				idx = n - 1
-			}
-			last = idx
-			linuxPrintInstall(idx, false, false, setupStepDoing(idx))
-		}
-	}
+	_ = in
+	fmt.Println()
+	fmt.Println(tuiS("\x1b[36m", "native package required"))
+	fmt.Println("Custom Setup UI is removed. Install with the OS package:")
+	fmt.Println("  sudo dpkg -i edr-agent_*.deb")
+	fmt.Println("  # or: sudo rpm -Uvh edr-agent-*.rpm")
+	fmt.Println("Then enroll:")
+	fmt.Println("  sudo edrctl enroll --token <TOKEN>")
+	return false, nil
 }
 
 func linuxAskAccept(in *bufio.Reader) bool {

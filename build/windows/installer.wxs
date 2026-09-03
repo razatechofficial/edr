@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <!--
-    Native MSI (same pattern as Microsoft Defender / CrowdStrike Falcon):
-    copies sensor + console + models. Attended: license agreement then progress.
-    Silent/GPO: msiexec /qn /i edr-agent.msi (EULA accepted by deploying).
-    First-run enroll lives in EDR Agent.exe, not a fat Setup.exe.
-    Service is registered but not started until the operator launches it.
+    Native MSI only (Defender / Falcon pattern): license + progress via WixUI.
+    Silent/GPO: msiexec /qn. No custom Fyne Setup, no auto-launch of the console.
+    Enroll from Start Menu → EDR Agent, or: edrctl enroll --token …
+    Service is registered after InstallFiles; operator starts it when ready.
   -->
   <Product Id="*"
            Name="EDR Agent"
@@ -18,28 +17,18 @@
              InstallScope="perMachine"
              InstallPrivileges="elevated"/>
 
-    <!-- Restart Manager also tries to stop EDRAgent and surfaces the same
-         "could not be stopped" dialog. Files are replaced after we kill the
-         process; do not ask RM to shut the service down. -->
+    <!-- Kill processes ourselves; do not ask Restart Manager to stop EDRAgent. -->
     <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable"/>
     <Property Id="MSIRMSHUTDOWN" Value="2"/>
 
-    <!-- Attended: license → progress. Silent/GPO: msiexec /qn skips this UI;
-         the organization accepts the EULA by deploying the package. -->
+    <!-- Attended: native MSI license → progress. No custom installer screens. -->
     <WixVariable Id="WixUILicenseRtf" Value="$(var.EdrLicenseRtf)"/>
     <UIRef Id="WixUI_Minimal"/>
     <UIRef Id="WixUI_ErrorProgressText"/>
-    <CustomAction Id="LaunchApplication"
-                  FileKey="EdrUIExe"
-                  ExeCommand=""
-                  Execute="immediate"
-                  Impersonate="yes"
-                  Return="asyncNoWait"/>
 
-    <!-- Impersonate=no is required: default immediate CAs run as the invoking
-         user and sc delete silently fails, then cached old MSIs hit 1921 at
-         RemoveExistingProducts. Deferred kill cannot run before that action. -->
+    <!-- Impersonate=no: elevated stop/kill before upgrade validates files. -->
     <Binary Id="KillAgentVbs" SourceFile="$(var.KillAgentVbs)"/>
+    <Binary Id="MsiPurgeVbs" SourceFile="$(var.MsiPurgeVbs)"/>
     <CustomAction Id="CaKillAgent"
                   BinaryKey="KillAgentVbs"
                   VBScriptCall=""
@@ -52,18 +41,30 @@
                   Execute="immediate"
                   Impersonate="no"
                   Return="ignore"/>
+    <!-- ARP uninstall: kill tray, drop Run key, wipe certs/queue (VBS), then
+         edr-installer uninstall --msi for DPAPI/keystore + service. -->
+    <CustomAction Id="CaMsiPurge"
+                  BinaryKey="MsiPurgeVbs"
+                  VBScriptCall=""
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore"/>
+    <CustomAction Id="CaInstallerPurge"
+                  FileKey="EdrInstallerExe"
+                  ExeCommand="uninstall --msi"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore"/>
 
-    <!-- Do not use WiX ServiceInstall/ServiceControl: MSI StopServices (1921)
-         runs during upgrade uninstall of older packages that had Stop="both".
-         Deferred FileKey CAs run as LocalSystem after files are on disk;
-         immediate Directory=INSTALLFOLDER often ran before the copy, so
-         the install flag was a no-op and preflight stayed on service red. -->
+    <!-- Do not use WiX ServiceInstall/ServiceControl (StopServices 1921 on old MSI).
+         Deferred FileKey --install after InstallFiles; Return=check so a failed
+         register fails the install instead of leaving preflight red. -->
     <CustomAction Id="CaRegisterService"
                   FileKey="AgentExe"
                   ExeCommand="--install"
                   Execute="deferred"
                   Impersonate="no"
-                  Return="ignore"/>
+                  Return="check"/>
     <CustomAction Id="CaUnregisterService"
                   FileKey="AgentExe"
                   ExeCommand="--uninstall"
@@ -74,7 +75,7 @@
     <MajorUpgrade AllowSameVersionUpgrades="yes"
                   Schedule="afterInstallValidate"
                   DowngradeErrorMessage=
-      "A newer version of EDR Agent is already installed."/>
+      "A newer version of EDR Agent is already installed. Uninstall it first, or install a newer build."/>
     <MediaTemplate EmbedCab="yes" CompressionLevel="high"/>
 
     <Feature Id="ProductFeature" Title="EDR Agent" Level="1">
@@ -87,8 +88,9 @@
       <Custom Action="CaKillAgent" Before="InstallValidate">NOT REMOVE</Custom>
       <Custom Action="CaKillAgentPreUpgrade" Before="RemoveExistingProducts">NOT REMOVE</Custom>
       <Custom Action="CaRegisterService" After="InstallFiles">NOT REMOVE</Custom>
+      <Custom Action="CaMsiPurge" Before="CaInstallerPurge">REMOVE="ALL"</Custom>
+      <Custom Action="CaInstallerPurge" Before="CaUnregisterService">REMOVE="ALL"</Custom>
       <Custom Action="CaUnregisterService" Before="RemoveFiles">REMOVE="ALL"</Custom>
-      <Custom Action="LaunchApplication" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt; 3</Custom>
     </InstallExecuteSequence>
     <InstallUISequence>
       <Custom Action="CaKillAgent" Before="ExecuteAction">NOT REMOVE</Custom>

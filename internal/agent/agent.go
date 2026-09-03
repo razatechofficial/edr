@@ -23,6 +23,7 @@ import (
 	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/comms"
 	"github.com/razatechofficial/edr/internal/compliance/sca"
+	"github.com/razatechofficial/edr/internal/conc"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/detect"
 	"github.com/razatechofficial/edr/internal/detection"
@@ -88,6 +89,7 @@ type Agent struct {
 	userLookup     *collector.UsernameCache
 	fileDedup      *collector.FileDeduper
 	fileHashPool   *fileHashPool
+	workPool       *conc.Pool
 	telemetryRelay *forwarder.TelemetryRelay
 	// telemetrySealSender mirrors forwarder seal settings for diagnostics (no live transport).
 	telemetrySealSender *telemetry.Sender
@@ -100,6 +102,7 @@ type Agent struct {
 	lastHealthSnapshot time.Time
 	lastRuntimeStats   time.Time
 	eventsProcessed    atomic.Uint64
+	startedAt          time.Time
 	validationMu       sync.RWMutex
 	validationSink     func(detection.Detection)
 	noisyAlertMu       sync.Mutex
@@ -169,6 +172,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		userLookup:         users,
 		fileDedup:          collector.NewFileDeduper(0),
 		fileHashPool:       newFileHashPool(),
+		workPool:           conc.NewPool(2, 64),
 		noisyAlertLastSeen: make(map[string]time.Time),
 	}
 	a.writer.SetProductVersion(cfg.Agent.Version)
@@ -180,9 +184,19 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		telEP = strings.TrimSpace(cfg.Forwarder.Endpoint)
 	}
 	// Prefer XDR gRPC ingest when configured or device credentials already exist.
+	// Package installs often set xdr.enabled before enroll; defer ingest until
+	// credentials exist so the sensor still starts for local monitoring.
 	if xdrclient.ShouldInitXDR(cfg.XDR, cfg.Agent.DataDir) {
 		if err := a.initXDR(); err != nil {
-			return nil, err
+			store := xdrclient.Store{
+				Dir:     xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
+				DataDir: cfg.Agent.DataDir,
+				Backend: cfg.XDR.SecureStorage,
+			}
+			if store.HasCredentials() || cfg.XDR.HasBootstrapCredentials() {
+				return nil, err
+			}
+			a.logger.Warn("xdr ingest deferred until enrollment completes", "error", err)
 		}
 	} else if telEP != "" {
 		qdir := filepath.Join(cfg.Agent.DataDir, "telemetry-queue")
@@ -440,17 +454,9 @@ func (a *Agent) initAdvancedDetection() error {
 }
 
 func applyRuntimeLimits(cfg config.Config, logger *slog.Logger) {
-	if cfg.Performance.WorkerCount > 0 {
-		maxProcs := cfg.Performance.WorkerCount
-		if maxProcs > runtime.NumCPU() {
-			maxProcs = runtime.NumCPU()
-		}
-		if maxProcs < 1 {
-			maxProcs = 1
-		}
-		runtime.GOMAXPROCS(maxProcs)
-	}
-
+	// Do not pin GOMAXPROCS to WorkerCount. WorkerCount bounds detection
+	// pools; the runtime should keep one P per CPU so GC and syscalls stay
+	// efficient (GOMEMLIMIT / SetMemoryLimit is the RSS ceiling).
 	if cfg.Performance.MaxMemoryMB > 0 {
 		limit := int64(cfg.Performance.MaxMemoryMB) * 1024 * 1024
 		debug.SetMemoryLimit(limit)
@@ -461,7 +467,7 @@ func applyRuntimeLimits(cfg config.Config, logger *slog.Logger) {
 
 	// Profile-aware GC: low_resource favours frequent small collections so RSS
 	// stays close to live-set; strict favours throughput; balanced is between.
-	gcPercent := 75
+	gcPercent := 80
 	switch strings.ToLower(strings.TrimSpace(cfg.Performance.Profile)) {
 	case "low_resource":
 		gcPercent = 50
@@ -473,7 +479,8 @@ func applyRuntimeLimits(cfg config.Config, logger *slog.Logger) {
 		logger.Info("go runtime gc percent applied",
 			"profile", cfg.Performance.Profile,
 			"gc_percent", gcPercent,
-			"previous", prev)
+			"previous", prev,
+			"gomaxprocs", runtime.GOMAXPROCS(0))
 	}
 }
 
@@ -619,6 +626,7 @@ func NewForTestingWithCollectors(cfg config.Config, rs rules.RuleSet, collectors
 		killAllow:          makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
 		fileDedup:          collector.NewFileDeduper(0),
 		fileHashPool:       newFileHashPool(),
+		workPool:           conc.NewPool(2, 64),
 		noisyAlertLastSeen: make(map[string]time.Time),
 	}
 	return a
@@ -627,6 +635,12 @@ func NewForTestingWithCollectors(cfg config.Config, rs rules.RuleSet, collectors
 func (a *Agent) Run(ctx context.Context) error {
 	if len(a.collectors) == 0 {
 		return errors.New("no collectors configured")
+	}
+	if a.fileHashPool != nil {
+		defer a.fileHashPool.Close()
+	}
+	if a.workPool != nil {
+		defer a.workPool.Close()
 	}
 	if a.cfg.Service.PIDFile != "" {
 		if err := pidfile.Write(a.cfg.Service.PIDFile); err != nil {
@@ -744,6 +758,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.logger.Info("agent started")
 	a.logger.Debug("rules loaded", "count", len(a.ruleSet.Rules))
 
+	a.startLocalControlAPI(ctx)
+
 	if a.responseLayer != nil {
 		a.responseLayer.Start(ctx)
 		defer a.responseLayer.Stop()
@@ -850,11 +866,14 @@ func (a *Agent) drainAdvancedAlerts(ctx context.Context) {
 			d := detection.FromAlert(advAlert)
 			a.emitValidationDetection(d)
 			if a.responseLayer != nil {
-				go func(det detection.Detection) {
+				det := d
+				if a.workPool == nil || !a.workPool.Submit(func() {
 					if err := a.responseLayer.Handle(ctx, det); err != nil {
 						a.logger.Error("response layer handle failed", "error", err)
 					}
-				}(d)
+				}) {
+					a.logger.Warn("response worker queue full, dropping handle")
+				}
 			}
 			al := schema.Alert{
 				SchemaVersion: schema.SchemaVersionV1,
@@ -887,24 +906,13 @@ func (a *Agent) drainAdvancedAlerts(ctx context.Context) {
 					al.ProcessPID = fe.ActorPID
 				}
 			}
-			// handleAlerts can block on disk I/O; run concurrently so ctx cancellation
-			// is still observed and Run() can finish defers (e.g. advEngine.Stop).
-			errCh := make(chan error, 1)
-			go func() {
-				errCh <- a.handleAlerts([]schema.Alert{al})
-			}()
-			select {
-			case <-ctx.Done():
-				return
-			case err := <-errCh:
-				if err != nil {
-					a.logger.Error("handle advanced alert failed", "error", err)
-				}
-				a.logger.Info("advanced detection alert",
-					"rule", al.RuleID, "severity", al.Severity,
-					"title", al.Title, "pid", al.ProcessPID,
-					"file_path", al.FilePath, "file_sha256", al.FileSHA256)
+			if err := a.handleAlerts([]schema.Alert{al}); err != nil {
+				a.logger.Error("handle advanced alert failed", "error", err)
 			}
+			a.logger.Info("advanced detection alert",
+				"rule", al.RuleID, "severity", al.Severity,
+				"title", al.Title, "pid", al.ProcessPID,
+				"file_path", al.FilePath, "file_sha256", al.FileSHA256)
 		}
 	}
 }

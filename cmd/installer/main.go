@@ -46,21 +46,29 @@ var (
 	flagEnrollmentInsecure  bool
 	flagNoStart             bool
 	flagKeepData            bool
+	flagMSI                 bool
 )
 
 func main() {
 	root := &cobra.Command{
 		Use:   "edr-installer",
-		Short: "EDR agent installer and service manager",
-		Long: `Attended (Windows/macOS): run with no arguments to open the EDR Agent setup wizard (EULA → copy files → Launch). Linux prints a terminal license prompt.
+		Short: "EDR agent service helper (install/uninstall)",
+		Long: `Enterprise installs use the native OS package only:
+  Windows: msiexec /i edr-agent_….msi
+  macOS:   installer -pkg edr-agent_….pkg -target /
+  Linux:   dpkg -i edr-agent_….deb   (or rpm)
 
-Silent fleet: edr-installer install [--enrollment-token TOKEN]
-The sensor is not started in the attended wizard (--no-start). First-run enrollment happens after Launch.`,
+Fleet helper (no custom GUI):
+  edr-installer install [--enrollment-token TOKEN]
+  edr-installer uninstall`,
 		CompletionOptions: cobra.CompletionOptions{
 			DisableDefaultCmd: true,
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return fmt.Errorf("use the native OS package (MSI/pkg/deb), or: edr-installer install|uninstall|version")
+		},
 	}
 
 	root.PersistentFlags().StringVar(&flagDataDir, "data-dir", "", "override default data directory")
@@ -102,6 +110,7 @@ a support engineer asks to preserve forensics under the data directory.`,
 		RunE: runUninstall,
 	}
 	uninstallCmd.Flags().BoolVar(&flagKeepData, "keep-data", false, "leave the data directory (forensics) on disk")
+	uninstallCmd.Flags().BoolVar(&flagMSI, "msi", false, "Windows MSI CustomAction: purge identity/data/autostart; leave Program Files to MSI")
 
 	versionCmd := &cobra.Command{
 		Use:   "version",
@@ -114,11 +123,12 @@ a support engineer asks to preserve forensics under the data directory.`,
 
 	wizardCmd := &cobra.Command{
 		Use:   "wizard",
-		Short: "Attended installer (EULA + files, then Launch)",
-		RunE:  runAttendedEntry,
+		Short: "Removed — use the native OS package",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return fmt.Errorf("custom Setup UI removed; install with MSI (Windows), pkg (macOS), or deb/rpm (Linux)")
+		},
 	}
 
-	root.RunE = runAttendedEntry
 	root.AddCommand(installCmd, uninstallCmd, versionCmd, wizardCmd)
 
 	if err := root.Execute(); err != nil {
@@ -389,21 +399,25 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	fmt.Println("==> Clearing device identity (certs, keys, keystore)")
 	_ = xdrclient.ResetLocalIdentity(paths.dataDir, "auto")
 
-	fmt.Println("==> Removing binaries")
-	binNames := []string{agentBinaryName(), edrctlBinaryName(), edrAliasBinaryName(), agentUIBinaryName()}
-	if runtime.GOOS == "darwin" {
-		binNames = append(binNames, "edr-installer")
-	}
-	for _, name := range binNames {
-		p := filepath.Join(paths.binDir, name)
-		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-			fmt.Printf("    warning: removing %s: %v\n", p, err)
-		} else if err == nil {
-			fmt.Printf("    removed %s\n", p)
+	if !flagMSI {
+		fmt.Println("==> Removing binaries")
+		binNames := []string{agentBinaryName(), edrctlBinaryName(), edrAliasBinaryName(), agentUIBinaryName()}
+		if runtime.GOOS == "darwin" {
+			binNames = append(binNames, "edr-installer")
 		}
+		for _, name := range binNames {
+			p := filepath.Join(paths.binDir, name)
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				fmt.Printf("    warning: removing %s: %v\n", p, err)
+			} else if err == nil {
+				fmt.Printf("    removed %s\n", p)
+			}
+		}
+		fmt.Println("==> Removing leftover install trees")
+		purgeTrees(extraPurgeTrees())
+	} else {
+		fmt.Println("==> MSI mode: leaving Program Files for Windows Installer RemoveFiles")
 	}
-	fmt.Println("==> Removing leftover install trees")
-	purgeTrees(extraPurgeTrees())
 
 	fmt.Println("==> Removing configuration")
 	for _, name := range []string{installedConfigFileName(), "agent.yaml", "config.yml", "enrollment.token", "com.razatech.edr.enrollment-token"} {
@@ -414,31 +428,49 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	if !flagKeepData {
-		fmt.Println("==> Purging data (rules, models, queue, certs, alerts, forensics)")
-		for _, dir := range []string{paths.dataDir, paths.logDir, paths.rulesDir, paths.quarantineDir, paths.configDir} {
-			if strings.TrimSpace(dir) == "" || dir == "/" {
-				continue
+		if flagMSI {
+			fmt.Println("==> Purging runtime identity/queue (MSI removes authored configs/rules/models)")
+			for _, sub := range []string{"xdr-tls", "telemetry-queue", "alert-spool", "forensics", "quarantine", "logs", "alerts"} {
+				p := filepath.Join(paths.dataDir, sub)
+				if err := os.RemoveAll(p); err != nil && !os.IsNotExist(err) {
+					fmt.Printf("    warning: removing %s: %v\n", p, err)
+				}
 			}
-			if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
-				fmt.Printf("    warning: removing %s: %v\n", dir, err)
-			} else {
-				fmt.Printf("    removed %s\n", dir)
+			_ = os.Remove(filepath.Join(paths.dataDir, "agent_id"))
+			_ = os.Remove(filepath.Join(paths.dataDir, "enrollment.json"))
+			if runtime.GOOS == "windows" {
+				_ = runCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name=EDR Agent")
 			}
+			purgeUserConsoleState()
+		} else {
+			fmt.Println("==> Purging data (rules, models, queue, certs, alerts, forensics)")
+			for _, dir := range []string{paths.dataDir, paths.logDir, paths.rulesDir, paths.quarantineDir, paths.configDir} {
+				if strings.TrimSpace(dir) == "" || dir == "/" {
+					continue
+				}
+				if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+					fmt.Printf("    warning: removing %s: %v\n", dir, err)
+				} else {
+					fmt.Printf("    removed %s\n", dir)
+				}
+			}
+			if runtime.GOOS == "linux" {
+				_ = os.RemoveAll("/etc/edr")
+				_ = os.RemoveAll("/var/lib/edr")
+			}
+			if runtime.GOOS == "windows" {
+				_ = runCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name=EDR Agent")
+			}
+			purgeUserConsoleState()
 		}
-		if runtime.GOOS == "linux" {
-			_ = os.RemoveAll("/etc/edr")
-			_ = os.RemoveAll("/var/lib/edr")
-		}
-		if runtime.GOOS == "windows" {
-			_ = runCmd("netsh", "advfirewall", "firewall", "delete", "rule", "name=EDR Agent")
-		}
-		purgeUserConsoleState()
 	} else {
 		fmt.Printf("    --keep-data: left %s in place\n", paths.dataDir)
 	}
 
-	fmt.Println("==> Forgetting installer receipts")
-	forgetPackageReceipts()
+	if !flagMSI {
+		fmt.Println("==> Forgetting installer receipts")
+		forgetPackageReceipts()
+	}
 	removeInstanceLocks()
 
 	fmt.Println("==> Closing the installed console")
@@ -474,61 +506,11 @@ func installedConfigPath(p installPaths) string {
 // platformPaths returns the canonical directory layout for the current OS,
 // respecting any user overrides via --data-dir.
 func platformPaths() installPaths {
-	var p installPaths
-	switch runtime.GOOS {
-	case "linux":
-		p = installPaths{
-			binDir:        "/usr/local/bin",
-			configDir:     "/etc/edr-agent",
-			dataDir:       "/var/lib/edr-agent",
-			logDir:        "/var/log/edr-agent",
-			rulesDir:      "/etc/edr-agent/rules",
-			quarantineDir: "/var/lib/edr-agent/quarantine",
-		}
-	case "darwin":
-		cfg := "/Library/Application Support/EDR/config"
-		p = installPaths{
-			binDir:        "/usr/local/bin",
-			configDir:     cfg,
-			dataDir:       "/Library/Application Support/EDR",
-			logDir:        "/Library/Logs/EDR",
-			rulesDir:      filepath.Join(cfg, "rules"),
-			quarantineDir: "/Library/Application Support/EDR/quarantine",
-		}
-	case "windows":
-		pf := os.Getenv("ProgramFiles")
-		if pf == "" {
-			pf = `C:\Program Files`
-		}
-		pd := os.Getenv("ProgramData")
-		if pd == "" {
-			pd = `C:\ProgramData`
-		}
-		root := filepath.Join(pd, "EDR Agent")
-		p = installPaths{
-			binDir:        filepath.Join(pf, "EDR Agent"),
-			configDir:     root,
-			dataDir:       root,
-			logDir:        filepath.Join(root, "logs"),
-			rulesDir:      filepath.Join(root, "rules"),
-			quarantineDir: filepath.Join(root, "quarantine"),
-		}
-	default:
-		p = installPaths{
-			binDir:        "/usr/local/bin",
-			configDir:     "/etc/edr-agent",
-			dataDir:       "/var/lib/edr-agent",
-			logDir:        "/var/log/edr-agent",
-			rulesDir:      "/etc/edr-agent/rules",
-			quarantineDir: "/var/lib/edr-agent/quarantine",
-		}
-	}
-
+	p := defaultPlatformPaths()
 	if flagDataDir != "" {
 		p.dataDir = flagDataDir
 		p.quarantineDir = filepath.Join(flagDataDir, "quarantine")
 	}
-
 	return p
 }
 
@@ -1014,29 +996,6 @@ func installLaunchDaemon(agentBin, configPath string) error {
 	return nil
 }
 
-
-// agentBinaryName returns the platform-specific agent binary name.
-func agentBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "edr-agent.exe"
-	}
-	return "edr-agent"
-}
-
-// edrctlBinaryName returns the platform-specific CLI binary name.
-func edrctlBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "edrctl.exe"
-	}
-	return "edrctl"
-}
-
-func edrAliasBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "edr.exe"
-	}
-	return "edr"
-}
 
 // findAgentBinary locates the agent binary: embedded staging (single-file installer),
 // then paths next to this installer, then dev build outputs.

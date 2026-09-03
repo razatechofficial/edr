@@ -134,16 +134,12 @@ if [[ -f "${ROOT}/deploy/macos/first-run-permissions.sh" ]]; then
 fi
 
 if [[ -d rules ]]; then
-	cp -R rules/. "${PKG_ROOT}/Library/Application Support/EDR/config/rules/"
+	bash "${ROOT}/scripts/ci/stage_os_rules.sh" darwin "${PKG_ROOT}/Library/Application Support/EDR/config/rules"
 fi
 
 bash "${ROOT}/scripts/ci/ensure_onnx_models.sh"
 if [[ -d models ]] && compgen -G "models/*.onnx" >/dev/null; then
-	cp models/*.onnx "${PKG_ROOT}/Library/Application Support/EDR/models/"
-	[[ -f models/manifest.json ]] && cp models/manifest.json "${PKG_ROOT}/Library/Application Support/EDR/models/"
-	for sig in models/*.onnx.sig; do
-		[[ -f "${sig}" ]] && cp "${sig}" "${PKG_ROOT}/Library/Application Support/EDR/models/"
-	done
+	bash "${ROOT}/scripts/ci/stage_os_models.sh" darwin "${PKG_ROOT}/Library/Application Support/EDR/models"
 else
 	echo "ERROR: ML models not found in models/ directory. Run 'make models-bootstrap' first." >&2
 	exit 1
@@ -166,11 +162,16 @@ if [[ -f configs/macos/config.fleet.tls.yml ]]; then
 fi
 
 CONFIG_DST="${PKG_ROOT}/Library/Application Support/EDR/config/agent.yaml"
-sed \
-	-e "s|data_dir: \"/var/lib/edr\"|data_dir: \"${EDR_BASE}\"|" \
-	-e "s|models_dir: \"./models\"|models_dir: \"${EDR_BASE}/models\"|" \
-	-e "s|^rules_file:.*|rules_file: \"${RULES_BASELINE}\"|" \
-	configs/agent.yaml > "${CONFIG_DST}"
+# Prefer macOS-tuned profile (low_resource, smaller spool, no PE model).
+if [[ -f configs/macos/config.yml ]]; then
+	cp configs/macos/config.yml "${CONFIG_DST}"
+else
+	sed \
+		-e "s|data_dir: \"/var/lib/edr\"|data_dir: \"${EDR_BASE}\"|" \
+		-e "s|models_dir: \"./models\"|models_dir: \"${EDR_BASE}/models\"|" \
+		-e "s|^rules_file:.*|rules_file: \"${RULES_BASELINE}\"|" \
+		configs/agent.yaml > "${CONFIG_DST}"
+fi
 chmod 644 "${CONFIG_DST}"
 
 cat > "${PKG_ROOT}/Library/LaunchDaemons/com.razatech.edr-agent.plist" <<'EOF'
@@ -250,8 +251,9 @@ if [[ -n "${COMMAND_LINE_INSTALL:-}" ]]; then
 	bootstrap_ui_agent "${CONSOLE_USER}"
 	exit 0
 fi
+# Native Installer.app only — do not open a custom first-run UI.
+# Operator opens EDR Agent from Applications (or enrolls via MDM / edrctl).
 if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
-	/usr/bin/sudo -u "${CONSOLE_USER}" /usr/bin/open "${APP}" >/dev/null 2>&1 || true
 	bootstrap_ui_agent "${CONSOLE_USER}"
 fi
 EOF

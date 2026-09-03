@@ -1,7 +1,8 @@
 package uistate
 
-// Screen routing: setup (attended installer) → token → identity → receipt
-// → OS grants → every-launch preflight → tray.
+// Screen routing (native package install only — no custom Setup wizard):
+// token → identity → receipt → OS grants → every-launch preflight → tray.
+// Setup is only the orphan "not installed" message after a broken uninstall.
 
 type Screen int
 
@@ -12,7 +13,7 @@ const (
 	Permissions
 	Preflight
 	Dash
-	Setup
+	Setup // orphan / not-installed message only (never EULA copy-files)
 )
 
 type Health int
@@ -42,19 +43,17 @@ func InitialScreen(installed, enrolled, needsGrants, serviceOK bool) Screen {
 
 // Route is the enterprise entry state machine (CrowdStrike / Defender / NIST CM-2):
 //
-//	not installed                         → Setup (orphan / download package)
+//	not installed                         → Setup (orphan: use MSI/pkg/deb)
 //	installed, not enrolled               → Enroll (token)
 //	enrolled, OS grants missing           → Permissions (FDA / firewall / PPPC)
 //	enrolled, grants OK, sensor stopped   → Preflight (register/start service)
 //	enrolled, sensor running              → Dash
 //
-// Setup.app / --setup always stays on Setup (license or manage:
-// update / reinstall / uninstall). Tray Open and a second launch must
-// call Route again — never skip to Dash while the service is missing.
+// fromSetup is ignored: attended Setup.exe / --setup are removed from the
+// product path. Tray Open must call Route again — never skip to Dash while
+// the service is missing.
 func Route(fromSetup, installed, enrolled, needsGrants, serviceOK bool) Screen {
-	if fromSetup {
-		return Setup
-	}
+	_ = fromSetup
 	if !installed {
 		return Setup
 	}

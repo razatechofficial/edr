@@ -17,18 +17,20 @@ func main() {
 			os.Exit(hostperm.RunFDAProbe())
 		}
 		if a == "--setup" {
-			flagSetup = true
+			fmt.Fprintf(os.Stderr, "custom Setup UI removed — install with the native OS package (MSI/pkg/deb)\n")
+			os.Exit(2)
 		}
 		if a == "--tray" {
 			flagTray = true
 		}
 		if a == "-h" || a == "--help" {
-			fmt.Fprintf(os.Stdout, "edr\n  --setup   attended installer (EULA, copy files, then enroll)\n  --tray    menu bar only (login item; window stays hidden until opened)\n")
+			fmt.Fprintf(os.Stdout, "edr\n  --tray    menu bar only (login item; window stays hidden until opened)\n")
 			os.Exit(0)
 		}
 	}
 	if runningAttendedSetup() {
-		flagSetup = true
+		fmt.Fprintf(os.Stderr, "EDR-Agent-Setup is retired — use the native OS package (MSI/pkg/deb)\n")
+		os.Exit(2)
 	}
 	if err := maybeElevate(); err != nil {
 		fmt.Fprintf(os.Stderr, "EDR Agent UI: %v\n", err)

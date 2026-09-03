@@ -17,8 +17,6 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-var errServiceAlreadyPresent = errors.New("EDRAgent already registered")
-
 func serviceAlreadyPresent(err error) bool {
 	if err == nil {
 		return false
@@ -93,16 +91,16 @@ func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, err
 	if existing, err := m.OpenService(windowsServiceName); err == nil {
 		return existing, nil
 	}
-	if serviceAlreadyPresent(last) {
-		for i := 0; i < 12; i++ {
-			time.Sleep(400 * time.Millisecond)
-			if existing, err := m.OpenService(windowsServiceName); err == nil {
-				return existing, nil
+		if serviceAlreadyPresent(last) {
+			for i := 0; i < 20; i++ {
+				time.Sleep(500 * time.Millisecond)
+				if existing, err := m.OpenService(windowsServiceName); err == nil {
+					return existing, nil
+				}
 			}
+			installLog("CreateService reported exists but OpenService failed after wait: %v", last)
+			return nil, fmt.Errorf("EDRAgent still marked for deletion or missing after CreateService; reboot and reinstall: %w", last)
 		}
-		installLog("CreateService already exists; treating as registered")
-		return nil, errServiceAlreadyPresent
-	}
 	return nil, last
 }
 
@@ -133,10 +131,6 @@ func installService() error {
 
 	s, err := openOrCreateService(m, exePath, cfgPath)
 	if err != nil {
-		if errors.Is(err, errServiceAlreadyPresent) {
-			installLog("install complete (service already registered)")
-			return nil
-		}
 		installLog("create service: %v", err)
 		return fmt.Errorf("register EDRAgent service: %w", err)
 	}

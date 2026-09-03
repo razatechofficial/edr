@@ -55,7 +55,7 @@ ml:
   models_dir: "/Library/Application Support/EDR/models"
   auto_update: false
   models:
-    pe_classifier: pe_classifier.onnx
+    # PE classifier is Windows-only; omit on macOS to cut RSS.
     behavior_lstm: behavior_lstm.onnx
     network_anomaly: network_anomaly.onnx
     ransomware: ransomware.onnx
@@ -72,8 +72,15 @@ llm:
   rag:
     enabled: false
 
+performance:
+  profile: low_resource
+  max_memory_mb: 512
+  worker_count: 2
+  event_buffer_size: 2048
+
 xdr:
-  spool_max_bytes: 3221225472
+  # 1 GiB offline spool on laptops (was 3 GiB); still covers multi-day outages.
+  spool_max_bytes: 1073741824
   spool_max_age_days: 7
 
 self_protect:

@@ -7,4 +7,15 @@ chmod 700 /var/lib/edr-agent /var/lib/edr-agent/forensics /var/lib/edr-agent/qua
 chmod 755 /etc/edr-agent /etc/edr-agent/rules
 systemctl daemon-reload
 systemctl enable edr-agent
-systemctl start edr-agent
+# Register only path still starts so local monitoring is available; enroll opens ingest.
+systemctl start edr-agent || true
+cat <<'MSG'
+
+EDR agent installed (native deb). Enroll this host to open XDR ingest:
+  sudo edrctl enroll --token <TOKEN>
+
+Then verify:
+  systemctl status edr-agent --no-pager
+  sudo edrctl ui
+
+MSG
