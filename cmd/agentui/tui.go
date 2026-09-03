@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/razatechofficial/edr/internal/installprogress"
 	"github.com/razatechofficial/edr/internal/platform"
 	"github.com/razatechofficial/edr/internal/xdrclient"
 )
