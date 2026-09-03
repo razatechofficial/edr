@@ -140,9 +140,35 @@ if ! awk '
 	echo "agent.yaml must set ml.enabled: true" >&2
 	exit 1
 fi
-onnx_count="$(find "${tmpdir}/expanded" \( -iname '*.onnx' -o -iname '*.onn' \) | wc -l | tr -d ' ')"
-if [ "${onnx_count}" -lt 12 ]; then
-	echo "expected 12 ONNX models in pkg, found ${onnx_count}" >&2
+onnx_dir="$(find "${tmpdir}/expanded" -type d -path '*/models' 2>/dev/null | head -1)"
+if [[ -z "${onnx_dir}" ]]; then
+	echo "missing models directory in pkg" >&2
+	exit 1
+fi
+required_models=(
+	behavior_lstm.onnx
+	network_anomaly.onnx
+	ransomware.onnx
+	network_lgbm.onnx
+	rat_c2_detector.onnx
+)
+for m in "${required_models[@]}"; do
+	if [[ ! -f "${onnx_dir}/${m}" ]]; then
+		echo "missing required ONNX model: ${m}" >&2
+		exit 1
+	fi
+done
+if [[ -f "${onnx_dir}/aigen_detector.onnx" ]]; then
+	echo "aigen_detector.onnx must not ship in the default macOS package" >&2
+	exit 1
+fi
+if [[ -f "${onnx_dir}/pe_classifier.onnx" ]]; then
+	echo "pe_classifier.onnx is Windows-only and must not ship in the macOS package" >&2
+	exit 1
+fi
+onnx_count="$(find "${onnx_dir}" -name '*.onnx' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${onnx_count}" -lt "${#required_models[@]}" ]; then
+	echo "expected at least ${#required_models[@]} ONNX models in pkg, found ${onnx_count}" >&2
 	exit 1
 fi
 

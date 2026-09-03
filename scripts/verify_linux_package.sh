@@ -65,9 +65,33 @@ grep -q '^  models_dir: /usr/share/edr-agent/models$' "${cfg}" || {
   echo "config.yml must set ml.models_dir to /usr/share/edr-agent/models" >&2
   exit 1
 }
-onnx_count="$(find "${tmpdir}/usr/share/edr-agent/models" -name '*.onnx' 2>/dev/null | wc -l | tr -d ' ')"
-if [ "${onnx_count}" -lt 12 ]; then
-  echo "expected 12 ONNX models in package, found ${onnx_count}" >&2
+
+# Lean OS package: core models only (no aigen ~61MB; no Windows PE on Linux).
+models_dir="${tmpdir}/usr/share/edr-agent/models"
+required_models=(
+  behavior_lstm.onnx
+  network_anomaly.onnx
+  ransomware.onnx
+  network_lgbm.onnx
+  rat_c2_detector.onnx
+)
+for m in "${required_models[@]}"; do
+  if [ ! -f "${models_dir}/${m}" ]; then
+    echo "missing required ONNX model: ${m}" >&2
+    exit 1
+  fi
+done
+if [ -f "${models_dir}/aigen_detector.onnx" ]; then
+  echo "aigen_detector.onnx must not ship in the default Linux package" >&2
+  exit 1
+fi
+if [ -f "${models_dir}/pe_classifier.onnx" ]; then
+  echo "pe_classifier.onnx is Windows-only and must not ship in the Linux package" >&2
+  exit 1
+fi
+onnx_count="$(find "${models_dir}" -name '*.onnx' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${onnx_count}" -lt "${#required_models[@]}" ]; then
+  echo "expected at least ${#required_models[@]} ONNX models in package, found ${onnx_count}" >&2
   exit 1
 fi
 
