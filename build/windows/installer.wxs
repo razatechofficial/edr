@@ -54,18 +54,20 @@
                   Return="ignore"/>
 
     <!-- Do not use WiX ServiceInstall/ServiceControl: MSI StopServices (1921)
-         runs during upgrade uninstall of older packages that had Stop="both",
-         and can fail even when EDRAgent is stopped. Register after files. -->
+         runs during upgrade uninstall of older packages that had Stop="both".
+         Deferred FileKey CAs run as LocalSystem after files are on disk;
+         immediate Directory=INSTALLFOLDER often ran before the copy, so
+         --install was a no-op and preflight stayed on "service registered" red. -->
     <CustomAction Id="CaRegisterService"
-                  Directory="INSTALLFOLDER"
-                  ExeCommand="edr-agent.exe --install"
-                  Execute="immediate"
+                  FileKey="AgentExe"
+                  ExeCommand="--install"
+                  Execute="deferred"
                   Impersonate="no"
                   Return="ignore"/>
     <CustomAction Id="CaUnregisterService"
-                  Directory="INSTALLFOLDER"
-                  ExeCommand="edr-agent.exe --uninstall"
-                  Execute="immediate"
+                  FileKey="AgentExe"
+                  ExeCommand="--uninstall"
+                  Execute="deferred"
                   Impersonate="no"
                   Return="ignore"/>
 

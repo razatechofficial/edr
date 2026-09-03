@@ -151,8 +151,7 @@ func (c *console) startSensor() {
 	}
 	go func() {
 		if isWindows() {
-			needInstall := !hostperm.SensorRegistered()
-			if needInstall {
+			if !hostperm.SensorRegistered() {
 				if err := runAgentInstallPrivileged(); err != nil && !serviceAlreadyPresentError(err.Error()) && !hostperm.SensorRegistered() {
 					st := loadStatus()
 					fyne.Do(func() {
@@ -164,10 +163,32 @@ func (c *console) startSensor() {
 							c.preflightLine.SetText("Service registration did not finish.")
 						}
 						c.presentStartFault(f)
+						go c.runPreflight()
 						c.applyDashboard(st, sampleResources(st))
 					})
 					return
 				}
+			}
+			if !hostperm.SensorRegistered() {
+				st := loadStatus()
+				fyne.Do(func() {
+					c.setBusy(false)
+					f := uiFault{
+						Title:  "The sensor service is not registered",
+						Body:   "EDRAgent was not created. Allow the Administrator prompt, or run edr-agent.exe --install from an elevated Command Prompt.",
+						Detail: `"` + sensorBinaryPath() + `" --install`,
+						Action: "Try again",
+					}
+					c.setDashFault(f)
+					c.setPreflightFault(f)
+					if c.preflightLine != nil {
+						c.preflightLine.SetText("Service registration did not finish.")
+					}
+					c.presentStartFault(f)
+					go c.runPreflight()
+					c.applyDashboard(st, sampleResources(st))
+				})
+				return
 			}
 		}
 		_, _ = runEdrctl("stage-identity")
