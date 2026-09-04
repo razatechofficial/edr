@@ -57,18 +57,36 @@ func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, err
 			cfg.DisplayName = "EDR Agent"
 			cfg.Description = "Endpoint Detection and Response Agent"
 			cfg.BinaryPathName = quotedBinPath(exePath, "--config", cfgPath)
-			_ = existing.UpdateConfig(cfg)
+			if uerr := existing.UpdateConfig(cfg); uerr != nil {
+				installLog("UpdateConfig existing service: %v", uerr)
+			}
 		}
 		return existing, nil
 	}
 
 	var last error
-	for i := 0; i < 3; i++ {
+	// MSI deferred --install can race AV locks and a prior sc delete (marked for
+	// deletion). Retry longer than a typical MSI custom-action patience window.
+	for i := 0; i < 8; i++ {
 		if existing, err := m.OpenService(windowsServiceName); err == nil {
+			// Prefer update-in-place. Only delete when we must recreate.
+			cfg, cerr := existing.Config()
+			if cerr == nil {
+				cfg.StartType = mgr.StartAutomatic
+				cfg.DelayedAutoStart = true
+				cfg.DisplayName = "EDR Agent"
+				cfg.Description = "Endpoint Detection and Response Agent"
+				cfg.BinaryPathName = quotedBinPath(exePath, "--config", cfgPath)
+				if uerr := existing.UpdateConfig(cfg); uerr != nil {
+					installLog("UpdateConfig before recreate: %v", uerr)
+				} else {
+					return existing, nil
+				}
+			}
 			_, _ = existing.Control(svc.Stop)
 			_ = existing.Delete()
 			_ = existing.Close()
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		}
 		s, err := m.CreateService(
 			windowsServiceName,
@@ -86,22 +104,37 @@ func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, err
 		}
 		last = err
 		installLog("CreateService attempt %d: %v", i+1, err)
-		time.Sleep(200 * time.Millisecond)
+		if serviceAlreadyPresent(err) {
+			// Marked-for-delete clears only after all handles close; wait it out.
+			for j := 0; j < 30; j++ {
+				time.Sleep(500 * time.Millisecond)
+				if existing, oerr := m.OpenService(windowsServiceName); oerr == nil {
+					return existing, nil
+				}
+				s2, cerr := m.CreateService(
+					windowsServiceName,
+					exePath,
+					mgr.Config{
+						StartType:        mgr.StartAutomatic,
+						DisplayName:      "EDR Agent",
+						Description:      "Endpoint Detection and Response Agent",
+						DelayedAutoStart: true,
+					},
+					"--config", cfgPath,
+				)
+				if cerr == nil {
+					return s2, nil
+				}
+				last = cerr
+			}
+		}
+		time.Sleep(400 * time.Millisecond)
 	}
 	if existing, err := m.OpenService(windowsServiceName); err == nil {
 		return existing, nil
 	}
-		if serviceAlreadyPresent(last) {
-			for i := 0; i < 20; i++ {
-				time.Sleep(500 * time.Millisecond)
-				if existing, err := m.OpenService(windowsServiceName); err == nil {
-					return existing, nil
-				}
-			}
-			installLog("CreateService reported exists but OpenService failed after wait: %v", last)
-			return nil, fmt.Errorf("EDRAgent still marked for deletion or missing after CreateService; reboot and reinstall: %w", last)
-		}
-	return nil, last
+	installLog("CreateService exhausted: %v", last)
+	return nil, fmt.Errorf("register EDRAgent failed (if marked for deletion, reboot then reinstall): %w", last)
 }
 
 func installService() error {

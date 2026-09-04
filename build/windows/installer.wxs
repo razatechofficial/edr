@@ -57,14 +57,22 @@
                   Return="ignore"/>
 
     <!-- Do not use WiX ServiceInstall/ServiceControl (StopServices 1921 on old MSI).
-         Deferred FileKey install flag after InstallFiles; Return=check so a failed
-         register fails the install instead of leaving preflight red. -->
+         Deferred FileKey install flag after InstallFiles. Return=ignore so a
+         transient CreateService failure (AV lock, marked-for-delete) does not
+         roll back the whole MSI with opaque 1722; console/preflight can repair. -->
     <CustomAction Id="CaRegisterService"
                   FileKey="AgentExe"
                   ExeCommand="--install"
                   Execute="deferred"
                   Impersonate="no"
-                  Return="check"/>
+                  Return="ignore"/>
+    <!-- Second best-effort register after commit (AV often releases the new exe late). -->
+    <CustomAction Id="CaRegisterServiceRetry"
+                  FileKey="AgentExe"
+                  ExeCommand="--install"
+                  Execute="immediate"
+                  Impersonate="no"
+                  Return="asyncNoWait"/>
     <CustomAction Id="CaUnregisterService"
                   FileKey="AgentExe"
                   ExeCommand="--uninstall"
@@ -88,6 +96,7 @@
       <Custom Action="CaKillAgent" Before="InstallValidate">NOT REMOVE</Custom>
       <Custom Action="CaKillAgentPreUpgrade" Before="RemoveExistingProducts">NOT REMOVE</Custom>
       <Custom Action="CaRegisterService" After="InstallFiles">NOT REMOVE</Custom>
+      <Custom Action="CaRegisterServiceRetry" After="InstallFinalize">NOT REMOVE</Custom>
       <Custom Action="CaMsiPurge" Before="CaInstallerPurge">REMOVE="ALL"</Custom>
       <Custom Action="CaInstallerPurge" Before="CaUnregisterService">REMOVE="ALL"</Custom>
       <Custom Action="CaUnregisterService" Before="RemoveFiles">REMOVE="ALL"</Custom>
