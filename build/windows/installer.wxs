@@ -71,12 +71,13 @@
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore"/>
+    <!-- asyncNoWait is exe-only (CNDL0038); VBS retry must use ignore. -->
     <CustomAction Id="CaRegisterServiceRetry"
                   BinaryKey="RegisterServiceVbs"
                   VBScriptCall=""
                   Execute="immediate"
                   Impersonate="no"
-                  Return="asyncNoWait"/>
+                  Return="ignore"/>
     <CustomAction Id="CaUnregisterService"
                   FileKey="AgentExe"
                   ExeCommand="--uninstall"
