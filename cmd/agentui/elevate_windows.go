@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/razatechofficial/edr/internal/hostperm"
 	"golang.org/x/sys/windows"
 )
 
@@ -100,20 +101,35 @@ func runInstallerPrivileged(args ...string) (string, error) {
 
 func runAgentInstallPrivileged() error {
 	bin := sensorBinaryPath()
-	if processIsAdmin() {
+	pd := os.Getenv("ProgramData")
+	if pd == "" {
+		pd = `C:\ProgramData`
+	}
+	cfg := filepath.Join(pd, "EDR Agent", "config.yml")
+	register := func() error {
+		if err := hostperm.EnsureSensorService(bin, cfg); err != nil {
+			return err
+		}
+		// Best-effort recovery/ACL hardening inside the sensor binary.
 		cmd := exec.Command(bin, "--install")
 		hideConsole(cmd)
-		out, err := cmd.CombinedOutput()
-		msg := strings.TrimSpace(string(out))
-		if err != nil {
-			if serviceAlreadyPresentError(msg + " " + err.Error()) {
+		_ = cmd.Run()
+		return nil
+	}
+	if processIsAdmin() {
+		if err := register(); err != nil {
+			if serviceAlreadyPresentError(err.Error()) {
 				return nil
 			}
-			return fmt.Errorf("register service: %w (%s)", err, msg)
+			return fmt.Errorf("register service: %w", err)
 		}
 		return nil
 	}
-	return shellRunAs(bin, []string{"--install"}, false, true)
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return shellRunAs(exe, []string{"--register-service", "--already-elevated"}, false, true)
 }
 
 func shellRunAs(exe string, args []string, show, wait bool) error {

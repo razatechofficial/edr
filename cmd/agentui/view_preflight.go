@@ -169,6 +169,11 @@ func (c *console) startSensor() {
 					return
 				}
 			}
+			// SCM can lag briefly after CreateService; wait before failing.
+			deadline := time.Now().Add(8 * time.Second)
+			for !hostperm.SensorRegistered() && time.Now().Before(deadline) {
+				time.Sleep(400 * time.Millisecond)
+			}
 			if !hostperm.SensorRegistered() {
 				st := loadStatus()
 				fyne.Do(func() {

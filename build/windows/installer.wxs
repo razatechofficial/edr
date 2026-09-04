@@ -29,6 +29,7 @@
     <!-- Impersonate=no: elevated stop/kill before upgrade validates files. -->
     <Binary Id="KillAgentVbs" SourceFile="$(var.KillAgentVbs)"/>
     <Binary Id="MsiPurgeVbs" SourceFile="$(var.MsiPurgeVbs)"/>
+    <Binary Id="RegisterServiceVbs" SourceFile="$(var.RegisterServiceVbs)"/>
     <CustomAction Id="CaKillAgent"
                   BinaryKey="KillAgentVbs"
                   VBScriptCall=""
@@ -56,20 +57,23 @@
                   Impersonate="no"
                   Return="ignore"/>
 
-    <!-- Do not use WiX ServiceInstall/ServiceControl (StopServices 1921 on old MSI).
-         Deferred FileKey install flag after InstallFiles. Return=ignore so a
-         transient CreateService failure (AV lock, marked-for-delete) does not
-         roll back the whole MSI with opaque 1722; console/preflight can repair. -->
+    <!-- Register via WMI/sc VBS (does not launch the CGO sensor). Optional
+         agent install flag afterward applies recovery/ACL hardening only. -->
     <CustomAction Id="CaRegisterService"
+                  BinaryKey="RegisterServiceVbs"
+                  VBScriptCall=""
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore"/>
+    <CustomAction Id="CaRegisterServiceHardening"
                   FileKey="AgentExe"
                   ExeCommand="--install"
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore"/>
-    <!-- Second best-effort register after commit (AV often releases the new exe late). -->
     <CustomAction Id="CaRegisterServiceRetry"
-                  FileKey="AgentExe"
-                  ExeCommand="--install"
+                  BinaryKey="RegisterServiceVbs"
+                  VBScriptCall=""
                   Execute="immediate"
                   Impersonate="no"
                   Return="asyncNoWait"/>
@@ -96,6 +100,7 @@
       <Custom Action="CaKillAgent" Before="InstallValidate">NOT REMOVE</Custom>
       <Custom Action="CaKillAgentPreUpgrade" Before="RemoveExistingProducts">NOT REMOVE</Custom>
       <Custom Action="CaRegisterService" After="InstallFiles">NOT REMOVE</Custom>
+      <Custom Action="CaRegisterServiceHardening" After="CaRegisterService">NOT REMOVE</Custom>
       <Custom Action="CaRegisterServiceRetry" After="InstallFinalize">NOT REMOVE</Custom>
       <Custom Action="CaMsiPurge" Before="CaInstallerPurge">REMOVE="ALL"</Custom>
       <Custom Action="CaInstallerPurge" Before="CaUnregisterService">REMOVE="ALL"</Custom>

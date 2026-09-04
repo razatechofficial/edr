@@ -16,6 +16,13 @@ func main() {
 		if a == "--fda-probe" || a == "fda-probe" {
 			os.Exit(hostperm.RunFDAProbe())
 		}
+		if a == "--register-service" {
+			if err := hostperm.EnsureSensorService("", ""); err != nil {
+				fmt.Fprintf(os.Stderr, "register service: %v\n", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
 		if a == "--setup" {
 			fmt.Fprintf(os.Stderr, "custom Setup UI removed — install with the native OS package (MSI/pkg/deb)\n")
 			os.Exit(2)

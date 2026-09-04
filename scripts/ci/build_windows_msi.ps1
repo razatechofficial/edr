@@ -120,6 +120,7 @@ $applyPPLBat = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/app
 $licenseRtf = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/License.rtf'))
 $killAgentVbs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/kill_agent.vbs'))
 $msiPurgeVbs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi_purge.vbs'))
+$registerServiceVbs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/register_service.vbs'))
 $rulesWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/rules.wxs'))
 $modelsWxs = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/models.wxs'))
 $rulesStage = [System.IO.Path]::GetFullPath((Join-Path $root 'build/windows/msi-rules'))
@@ -132,6 +133,9 @@ if (-not (Test-Path -LiteralPath $killAgentVbs)) {
 }
 if (-not (Test-Path -LiteralPath $msiPurgeVbs)) {
     throw "Missing MSI purge helper: $msiPurgeVbs"
+}
+if (-not (Test-Path -LiteralPath $registerServiceVbs)) {
+    throw "Missing MSI register helper: $registerServiceVbs"
 }
 if (-not (Test-Path -LiteralPath $configYml)) {
     throw "Missing staged config: $configYml"
@@ -206,6 +210,7 @@ $candleArgList = @(
     "-dEdrLicenseRtf=$licenseRtf",
     "-dKillAgentVbs=$killAgentVbs",
     "-dMsiPurgeVbs=$msiPurgeVbs",
+    "-dRegisterServiceVbs=$registerServiceVbs",
     "-dRulesStage=$rulesStage",
     "-dModelsStage=$modelsStage",
     $wxs,
