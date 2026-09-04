@@ -106,9 +106,22 @@ func runAgentInstallPrivileged() error {
 		pd = `C:\ProgramData`
 	}
 	cfg := filepath.Join(pd, "EDR Agent", "config.yml")
+	svcreg := filepath.Join(filepath.Dir(bin), "edr-svcreg.exe")
 	register := func() error {
 		if err := hostperm.EnsureSensorService(bin, cfg); err != nil {
-			return err
+			// Prefer CGO-free helper if in-process SCM failed.
+			if st, serr := os.Stat(svcreg); serr == nil && !st.IsDir() {
+				cmd := exec.Command(svcreg, bin, cfg)
+				hideConsole(cmd)
+				if out, rerr := cmd.CombinedOutput(); rerr != nil {
+					return fmt.Errorf("register service: %w (%s)", rerr, strings.TrimSpace(string(out)))
+				}
+			} else {
+				return err
+			}
+		}
+		if !hostperm.SensorRegistered() {
+			return fmt.Errorf("EDRAgent still missing after register")
 		}
 		// Best-effort recovery/ACL hardening inside the sensor binary.
 		cmd := exec.Command(bin, "--install")

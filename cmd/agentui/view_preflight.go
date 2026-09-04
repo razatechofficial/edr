@@ -24,7 +24,12 @@ func (c *console) buildPreflight() fyne.CanvasObject {
 	c.preflightFaultBox = container.NewVBox()
 
 	recheck := widget.NewButton("Recheck", func() {
-		go c.runPreflight()
+		go func() {
+			if isWindows() && !hostperm.SensorRegistered() {
+				_ = runAgentInstallPrivileged()
+			}
+			c.runPreflight()
+		}()
 	})
 	recheck.Importance = widget.MediumImportance
 

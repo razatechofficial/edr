@@ -42,6 +42,9 @@ GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${WINSVC_LDFLAGS}" -o bi
 GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${WINSVC_LDFLAGS}" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
 GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${LDFLAGS}" -o dist/windows-amd64/edrctl.exe ./cmd/cli
 GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${WINSVC_LDFLAGS}" -o dist/windows-amd64/edr-installer.exe ./cmd/installer
+# CGO-free service registrar for MSI (must not link libyara / MinGW runtime).
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/windows-amd64/edr-svcreg.exe ./cmd/svcreg
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o bin/edr-svcreg-windows-amd64.exe ./cmd/svcreg
 # Console does not scan; do not inherit agent YARA CGO flags or -tags.
 # Do not build EDR-Agent-Setup.exe (embedsetup) — that lives on attended-setup.
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui

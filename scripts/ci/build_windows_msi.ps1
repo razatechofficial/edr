@@ -91,6 +91,7 @@ $agentExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/e
 $edrCtlExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edrctl.exe'))
 $edrUIExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edr-agent-ui.exe'))
 $edrInstallerExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edr-installer.exe'))
+$edrSvcRegExe = [System.IO.Path]::GetFullPath((Join-Path $root 'dist/windows-amd64/edr-svcreg.exe'))
 if (-not (Test-Path -LiteralPath $agentExe)) {
     throw "Missing Windows agent binary (build it first): $agentExe"
 }
@@ -102,6 +103,9 @@ if (-not (Test-Path -LiteralPath $edrUIExe)) {
 }
 if (-not (Test-Path -LiteralPath $edrInstallerExe)) {
     throw "Missing Windows installer binary (build it first): $edrInstallerExe"
+}
+if (-not (Test-Path -LiteralPath $edrSvcRegExe)) {
+    throw "Missing Windows svcreg binary (build it first): $edrSvcRegExe"
 }
 
 & (Join-Path $PSScriptRoot 'stage_windows_msi.ps1') -Root $root
@@ -196,6 +200,7 @@ $candleArgList = @(
     "-dEdrCtlExe=$edrCtlExe",
     "-dEdrUIExe=$edrUIExe",
     "-dEdrInstallerExe=$edrInstallerExe",
+    "-dEdrSvcRegExe=$edrSvcRegExe",
     "-dEdrConfigYml=$configYml",
     "-dEdrConfigHardenedYml=$configHardenedYml",
     "-dEdrConfigEnterpriseYml=$configEnterpriseYml",

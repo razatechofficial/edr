@@ -57,9 +57,15 @@
                   Impersonate="no"
                   Return="ignore"/>
 
-    <!-- Register via WMI/sc VBS (does not launch the CGO sensor). Optional
-         agent install flag afterward applies recovery/ACL hardening only. -->
+    <!-- Register with CGO-free edr-svcreg.exe (SCM only). VBS is a second
+         pass. Optional agent install flag applies recovery/ACL hardening. -->
     <CustomAction Id="CaRegisterService"
+                  FileKey="EdrSvcRegExe"
+                  ExeCommand=""
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore"/>
+    <CustomAction Id="CaRegisterServiceVbs"
                   BinaryKey="RegisterServiceVbs"
                   VBScriptCall=""
                   Execute="deferred"
@@ -71,10 +77,9 @@
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore"/>
-    <!-- asyncNoWait is exe-only (CNDL0038); VBS retry must use ignore. -->
     <CustomAction Id="CaRegisterServiceRetry"
-                  BinaryKey="RegisterServiceVbs"
-                  VBScriptCall=""
+                  FileKey="EdrSvcRegExe"
+                  ExeCommand=""
                   Execute="immediate"
                   Impersonate="no"
                   Return="ignore"/>
@@ -101,7 +106,8 @@
       <Custom Action="CaKillAgent" Before="InstallValidate">NOT REMOVE</Custom>
       <Custom Action="CaKillAgentPreUpgrade" Before="RemoveExistingProducts">NOT REMOVE</Custom>
       <Custom Action="CaRegisterService" After="InstallFiles">NOT REMOVE</Custom>
-      <Custom Action="CaRegisterServiceHardening" After="CaRegisterService">NOT REMOVE</Custom>
+      <Custom Action="CaRegisterServiceVbs" After="CaRegisterService">NOT REMOVE</Custom>
+      <Custom Action="CaRegisterServiceHardening" After="CaRegisterServiceVbs">NOT REMOVE</Custom>
       <Custom Action="CaRegisterServiceRetry" After="InstallFinalize">NOT REMOVE</Custom>
       <Custom Action="CaMsiPurge" Before="CaInstallerPurge">REMOVE="ALL"</Custom>
       <Custom Action="CaInstallerPurge" Before="CaUnregisterService">REMOVE="ALL"</Custom>
@@ -157,6 +163,12 @@
         <File Id="EdrInstallerExe"
               Source="$(var.EdrInstallerExe)"
               Name="edr-installer.exe"
+              KeyPath="yes"/>
+      </Component>
+      <Component Id="cmpEdrSvcRegExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="EdrSvcRegExe"
+              Source="$(var.EdrSvcRegExe)"
+              Name="edr-svcreg.exe"
               KeyPath="yes"/>
       </Component>
       <Component Id="cmpEdrAliasExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
