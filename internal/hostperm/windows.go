@@ -133,6 +133,9 @@ func evaluateService(it Item) Item {
 		return fail(it, "The machine-wide sensor service is not registered. Reinstall as administrator.")
 	}
 	defer done()
+	if cfg, cerr := s.Config(); cerr == nil && cfg.StartType == mgr.StartDisabled {
+		return fail(it, "EDRAgent is Disabled (cannot start). Recheck or Start to re-enable Automatic.")
+	}
 	st, err := s.Query()
 	if err != nil {
 		return ok(it, "Service is installed. Start loads the sensor.")

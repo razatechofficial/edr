@@ -47,6 +47,8 @@ Else
   End If
 
   sh.Run """" & sys & "\sc.exe"" description EDRAgent ""Endpoint Detection and Response Agent""", 0, True
+  ' Uninstall may leave the service Disabled (StartService 1058); always re-enable.
+  sh.Run """" & sys & "\sc.exe"" config EDRAgent start= auto", 0, True
   sh.RegWrite "HKLM\SYSTEM\CurrentControlSet\Services\EDRAgent\DelayedAutostart", 1, "REG_DWORD"
 
   rc = sh.Run("""" & sys & "\sc.exe"" query EDRAgent", 0, True)

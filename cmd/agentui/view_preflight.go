@@ -156,23 +156,23 @@ func (c *console) startSensor() {
 	}
 	go func() {
 		if isWindows() {
-			if !hostperm.SensorRegistered() {
-				if err := runAgentInstallPrivileged(); err != nil && !serviceAlreadyPresentError(err.Error()) && !hostperm.SensorRegistered() {
-					st := loadStatus()
-					fyne.Do(func() {
-						c.setBusy(false)
-						f := classifyStartError(err.Error())
-						c.setDashFault(f)
-						c.setPreflightFault(f)
-						if c.preflightLine != nil {
-							c.preflightLine.SetText("Service registration did not finish.")
-						}
-						c.presentStartFault(f)
-						go c.runPreflight()
-						c.applyDashboard(st, sampleResources(st))
-					})
-					return
-				}
+			// Always repair SCM entry (binPath + Automatic). A prior uninstall
+			// may leave EDRAgent present but Disabled (StartService 1058).
+			if err := runAgentInstallPrivileged(); err != nil && !serviceAlreadyPresentError(err.Error()) && !hostperm.SensorRegistered() {
+				st := loadStatus()
+				fyne.Do(func() {
+					c.setBusy(false)
+					f := classifyStartError(err.Error())
+					c.setDashFault(f)
+					c.setPreflightFault(f)
+					if c.preflightLine != nil {
+						c.preflightLine.SetText("Service registration did not finish.")
+					}
+					c.presentStartFault(f)
+					go c.runPreflight()
+					c.applyDashboard(st, sampleResources(st))
+				})
+				return
 			}
 			// SCM can lag briefly after CreateService; wait before failing.
 			deadline := time.Now().Add(8 * time.Second)
