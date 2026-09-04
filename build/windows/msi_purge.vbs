@@ -1,6 +1,8 @@
 ' Full ARP uninstall cleanup (enterprise): kill tray/sensor, drop Run key,
 ' delete service, wipe ProgramData identity/queue/logs, remove firewall rule.
 ' MSI RemoveFiles still removes component-tracked Program Files / configs.
+' Do NOT set start=disabled before delete — if sc delete fails (handle open),
+' the next install would inherit Disabled and StartService returns 1058.
 Option Explicit
 On Error Resume Next
 Dim sh, sys, fso, pd, agent, n, wsh
@@ -13,7 +15,6 @@ agent = sh.ExpandEnvironmentStrings("%ProgramFiles%") & "\EDR Agent\edr-agent.ex
 If fso.FileExists(agent) Then
   sh.Run """" & agent & """ --msi-stop", 0, True
 End If
-sh.Run """" & sys & "\sc.exe"" config EDRAgent start= disabled", 0, True
 sh.Run """" & sys & "\sc.exe"" stop EDRAgent", 0, True
 sh.Run """" & sys & "\taskkill.exe"" /F /IM edr-agent-ui.exe /T", 0, True
 sh.Run """" & sys & "\taskkill.exe"" /F /IM edr-agent.exe /T", 0, True
