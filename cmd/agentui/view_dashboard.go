@@ -407,6 +407,35 @@ func (c *console) showDash() {
 	}
 	c.screen = uistate.Dash
 	lastTrayTap = time.Now()
+	res := sampleResources(c.last)
+	c.applyDashboard(c.last, res)
+	c.refreshTray(c.last, res)
+
+	// Start Menu / elevated launch: show the real window. Tray flyouts are
+	// often invisible on Windows Server (no reliable notification area).
+	if !flagTray {
+		c.flyoutOpen = false
+		if c.pop != nil {
+			c.pop.Hide()
+		}
+		if c.win == nil {
+			return
+		}
+		c.win.SetPadded(false)
+		if c.dashContent != nil && c.win.Content() != c.dashContent {
+			c.win.SetContent(c.dashContent)
+		}
+		h := c.dashHeight()
+		if h < wizardH {
+			h = wizardH
+		}
+		c.lockSize(wizardW, h)
+		c.win.CenterOnScreen()
+		c.win.Show()
+		c.win.RequestFocus()
+		return
+	}
+
 	if c.win != nil && c.win != c.flyoutWindow() {
 		c.win.Hide()
 	}
@@ -418,9 +447,6 @@ func (c *console) showDash() {
 	if c.dashContent != nil && target.Content() != c.dashContent {
 		target.SetContent(c.dashContent)
 	}
-	res := sampleResources(c.last)
-	c.applyDashboard(c.last, res)
-	c.refreshTray(c.last, res)
 	c.flyoutOpen = true
 	c.fitDash()
 	target.Show()

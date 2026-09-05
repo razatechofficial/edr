@@ -60,6 +60,8 @@ func claimUIInstance(activate bool) (release func(), exclusive bool) {
 				_ = conn.Close()
 				return nil, false
 			}
+			// Stale lock from a crashed console — take over.
+			_ = os.Remove(portFile)
 		}
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

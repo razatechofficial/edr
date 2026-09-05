@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -120,11 +121,20 @@ type console struct {
 }
 
 func runDashboard() error {
+	uiLog("start flagTray=%v args=%v", flagTray, os.Args)
 	release, exclusive := claimUIInstance(!flagTray)
 	if !exclusive {
+		uiLog("another console instance is running; asked it to show")
 		return nil
 	}
 	defer release()
+
+	defer func() {
+		if r := recover(); r != nil {
+			uiLog("panic: %v", r)
+			panic(r)
+		}
+	}()
 
 	appID := "com.razatech.edr.console"
 	if flagSetup {
