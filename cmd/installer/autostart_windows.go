@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -24,12 +25,36 @@ func installLoginAutostart(paths installPaths) error {
 		return nil
 	}
 	defer k.Close()
-	if err := k.SetStringValue("EDR Agent", `"`+ui+`" --tray`); err != nil {
+	// Workstation: --tray (menu-bar / notification area). Server/RDP: no tray
+	// flag so the first login shows a real window (Server tray is unreliable).
+	cmd := `"` + ui + `"`
+	if !windowsInstallationIsServer() {
+		cmd = `"` + ui + `" --tray`
+	}
+	if err := k.SetStringValue("EDR Agent", cmd); err != nil {
 		fmt.Printf("    warning: HKLM Run: %v\n", err)
 		return nil
 	}
 	fmt.Println("    login item HKLM\\...\\Run\\EDR Agent (all users)")
 	return nil
+}
+
+func windowsInstallationIsServer() bool {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion`, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer k.Close()
+	if pt, _, err := k.GetStringValue("InstallationType"); err == nil {
+		switch pt {
+		case "Server", "Server Core", "Nano Server":
+			return true
+		}
+	}
+	if name, _, err := k.GetStringValue("ProductName"); err == nil {
+		return strings.Contains(strings.ToLower(name), "server")
+	}
+	return false
 }
 
 func removeLoginAutostart() {

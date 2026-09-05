@@ -1,0 +1,7 @@
+Mesa 3D (opengl32.dll) — software OpenGL for the Windows operator console.
+
+Source: https://www.mesa3d.org / community Mesa64 builds (e.g. fdossena).
+License: MIT (Mesa). Bundled so Fyne/GLFW can open a window on Windows
+Server, Hyper-V, and RDP sessions that lack a hardware WGL driver.
+
+The DLL is loaded only by edr-agent-ui.exe from the install directory.

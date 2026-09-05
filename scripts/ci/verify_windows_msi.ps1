@@ -53,6 +53,8 @@ $required = @(
 	'edrctl.exe',
 	'edr-agent-ui.exe',
 	'edr-installer.exe',
+	'edr-svcreg.exe',
+	'opengl32.dll',
 	'edr.exe',
 	'config.yml',
 	'baseline.yaml',
@@ -70,6 +72,8 @@ $knownFileKeys = @{
 	'edrctl.exe'    = @('EdrCtlExe')
 	'edr-agent-ui.exe' = @('EdrUIExe')
 	'edr-installer.exe' = @('EdrInstallerExe')
+	'edr-svcreg.exe' = @('EdrSvcRegExe')
+	'opengl32.dll'  = @('MesaOpenGLDll')
 	'edr.exe'       = @('EdrAliasExe')
 }
 
@@ -87,14 +91,15 @@ foreach ($name in $required) {
 }
 
 # Heat often stores long names as 8.3 (pe_classifier.onnx -> PE_CLA~1.ONN).
+# Windows MSI stages the lean core set (6 models including PE).
 $onnx = @()
 foreach ($n in $files) {
 	if ($n -match '\.onnx$' -or $n -match '\.onn$') {
 		$onnx += $n
 	}
 }
-if ($onnx.Count -lt 12) {
-	throw "MSI has $($onnx.Count) ONNX entries, want at least 12 (WiX 8.3 names included)"
+if ($onnx.Count -lt 6) {
+	throw "MSI has $($onnx.Count) ONNX entries, want at least 6 (WiX 8.3 names included)"
 }
 
-Write-Host "MSI verification passed: $MsiPath ($($files.Count) file entries, $($onnx.Count) onnx)"
+Write-Host "MSI verification passed: $MsiPath ($($files.Count) file entries, $($onnx.Count) onnx, Mesa+svcreg OK)"

@@ -51,10 +51,18 @@ CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimp
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o bin/edr-agent-ui-windows-amd64.exe ./cmd/agentui
 
 # Software OpenGL for Windows Server / Hyper-V / RDP (Fyne requires WGL).
+# Required for release MSIs — do not ship a console that exits with no window.
 if command -v pwsh >/dev/null 2>&1; then
-	pwsh -NoProfile -File "${ROOT}/scripts/ci/bundle_windows_mesa.ps1" -Root "${ROOT}" || true
+	pwsh -NoProfile -File "${ROOT}/scripts/ci/bundle_windows_mesa.ps1" -Root "${ROOT}" -Required
 elif command -v powershell >/dev/null 2>&1; then
-	powershell -NoProfile -File "${ROOT}/scripts/ci/bundle_windows_mesa.ps1" -Root "${ROOT}" || true
+	powershell -NoProfile -File "${ROOT}/scripts/ci/bundle_windows_mesa.ps1" -Root "${ROOT}" -Required
+else
+	echo "ERROR: pwsh/powershell required to bundle Mesa opengl32.dll" >&2
+	exit 1
+fi
+if [[ ! -f "${ROOT}/dist/windows-amd64/opengl32.dll" ]]; then
+	echo "ERROR: Mesa opengl32.dll missing after bundle (Server/RDP UI will not open)" >&2
+	exit 1
 fi
 
 if [[ "${EDR_WINDOWS_YARA:-0}" == "1" ]]; then
