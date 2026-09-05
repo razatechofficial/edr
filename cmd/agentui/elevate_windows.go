@@ -51,19 +51,9 @@ func hasArg(name string) bool {
 }
 
 func maybeElevate() error {
-	if processIsAdmin() || flagTray {
-		return nil
-	}
-	if hasArg("--already-elevated") {
-		return nil
-	}
-	if err := relaunchElevated(os.Args[1:]...); err != nil {
-		if err == windows.ERROR_CANCELLED {
-			return nil
-		}
-		return err
-	}
-	os.Exit(0)
+	// Privileged actions (service start/uninstall) already use ShellExecute
+	// runas. Elevating the whole Fyne console breaks on Windows Server / RDP
+	// (WGL OpenGL) and made Start Menu look like a no-op when UAC failed.
 	return nil
 }
 

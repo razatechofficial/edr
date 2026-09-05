@@ -50,6 +50,13 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}"
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o bin/edr-agent-ui-windows-amd64.exe ./cmd/agentui
 
+# Software OpenGL for Windows Server / Hyper-V / RDP (Fyne requires WGL).
+if command -v pwsh >/dev/null 2>&1; then
+	pwsh -NoProfile -File "${ROOT}/scripts/ci/bundle_windows_mesa.ps1" -Root "${ROOT}" || true
+elif command -v powershell >/dev/null 2>&1; then
+	powershell -NoProfile -File "${ROOT}/scripts/ci/bundle_windows_mesa.ps1" -Root "${ROOT}" || true
+fi
+
 if [[ "${EDR_WINDOWS_YARA:-0}" == "1" ]]; then
 	if command -v pwsh >/dev/null 2>&1; then
 		pwsh -NoProfile -File "${ROOT}/scripts/ci/bundle_windows_yara.ps1" -Root "${ROOT}"

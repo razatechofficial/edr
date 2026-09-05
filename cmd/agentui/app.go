@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -132,7 +133,7 @@ func runDashboard() error {
 	defer func() {
 		if r := recover(); r != nil {
 			uiLog("panic: %v", r)
-			panic(r)
+			uiAlert("EDR Agent", fmt.Sprintf("The console failed to open a window.\n\n%v\n\nWindows Server / RDP often lack OpenGL. Use an MSI that includes opengl32.dll (Mesa), or manage the agent with edrctl.", r))
 		}
 	}()
 
