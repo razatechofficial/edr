@@ -302,7 +302,8 @@ func (c *console) routeInitial() {
 
 // reveal shows the screen the operator should actually be on (NIST CM-2:
 // enroll → OS grants → preflight → running). Tray / second-instance must
-// not jump to Start if the service is missing.
+// not jump to Start if the service is missing. Always use the main window
+// (not the tray flyout) so Server / Start Menu activation is visible.
 func (c *console) reveal() {
 	if c.removed {
 		c.enterRemovedState()
@@ -315,7 +316,7 @@ func (c *console) reveal() {
 	c.last = mergeEnrollment(loadStatus(), c.last)
 	next := uistate.Route(false, agentInstalled(), c.last.Enrolled, needsOSGrants(), serviceHealthy(c.last.Service))
 	if next == uistate.Dash {
-		c.showDash()
+		c.showDashWindow()
 		return
 	}
 	c.show(next)

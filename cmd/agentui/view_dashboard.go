@@ -401,6 +401,14 @@ func (c *console) flyoutWindow() fyne.Window {
 }
 
 func (c *console) showDash() {
+	if flagTray {
+		c.showDashFlyout()
+		return
+	}
+	c.showDashWindow()
+}
+
+func (c *console) showDashWindow() {
 	if c.removed {
 		c.enterRemovedState()
 		return
@@ -410,32 +418,37 @@ func (c *console) showDash() {
 	res := sampleResources(c.last)
 	c.applyDashboard(c.last, res)
 	c.refreshTray(c.last, res)
-
-	// Start Menu / elevated launch: show the real window. Tray flyouts are
-	// often invisible on Windows Server (no reliable notification area).
-	if !flagTray {
-		c.flyoutOpen = false
-		if c.pop != nil {
-			c.pop.Hide()
-		}
-		if c.win == nil {
-			return
-		}
-		c.win.SetPadded(false)
-		if c.dashContent != nil && c.win.Content() != c.dashContent {
-			c.win.SetContent(c.dashContent)
-		}
-		h := c.dashHeight()
-		if h < wizardH {
-			h = wizardH
-		}
-		c.lockSize(wizardW, h)
-		c.win.CenterOnScreen()
-		c.win.Show()
-		c.win.RequestFocus()
+	c.flyoutOpen = false
+	if c.pop != nil {
+		c.pop.Hide()
+	}
+	if c.win == nil {
 		return
 	}
+	c.win.SetPadded(false)
+	if c.dashContent != nil && c.win.Content() != c.dashContent {
+		c.win.SetContent(c.dashContent)
+	}
+	h := c.dashHeight()
+	if h < wizardH {
+		h = wizardH
+	}
+	c.lockSize(wizardW, h)
+	c.win.CenterOnScreen()
+	c.win.Show()
+	c.win.RequestFocus()
+}
 
+func (c *console) showDashFlyout() {
+	if c.removed {
+		c.enterRemovedState()
+		return
+	}
+	c.screen = uistate.Dash
+	lastTrayTap = time.Now()
+	res := sampleResources(c.last)
+	c.applyDashboard(c.last, res)
+	c.refreshTray(c.last, res)
 	if c.win != nil && c.win != c.flyoutWindow() {
 		c.win.Hide()
 	}
