@@ -193,6 +193,12 @@ func NewWithFiles(configPath string) (*Agent, error) {
 			// local monitoring when the cloud is unreachable; LocalSystem also
 			// cannot always read a user-scoped keystore on first service start.
 			a.logger.Warn("xdr ingest deferred; sensor continues locally", "error", err)
+			xdrclient.PersistIngestStatus(
+				xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
+				false,
+				"",
+				err.Error(),
+			)
 		}
 	} else if telEP != "" {
 		qdir := filepath.Join(cfg.Agent.DataDir, "telemetry-queue")

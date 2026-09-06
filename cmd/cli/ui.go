@@ -415,10 +415,11 @@ func xdrIngestConfigured() bool {
 	if yaml.Unmarshal(data, &cfg) != nil {
 		return false
 	}
-	if cfg.XDR.Enabled {
+	if cfg.XDR.Enabled || len(cfg.XDR.IngestHosts) > 0 {
 		return true
 	}
-	return len(cfg.XDR.IngestHosts) > 0
+	// MSI upgrades used to wipe the xdr: YAML block; enroll still left .env.
+	return xdrRuntimeEnvEnabled()
 }
 
 func ingestStreamLive() bool {

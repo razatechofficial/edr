@@ -470,9 +470,19 @@ func ParseCommandPayload(raw []byte) map[string]interface{} {
 const ingestStatusFileName = "ingest.status"
 
 func (c *IngestClient) persistStreamStatus(ok bool, host, detail string) {
-	if c == nil || strings.TrimSpace(c.store.Dir) == "" {
+	if c == nil {
 		return
 	}
+	PersistIngestStatus(c.store.Dir, ok, host, detail)
+}
+
+// PersistIngestStatus writes xdr-tls/ingest.status for the console (ok or the last fault).
+func PersistIngestStatus(certDir string, ok bool, host, detail string) {
+	certDir = strings.TrimSpace(certDir)
+	if certDir == "" {
+		return
+	}
+	_ = os.MkdirAll(certDir, 0o755)
 	st := map[string]any{
 		"ok":         ok,
 		"host":       host,
@@ -485,5 +495,5 @@ func (c *IngestClient) persistStreamStatus(ok bool, host, detail string) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(c.store.Dir, ingestStatusFileName), b, 0o644)
+	_ = os.WriteFile(filepath.Join(certDir, ingestStatusFileName), b, 0o644)
 }
