@@ -352,7 +352,38 @@ func (c *console) onDashAction() {
 		c.show(uistate.Enroll)
 		return
 	}
+	if serviceHealthy(c.last.Service) && (!c.last.IngestConfigured || !c.last.IngestEnv || !c.last.IngestOK) {
+		c.connectStream()
+		return
+	}
 	c.startSensor()
+}
+
+func (c *console) connectStream() {
+	c.setBusy(true)
+	if c.dashAction != nil {
+		c.dashAction.SetText("Connecting…")
+	}
+	go func() {
+		_, err := runEdrctlPrivileged("connect-stream")
+		st := waitForService(45 * time.Second)
+		fyne.Do(func() {
+			c.setBusy(false)
+			st = mergeEnrollment(st, c.last)
+			c.last = st
+			if err != nil && !st.IngestConfigured {
+				c.setDashFault(uiFault{
+					Title:  "Could not connect the stream",
+					Body:   "Allow Administrator if asked, then Connect stream again.",
+					Detail: firstLine(err.Error()),
+					Action: "OK",
+				})
+			} else {
+				c.setDashFault(uiFault{})
+			}
+			c.applyDashboard(st, sampleResources(st))
+		})
+	}()
 }
 
 func (c *console) setDashFault(f uiFault) {

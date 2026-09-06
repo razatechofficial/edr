@@ -194,6 +194,20 @@ func SensorRuntimeStatus() string {
 	}
 }
 
+// SensorPID is the SCM process id for a running EDRAgent, or 0.
+func SensorPID() uint32 {
+	s, closer, err := openEDRService()
+	if err != nil {
+		return 0
+	}
+	defer closer()
+	st, err := s.Query()
+	if err != nil || st.ProcessId == 0 {
+		return 0
+	}
+	return st.ProcessId
+}
+
 // StartSensorService asks SCM to start EDRAgent. Already running is success.
 // Open with START+QUERY only. SERVICE_ALL_ACCESS fails when the service DACL
 // denies STOP/DELETE to Everyone (that deny applies to Administrators too).

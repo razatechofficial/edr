@@ -222,7 +222,8 @@
         <File Id="ConfigFile"
               Source="$(var.EdrConfigYml)"
               Name="config.yml"
-              KeyPath="yes"/>
+              KeyPath="yes"
+              NeverOverwrite="yes"/>
         <CreateFolder/>
       </Component>
       <Component Id="cmpConfigHardenedYml" Guid="*" Directory="DATAROOT" Win64="yes">

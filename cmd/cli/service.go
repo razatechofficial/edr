@@ -17,6 +17,48 @@ import (
 	"github.com/razatechofficial/edr/internal/xdrclient"
 )
 
+func newConnectStreamCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "connect-stream",
+		Short: "Enable ingest from the device certificate and restart the sensor",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requirePrivileged(); err != nil {
+				return err
+			}
+			if err := enableIngestFromLocalIdentity(); err != nil {
+				return err
+			}
+			_ = controlAgentService("stop")
+			time.Sleep(600 * time.Millisecond)
+			return controlAgentService("start")
+		},
+	}
+}
+
+func enableIngestFromLocalIdentity() error {
+	cfg, err := config.Load(configFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	store := xdrclient.Store{
+		Dir:     xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
+		DataDir: cfg.Agent.DataDir,
+		Backend: cfg.XDR.SecureStorage,
+	}
+	st, err := store.Load()
+	if err != nil {
+		st = xdrclient.State{}
+	}
+	if len(st.IngestHosts) == 0 {
+		st.IngestHosts = xdrclient.DefaultIngestHosts()
+	}
+	if err := xdrclient.EnableIngestFromEnrollment(configFile, st); err != nil {
+		return fmt.Errorf("enable ingest: %w", err)
+	}
+	fmt.Println("ingest enabled; restarting sensor")
+	return nil
+}
+
 func newStartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "start",

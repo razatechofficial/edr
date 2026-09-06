@@ -44,6 +44,12 @@ compliance:
   enable_posture: true
   enable_rootcheck: false
   emit_passed_findings: false
+xdr:
+  enabled: false
+  enrollment_host: enroll.xdr.averox.com:443
+  ingest_hosts:
+    - ingest.xdr.averox.com:443
+  secure_storage: auto
 self_protect:
   enabled: false
 response:

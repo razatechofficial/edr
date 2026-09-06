@@ -53,8 +53,9 @@ func sampleResources(st operatorStatus) resourceSnapshot {
 	if cpu > 100 {
 		cpu = 100
 	}
-	// ps/%cpu is per logical core; SysCPU is whole-machine. Convert before subtracting.
-	otherCPU := cpu - agentCPUShare(agentCPU)
+	// Windows AgentCPU is already a Task Manager machine share (0-100).
+	// ps/%cpu on Unix is per logical core and must be scaled first.
+	otherCPU := cpu - agentAgainstSystem(agentCPU)
 	if otherCPU < 0 {
 		otherCPU = 0
 	}
@@ -80,6 +81,19 @@ func agentCPUShare(agentCPU float64) float64 {
 		return 0
 	}
 	return share
+}
+
+func agentAgainstSystem(agentCPU float64) float64 {
+	if isWindows() {
+		if agentCPU < 0 {
+			return 0
+		}
+		if agentCPU > 100 {
+			return 100
+		}
+		return agentCPU
+	}
+	return agentCPUShare(agentCPU)
 }
 
 func busyCPU(idle0, total0, idle1, total1 uint64) float64 {
@@ -113,7 +127,7 @@ func (s resourceSnapshot) memShares() (edr, other, free float64) {
 }
 
 func (s resourceSnapshot) cpuShares() (edr, other, idle float64) {
-	edr = agentCPUShare(s.AgentCPU) / 100
+	edr = agentAgainstSystem(s.AgentCPU) / 100
 	other = s.OtherCPU / 100
 	idle = 1 - edr - other
 	if idle < 0 {

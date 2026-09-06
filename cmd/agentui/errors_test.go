@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+func TestParseTasklistMemMB(t *testing.T) {
+	mb, ok := parseTasklistMemMB(`"edr-agent.exe","4242","Services","0","186,432 K"`)
+	if !ok {
+		t.Fatal("expected parse")
+	}
+	if mb < 180 || mb > 185 {
+		t.Fatalf("got %.2f MB, want ~182", mb)
+	}
+	if _, ok := parseTasklistMemMB(`INFO: No tasks are running which match the specified criteria.`); ok {
+		t.Fatal("no tasks")
+	}
+}
+
 func TestClassifyEnrollError(t *testing.T) {
 	if classifyEnrollError("dial enrollment: i/o timeout").Title != "Can’t reach the enrollment service" {
 		t.Fatal("timeout")

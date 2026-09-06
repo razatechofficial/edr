@@ -234,6 +234,7 @@ func runAgentCore(ctx context.Context, cfgPath string) (err error) {
 	if err := xdrclient.InstallStagedIdentity(cfgPath, cfg.XDR, cfg.Agent.DataDir); err != nil {
 		fmt.Fprintf(os.Stderr, "staged identity: %v\n", err)
 	}
+	enableIngestIfEnrolled(cfgPath, cfg)
 	// Resolve token file → env so NewWithFiles/Load sees bootstrap credentials.
 	if _, err := xdrclient.ApplyBootstrap(&cfg.XDR, xdrclient.BootstrapOverrides{
 		Host:            xdrEnrollmentHost,
@@ -313,4 +314,28 @@ func runAgentCore(ctx context.Context, cfgPath string) (err error) {
 
 	logger.Info("agent stopped gracefully")
 	return nil
+}
+
+func enableIngestIfEnrolled(cfgPath string, cfg config.Config) {
+	store := xdrclient.Store{
+		Dir:     xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
+		DataDir: cfg.Agent.DataDir,
+		Backend: cfg.XDR.SecureStorage,
+	}
+	st, err := store.Load()
+	if err != nil {
+		if !store.HasCredentials() {
+			return
+		}
+		st = xdrclient.State{IngestHosts: xdrclient.DefaultIngestHosts()}
+	}
+	if strings.TrimSpace(st.AgentID) == "" && len(st.IngestHosts) == 0 && !store.HasCredentials() {
+		return
+	}
+	if len(st.IngestHosts) == 0 {
+		st.IngestHosts = xdrclient.DefaultIngestHosts()
+	}
+	if err := xdrclient.EnableIngestFromEnrollment(cfgPath, st); err != nil {
+		fmt.Fprintf(os.Stderr, "enable ingest: %v\n", err)
+	}
 }

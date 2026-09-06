@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/csv"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,32 @@ import (
 
 	"github.com/razatechofficial/edr/internal/platform"
 )
+
+func parseTasklistMemMB(raw string) (float64, bool) {
+	line := strings.TrimSpace(raw)
+	if line == "" || strings.Contains(strings.ToLower(line), "no tasks") {
+		return 0, false
+	}
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = strings.TrimSpace(line[:i])
+	}
+	recs, err := csv.NewReader(strings.NewReader(line)).Read()
+	if err != nil || len(recs) < 5 {
+		return 0, false
+	}
+	if !strings.EqualFold(strings.TrimSpace(recs[0]), "edr-agent.exe") {
+		return 0, false
+	}
+	mem := strings.TrimSpace(recs[len(recs)-1])
+	mem = strings.TrimSuffix(strings.TrimSpace(mem), "K")
+	mem = strings.ReplaceAll(mem, ",", "")
+	mem = strings.ReplaceAll(mem, " ", "")
+	kb, err := strconv.ParseFloat(mem, 64)
+	if err != nil || kb <= 0 {
+		return 0, false
+	}
+	return kb / 1024, true
+}
 
 func parseEtime(s string) string {
 	s = strings.TrimSpace(s)
