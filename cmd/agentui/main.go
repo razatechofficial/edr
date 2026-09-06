@@ -47,6 +47,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "EDR-Agent-Setup is retired — use the native OS package (MSI/pkg/deb)\n")
 		os.Exit(2)
 	}
+	if launchNativeConsoleIfNeeded() {
+		return
+	}
 	if err := maybeElevate(); err != nil {
 		uiLog("elevate: %v", err)
 		fmt.Fprintf(os.Stderr, "EDR Agent UI: %v\n", err)

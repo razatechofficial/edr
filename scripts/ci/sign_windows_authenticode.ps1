@@ -33,6 +33,7 @@ $agentExe = Join-Path $root 'dist/windows-amd64/edr-agent.exe'
 $extraExes = @(
 	(Join-Path $root 'dist/windows-amd64/edr-installer.exe'),
 	(Join-Path $root 'dist/windows-amd64/edr-agent-ui.exe'),
+	(Join-Path $root 'dist/windows-amd64/edr-console.exe'),
 	(Join-Path $root 'dist/windows-amd64/edrctl.exe')
 )
 $msiFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'dist') -Filter 'edr-agent_*.msi' -ErrorAction SilentlyContinue)

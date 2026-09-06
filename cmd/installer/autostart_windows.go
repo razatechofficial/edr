@@ -14,9 +14,22 @@ import (
 const windowsRunKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 
 func installLoginAutostart(paths installPaths) error {
-	ui := filepath.Join(paths.binDir, agentUIBinaryName())
+	// Server/RDP: Win32 console (Fyne blinks with no OpenGL). Pro/11: Fyne tray.
+	ui := filepath.Join(paths.binDir, "edr-console.exe")
+	cmd := `"` + ui + `"`
+	if !windowsInstallationIsServer() {
+		fyne := filepath.Join(paths.binDir, agentUIBinaryName())
+		if st, err := os.Stat(fyne); err == nil && !st.IsDir() {
+			ui = fyne
+			cmd = `"` + ui + `" --tray`
+		}
+	}
 	if st, err := os.Stat(ui); err != nil || st.IsDir() {
-		fmt.Println("    skip login item: edr-agent-ui.exe not installed")
+		ui = filepath.Join(paths.binDir, agentUIBinaryName())
+		cmd = `"` + ui + `"`
+	}
+	if st, err := os.Stat(ui); err != nil || st.IsDir() {
+		fmt.Println("    skip login item: console not installed")
 		return nil
 	}
 	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, windowsRunKey, registry.SET_VALUE)
@@ -25,12 +38,6 @@ func installLoginAutostart(paths installPaths) error {
 		return nil
 	}
 	defer k.Close()
-	// Workstation: --tray (menu-bar / notification area). Server/RDP: no tray
-	// flag so the first login shows a real window (Server tray is unreliable).
-	cmd := `"` + ui + `"`
-	if !windowsInstallationIsServer() {
-		cmd = `"` + ui + `" --tray`
-	}
 	if err := k.SetStringValue("EDR Agent", cmd); err != nil {
 		fmt.Printf("    warning: HKLM Run: %v\n", err)
 		return nil

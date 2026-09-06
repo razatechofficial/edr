@@ -45,6 +45,9 @@ GOOS=windows GOARCH=amd64 go build ${GOFLAGS} -ldflags "${WINSVC_LDFLAGS}" -o di
 # CGO-free service registrar for MSI (must not link libyara / MinGW runtime).
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/windows-amd64/edr-svcreg.exe ./cmd/svcreg
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o bin/edr-svcreg-windows-amd64.exe ./cmd/svcreg
+# Win32 operator window (no OpenGL). Start Menu on Server/RDP uses this.
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${WINSVC_LDFLAGS}" -o dist/windows-amd64/edr-console.exe ./cmd/winconsole
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${WINSVC_LDFLAGS}" -o bin/edr-console-windows-amd64.exe ./cmd/winconsole
 # Console does not scan; do not inherit agent YARA CGO flags or -tags.
 # Do not build EDR-Agent-Setup.exe (embedsetup) — that lives on attended-setup.
 CGO_ENABLED=1 CGO_CFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui

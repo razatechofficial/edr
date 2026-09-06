@@ -17,6 +17,7 @@ If fso.FileExists(agent) Then
 End If
 sh.Run """" & sys & "\sc.exe"" stop EDRAgent", 0, True
 sh.Run """" & sys & "\taskkill.exe"" /F /IM edr-agent-ui.exe /T", 0, True
+sh.Run """" & sys & "\taskkill.exe"" /F /IM edr-console.exe /T", 0, True
 sh.Run """" & sys & "\taskkill.exe"" /F /IM edr-agent.exe /T", 0, True
 For n = 1 To 6
   sh.Run """" & sys & "\sc.exe"" delete EDRAgent", 0, True

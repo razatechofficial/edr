@@ -32,9 +32,14 @@ func prepareWindowsUIRuntime() {
 	}
 
 	mesa := filepath.Join(dir, "opengl32.dll")
+	gallium := filepath.Join(dir, "libgallium_wgl.dll")
 	hasMesa := false
-	if st, err := os.Stat(mesa); err == nil && !st.IsDir() && st.Size() > 1<<20 {
-		hasMesa = true
+	if st, err := os.Stat(mesa); err == nil && !st.IsDir() {
+		if st.Size() > 1<<20 {
+			hasMesa = true
+		} else if gst, gerr := os.Stat(gallium); gerr == nil && !gst.IsDir() && gst.Size() > 1<<20 {
+			hasMesa = true
+		}
 	}
 	// App-dir opengl32.dll is used automatically. Force llvmpipe only when
 	// hardware WGL is known-broken (Server / RDP); on Pro/11 local sessions

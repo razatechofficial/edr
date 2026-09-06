@@ -126,6 +126,7 @@ func runDashboard() error {
 	release, exclusive := claimUIInstance(!flagTray)
 	if !exclusive {
 		uiLog("another console instance is running; asked it to show")
+		uiAlert("EDR Agent", "The console is already running. If no window appeared, open EDR Agent from the Start Menu (edr-console) or end edr-agent-ui.exe in Task Manager and try again.")
 		return nil
 	}
 	defer release()

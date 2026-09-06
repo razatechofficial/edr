@@ -740,6 +740,7 @@ jobs:
             bin/edrctl-windows-amd64.exe
             bin/edr-installer-windows-amd64.exe
             bin/edr-agent-ui-windows-amd64.exe
+            bin/edr-console-windows-amd64.exe
 
   macos-test-nosec:
     name: macOS tests (nosec)

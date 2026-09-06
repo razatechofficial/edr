@@ -15,6 +15,7 @@ AGENT_SRC="${BIN_DIR}/edr-agent-windows-amd64.exe"
 CTL_SRC="${BIN_DIR}/edrctl-windows-amd64.exe"
 INST_SRC="${BIN_DIR}/edr-installer-windows-amd64.exe"
 UI_SRC="${BIN_DIR}/edr-agent-ui-windows-amd64.exe"
+CONSOLE_SRC="${BIN_DIR}/edr-console-windows-amd64.exe"
 
 if [[ ! -f "${AGENT_SRC}" ]] || [[ ! -f "${CTL_SRC}" ]]; then
 	echo "Missing Windows binaries. Build first: ${ROOT_DIR}/scripts/build.sh windows" >&2
@@ -29,6 +30,9 @@ if [[ -f "${INST_SRC}" ]]; then
 fi
 if [[ -f "${UI_SRC}" ]]; then
 	cp "${UI_SRC}" "${STAGING}/edr-agent-ui.exe"
+fi
+if [[ -f "${CONSOLE_SRC}" ]]; then
+	cp "${CONSOLE_SRC}" "${STAGING}/edr-console.exe"
 fi
 cp "${SCRIPT_DIR}/windows/install.bat" "${SCRIPT_DIR}/windows/uninstall.bat" "${STAGING}/"
 

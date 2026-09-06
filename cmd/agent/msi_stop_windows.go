@@ -19,6 +19,7 @@ import (
 func msiStopForReplace() error {
 	self := os.Getpid()
 	killImage("edr-agent-ui.exe")
+	killImage("edr-console.exe")
 
 	m, err := mgr.Connect()
 	if err == nil {

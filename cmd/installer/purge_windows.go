@@ -26,6 +26,7 @@ func stopProductProcesses() {
 func quitInstalledConsole() {
 	// Setup is EDR-Agent-Setup.exe — do not kill it.
 	_ = runCmd("taskkill", "/F", "/IM", "edr-agent-ui.exe")
+	_ = runCmd("taskkill", "/F", "/IM", "edr-console.exe")
 }
 
 func forgetPackageReceipts() {}

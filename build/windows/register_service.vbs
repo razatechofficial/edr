@@ -59,20 +59,25 @@ Else
     Log "FAIL EDRAgent missing after create (reboot if marked for deletion)"
   End If
 
-  ' Per-machine login console (Start Menu still works). Server: no --tray
-  ' (notification area is unreliable). Pro/11: --tray for menu-bar style.
+  ' Server: Win32 console (no OpenGL). Pro/11: Fyne tray when present.
   Dim ui, prod, runCmd
-  ui = pf & "\EDR Agent\edr-agent-ui.exe"
-  If fso.FileExists(ui) Then
-    prod = ""
-    On Error Resume Next
-    prod = sh.RegRead("HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProductName")
-    On Error Resume Next
-    If InStr(1, LCase(CStr(prod)), "server", 1) > 0 Then
-      runCmd = """" & ui & """"
-    Else
+  ui = pf & "\EDR Agent\edr-console.exe"
+  runCmd = """" & ui & """"
+  prod = ""
+  On Error Resume Next
+  prod = sh.RegRead("HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProductName")
+  On Error Resume Next
+  If InStr(1, LCase(CStr(prod)), "server", 1) = 0 Then
+    If fso.FileExists(pf & "\EDR Agent\edr-agent-ui.exe") Then
+      ui = pf & "\EDR Agent\edr-agent-ui.exe"
       runCmd = """" & ui & """ --tray"
     End If
+  End If
+  If Not fso.FileExists(ui) Then
+    ui = pf & "\EDR Agent\edr-agent-ui.exe"
+    runCmd = """" & ui & """"
+  End If
+  If fso.FileExists(ui) Then
     sh.RegWrite "HKLM\Software\Microsoft\Windows\CurrentVersion\Run\EDR Agent", runCmd, "REG_SZ"
     Log "HKLM Run set: " & runCmd
   End If

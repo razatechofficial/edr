@@ -52,6 +52,7 @@ $required = @(
 	'edr-agent.exe',
 	'edrctl.exe',
 	'edr-agent-ui.exe',
+	'edr-console.exe',
 	'edr-installer.exe',
 	'edr-svcreg.exe',
 	'opengl32.dll',
@@ -71,6 +72,7 @@ $knownFileKeys = @{
 	'edr-agent.exe' = @('AgentExe')
 	'edrctl.exe'    = @('EdrCtlExe')
 	'edr-agent-ui.exe' = @('EdrUIExe')
+	'edr-console.exe' = @('EdrConsoleExe')
 	'edr-installer.exe' = @('EdrInstallerExe')
 	'edr-svcreg.exe' = @('EdrSvcRegExe')
 	'opengl32.dll'  = @('MesaOpenGLDll', 'MesaGlDll1', 'MesaGlDll2')

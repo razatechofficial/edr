@@ -146,6 +146,8 @@ else
 endif
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edrctl.exe ./cmd/cli
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o dist/windows-amd64/edr-installer.exe ./cmd/installer
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o dist/windows-amd64/edr-console.exe ./cmd/winconsole
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o $(BIN_DIR)/edr-console-windows-amd64.exe ./cmd/winconsole
 ifneq ($(MINGW_CC),)
 	CGO_ENABLED=1 CC=$(MINGW_CC) CGO_CFLAGS= CGO_CPPFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o $(BIN_DIR)/edr-agent-ui-windows-amd64.exe ./cmd/agentui
 	CGO_ENABLED=1 CC=$(MINGW_CC) CGO_CFLAGS= CGO_CPPFLAGS= CGO_LDFLAGS= GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui

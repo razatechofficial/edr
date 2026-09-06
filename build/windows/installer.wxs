@@ -154,6 +154,12 @@
               Name="edr-agent-ui.exe"
               KeyPath="yes"/>
       </Component>
+      <Component Id="cmpEdrConsoleExe" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="EdrConsoleExe"
+              Source="$(var.EdrConsoleExe)"
+              Name="edr-console.exe"
+              KeyPath="yes"/>
+      </Component>
       <Component Id="cmpEdrUIManifest" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="EdrUIManifest"
               Source="edr-agent-ui.exe.manifest"
@@ -182,7 +188,7 @@
         <Shortcut Id="StartMenuApp"
                   Name="EDR Agent"
                   Description="Open the EDR Agent console"
-                  Target="[#EdrUIExe]"
+                  Target="[#EdrConsoleExe]"
                   WorkingDirectory="INSTALLFOLDER"/>
         <RegistryValue Root="HKLM"
                        Key="Software\RazaTech\EDR Agent"

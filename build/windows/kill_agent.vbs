@@ -14,5 +14,6 @@ If fso.FileExists(agent) Then
 End If
 sh.Run """" & sys & "\sc.exe"" stop EDRAgent", 0, True
 sh.Run """" & sys & "\taskkill.exe"" /F /IM edr-agent-ui.exe /T", 0, True
+sh.Run """" & sys & "\taskkill.exe"" /F /IM edr-console.exe /T", 0, True
 sh.Run """" & sys & "\taskkill.exe"" /F /IM edr-agent.exe /T", 0, True
 sh.Run """" & sys & "\ping.exe"" -n 2 127.0.0.1", 0, True
