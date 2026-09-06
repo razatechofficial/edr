@@ -269,7 +269,7 @@ foreach ($dll in $mesaFiles) {
     $fileId = "MesaGlDll$idx"
     $full = [System.IO.Path]::GetFullPath($dll.FullName)
     $mesaLines += @(
-        "      <Component Id=""$cmpId"" Guid=""*"" Directory=""INSTALLFOLDER"" Win64=""yes"">"
+        "      <Component Id=""$cmpId"" Guid=""*"" Win64=""yes"">"
         "        <File Id=""$fileId"" Source=""$full"" Name=""$($dll.Name)"" KeyPath=""yes""/>"
         '      </Component>'
     )
@@ -313,7 +313,7 @@ if ($yaraDlls.Count -gt 0) {
         $fileId = "LibYaraDll$idx"
         $full = [System.IO.Path]::GetFullPath($dll.FullName)
         $yaraLines += @(
-            "      <Component Id=""$cmpId"" Guid=""*"" Directory=""INSTALLFOLDER"" Win64=""yes"">"
+            "      <Component Id=""$cmpId"" Guid=""*"" Win64=""yes"">"
             "        <File Id=""$fileId"" Source=""$full"" Name=""$($dll.Name)"" KeyPath=""yes""/>"
             '      </Component>'
         )
