@@ -245,23 +245,42 @@ $modelsWixobj = Join-Path $root 'build/windows/models.wixobj'
 $lightInputs = @($wixobj, $rulesWixobj, $modelsWixobj)
 
 $agentDist = Join-Path $root 'dist/windows-amd64'
-$mesaDll = Join-Path $agentDist 'opengl32.dll'
-if (-not (Test-Path -LiteralPath $mesaDll)) {
+$mesaNames = @('opengl32.dll', 'libgallium_wgl.dll')
+$mesaFiles = @()
+foreach ($n in $mesaNames) {
+    $p = Join-Path $agentDist $n
+    if (Test-Path -LiteralPath $p) { $mesaFiles += (Get-Item -LiteralPath $p) }
+}
+if (-not ($mesaFiles | Where-Object { $_.Name -ieq 'opengl32.dll' })) {
     throw "Missing Mesa opengl32.dll (required for Server/RDP console). Run bundle_windows_mesa.ps1 -Required first."
 }
 $mesaWxs = Join-Path $root 'build/windows/mesa_dll.wxs'
-$mesaFull = [System.IO.Path]::GetFullPath($mesaDll)
 $mesaLines = @(
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">'
     '  <Fragment>'
     '    <DirectoryRef Id="INSTALLFOLDER">'
-    '      <Component Id="cmpMesaOpenGL" Guid="*" Directory="INSTALLFOLDER" Win64="yes">'
-    "        <File Id=""MesaOpenGLDll"" Source=""$mesaFull"" Name=""opengl32.dll"" KeyPath=""yes""/>"
-    '      </Component>'
+)
+$groupRefs = @()
+$idx = 0
+foreach ($dll in $mesaFiles) {
+    $idx++
+    $cmpId = "cmpMesaGl$idx"
+    $fileId = "MesaGlDll$idx"
+    $full = [System.IO.Path]::GetFullPath($dll.FullName)
+    $mesaLines += @(
+        "      <Component Id=""$cmpId"" Guid=""*"" Directory=""INSTALLFOLDER"" Win64=""yes"">"
+        "        <File Id=""$fileId"" Source=""$full"" Name=""$($dll.Name)"" KeyPath=""yes""/>"
+        '      </Component>'
+    )
+    $groupRefs += "      <ComponentRef Id=""$cmpId""/>"
+}
+$mesaLines += @(
     '    </DirectoryRef>'
     '    <ComponentGroup Id="MesaDllComponents">'
-    '      <ComponentRef Id="cmpMesaOpenGL"/>'
+)
+$mesaLines += $groupRefs
+$mesaLines += @(
     '    </ComponentGroup>'
     '    <Feature Id="ProductFeature" Level="1">'
     '      <ComponentGroupRef Id="MesaDllComponents"/>'
@@ -275,7 +294,7 @@ Invoke-WiXTool -Label 'candle mesa_dll.wxs' -ExePath $candleExe -ArgList @(
     '-nologo', '-arch', 'x64', $mesaWxs, '-out', (Join-Path $root 'build/windows/')
 ) -LogPath $candleLog
 $lightInputs += $mesaWixobj
-Write-Host "Including Mesa software OpenGL (opengl32.dll) for Server/RDP/Pro console"
+Write-Host "Including $($mesaFiles.Count) Mesa OpenGL DLL(s) for Server/RDP/Pro console"
 
 $yaraDlls = @(Get-ChildItem -LiteralPath $agentDist -Filter 'libyara*.dll' -ErrorAction SilentlyContinue)
 if ($yaraDlls.Count -gt 0) {

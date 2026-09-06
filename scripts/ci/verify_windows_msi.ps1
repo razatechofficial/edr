@@ -73,7 +73,7 @@ $knownFileKeys = @{
 	'edr-agent-ui.exe' = @('EdrUIExe')
 	'edr-installer.exe' = @('EdrInstallerExe')
 	'edr-svcreg.exe' = @('EdrSvcRegExe')
-	'opengl32.dll'  = @('MesaOpenGLDll')
+	'opengl32.dll'  = @('MesaOpenGLDll', 'MesaGlDll1', 'MesaGlDll2')
 	'edr.exe'       = @('EdrAliasExe')
 }
 
