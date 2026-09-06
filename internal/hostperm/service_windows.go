@@ -3,7 +3,6 @@
 package hostperm
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,8 +10,6 @@ import (
 	"time"
 
 	"github.com/razatechofficial/edr/internal/platform"
-	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
@@ -50,9 +47,7 @@ func EnsureSensorService(exePath, cfgPath string) error {
 	defer m.Disconnect()
 
 	binLine := quotedServiceBin(absExe, absCfg)
-	if s, err := m.OpenService(windowsServiceName); err == nil {
-		defer s.Close()
-		_, _ = s.Control(svc.Stop)
+	apply := func(s *mgr.Service) error {
 		cfg, cerr := s.Config()
 		if cerr != nil {
 			return fmt.Errorf("read EDRAgent config: %w", cerr)
@@ -69,26 +64,23 @@ func EnsureSensorService(exePath, cfgPath string) error {
 		return nil
 	}
 
+	// Do not Control(Stop) here: a wedged START_PENDING service blocks MSI
+	// and the operator window for a long time. binPath can be updated live.
+	if s, err := m.OpenService(windowsServiceName); err == nil {
+		defer s.Close()
+		return apply(s)
+	}
+
+	deadline := time.Now().Add(8 * time.Second)
 	var last error
-	for i := 0; i < 10; i++ {
+	for time.Now().Before(deadline) {
 		if s, err := m.OpenService(windowsServiceName); err == nil {
-			_, _ = s.Control(svc.Stop)
-			cfg, cerr := s.Config()
-			if cerr == nil {
-				cfg.StartType = mgr.StartAutomatic
-				cfg.DelayedAutoStart = true
-				cfg.DisplayName = "EDR Agent"
-				cfg.Description = "Endpoint Detection and Response Agent"
-				cfg.BinaryPathName = binLine
-				if uerr := s.UpdateConfig(cfg); uerr == nil {
-					_ = s.SetRecoveryActions(defaultRecoveryActions(), 86400)
-					_ = s.Close()
-					return nil
-				}
-			}
-			_ = s.Delete()
+			uerr := apply(s)
 			_ = s.Close()
-			time.Sleep(500 * time.Millisecond)
+			if uerr == nil {
+				return nil
+			}
+			last = uerr
 		}
 		s, err := m.CreateService(
 			windowsServiceName,
@@ -107,41 +99,7 @@ func EnsureSensorService(exePath, cfgPath string) error {
 			return nil
 		}
 		last = err
-		if serviceExistsErr(err) {
-			for j := 0; j < 40; j++ {
-				time.Sleep(500 * time.Millisecond)
-				if s, oerr := m.OpenService(windowsServiceName); oerr == nil {
-					cfg, cerr := s.Config()
-					if cerr == nil {
-						cfg.BinaryPathName = binLine
-						cfg.StartType = mgr.StartAutomatic
-						cfg.DelayedAutoStart = true
-						_ = s.UpdateConfig(cfg)
-					}
-					_ = s.SetRecoveryActions(defaultRecoveryActions(), 86400)
-					_ = s.Close()
-					return nil
-				}
-				s2, cerr := m.CreateService(
-					windowsServiceName,
-					absExe,
-					mgr.Config{
-						StartType:        mgr.StartAutomatic,
-						DisplayName:      "EDR Agent",
-						Description:      "Endpoint Detection and Response Agent",
-						DelayedAutoStart: true,
-					},
-					"--config", absCfg,
-				)
-				if cerr == nil {
-					_ = s2.SetRecoveryActions(defaultRecoveryActions(), 86400)
-					_ = s2.Close()
-					return nil
-				}
-				last = cerr
-			}
-		}
-		time.Sleep(400 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 	}
 	return fmt.Errorf("register EDRAgent: %w", last)
 }
@@ -156,15 +114,4 @@ func defaultRecoveryActions() []mgr.RecoveryAction {
 
 func quotedServiceBin(exe, cfg string) string {
 	return `"` + exe + `" "--config" "` + cfg + `"`
-}
-
-func serviceExistsErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, windows.ERROR_SERVICE_EXISTS) || errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
-		return true
-	}
-	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "already exists") || strings.Contains(s, "marked for deletion")
 }

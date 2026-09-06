@@ -160,6 +160,12 @@
               Name="edr-console.exe"
               KeyPath="yes"/>
       </Component>
+      <Component Id="cmpEdrConsoleManifest" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="EdrConsoleManifest"
+              Source="edr-console.exe.manifest"
+              Name="edr-console.exe.manifest"
+              KeyPath="yes"/>
+      </Component>
       <Component Id="cmpEdrUIManifest" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
         <File Id="EdrUIManifest"
               Source="edr-agent-ui.exe.manifest"

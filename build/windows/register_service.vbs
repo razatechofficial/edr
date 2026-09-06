@@ -38,7 +38,7 @@ Else
   rc = sh.Run("""" & sys & "\sc.exe"" config EDRAgent binPath= " & binArg & " start= auto DisplayName= ""EDR Agent""", 0, True)
   Log "sc config exit=" & CStr(rc)
   If rc <> 0 Then
-    For n = 1 To 12
+    For n = 1 To 5
       rc = sh.Run("""" & sys & "\sc.exe"" create EDRAgent binPath= " & binArg & " start= auto DisplayName= ""EDR Agent""", 0, True)
       Log "sc create attempt " & CStr(n) & " exit=" & CStr(rc)
       If rc = 0 Then Exit For

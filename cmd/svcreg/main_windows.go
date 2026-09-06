@@ -2,12 +2,14 @@
 
 // Command svcreg registers the per-machine EDRAgent service via SCM.
 // Built with CGO_ENABLED=0 so MSI/custom actions never depend on libyara/MinGW DLLs.
+// Built as WINDOWS subsystem so msiexec never shows a blank console.
 package main
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/razatechofficial/edr/internal/hostperm"
 	"github.com/razatechofficial/edr/internal/platform"
@@ -22,8 +24,21 @@ func main() {
 	if len(os.Args) >= 3 && os.Args[2] != "" {
 		cfg = os.Args[2]
 	}
+	logf("begin exe=%s cfg=%s", exe, cfg)
 	if err := hostperm.EnsureSensorService(exe, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "svcreg: %v\n", err)
+		logf("fail: %v", err)
 		os.Exit(1)
 	}
+	logf("ok")
+}
+
+func logf(format string, args ...any) {
+	dir := platform.LogDir()
+	_ = os.MkdirAll(dir, 0o755)
+	f, err := os.OpenFile(filepath.Join(dir, "msi_register.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, time.Now().UTC().Format(time.RFC3339)+" svcreg "+format+"\n", args...)
 }
