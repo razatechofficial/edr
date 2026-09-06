@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/hostperm"
 	"github.com/razatechofficial/edr/internal/selfprotect"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -93,7 +94,10 @@ func setServiceLaunchProtected(h windows.Handle, level uint32) error {
 func setServiceObjectDACL(h windows.Handle) error {
 	// Deny SERVICE_STOP(SW) + DELETE(SD) to Everyone, keep full access for SYSTEM/Administrators.
 	// SDDL is applied only when explicitly enabled by config.
-	sddl := "D:(D;;SWSD;;;WD)(A;;KA;;;SY)(A;;KA;;;BA)(A;;CCLCSWLOCRRC;;;AU)"
+	// Do not deny STOP/DELETE to Everyone: that ACE wins over Administrators
+	// and makes OpenService(ALL_ACCESS) fail as "Access is denied", which the
+	// console used to misreport as "EDRAgent is not registered".
+	sddl := hostperm.ServiceStartSDDL
 	sddlPtr, err := windows.UTF16PtrFromString(sddl)
 	if err != nil {
 		return err

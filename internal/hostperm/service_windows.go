@@ -48,6 +48,7 @@ func EnsureSensorService(exePath, cfgPath string) error {
 	m, err := mgr.Connect()
 	if err != nil {
 		if scErr := createWithSC(absExe, absCfg); scErr == nil {
+			resetServiceStartDACL()
 			return nil
 		}
 		return err
@@ -76,7 +77,11 @@ func EnsureSensorService(exePath, cfgPath string) error {
 
 	if s, err := m.OpenService(windowsServiceName); err == nil {
 		defer s.Close()
-		return apply(s)
+		if err := apply(s); err != nil {
+			return err
+		}
+		resetServiceStartDACL()
+		return nil
 	}
 
 	deadline := time.Now().Add(12 * time.Second)
@@ -86,6 +91,7 @@ func EnsureSensorService(exePath, cfgPath string) error {
 			uerr := apply(s)
 			_ = s.Close()
 			if uerr == nil {
+				resetServiceStartDACL()
 				return nil
 			}
 			last = uerr
@@ -114,6 +120,7 @@ func EnsureSensorService(exePath, cfgPath string) error {
 			_ = s.UpdateConfig(cfg)
 			_ = s.SetRecoveryActions(defaultRecoveryActions(), 86400)
 			_ = s.Close()
+			resetServiceStartDACL()
 			return nil
 		}
 		last = err
@@ -123,16 +130,14 @@ func EnsureSensorService(exePath, cfgPath string) error {
 		time.Sleep(400 * time.Millisecond)
 	}
 	if scErr := createWithSC(absExe, absCfg); scErr == nil {
+		resetServiceStartDACL()
 		return nil
 	}
 	return fmt.Errorf("register EDRAgent: %w", last)
 }
 
 func createWithSC(exe, cfg string) error {
-	sys := filepath.Join(os.Getenv("SystemRoot"), "System32", "sc.exe")
-	if os.Getenv("SystemRoot") == "" {
-		sys = `C:\Windows\System32\sc.exe`
-	}
+	sys := scExe()
 	binPath := `"` + exe + `" --config "` + cfg + `"`
 	cmd := exec.Command(sys, "create", windowsServiceName,
 		"binPath=", binPath,
@@ -165,6 +170,7 @@ func defaultRecoveryActions() []mgr.RecoveryAction {
 // Open with START+QUERY only. SERVICE_ALL_ACCESS fails when the service DACL
 // denies STOP/DELETE to Everyone (that deny applies to Administrators too).
 func StartSensorService() error {
+	resetServiceStartDACL()
 	s, closer, err := openEDRServiceForStart()
 	if err != nil {
 		if scErr := startWithSC(); scErr == nil {
@@ -216,12 +222,28 @@ func openEDRServiceForStart() (*mgr.Service, func(), error) {
 	}, nil
 }
 
-func startWithSC() error {
+func scExe() string {
 	sys := filepath.Join(os.Getenv("SystemRoot"), "System32", "sc.exe")
 	if os.Getenv("SystemRoot") == "" {
-		sys = `C:\Windows\System32\sc.exe`
+		return `C:\Windows\System32\sc.exe`
 	}
-	cmd := exec.Command(sys, "start", windowsServiceName)
+	return sys
+}
+
+// ServiceStartSDDL lets SYSTEM and Administrators start/stop, and the
+// interactive console start (RP). There is no Everyone-deny ACE: that deny
+// made OpenService(ALL_ACCESS) fail for Administrators and produced a false
+// "EDRAgent is not registered (Access is denied.)" on Start.
+const ServiceStartSDDL = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWRPLORC;;;IU)"
+
+func resetServiceStartDACL() {
+	cmd := exec.Command(scExe(), "sdset", windowsServiceName, ServiceStartSDDL)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	_ = cmd.Run()
+}
+
+func startWithSC() error {
+	cmd := exec.Command(scExe(), "start", windowsServiceName)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	out, err := cmd.CombinedOutput()
 	msg := strings.ToLower(strings.TrimSpace(string(out)))

@@ -181,6 +181,14 @@ func classifyStartError(raw string) uiFault {
 			Detail: firstLine(raw),
 			Action: "Try again",
 		}
+	case strings.Contains(s, "access is denied") || strings.Contains(s, "access denied") ||
+		strings.Contains(s, "elevated process exited") || strings.Contains(s, "error 5"):
+		return uiFault{
+			Title:  "The sensor did not start",
+			Body:   "Windows denied starting EDRAgent. Allow Administrator if asked, then Start again.",
+			Detail: firstLine(raw),
+			Action: "Try again",
+		}
 	case strings.Contains(s, "did not stay running") || strings.Contains(s, "no usable local enrollment") ||
 		strings.Contains(s, "cannot read the device certificate") || strings.Contains(s, "staged identity"):
 		body := "The background sensor exited. On this Mac, grant Full Disk Access to the sensor binary, then Recheck and Start."

@@ -77,24 +77,54 @@ func runEdrctlPrivileged(args ...string) (string, error) {
 }
 
 func startSensorServicePrivileged() error {
-	if err := hostperm.StartSensorService(); err == nil {
-		return nil
-	}
+	// Never OpenService from the unelevated Fyne process, and never call
+	// edrctl start. A hardened DACL without SERVICE_START for Interactive
+	// Users returns Access Denied; old edrctl then reports "not registered".
 	sys := filepath.Join(os.Getenv("SystemRoot"), "System32", "sc.exe")
 	if os.Getenv("SystemRoot") == "" {
 		sys = `C:\Windows\System32\sc.exe`
 	}
-	if err := shellRunAs(sys, []string{"start", "EDRAgent"}, false, true); err != nil {
+	svcreg := filepath.Join(filepath.Dir(sensorBinaryPath()), "edr-svcreg.exe")
+
+	alreadyRunning := func(err error) bool {
+		if err == nil {
+			return true
+		}
 		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "already") || strings.Contains(msg, "1056") {
-			return nil
-		}
-		if ierr := hostperm.StartSensorService(); ierr != nil {
-			return err
-		}
+		return strings.Contains(msg, "already") || strings.Contains(msg, "1056")
+	}
+
+	if err := hostperm.StartSensorService(); err == nil || alreadyRunning(err) {
 		return nil
 	}
-	return nil
+
+	var last error
+	if st, err := os.Stat(svcreg); err == nil && !st.IsDir() {
+		if err := shellRunAs(svcreg, []string{"--start"}, false, true); err == nil || alreadyRunning(err) {
+			return nil
+		} else {
+			last = err
+			if detail := readSvcRegLastError(); detail != "" && !strings.HasPrefix(strings.ToUpper(detail), "OK") {
+				last = fmt.Errorf("start service: %s", detail)
+			}
+		}
+	}
+	if err := shellRunAs(sys, []string{"start", "EDRAgent"}, false, true); err == nil || alreadyRunning(err) {
+		return nil
+	} else if last == nil {
+		last = err
+	}
+	if processIsAdmin() {
+		if err := hostperm.StartSensorService(); err == nil || alreadyRunning(err) {
+			return nil
+		} else {
+			last = err
+		}
+	}
+	if last == nil {
+		return fmt.Errorf("start EDRAgent: Access is denied. Allow Administrator, then Start again.")
+	}
+	return last
 }
 
 func runInstallerPrivileged(args ...string) (string, error) {

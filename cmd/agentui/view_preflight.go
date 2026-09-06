@@ -189,20 +189,16 @@ func (c *console) startSensor() {
 			setLine("Starting EDRAgent… Allow Administrator if asked.")
 			_, _ = runEdrctlTimeout(8*time.Second, "stage-identity")
 			if err := startSensorServicePrivileged(); err != nil {
-				out, rerr := runEdrctlPrivileged("start")
-				if rerr != nil {
-					f := classifyStartError(out)
-					if f.Detail == "" {
-						f.Detail = rerr.Error()
-					}
-					if f.Title == "" || strings.Contains(strings.ToLower(f.Title), "register") {
-						f.Title = "The sensor did not start"
-						f.Body = "EDRAgent is registered but did not enter the running state. Allow Administrator if Windows asked, then Start again."
-					}
-					failStart(f)
-					return
+				f := classifyStartError(err.Error())
+				if f.Detail == "" {
+					f.Detail = err.Error()
 				}
-				_ = err
+				if f.Title == "" || strings.Contains(strings.ToLower(f.Title), "register") {
+					f.Title = "The sensor did not start"
+					f.Body = "EDRAgent is registered but did not enter the running state. Allow Administrator if Windows asked, then Start again."
+				}
+				failStart(f)
+				return
 			}
 		} else {
 			_, _ = runEdrctl("stage-identity")

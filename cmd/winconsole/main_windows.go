@@ -525,8 +525,7 @@ func doRepair() {
 func doStart() {
 	postStatus("Starting the sensor…\r\nAllow Administrator if Windows asks.")
 	svcreg := filepath.Join(platform.InstallDir(), "edr-svcreg.exe")
-	_ = runElevated(12000, svcreg)
-	if err := runElevated(45000, filepath.Join(platform.InstallDir(), "edrctl.exe"), "start"); err != nil {
+	if err := runElevated(45000, svcreg, "--start"); err != nil {
 		postStatus("Could not start the sensor.\r\n\r\n" + err.Error())
 		setBusy(false)
 		return
@@ -548,7 +547,7 @@ func doEnroll() {
 		setBusy(false)
 		return
 	}
-	_ = runElevated(45000, filepath.Join(platform.InstallDir(), "edrctl.exe"), "start")
+	_ = runElevated(45000, filepath.Join(platform.InstallDir(), "edr-svcreg.exe"), "--start")
 	time.Sleep(400 * time.Millisecond)
 	finishWork()
 }

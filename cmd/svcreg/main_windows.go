@@ -16,9 +16,20 @@ import (
 )
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "--start" {
+		logf("start begin")
+		if err := hostperm.StartSensorService(); err != nil {
+			logf("start fail: %v", err)
+			writeLast("FAIL start: " + err.Error())
+			os.Exit(1)
+		}
+		logf("start ok")
+		writeLast("OK start")
+		return
+	}
 	exe := filepath.Join(platform.InstallDir(), "edr-agent.exe")
 	cfg := filepath.Join(platform.DataDir(), "config.yml")
-	if len(os.Args) >= 2 && os.Args[1] != "" {
+	if len(os.Args) >= 2 && os.Args[1] != "" && os.Args[1] != "--start" {
 		exe = os.Args[1]
 	}
 	if len(os.Args) >= 3 && os.Args[2] != "" {

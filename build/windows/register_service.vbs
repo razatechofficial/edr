@@ -51,6 +51,12 @@ Else
   sh.Run """" & sys & "\sc.exe"" config EDRAgent start= auto", 0, True
   sh.RegWrite "HKLM\SYSTEM\CurrentControlSet\Services\EDRAgent\DelayedAutostart", 1, "REG_DWORD"
 
+  ' Replace a leftover Everyone-deny DACL so Administrators and the console can start EDRAgent.
+  rc = sh.Run("""" & sys & "\sc.exe"" sdset EDRAgent ""D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWRPLORC;;;IU)""", 0, True)
+  Log "sc sdset exit=" & CStr(rc)
+  sh.Run """" & sys & "\sc.exe"" start EDRAgent", 0, False
+  Log "sc start requested"
+
   rc = sh.Run("""" & sys & "\sc.exe"" query EDRAgent", 0, True)
   Log "sc query exit=" & CStr(rc)
   If rc = 0 Then
