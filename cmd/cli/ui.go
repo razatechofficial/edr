@@ -145,11 +145,11 @@ func collectOperatorStatus(probeHosts bool) operatorStatus {
 			st.MemoryMB = status.MemoryMB
 			st.EventsProc = status.EventsProc
 			st.RulesCount = status.RulesCount
-			if status.IngestOK {
-				st.IngestOK = true
-			}
+			st.IngestOK = status.IngestOK
 			if status.IngestFault != "" {
 				st.IngestFault = status.IngestFault
+			} else if status.IngestOK {
+				st.IngestFault = ""
 			}
 			if status.IngestHost != "" && st.Ingest == "" {
 				st.Ingest = status.IngestHost
@@ -427,10 +427,11 @@ func xdrIngestConfigured() bool {
 	if yaml.Unmarshal(data, &cfg) != nil {
 		return false
 	}
-	if cfg.XDR.Enabled || len(cfg.XDR.IngestHosts) > 0 {
+	if cfg.XDR.Enabled {
 		return true
 	}
-	// MSI upgrades used to wipe the xdr: YAML block; enroll still left .env.
+	// Stock YAML lists ingest_hosts while xdr.enabled is still false.
+	// That must not look like a live ingest config or Enroll is skipped.
 	return xdrRuntimeEnvEnabled()
 }
 

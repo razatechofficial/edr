@@ -52,6 +52,16 @@ func decorateHealth(st operatorStatus) (uistate.Health, uistate.Lamps) {
 	return k, lamps
 }
 
+func ingestNeedsEnroll(st operatorStatus) bool {
+	f := strings.ToLower(strings.TrimSpace(st.IngestFault))
+	if f == "" {
+		return false
+	}
+	return strings.Contains(f, "certificate") ||
+		strings.Contains(f, "credentials") ||
+		strings.Contains(f, "enroll")
+}
+
 func ingestIdleBanner(configured, env bool, fault string) string {
 	if !configured {
 		return "Ingest is not configured. Local detections continue."

@@ -128,8 +128,10 @@ Examples (same on Windows, macOS, and Linux; Windows may omit sudo):
 			time.Sleep(time.Second)
 			if err := controlAgentService("start"); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: start sensor after enroll: %v\nrun: sudo edrctl start\n", err)
-			} else {
-				fmt.Println("sensor restarted; wait a few seconds then: sudo edrctl ui")
+				return nil
+			}
+			if err := waitIngestLive(45 * time.Second); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: ingest stream: %v\nrun: edrctl connect-stream\n", err)
 			}
 			return nil
 		},

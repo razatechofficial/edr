@@ -200,7 +200,15 @@ func NewWithFiles(configPath string) (*Agent, error) {
 				err.Error(),
 			)
 		}
-	} else if telEP != "" {
+	} else {
+		xdrclient.PersistIngestStatus(
+			xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
+			false,
+			"",
+			"device credentials required; enroll this PC first",
+		)
+	}
+	if a.xdrIngest == nil && telEP != "" {
 		qdir := filepath.Join(cfg.Agent.DataDir, "telemetry-queue")
 		qm, qerr := telemetryqueue.NewManager(qdir, telemetryqueue.EffectiveMaxBytes(cfg.XDR.SpoolMaxBytes))
 		if qerr != nil {

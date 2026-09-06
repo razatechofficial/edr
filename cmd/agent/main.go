@@ -329,20 +329,18 @@ func enableIngestIfEnrolled(cfgPath string, cfg config.Config) {
 		Dir:     xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
 		DataDir: cfg.Agent.DataDir,
 		Backend: cfg.XDR.SecureStorage,
+	}.WithExistingCredentials()
+	if !store.HasCredentials() {
+		return
 	}
 	st, err := store.Load()
 	if err != nil {
-		if !store.HasCredentials() {
-			return
-		}
-		st = xdrclient.State{IngestHosts: xdrclient.DefaultIngestHosts()}
-	}
-	if strings.TrimSpace(st.AgentID) == "" && len(st.IngestHosts) == 0 && !store.HasCredentials() {
-		return
+		st = xdrclient.State{IngestHosts: xdrclient.DefaultIngestHosts(), SecureStorage: store.BackendName()}
 	}
 	if len(st.IngestHosts) == 0 {
 		st.IngestHosts = xdrclient.DefaultIngestHosts()
 	}
+	st.SecureStorage = store.BackendName()
 	if err := xdrclient.EnableIngestFromEnrollment(cfgPath, st); err != nil {
 		fmt.Fprintf(os.Stderr, "enable ingest: %v\n", err)
 	}

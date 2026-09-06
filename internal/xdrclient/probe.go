@@ -27,9 +27,9 @@ type diskEnrollMeta struct {
 	CertNotAfter time.Time `json:"cert_not_after"`
 }
 
-// ProbeLocalEnrollment looks at enrollment.json and sealed cert files under
-// the agent data dir. A present-but-unreadable sidecar still counts as enrolled
-// (root writes 0600 files the GUI user cannot open).
+// ProbeLocalEnrollment looks at enrollment.json and device cert blobs.
+// An empty or ACL-locked xdr-tls folder is not enrollment — Windows MSI
+// creates that directory and then denies Users, which used to skip Enroll.
 func ProbeLocalEnrollment(configPath, dataDir string) LocalEnrollment {
 	var dirs []string
 	add := func(d string) {
@@ -88,27 +88,29 @@ func probeEnrollmentDir(dataDir string) LocalEnrollment {
 				return out
 			}
 		}
-		return LocalEnrollment{Enrolled: true}
 	} else if isDenied(err) {
-		return LocalEnrollment{Enrolled: true}
-	}
-	if _, err := os.Stat(path); err == nil || isDenied(err) {
-		return LocalEnrollment{Enrolled: true}
-	}
-	for _, name := range []string{"agent.crt.enc", "agent.key.enc", "agent.crt", "ingest.status", "ca-chain.pem"} {
-		p := filepath.Join(tls, name)
-		if _, err := os.Stat(p); err == nil || isDenied(err) {
+		// File exists but is unreadable (0600 SYSTEM). A denied directory
+		// Stat also fails — MSI creates empty xdr-tls then locks it, which
+		// must not skip Enroll.
+		if _, serr := os.Stat(path); serr == nil {
 			return LocalEnrollment{Enrolled: true}
 		}
 	}
-	if st, err := os.Stat(tls); err == nil && st.IsDir() {
-		if _, err := os.ReadDir(tls); isDenied(err) {
-			return LocalEnrollment{Enrolled: true}
-		}
-	} else if isDenied(err) {
+	if hasDeviceCertPair(tls) {
 		return LocalEnrollment{Enrolled: true}
 	}
 	return LocalEnrollment{}
+}
+
+func hasDeviceCertPair(tls string) bool {
+	cert := fileExists(tls, "agent.crt.dpapi") || fileExists(tls, "agent.crt.enc") || fileExists(tls, "agent.crt")
+	key := fileExists(tls, "agent.key.dpapi") || fileExists(tls, "agent.key.enc") || fileExists(tls, "agent.key")
+	return cert && key
+}
+
+func fileExists(dir, name string) bool {
+	st, err := os.Stat(filepath.Join(dir, name))
+	return err == nil && !st.IsDir()
 }
 
 func isDenied(err error) bool {
@@ -118,5 +120,6 @@ func isDenied(err error) bool {
 	if os.IsPermission(err) {
 		return true
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "permission denied")
+	return strings.Contains(strings.ToLower(err.Error()), "permission denied") ||
+		strings.Contains(strings.ToLower(err.Error()), "access is denied")
 }

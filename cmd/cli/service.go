@@ -30,9 +30,32 @@ func newConnectStreamCmd() *cobra.Command {
 			}
 			_ = controlAgentService("stop")
 			time.Sleep(600 * time.Millisecond)
-			return controlAgentService("start")
+			if err := controlAgentService("start"); err != nil {
+				return err
+			}
+			return waitIngestLive(45 * time.Second)
 		},
 	}
+}
+
+func waitIngestLive(d time.Duration) error {
+	deadline := time.Now().Add(d)
+	var last string
+	for time.Now().Before(deadline) {
+		st := collectOperatorStatus(false)
+		if st.IngestOK {
+			fmt.Println("ingest stream connected")
+			return nil
+		}
+		if f := strings.TrimSpace(st.IngestFault); f != "" && f != "ingest client not started" {
+			last = f
+		}
+		time.Sleep(800 * time.Millisecond)
+	}
+	if last == "" {
+		last = "ingest did not connect; enroll this PC if there is no device certificate"
+	}
+	return fmt.Errorf("%s", last)
 }
 
 func enableIngestFromLocalIdentity() error {

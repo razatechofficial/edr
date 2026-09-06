@@ -54,6 +54,9 @@ func TestProbeLocalEnrollmentSealedCert(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tls, "agent.crt.enc"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(tls, "agent.key.enc"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	got := ProbeLocalEnrollment("", dir)
 	if !got.Enrolled {
 		t.Fatal("sealed device cert should count as enrolled")
@@ -65,6 +68,22 @@ func TestProbeLocalEnrollmentEmpty(t *testing.T) {
 	got := ProbeLocalEnrollment(filepath.Join(dir, "missing.yaml"), dir)
 	if got.Enrolled {
 		t.Fatalf("empty data dir must not look enrolled: %#v", got)
+	}
+}
+
+func TestProbeLocalEnrollmentDeniedDirIsNotEnrolled(t *testing.T) {
+	dir := t.TempDir()
+	tls := filepath.Join(dir, "xdr-tls")
+	if err := os.MkdirAll(tls, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(tls, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(tls, 0o755) })
+	got := ProbeLocalEnrollment("", dir)
+	if got.Enrolled {
+		t.Fatalf("ACL-locked empty xdr-tls must not look enrolled: %#v", got)
 	}
 }
 
@@ -89,7 +108,7 @@ func TestProbeLocalEnrollmentIngestStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := ProbeLocalEnrollment("", dir)
-	if !got.Enrolled {
-		t.Fatal("ingest.status means the device already enrolled")
+	if got.Enrolled {
+		t.Fatal("ingest.status without a device cert must not look enrolled")
 	}
 }

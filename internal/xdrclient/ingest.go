@@ -314,8 +314,22 @@ func (c *IngestClient) ensureStream(ctx context.Context) error {
 	return lastErr
 }
 
+// Connect opens the ingest stream and sends one heartbeat so ingest.status
+// is written before the operator console polls.
+func (c *IngestClient) Connect(ctx context.Context) error {
+	if c == nil {
+		return fmt.Errorf("ingest client is nil")
+	}
+	if err := c.ensureStream(context.Background()); err != nil {
+		return err
+	}
+	return c.Send(ctx, c.heartbeatPayload())
+}
+
 func (c *IngestClient) dial(ctx context.Context, host string) (*grpc.ClientConn, telemetryv1.TelemetryService_StreamTelemetryClient, error) {
-	_ = ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var opts []grpc.DialOption
 	if c.insecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -338,6 +352,8 @@ func (c *IngestClient) dial(ctx context.Context, host string) (*grpc.ClientConn,
 		return nil, nil, err
 	}
 	client := telemetryv1.NewTelemetryServiceClient(conn)
+	// The bidi stream must outlive any dial/Connect timeout. Binding it to a
+	// 25s startup ctx canceled the session as soon as initXDR returned.
 	stream, err := client.StreamTelemetry(context.Background())
 	if err != nil {
 		_ = conn.Close()

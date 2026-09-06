@@ -309,7 +309,7 @@ func (c *console) updateDashAction(st operatorStatus) {
 	if needsOSGrants() {
 		c.dashAction.SetText("Grant Full Disk Access")
 		show = true
-	} else if !st.Enrolled {
+	} else if !st.Enrolled || ingestNeedsEnroll(st) {
 		c.dashAction.SetText("Enroll this device")
 		show = true
 	} else if !serviceHealthy(st.Service) {
@@ -348,7 +348,7 @@ func (c *console) onDashAction() {
 		c.show(uistate.Permissions)
 		return
 	}
-	if !c.last.Enrolled {
+	if !c.last.Enrolled || ingestNeedsEnroll(c.last) {
 		c.show(uistate.Enroll)
 		return
 	}
@@ -371,11 +371,20 @@ func (c *console) connectStream() {
 			c.setBusy(false)
 			st = mergeEnrollment(st, c.last)
 			c.last = st
-			if err != nil && !st.IngestConfigured {
+			if !st.IngestOK {
+				detail := strings.TrimSpace(st.IngestFault)
+				if detail == "" && err != nil {
+					detail = err.Error()
+				}
+				body := "Local detections continue. Enroll this PC if there is no device certificate."
+				low := strings.ToLower(detail)
+				if strings.Contains(low, "certificate") || strings.Contains(low, "enroll") || strings.Contains(low, "credentials") {
+					body = "This PC has no device certificate. Enroll with a new one-time token."
+				}
 				c.setDashFault(uiFault{
 					Title:  "Could not connect the stream",
-					Body:   "Allow Administrator if asked, then Connect stream again.",
-					Detail: firstLine(err.Error()),
+					Body:   body,
+					Detail: firstLine(detail),
 					Action: "OK",
 				})
 			} else {

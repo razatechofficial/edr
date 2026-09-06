@@ -97,8 +97,18 @@ func (a *Agent) initXDR() error {
 	ingest.SetPostureProvider(func() map[string]string {
 		return collector.FleetPostureLabels(a.cfg)
 	})
+	if err := xdrclient.EnsureTrustCA(ctx, res.Store, a.cfg.XDR.EnrollmentHost, a.cfg.XDR.InsecureSkipTLS); err != nil {
+		a.logger.Warn("xdr trust CA missing; ingest mTLS may fail", "error", err)
+	}
 	a.xdrIngest = ingest
 	a.telemetryRelay = forwarder.NewTelemetryRelayWithSender(ingest, qm, a.logger)
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer connectCancel()
+	if err := ingest.Connect(connectCtx); err != nil {
+		a.logger.Warn("xdr ingest did not connect on start; heartbeat will retry", "error", err)
+	} else {
+		a.logger.Info("xdr ingest stream connected")
+	}
 	a.logger.Info("xdr ingest telemetry relay configured",
 		"hosts", res.State.IngestHosts,
 		"queue_dir", qdir,
