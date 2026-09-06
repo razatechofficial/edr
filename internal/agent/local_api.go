@@ -85,20 +85,21 @@ func (a *Agent) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 	if a.advEngine != nil {
 		alerts = a.advEngine.Stats().DetectionsEmitted
 	}
+	cpu, memMB := sampleSelfResources()
 	body := map[string]any{
-		"status":            "running",
-		"version":           a.cfg.Agent.Version,
-		"uptime":            uptime.Round(time.Second).String(),
-		"started_at":        a.startedAt.UTC().Format(time.RFC3339),
-		"pid":               os.Getpid(),
-		"os":                runtime.GOOS,
-		"arch":              runtime.GOARCH,
-		"rules_count":       rules,
-		"cpu_percent":       0.0,
-		"memory_mb":         0.0,
-		"events_processed":  a.eventsProcessed.Load(),
-		"alerts_generated":  alerts,
-		"isolated":          false,
+		"status":           "running",
+		"version":          a.cfg.Agent.Version,
+		"uptime":           uptime.Round(time.Second).String(),
+		"started_at":       a.startedAt.UTC().Format(time.RFC3339),
+		"pid":              os.Getpid(),
+		"os":               runtime.GOOS,
+		"arch":             runtime.GOARCH,
+		"rules_count":      rules,
+		"cpu_percent":      cpu,
+		"memory_mb":        memMB,
+		"events_processed": a.eventsProcessed.Load(),
+		"alerts_generated": alerts,
+		"isolated":         false,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(body)

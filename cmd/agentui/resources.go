@@ -22,11 +22,22 @@ type resourceSnapshot struct {
 
 func sampleResources(st operatorStatus) resourceSnapshot {
 	cpu, used, total := sampleSystem()
-	agentCPU, agentMem := 0.0, 0.0
+	agentCPU, agentMem := st.CPUPercent, st.MemoryMB
+	if c, m, ok := platform.ReadRuntimeStatsResources(platform.DataDir()); ok {
+		if c > 0 {
+			agentCPU = c
+		}
+		if m > 0 {
+			agentMem = m
+		}
+	}
 	if c, m, _, ok := sampleAgentProcess(); ok {
-		agentCPU, agentMem = c, m
-	} else {
-		agentCPU, agentMem = st.CPUPercent, st.MemoryMB
+		if m > agentMem {
+			agentMem = m
+		}
+		if c > 0 {
+			agentCPU = c
+		}
 	}
 	if agentCPU < 0 {
 		agentCPU = 0

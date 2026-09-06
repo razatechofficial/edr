@@ -21,12 +21,17 @@ func (a *Agent) maybeWriteRuntimeStats() {
 	a.lastRuntimeStats = time.Now()
 	a.healthMu.Unlock()
 
+	cpu, memMB := sampleSelfResources()
 	st := struct {
-		EventsProcessed uint64 `json:"events_processed"`
-		AlertsGenerated uint64 `json:"alerts_generated,omitempty"`
-		UpdatedAt       string `json:"updated_at"`
+		EventsProcessed uint64  `json:"events_processed"`
+		AlertsGenerated uint64  `json:"alerts_generated,omitempty"`
+		CPUPercent      float64 `json:"cpu_percent,omitempty"`
+		MemoryMB        float64 `json:"memory_mb,omitempty"`
+		UpdatedAt       string  `json:"updated_at"`
 	}{
 		EventsProcessed: a.eventsProcessed.Load(),
+		CPUPercent:      cpu,
+		MemoryMB:        memMB,
 		UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
 	}
 	if a.advEngine != nil {

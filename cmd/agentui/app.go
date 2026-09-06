@@ -226,7 +226,7 @@ func runDashboard() error {
 			n++
 			dashLive := false
 			fyne.DoAndWait(func() {
-				dashLive = c.screen == uistate.Dash && c.flyoutOpen
+				dashLive = c.screen == uistate.Dash
 			})
 			if !dashLive && n%8 != 0 {
 				continue

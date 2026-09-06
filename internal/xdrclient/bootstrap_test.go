@@ -3,6 +3,7 @@ package xdrclient_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -123,8 +124,12 @@ func TestEnableIngestFromEnrollmentCreatesSection(t *testing.T) {
 	if cfg.XDR.EnrollmentHost != xdrclient.DefaultEnrollmentHost {
 		t.Fatalf("enrollment_host=%s", cfg.XDR.EnrollmentHost)
 	}
-	if cfg.XDR.SecureStorage != "file" {
-		t.Fatalf("secure_storage=%s want file", cfg.XDR.SecureStorage)
+	wantStore := "file"
+	if runtime.GOOS == "windows" {
+		wantStore = "dpapi"
+	}
+	if cfg.XDR.SecureStorage != wantStore {
+		t.Fatalf("secure_storage=%s want %s", cfg.XDR.SecureStorage, wantStore)
 	}
 	if len(cfg.XDR.IngestHosts) != 1 || cfg.XDR.IngestHosts[0] != "ingest.xdr.averox.com:443" {
 		t.Fatalf("ingest_hosts=%v", cfg.XDR.IngestHosts)

@@ -315,8 +315,8 @@ func (c *console) updateDashAction(st operatorStatus) {
 	} else if !serviceHealthy(st.Service) {
 		c.dashAction.SetText("Start " + productName)
 		show = true
-	} else if !st.IngestConfigured || !st.IngestEnv || !st.IngestOK {
-		if st.IngestConfigured && st.IngestEnv {
+	} else if !st.IngestConfigured || !st.IngestOK {
+		if st.IngestConfigured {
 			c.dashAction.SetText("Retry stream")
 		} else {
 			c.dashAction.SetText("Connect stream")
@@ -352,7 +352,7 @@ func (c *console) onDashAction() {
 		c.show(uistate.Enroll)
 		return
 	}
-	if serviceHealthy(c.last.Service) && (!c.last.IngestConfigured || !c.last.IngestEnv || !c.last.IngestOK) {
+	if serviceHealthy(c.last.Service) && (!c.last.IngestConfigured || !c.last.IngestOK) {
 		c.connectStream()
 		return
 	}

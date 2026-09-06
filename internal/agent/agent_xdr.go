@@ -33,6 +33,13 @@ func (a *Agent) initXDR() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	store := xdrclient.Store{
+		Dir:     xdrclient.ResolveCertDir(a.cfg.XDR, a.cfg.Agent.DataDir),
+		DataDir: a.cfg.Agent.DataDir,
+		Backend: a.cfg.XDR.SecureStorage,
+	}.WithExistingCredentials()
+	a.cfg.XDR.SecureStorage = store.BackendName()
+
 	res, err := xdrclient.EnsureEnrolled(ctx, xdrclient.EnrollOptions{
 		Config:        a.cfg.XDR,
 		AgentID:       a.cfg.Agent.ID,

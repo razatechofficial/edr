@@ -10,7 +10,7 @@ import (
 func decorateHealth(st operatorStatus) (uistate.Health, uistate.Lamps) {
 	svcOK := serviceHealthy(st.Service)
 	queued := st.SpoolBytes >= 1<<20
-	ingestUp := st.IngestConfigured && st.IngestEnv && st.IngestOK && !queued
+	ingestUp := st.IngestConfigured && st.IngestOK && !queued
 	k := uistate.ClassifyHealth(st.Enrolled, svcOK, ingestUp, st.Isolated)
 	lamps := uistate.HealthCopy(k)
 	if needsOSGrants() {
@@ -33,7 +33,7 @@ func decorateHealth(st operatorStatus) (uistate.Health, uistate.Lamps) {
 			k = uistate.Degraded
 			lamps.Title = "On this device"
 		}
-	} else if svcOK && st.IngestConfigured && st.IngestEnv && !st.IngestOK {
+	} else if svcOK && st.IngestConfigured && !st.IngestOK {
 		lamps.Title = "Reconnecting"
 		lamps.Stream = "Retrying"
 		lamps.Banner = ingestIdleBanner(st.IngestConfigured, st.IngestEnv, st.IngestFault)

@@ -44,14 +44,20 @@ func enableIngestFromLocalIdentity() error {
 		Dir:     xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
 		DataDir: cfg.Agent.DataDir,
 		Backend: cfg.XDR.SecureStorage,
-	}
+	}.WithExistingCredentials()
 	st, err := store.Load()
-	if err != nil {
-		st = xdrclient.State{}
+	if err != nil || !store.HasCredentials() {
+		detail := "no device certificate; enroll this PC first"
+		if err != nil {
+			detail = err.Error()
+		}
+		xdrclient.PersistIngestStatus(store.Dir, false, "", detail)
+		return fmt.Errorf("no device certificate; enroll this PC first")
 	}
 	if len(st.IngestHosts) == 0 {
 		st.IngestHosts = xdrclient.DefaultIngestHosts()
 	}
+	st.SecureStorage = store.BackendName()
 	if err := xdrclient.EnableIngestFromEnrollment(configFile, st); err != nil {
 		return fmt.Errorf("enable ingest: %w", err)
 	}

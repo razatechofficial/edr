@@ -251,11 +251,49 @@ func (s Store) LoadCAChainPEM() []string {
 
 // HasCredentials reports whether key+cert exist in the secure store.
 func (s Store) HasCredentials() bool {
-	ks, err := s.openKS()
-	if err != nil {
-		return false
+	return s.hasOnBackend(s.Backend)
+}
+
+func (s Store) hasOnBackend(backend string) bool {
+	ks, err := keystore.New(keystore.Options{Backend: backend, Dir: s.Dir, DataDir: s.DataDir})
+	return err == nil && ks.Has()
+}
+
+// HasAnyCredentials is true when any supported backend has a device cert.
+func (s Store) HasAnyCredentials() bool {
+	if s.HasCredentials() {
+		return true
 	}
-	return ks.Has()
+	_, ok := s.existingBackend()
+	return ok
+}
+
+// WithExistingCredentials points the store at the backend that actually holds
+// the device cert (DPAPI vs file). Config can say "file" after a Windows enroll.
+func (s Store) WithExistingCredentials() Store {
+	if b, ok := s.existingBackend(); ok {
+		s.Backend = b
+	}
+	return s
+}
+
+func (s Store) existingBackend() (string, bool) {
+	order := []string{s.Backend, "auto", "dpapi", "file", "keychain"}
+	seen := map[string]struct{}{}
+	for _, b := range order {
+		b = strings.ToLower(strings.TrimSpace(b))
+		if b == "" {
+			continue
+		}
+		if _, ok := seen[b]; ok {
+			continue
+		}
+		seen[b] = struct{}{}
+		if s.hasOnBackend(b) {
+			return b, true
+		}
+	}
+	return s.Backend, false
 }
 
 func (s Store) ingestSeqPath() string { return filepath.Join(s.Dir, ingestSeqFileName) }

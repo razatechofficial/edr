@@ -83,9 +83,15 @@ func sampleAgentProcess() (cpu, memMB float64, uptime string, ok bool) {
 	}
 
 	agentCPUMu.Lock()
-	defer agentCPUMu.Unlock()
 	now := time.Now()
-	if !lastCPUAt.IsZero() && ticks >= lastCPUTicks {
+	if lastCPUAt.IsZero() {
+		lastCPUAt = now
+		lastCPUTicks = ticks
+		agentCPUMu.Unlock()
+		time.Sleep(200 * time.Millisecond)
+		return sampleAgentProcess()
+	}
+	if ticks >= lastCPUTicks {
 		wall := now.Sub(lastCPUAt).Seconds()
 		if wall > 0.05 {
 			delta := float64(ticks-lastCPUTicks) / 1e7 // FILETIME 100ns → seconds
@@ -104,6 +110,7 @@ func sampleAgentProcess() (cpu, memMB float64, uptime string, ok bool) {
 	}
 	lastCPUAt = now
 	lastCPUTicks = ticks
+	agentCPUMu.Unlock()
 	return cpu, memMB, uptime, true
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -195,7 +196,7 @@ func ShouldInitXDR(cfg config.XDRConfig, dataDir string) bool {
 		DataDir: dataDir,
 		Backend: cfg.SecureStorage,
 	}
-	return store.HasCredentials()
+	return store.HasAnyCredentials()
 }
 
 // PatchXDRConfigFile enables XDR settings in agent.yaml without embedding the token.
@@ -263,12 +264,7 @@ func EnableIngestFromEnrollment(path string, st State) error {
 	if len(ingest) == 0 {
 		ingest = DefaultIngestHosts()
 	}
-	backend := strings.TrimSpace(st.SecureStorage)
-	switch backend {
-	case "", "auto", "keychain":
-		// LaunchDaemon / SYSTEM cannot read a user login Keychain.
-		backend = "file"
-	}
+	backend := daemonSecureStorage(st.SecureStorage)
 	setMapBool(xdr, "enabled", true)
 	setMapString(xdr, "enrollment_host", host)
 	setMapStringList(xdr, "ingest_hosts", ingest)
@@ -278,6 +274,20 @@ func EnableIngestFromEnrollment(path string, st State) error {
 		return err
 	}
 	return WriteXDRRuntimeEnv(filepath.Dir(path), true, backend)
+}
+
+// daemonSecureStorage is the backend the machine-wide sensor can actually open.
+// Windows enroll writes DPAPI blobs; pinning "file" (the macOS LaunchDaemon
+// path) made Retry stream rewrite config.yml and left ingest without a cert.
+func daemonSecureStorage(name string) string {
+	b := strings.ToLower(strings.TrimSpace(name))
+	if runtime.GOOS == "windows" {
+		if b == "file" {
+			return "file"
+		}
+		return "dpapi"
+	}
+	return "file"
 }
 
 // WriteXDRRuntimeEnv merges XDR_ENABLED / XDR_SECURE_STORAGE into configDir/.env

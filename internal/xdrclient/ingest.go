@@ -274,8 +274,10 @@ func (c *IngestClient) ensureStream(ctx context.Context) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("no ingest hosts")
 	}
-	if !c.insecure && !c.store.HasCredentials() {
-		return fmt.Errorf("device credentials required for ingest mTLS")
+	if !c.insecure && !c.store.HasAnyCredentials() {
+		err := fmt.Errorf("device credentials required for ingest mTLS")
+		c.persistStreamStatus(false, "", err.Error())
+		return err
 	}
 	var lastErr error
 	for i := 0; i < len(hosts); i++ {
@@ -299,12 +301,14 @@ func (c *IngestClient) ensureStream(ctx context.Context) error {
 		c.lastHost = host
 		c.mu.Unlock()
 		c.log.Info("ingest stream connected", "host", host)
+		c.persistStreamStatus(true, host, "")
 		go c.recvLoop()
 		return nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("all ingest hosts failed")
 	}
+	c.persistStreamStatus(false, "", lastErr.Error())
 	return lastErr
 }
 
