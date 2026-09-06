@@ -250,6 +250,30 @@ func restrictSensitiveTree(dir string) {
 	_ = cmd.Run()
 }
 
+// restrictOperatorTree is SYSTEM+Admin write, Users read — status files the
+// unelevated console must see (runtime_stats, ingest.status, logs).
+func restrictOperatorTree(dir string) {
+	if dir == "" {
+		return
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	cmd := exec.Command("icacls", dir,
+		"/inheritance:r",
+		"/grant:r", "SYSTEM:(OI)(CI)F",
+		"/grant:r", "Administrators:(OI)(CI)F",
+		"/grant:r", "*S-1-5-32-545:(OI)(CI)R",
+	)
+	hideConsole(cmd)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	_ = cmd.Run()
+}
+
+func publishOperatorStatusDirs(dataDir string) {
+	restrictOperatorTree(dataDir)
+	restrictOperatorTree(filepath.Join(dataDir, "logs"))
+}
+
 func hardenServiceInstallDirACL(dir string) error {
 	if dir == "" || dir == "." {
 		return fmt.Errorf("empty install dir")

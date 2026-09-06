@@ -86,6 +86,10 @@ func (a *Agent) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 		alerts = a.advEngine.Stats().DetectionsEmitted
 	}
 	cpu, memMB := sampleSelfResources()
+	ingestOK, ingestHost, ingestFault := false, "", "ingest client not started"
+	if a.xdrIngest != nil {
+		ingestOK, ingestHost, ingestFault = a.xdrIngest.Status()
+	}
 	body := map[string]any{
 		"status":           "running",
 		"version":          a.cfg.Agent.Version,
@@ -100,6 +104,9 @@ func (a *Agent) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 		"events_processed": a.eventsProcessed.Load(),
 		"alerts_generated": alerts,
 		"isolated":         false,
+		"ingest_ok":        ingestOK,
+		"ingest_host":      ingestHost,
+		"ingest_fault":     ingestFault,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(body)

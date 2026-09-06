@@ -58,7 +58,7 @@ func TestRamBreakdown(t *testing.T) {
 		FreeMem:    8 << 30,
 	}
 	got := ramBreakdown(res)
-	if got != "other 24 GB · total 32 GB" {
+	if got != "sensor · other 24 GB · total 32 GB" {
 		t.Fatalf("got %q", got)
 	}
 	v, u := formatAgentRAM(140)
@@ -69,11 +69,11 @@ func TestRamBreakdown(t *testing.T) {
 
 func TestCpuBreakdown(t *testing.T) {
 	got := cpuBreakdown(resourceSnapshot{AgentCPU: 0.6, OtherCPU: 20.94, SysCPU: 21})
-	if got != "system 21% · idle 79%" {
+	if got != "sensor · system 21% · idle 79%" {
 		t.Fatalf("rounded-equal = %q", got)
 	}
 	got = cpuBreakdown(resourceSnapshot{AgentCPU: 8, OtherCPU: 16, SysCPU: 24})
-	if got != "other 16% · system 24%" {
+	if got != "sensor · other 16% · system 24%" {
 		t.Fatalf("distinct = %q", got)
 	}
 }

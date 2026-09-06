@@ -175,10 +175,10 @@ func installService() error {
 	}
 	_ = s.SetRecoveryActions(actions, 86400)
 
-	restrictSensitiveTree(WindowsDataRoot())
+	restrictOperatorTree(WindowsDataRoot())
 	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "rules"))
 	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "models"))
-	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "logs"))
+	restrictOperatorTree(filepath.Join(WindowsDataRoot(), "logs"))
 	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "xdr-tls"))
 
 	_ = eventlog.Remove(windowsServiceName)

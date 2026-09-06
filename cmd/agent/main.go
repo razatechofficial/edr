@@ -238,6 +238,7 @@ func runAgentCore(ctx context.Context, cfgPath string) (err error) {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	publishOperatorStatusDirs(cfg.Agent.DataDir)
 	if err := xdrclient.InstallStagedIdentity(cfgPath, cfg.XDR, cfg.Agent.DataDir); err != nil {
 		fmt.Fprintf(os.Stderr, "staged identity: %v\n", err)
 	}

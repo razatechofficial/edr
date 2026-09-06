@@ -76,7 +76,7 @@ func ramBreakdown(res resourceSnapshot) string {
 	if res.SysMemTot == 0 {
 		return "—"
 	}
-	return "other " + formatMemShort(res.OtherMem) + " · total " + formatMemShort(res.SysMemTot)
+	return "sensor · other " + formatMemShort(res.OtherMem) + " · total " + formatMemShort(res.SysMemTot)
 }
 
 func formatCPUPct(v float64) string {
@@ -99,9 +99,9 @@ func cpuBreakdown(res resourceSnapshot) string {
 		if idle < 0 {
 			idle = 0
 		}
-		return "system " + sys + " · idle " + formatCPUPct(idle)
+		return "sensor · system " + sys + " · idle " + formatCPUPct(idle)
 	}
-	return "other " + other + " · system " + sys
+	return "sensor · other " + other + " · system " + sys
 }
 
 func rulesLine(uptime string, rules int) string {

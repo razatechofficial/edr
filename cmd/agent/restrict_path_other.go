@@ -10,3 +10,5 @@ func restrictSensitivePath(path string) {
 	}
 	_ = os.Chmod(path, 0o600)
 }
+
+func publishOperatorStatusDirs(string) {}

@@ -37,14 +37,16 @@ type IngestClient struct {
 	onCommand CommandHandler
 	posture   PostureProvider
 
-	mu       sync.Mutex
-	conn     *grpc.ClientConn
-	stream   telemetryv1.TelemetryService_StreamTelemetryClient
-	seq      atomic.Int64
-	hostIdx  int
-	lastHost string
-	pending  map[int64]chan *telemetryv1.TelemetryAck
-	closed   atomic.Bool
+	mu         sync.Mutex
+	conn       *grpc.ClientConn
+	stream     telemetryv1.TelemetryService_StreamTelemetryClient
+	seq        atomic.Int64
+	hostIdx    int
+	lastHost   string
+	lastOK     bool
+	lastDetail string
+	pending    map[int64]chan *telemetryv1.TelemetryAck
+	closed     atomic.Bool
 }
 
 // NewIngestClient builds a client. Call Connect before Send, or Send will connect lazily.
@@ -477,16 +479,42 @@ func (c *IngestClient) persistStreamStatus(ok bool, host, detail string) {
 	if c == nil {
 		return
 	}
-	PersistIngestStatus(c.store.Dir, ok, host, detail)
+	c.mu.Lock()
+	c.lastOK = ok
+	if host != "" {
+		c.lastHost = host
+	}
+	c.lastDetail = detail
+	certDir := c.store.Dir
+	dataDir := c.store.DataDir
+	c.mu.Unlock()
+	PersistIngestStatus(certDir, ok, host, detail)
+	if dataDir != "" && dataDir != certDir {
+		PersistIngestStatus(dataDir, ok, host, detail)
+	}
 }
 
-// PersistIngestStatus writes xdr-tls/ingest.status for the console (ok or the last fault).
-func PersistIngestStatus(certDir string, ok bool, host, detail string) {
-	certDir = strings.TrimSpace(certDir)
-	if certDir == "" {
+// Status is the live ingest session (or the last persist). Used by the local
+// control API so an unelevated console can see Live without reading xdr-tls.
+func (c *IngestClient) Status() (ok bool, host, detail string) {
+	if c == nil {
+		return false, "", "ingest client not started"
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stream != nil {
+		return true, c.lastHost, ""
+	}
+	return c.lastOK, c.lastHost, c.lastDetail
+}
+
+// PersistIngestStatus writes ingest.status for the console (ok or the last fault).
+func PersistIngestStatus(dir string, ok bool, host, detail string) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
 		return
 	}
-	_ = os.MkdirAll(certDir, 0o755)
+	_ = os.MkdirAll(dir, 0o755)
 	st := map[string]any{
 		"ok":         ok,
 		"host":       host,
@@ -499,5 +527,15 @@ func PersistIngestStatus(certDir string, ok bool, host, detail string) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(certDir, ingestStatusFileName), b, 0o644)
+	path := filepath.Join(dir, ingestStatusFileName)
+	_ = os.WriteFile(path, b, 0o644)
+	grantUsersRead(path)
+	if strings.EqualFold(filepath.Base(dir), "xdr-tls") {
+		parent := filepath.Dir(dir)
+		if parent != "" && parent != dir {
+			p := filepath.Join(parent, ingestStatusFileName)
+			_ = os.WriteFile(p, b, 0o644)
+			grantUsersRead(p)
+		}
+	}
 }

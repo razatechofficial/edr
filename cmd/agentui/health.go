@@ -61,10 +61,18 @@ func ingestIdleBanner(configured, env bool, fault string) string {
 	}
 	f := strings.ToLower(fault)
 	switch {
+	case strings.Contains(f, "certificate") || strings.Contains(f, "credentials") || strings.Contains(f, "enroll"):
+		return "No device certificate. Enroll this PC with a new token."
 	case strings.Contains(f, "502") || strings.Contains(f, "bad gateway"):
-		return "Cloud ingest is unavailable (502). The sensor is running on this Mac."
+		return "Cloud ingest is unavailable (502). Local detections continue."
 	case strings.Contains(f, "unavailable"):
 		return "Cloud ingest is unavailable. Local detections continue."
+	case strings.TrimSpace(fault) != "":
+		msg := strings.TrimSpace(fault)
+		if len(msg) > 120 {
+			msg = msg[:120] + "…"
+		}
+		return "Ingest is not connected: " + msg
 	default:
 		return "Ingest is not connected. Local detections continue."
 	}

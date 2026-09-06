@@ -114,7 +114,7 @@ func collectOperatorStatus(probeHosts bool) operatorStatus {
 	st.SpoolBytes = dirSize(filepath.Join(peekDataDir(), "telemetry-queue"))
 	st.Blocks = countFiles(filepath.Join(peekDataDir(), "quarantine"))
 	st.IngestConfigured = xdrIngestConfigured()
-	st.IngestEnv = xdrRuntimeEnvEnabled()
+	st.IngestEnv = xdrRuntimeEnvEnabled() || st.IngestConfigured
 	st.IngestOK = ingestStreamLive()
 	st.IngestFault = ingestStreamFault()
 
@@ -122,15 +122,18 @@ func collectOperatorStatus(probeHosts bool) operatorStatus {
 	if err == nil {
 		st.ControlAPI = "ok"
 		var status struct {
-			Status     string  `json:"status"`
-			Version    string  `json:"version"`
-			Uptime     string  `json:"uptime"`
-			AlertsGen  uint64  `json:"alerts_generated"`
-			Isolated   bool    `json:"isolated"`
-			CPUPercent float64 `json:"cpu_percent"`
-			MemoryMB   float64 `json:"memory_mb"`
-			EventsProc uint64  `json:"events_processed"`
-			RulesCount int     `json:"rules_count"`
+			Status      string  `json:"status"`
+			Version     string  `json:"version"`
+			Uptime      string  `json:"uptime"`
+			AlertsGen   uint64  `json:"alerts_generated"`
+			Isolated    bool    `json:"isolated"`
+			CPUPercent  float64 `json:"cpu_percent"`
+			MemoryMB    float64 `json:"memory_mb"`
+			EventsProc  uint64  `json:"events_processed"`
+			RulesCount  int     `json:"rules_count"`
+			IngestOK    bool    `json:"ingest_ok"`
+			IngestHost  string  `json:"ingest_host"`
+			IngestFault string  `json:"ingest_fault"`
 		}
 		if json.Unmarshal(body, &status) == nil {
 			st.Runtime = status.Status
@@ -142,6 +145,15 @@ func collectOperatorStatus(probeHosts bool) operatorStatus {
 			st.MemoryMB = status.MemoryMB
 			st.EventsProc = status.EventsProc
 			st.RulesCount = status.RulesCount
+			if status.IngestOK {
+				st.IngestOK = true
+			}
+			if status.IngestFault != "" {
+				st.IngestFault = status.IngestFault
+			}
+			if status.IngestHost != "" && st.Ingest == "" {
+				st.Ingest = status.IngestHost
+			}
 		}
 	}
 	if st.EventsProc == 0 {
@@ -441,15 +453,22 @@ type ingestStatusFile struct {
 }
 
 func readIngestStatus() (ingestStatusFile, bool) {
-	raw, err := os.ReadFile(filepath.Join(peekDataDir(), "xdr-tls", "ingest.status"))
-	if err != nil {
-		return ingestStatusFile{}, false
+	data := peekDataDir()
+	for _, p := range []string{
+		filepath.Join(data, "ingest.status"),
+		filepath.Join(data, "xdr-tls", "ingest.status"),
+	} {
+		raw, err := os.ReadFile(p)
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		var st ingestStatusFile
+		if json.Unmarshal(raw, &st) != nil {
+			continue
+		}
+		return st, true
 	}
-	var st ingestStatusFile
-	if json.Unmarshal(raw, &st) != nil {
-		return ingestStatusFile{}, false
-	}
-	return st, true
+	return ingestStatusFile{}, false
 }
 
 func ingestReachable(ingestCSV string) bool {
