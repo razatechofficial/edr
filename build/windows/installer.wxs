@@ -218,12 +218,11 @@
                        Value="[INSTALLFOLDER]"
                        KeyPath="yes"/>
       </Component>
-      <Component Id="cmpConfigYml" Guid="*" Directory="DATAROOT" Win64="yes">
+      <Component Id="cmpConfigYml" Guid="*" Directory="DATAROOT" Win64="yes" NeverOverwrite="yes">
         <File Id="ConfigFile"
               Source="$(var.EdrConfigYml)"
               Name="config.yml"
-              KeyPath="yes"
-              NeverOverwrite="yes"/>
+              KeyPath="yes"/>
         <CreateFolder/>
       </Component>
       <Component Id="cmpConfigHardenedYml" Guid="*" Directory="DATAROOT" Win64="yes">
