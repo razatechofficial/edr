@@ -15,10 +15,7 @@ import (
 
 const processQueryLimitedInformation = 0x1000
 
-var (
-	modkernel32                 = windows.NewLazySystemDLL("kernel32.dll")
-	procK32GetProcessMemoryInfo = modkernel32.NewProc("K32GetProcessMemoryInfo")
-)
+var procK32GetProcessMemoryInfo = windows.NewLazySystemDLL("kernel32.dll").NewProc("K32GetProcessMemoryInfo")
 
 type processMemoryCounters struct {
 	CB                         uint32
@@ -34,7 +31,7 @@ type processMemoryCounters struct {
 }
 
 var (
-	cpuMu        sync.Mutex
+	agentCPUMu   sync.Mutex
 	lastCPUAt    time.Time
 	lastCPUTicks uint64
 )
@@ -85,8 +82,8 @@ func sampleAgentProcess() (cpu, memMB float64, uptime string, ok bool) {
 		uptime = processStartUptime(time.Unix(0, created.Nanoseconds()))
 	}
 
-	cpuMu.Lock()
-	defer cpuMu.Unlock()
+	agentCPUMu.Lock()
+	defer agentCPUMu.Unlock()
 	now := time.Now()
 	if !lastCPUAt.IsZero() && ticks >= lastCPUTicks {
 		wall := now.Sub(lastCPUAt).Seconds()
