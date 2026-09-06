@@ -231,8 +231,8 @@ func shellRunAs(exe string, args []string, show, wait bool) error {
 		return nil
 	}
 	defer windows.CloseHandle(info.HProcess)
-	wait, _ := windows.WaitForSingleObject(info.HProcess, 45000)
-	if wait == 0x00000102 { // WAIT_TIMEOUT
+	event, _ := windows.WaitForSingleObject(info.HProcess, 45000)
+	if event == 0x00000102 { // WAIT_TIMEOUT
 		return fmt.Errorf("Administrator approval timed out. Allow the prompt, then Start again.")
 	}
 	var code uint32
