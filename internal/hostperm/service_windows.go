@@ -162,17 +162,17 @@ func defaultRecoveryActions() []mgr.RecoveryAction {
 }
 
 // StartSensorService asks SCM to start EDRAgent. Already running is success.
+// Open with START+QUERY only. SERVICE_ALL_ACCESS fails when the service DACL
+// denies STOP/DELETE to Everyone (that deny applies to Administrators too).
 func StartSensorService() error {
-	m, err := mgr.Connect()
+	s, closer, err := openEDRServiceForStart()
 	if err != nil {
-		return startWithSC()
+		if scErr := startWithSC(); scErr == nil {
+			return nil
+		}
+		return fmt.Errorf("cannot start EDRAgent: %w", err)
 	}
-	defer m.Disconnect()
-	s, err := m.OpenService(windowsServiceName)
-	if err != nil {
-		return fmt.Errorf("EDRAgent is not registered: %w", err)
-	}
-	defer s.Close()
+	defer closer()
 	if st, qerr := s.Query(); qerr == nil {
 		switch st.State {
 		case svc.Running, svc.StartPending, svc.ContinuePending:
@@ -186,9 +186,34 @@ func StartSensorService() error {
 			strings.Contains(msg, "already started") {
 			return nil
 		}
+		if scErr := startWithSC(); scErr == nil {
+			return nil
+		}
 		return err
 	}
 	return nil
+}
+
+func openEDRServiceForStart() (*mgr.Service, func(), error) {
+	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
+	if err != nil {
+		return nil, nil, err
+	}
+	name, err := windows.UTF16PtrFromString(windowsServiceName)
+	if err != nil {
+		_ = windows.CloseServiceHandle(scm)
+		return nil, nil, err
+	}
+	const startRights = windows.SERVICE_START | windows.SERVICE_QUERY_STATUS | windows.SERVICE_QUERY_CONFIG
+	sh, err := windows.OpenService(scm, name, startRights)
+	if err != nil {
+		_ = windows.CloseServiceHandle(scm)
+		return nil, nil, err
+	}
+	return &mgr.Service{Name: windowsServiceName, Handle: sh}, func() {
+		_ = windows.CloseServiceHandle(sh)
+		_ = windows.CloseServiceHandle(scm)
+	}, nil
 }
 
 func startWithSC() error {

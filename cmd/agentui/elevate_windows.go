@@ -77,8 +77,8 @@ func runEdrctlPrivileged(args ...string) (string, error) {
 }
 
 func startSensorServicePrivileged() error {
-	if processIsAdmin() {
-		return hostperm.StartSensorService()
+	if err := hostperm.StartSensorService(); err == nil {
+		return nil
 	}
 	sys := filepath.Join(os.Getenv("SystemRoot"), "System32", "sc.exe")
 	if os.Getenv("SystemRoot") == "" {
@@ -89,7 +89,10 @@ func startSensorServicePrivileged() error {
 		if strings.Contains(msg, "already") || strings.Contains(msg, "1056") {
 			return nil
 		}
-		return err
+		if ierr := hostperm.StartSensorService(); ierr != nil {
+			return err
+		}
+		return nil
 	}
 	return nil
 }

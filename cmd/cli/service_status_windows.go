@@ -3,21 +3,16 @@
 package main
 
 import (
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
-	"golang.org/x/sys/windows/svc/mgr"
 )
 
 func windowsServiceRuntimeStatus() string {
-	m, err := mgr.Connect()
-	if err != nil {
-		return "unknown"
-	}
-	defer m.Disconnect()
-	s, err := m.OpenService("EDRAgent")
+	s, closer, err := openEDRAgent(windows.SERVICE_QUERY_STATUS)
 	if err != nil {
 		return "not installed"
 	}
-	defer s.Close()
+	defer closer()
 	st, err := s.Query()
 	if err != nil {
 		return "unknown"
