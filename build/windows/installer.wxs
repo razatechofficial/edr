@@ -100,6 +100,7 @@
       <ComponentGroupRef Id="ProductComponents"/>
       <ComponentGroupRef Id="RulesComponents"/>
       <ComponentGroupRef Id="ModelsComponents"/>
+      <ComponentGroupRef Id="MesaDllComponents"/>
     </Feature>
 
     <InstallExecuteSequence>

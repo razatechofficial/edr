@@ -282,9 +282,6 @@ $mesaLines += @(
 $mesaLines += $groupRefs
 $mesaLines += @(
     '    </ComponentGroup>'
-    '    <Feature Id="ProductFeature" Level="1">'
-    '      <ComponentGroupRef Id="MesaDllComponents"/>'
-    '    </Feature>'
     '  </Fragment>'
     '</Wix>'
 )
@@ -326,7 +323,7 @@ if ($yaraDlls.Count -gt 0) {
     $yaraLines += $groupRefs
     $yaraLines += @(
         '    </ComponentGroup>'
-        '    <Feature Id="ProductFeature" Level="1">'
+        '    <Feature Id="YaraDllFeature" Level="1">'
         '      <ComponentGroupRef Id="YaraDllComponents"/>'
         '    </Feature>'
         '  </Fragment>'
