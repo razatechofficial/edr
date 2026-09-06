@@ -95,9 +95,10 @@ func applyLocalEnrollment(st *operatorStatus) {
 			st.CertExpiry = hint.CertExpiry
 		}
 	}
-	// Live ingest or a running sensor with ingest configured means this host
-	// already registered — do not send the operator back to Enroll.
-	if st.IngestOK || (st.IngestConfigured && serviceHealthy(st.Service)) {
+	// Only a live ingest session proves enrollment when xdr-tls is unreadable.
+	// Ingest YAML + a running service is not enough: MSI/upgrade can wipe
+	// xdr-tls and leave XDR_ENABLED=true, which hid a missing device cert.
+	if st.IngestOK {
 		st.Enrolled = true
 	}
 	if serviceLooksMissing(st.Service) && hostperm.SensorRegistered() {

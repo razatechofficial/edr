@@ -182,6 +182,9 @@ func SensorRuntimeStatus() string {
 	}
 	switch st.State {
 	case svc.Running:
+		if !processStillActive(st.ProcessId) {
+			return "stopped"
+		}
 		return "running"
 	case svc.StartPending, svc.ContinuePending:
 		return "starting"
@@ -192,6 +195,37 @@ func SensorRuntimeStatus() string {
 	default:
 		return "installed"
 	}
+}
+
+// SensorProcessAlive is true when SCM reports a live edr-agent.exe PID.
+func SensorProcessAlive() bool {
+	s, closer, err := openEDRService()
+	if err != nil {
+		return false
+	}
+	defer closer()
+	st, err := s.Query()
+	if err != nil {
+		return false
+	}
+	return (st.State == svc.Running || st.State == svc.StartPending || st.State == svc.ContinuePending) &&
+		processStillActive(st.ProcessId)
+}
+
+func processStillActive(pid uint32) bool {
+	if pid == 0 {
+		return false
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	var code uint32
+	if err := windows.GetExitCodeProcess(h, &code); err != nil {
+		return false
+	}
+	return code == 259 // STILL_ACTIVE
 }
 
 // SensorPID is the SCM process id for a running EDRAgent, or 0.
@@ -224,7 +258,12 @@ func StartSensorService() error {
 	if st, qerr := s.Query(); qerr == nil {
 		switch st.State {
 		case svc.Running, svc.StartPending, svc.ContinuePending:
-			return nil
+			if processStillActive(st.ProcessId) {
+				return nil
+			}
+			// taskkill leaves SCM in RUNNING with a dead PID; StartService
+			// then returns 1056 and the sensor never comes back.
+			return recycleDeadSensor()
 		}
 	}
 	if err := s.Start(); err != nil {
@@ -232,7 +271,10 @@ func StartSensorService() error {
 		if errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) ||
 			strings.Contains(msg, "already running") ||
 			strings.Contains(msg, "already started") {
-			return nil
+			if SensorProcessAlive() {
+				return nil
+			}
+			return recycleDeadSensor()
 		}
 		if scErr := startWithSC(); scErr == nil {
 			return nil
@@ -240,6 +282,40 @@ func StartSensorService() error {
 		return err
 	}
 	return nil
+}
+
+func recycleDeadSensor() error {
+	resetServiceStartDACL()
+	stop := exec.Command(scExe(), "stop", windowsServiceName)
+	stop.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	_ = stop.Run()
+	deadline := time.Now().Add(12 * time.Second)
+	for time.Now().Before(deadline) {
+		s, closer, err := openEDRService()
+		if err != nil {
+			break
+		}
+		st, qerr := s.Query()
+		closer()
+		if qerr == nil && st.State == svc.Stopped {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if err := startWithSC(); err != nil {
+		return fmt.Errorf("EDRAgent process was dead; recycle failed: %w", err)
+	}
+	deadline = time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if SensorProcessAlive() {
+			return nil
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if SensorProcessAlive() {
+		return nil
+	}
+	return fmt.Errorf("EDRAgent process was dead; recycle did not start edr-agent.exe")
 }
 
 func openEDRServiceForStart() (*mgr.Service, func(), error) {
@@ -289,8 +365,14 @@ func startWithSC() error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	out, err := cmd.CombinedOutput()
 	msg := strings.ToLower(strings.TrimSpace(string(out)))
-	if err == nil || strings.Contains(msg, "already") {
+	if err == nil {
 		return nil
+	}
+	if strings.Contains(msg, "already") {
+		if SensorProcessAlive() {
+			return nil
+		}
+		return fmt.Errorf("sc start: %s", strings.TrimSpace(string(out)))
 	}
 	if strings.TrimSpace(string(out)) != "" {
 		return fmt.Errorf("sc start: %s", strings.TrimSpace(string(out)))

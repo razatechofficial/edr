@@ -4,47 +4,34 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/razatechofficial/edr/internal/hostperm"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
 func windowsControlAgentService(action string) error {
-	rights := uint32(windows.SERVICE_QUERY_STATUS | windows.SERVICE_QUERY_CONFIG)
-	switch action {
-	case "start":
-		rights |= windows.SERVICE_START
-	case "stop":
-		rights |= windows.SERVICE_STOP
-	}
-	s, closer, err := openEDRAgent(rights)
-	if err != nil {
-		return fmt.Errorf("%s EDRAgent: %w", action, err)
-	}
-	defer closer()
-	switch action {
-	case "start":
-		if err := s.Start(); err != nil {
-			msg := strings.ToLower(err.Error())
-			if strings.Contains(msg, "already running") || strings.Contains(msg, "already started") {
-				fmt.Println("EDRAgent already running")
-				return nil
-			}
+	if action == "start" {
+		if err := hostperm.StartSensorService(); err != nil {
 			return fmt.Errorf("start service: %w", err)
 		}
 		fmt.Println("EDRAgent start requested")
 		return nil
-	case "stop":
-		if _, err := s.Control(svc.Stop); err != nil {
-			return fmt.Errorf("stop service: %w", err)
-		}
-		fmt.Println("EDRAgent stop requested")
-		return nil
-	default:
+	}
+	if action != "stop" {
 		return fmt.Errorf("unsupported service action %q", action)
 	}
+	s, closer, err := openEDRAgent(windows.SERVICE_QUERY_STATUS | windows.SERVICE_STOP)
+	if err != nil {
+		return fmt.Errorf("stop EDRAgent: %w", err)
+	}
+	defer closer()
+	if _, err := s.Control(svc.Stop); err != nil {
+		return fmt.Errorf("stop service: %w", err)
+	}
+	fmt.Println("EDRAgent stop requested")
+	return nil
 }
 
 func openEDRAgent(access uint32) (*mgr.Service, func(), error) {

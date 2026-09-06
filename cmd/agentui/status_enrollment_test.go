@@ -16,10 +16,13 @@ func TestApplyLocalEnrollmentFromLiveIngest(t *testing.T) {
 }
 
 func TestApplyLocalEnrollmentFromConfiguredRunningSensor(t *testing.T) {
+	if xdrclient.ProbeLocalEnrollment(platform.ResolveConfigFile(), platform.DataDir()).Enrolled {
+		t.Skip("this machine already has a local enrollment sidecar")
+	}
 	st := operatorStatus{IngestConfigured: true, Service: "running"}
 	applyLocalEnrollment(&st)
-	if !st.Enrolled {
-		t.Fatal("running sensor with ingest configured must count as enrolled")
+	if st.Enrolled {
+		t.Fatal("ingest YAML + running service without xdr-tls must not look enrolled")
 	}
 }
 

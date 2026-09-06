@@ -40,5 +40,7 @@ If fso.FolderExists(pd & "\EDR") Then fso.DeleteFolder pd & "\EDR", True
 If fso.FileExists(pd & "\EDR Agent\enrollment.json") Then fso.DeleteFile pd & "\EDR Agent\enrollment.json", True
 If fso.FileExists(pd & "\EDR Agent\agent_id") Then fso.DeleteFile pd & "\EDR Agent\agent_id", True
 If fso.FileExists(pd & "\EDR Agent\enrollment.token") Then fso.DeleteFile pd & "\EDR Agent\enrollment.token", True
+If fso.FileExists(pd & "\EDR Agent\.env") Then fso.DeleteFile pd & "\EDR Agent\.env", True
+If fso.FileExists(pd & "\EDR Agent\config.yml") Then fso.DeleteFile pd & "\EDR Agent\config.yml", True
 
 sh.Run """" & sys & "\netsh.exe"" advfirewall firewall delete rule name=""EDR Agent""", 0, True

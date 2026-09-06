@@ -94,13 +94,17 @@ func startSensorServicePrivileged() error {
 		return strings.Contains(msg, "already") || strings.Contains(msg, "1056")
 	}
 
-	if err := hostperm.StartSensorService(); err == nil || alreadyRunning(err) {
+	if err := hostperm.StartSensorService(); err == nil {
+		return nil
+	} else if alreadyRunning(err) && hostperm.SensorProcessAlive() {
 		return nil
 	}
 
 	var last error
 	if st, err := os.Stat(svcreg); err == nil && !st.IsDir() {
-		if err := shellRunAs(svcreg, []string{"--start"}, false, true); err == nil || alreadyRunning(err) {
+		if err := shellRunAs(svcreg, []string{"--start"}, false, true); err == nil {
+			return nil
+		} else if alreadyRunning(err) && hostperm.SensorProcessAlive() {
 			return nil
 		} else {
 			last = err
@@ -109,13 +113,17 @@ func startSensorServicePrivileged() error {
 			}
 		}
 	}
-	if err := shellRunAs(sys, []string{"start", "EDRAgent"}, false, true); err == nil || alreadyRunning(err) {
+	if err := shellRunAs(sys, []string{"start", "EDRAgent"}, false, true); err == nil {
+		return nil
+	} else if alreadyRunning(err) && hostperm.SensorProcessAlive() {
 		return nil
 	} else if last == nil {
 		last = err
 	}
 	if processIsAdmin() {
-		if err := hostperm.StartSensorService(); err == nil || alreadyRunning(err) {
+		if err := hostperm.StartSensorService(); err == nil {
+			return nil
+		} else if alreadyRunning(err) && hostperm.SensorProcessAlive() {
 			return nil
 		} else {
 			last = err

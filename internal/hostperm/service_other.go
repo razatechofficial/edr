@@ -11,3 +11,8 @@ func EnsureSensorService(exePath, cfgPath string) error {
 func StartSensorService() error {
 	return nil
 }
+
+// SensorProcessAlive is Windows-only.
+func SensorProcessAlive() bool {
+	return false
+}

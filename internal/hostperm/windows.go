@@ -150,7 +150,7 @@ func evaluateService(it Item) Item {
 	if err != nil {
 		return ok(it, "Service is installed. Start loads the sensor.")
 	}
-	if st.State == svc.Running {
+	if st.State == svc.Running && processStillActive(st.ProcessId) {
 		return ok(it, "Service: running")
 	}
 	return ok(it, "Service is installed. Start loads the sensor.")

@@ -148,9 +148,14 @@ func newLogger(logMode string, cfg config.Config) (*zap.Logger, error) {
 	}
 
 	logPath := filepath.Join(cfg.Agent.DataDir, "logs", "agent.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o750); err != nil {
+	logDir := filepath.Dir(logPath)
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		writeServiceLastError(fmt.Errorf("create log dir: %w", err))
-	} else if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err != nil {
+	} else {
+		// MSI hardening can leave logs/ unwritable; reset before creating agent.log.
+		restrictSensitivePath(logDir)
+	}
+	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err != nil {
 		writeServiceLastError(fmt.Errorf("open agent.log: %w", err))
 	} else {
 		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderCfg), zapcore.AddSync(f), level))
