@@ -155,70 +155,82 @@ func (c *console) startSensor() {
 		return
 	}
 	go func() {
+		setLine := func(s string) {
+			fyne.Do(func() {
+				if c.preflightLine != nil {
+					c.preflightLine.SetText(s)
+				}
+			})
+		}
+		failStart := func(f uiFault) {
+			st := loadStatus()
+			fyne.Do(func() {
+				c.setBusy(false)
+				c.setDashFault(f)
+				c.setPreflightFault(f)
+				if c.preflightLine != nil {
+					c.preflightLine.SetText("Start did not finish.")
+				}
+				c.presentStartFault(f)
+				go c.runPreflight()
+				c.applyDashboard(st, sampleResources(st))
+			})
+		}
+
 		if isWindows() {
-			// Always repair SCM entry (binPath + Automatic). A prior uninstall
-			// may leave EDRAgent present but Disabled (StartService 1058).
-			if err := runAgentInstallPrivileged(); err != nil && !serviceAlreadyPresentError(err.Error()) && !hostperm.SensorRegistered() {
-				st := loadStatus()
-				fyne.Do(func() {
-					c.setBusy(false)
-					f := classifyStartError(err.Error())
-					c.setDashFault(f)
-					c.setPreflightFault(f)
-					if c.preflightLine != nil {
-						c.preflightLine.SetText("Service registration did not finish.")
-					}
-					c.presentStartFault(f)
-					go c.runPreflight()
-					c.applyDashboard(st, sampleResources(st))
-				})
-				return
-			}
-			// SCM can lag briefly after CreateService; wait before failing.
-			deadline := time.Now().Add(8 * time.Second)
-			for !hostperm.SensorRegistered() && time.Now().Before(deadline) {
-				time.Sleep(400 * time.Millisecond)
-			}
 			if !hostperm.SensorRegistered() {
-				st := loadStatus()
-				fyne.Do(func() {
-					c.setBusy(false)
-					f := uiFault{
-						Title:  "The sensor service is not registered",
-						Body:   "EDRAgent was not created. Allow the Administrator prompt, or run edr-agent.exe --install from an elevated Command Prompt.",
-						Detail: `"` + sensorBinaryPath() + `" --install`,
-						Action: "Try again",
+				setLine("Registering EDRAgent… Allow Administrator if asked.")
+				if err := runAgentInstallPrivileged(); err != nil && !serviceAlreadyPresentError(err.Error()) && !hostperm.SensorRegistered() {
+					f := classifyStartError(err.Error())
+					failStart(f)
+					return
+				}
+			}
+			setLine("Starting EDRAgent… Allow Administrator if asked.")
+			_, _ = runEdrctlTimeout(8*time.Second, "stage-identity")
+			if err := startSensorServicePrivileged(); err != nil {
+				out, rerr := runEdrctlPrivileged("start")
+				if rerr != nil {
+					f := classifyStartError(out)
+					if f.Detail == "" {
+						f.Detail = rerr.Error()
 					}
-					c.setDashFault(f)
-					c.setPreflightFault(f)
-					if c.preflightLine != nil {
-						c.preflightLine.SetText("Service registration did not finish.")
+					if f.Title == "" || strings.Contains(strings.ToLower(f.Title), "register") {
+						f.Title = "The sensor did not start"
+						f.Body = "EDRAgent is registered but did not enter the running state. Allow Administrator if Windows asked, then Start again."
 					}
-					c.presentStartFault(f)
-					go c.runPreflight()
-					c.applyDashboard(st, sampleResources(st))
-				})
+					failStart(f)
+					return
+				}
+				_ = err
+			}
+		} else {
+			_, _ = runEdrctl("stage-identity")
+			out, err := runEdrctlPrivileged("start")
+			if err != nil {
+				f := classifyStartError(out)
+				if f.Detail == "" {
+					f.Detail = err.Error()
+				}
+				failStart(f)
 				return
 			}
 		}
-		_, _ = runEdrctl("stage-identity")
-		out, err := runEdrctlPrivileged("start")
-		st := waitForService(8 * time.Second)
+
+		setLine("Waiting for the sensor…")
+		st := waitForService(15 * time.Second)
 		fyne.Do(func() {
 			c.setBusy(false)
 			st = mergeEnrollment(st, c.last)
 			c.last = st
-			if err != nil || !serviceHealthy(st.Service) {
-				f := classifyStartError(out)
-				if f.Detail == "" && err != nil {
-					f.Detail = err.Error()
+			if !serviceHealthy(st.Service) {
+				f := uiFault{
+					Title:  "The sensor did not start",
+					Body:   "EDRAgent is registered but is not running. Check %ProgramData%\\EDR Agent\\logs and Start again.",
+					Detail: "Service: " + firstNonEmpty(st.Service, "stopped"),
+					Action: "OK",
 				}
-				if f.Title == "" {
-					f.Title = "The sensor did not start"
-					f.Body = "EDRAgent is registered but is not running. Allow Administrator if Windows asked, then Start again."
-					f.Action = "OK"
-				}
-				c.setPreflightFault(uiFault{})
+				c.setPreflightFault(f)
 				c.setDashFault(f)
 				if c.preflightLine != nil {
 					c.preflightLine.SetText("Start did not finish.")
@@ -230,6 +242,10 @@ func (c *console) startSensor() {
 			c.setPreflightFault(uiFault{})
 			c.setDashFault(uiFault{})
 			c.last = st
+			if keepConsoleVisible() {
+				c.showDash()
+				return
+			}
 			c.dismissToTray()
 		})
 	}()

@@ -6,3 +6,8 @@ package hostperm
 func EnsureSensorService(exePath, cfgPath string) error {
 	return nil
 }
+
+// StartSensorService is Windows-only.
+func StartSensorService() error {
+	return nil
+}

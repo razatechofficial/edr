@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 func edrctlPath() string {
@@ -155,8 +158,17 @@ func installerPresent() bool {
 }
 
 func runEdrctl(args ...string) (string, error) {
-	cmd := exec.Command(edrctlPath(), args...)
+	return runEdrctlTimeout(20*time.Second, args...)
+}
+
+func runEdrctlTimeout(d time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, edrctlPath(), args...)
 	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return strings.TrimSpace(string(out)), fmt.Errorf("edrctl %s timed out", strings.Join(args, " "))
+	}
 	return strings.TrimSpace(string(out)), err
 }

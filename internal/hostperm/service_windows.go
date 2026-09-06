@@ -14,6 +14,7 @@ import (
 
 	"github.com/razatechofficial/edr/internal/platform"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
@@ -158,6 +159,54 @@ func defaultRecoveryActions() []mgr.RecoveryAction {
 		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 60 * time.Second},
 	}
+}
+
+// StartSensorService asks SCM to start EDRAgent. Already running is success.
+func StartSensorService() error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return startWithSC()
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(windowsServiceName)
+	if err != nil {
+		return fmt.Errorf("EDRAgent is not registered: %w", err)
+	}
+	defer s.Close()
+	if st, qerr := s.Query(); qerr == nil {
+		switch st.State {
+		case svc.Running, svc.StartPending, svc.ContinuePending:
+			return nil
+		}
+	}
+	if err := s.Start(); err != nil {
+		msg := strings.ToLower(err.Error())
+		if errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) ||
+			strings.Contains(msg, "already running") ||
+			strings.Contains(msg, "already started") {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func startWithSC() error {
+	sys := filepath.Join(os.Getenv("SystemRoot"), "System32", "sc.exe")
+	if os.Getenv("SystemRoot") == "" {
+		sys = `C:\Windows\System32\sc.exe`
+	}
+	cmd := exec.Command(sys, "start", windowsServiceName)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	out, err := cmd.CombinedOutput()
+	msg := strings.ToLower(strings.TrimSpace(string(out)))
+	if err == nil || strings.Contains(msg, "already") {
+		return nil
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		return fmt.Errorf("sc start: %s", strings.TrimSpace(string(out)))
+	}
+	return err
 }
 
 func quotedServiceBin(exe, cfg string) string {

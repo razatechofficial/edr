@@ -76,6 +76,24 @@ func runEdrctlPrivileged(args ...string) (string, error) {
 	return "", nil
 }
 
+func startSensorServicePrivileged() error {
+	if processIsAdmin() {
+		return hostperm.StartSensorService()
+	}
+	sys := filepath.Join(os.Getenv("SystemRoot"), "System32", "sc.exe")
+	if os.Getenv("SystemRoot") == "" {
+		sys = `C:\Windows\System32\sc.exe`
+	}
+	if err := shellRunAs(sys, []string{"start", "EDRAgent"}, false, true); err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "already") || strings.Contains(msg, "1056") {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func runInstallerPrivileged(args ...string) (string, error) {
 	if processIsAdmin() {
 		cmd := exec.Command(installerPath(), args...)
@@ -123,9 +141,6 @@ func runAgentInstallPrivileged() error {
 			}
 			return fmt.Errorf("EDRAgent still missing after register")
 		}
-		cmd := exec.Command(bin, "--install")
-		hideConsole(cmd)
-		_ = cmd.Run()
 		return nil
 	}
 	if processIsAdmin() {
@@ -216,7 +231,10 @@ func shellRunAs(exe string, args []string, show, wait bool) error {
 		return nil
 	}
 	defer windows.CloseHandle(info.HProcess)
-	_, _ = windows.WaitForSingleObject(info.HProcess, windows.INFINITE)
+	wait, _ := windows.WaitForSingleObject(info.HProcess, 45000)
+	if wait == 0x00000102 { // WAIT_TIMEOUT
+		return fmt.Errorf("Administrator approval timed out. Allow the prompt, then Start again.")
+	}
 	var code uint32
 	if err := windows.GetExitCodeProcess(info.HProcess, &code); err != nil {
 		return err
