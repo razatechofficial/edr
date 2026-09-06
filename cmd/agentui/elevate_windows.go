@@ -99,21 +99,30 @@ func runAgentInstallPrivileged() error {
 	svcreg := filepath.Join(filepath.Dir(bin), "edr-svcreg.exe")
 	register := func() error {
 		if err := hostperm.EnsureSensorService(bin, cfg); err != nil {
-			// Prefer CGO-free helper if in-process SCM failed.
 			if st, serr := os.Stat(svcreg); serr == nil && !st.IsDir() {
 				cmd := exec.Command(svcreg, bin, cfg)
 				hideConsole(cmd)
-				if out, rerr := cmd.CombinedOutput(); rerr != nil {
-					return fmt.Errorf("register service: %w (%s)", rerr, strings.TrimSpace(string(out)))
+				out, rerr := cmd.CombinedOutput()
+				if rerr != nil {
+					detail := strings.TrimSpace(string(out))
+					if detail == "" {
+						detail = readSvcRegLastError()
+					}
+					if detail == "" {
+						detail = rerr.Error()
+					}
+					return fmt.Errorf("register service: %s", detail)
 				}
 			} else {
 				return err
 			}
 		}
 		if !hostperm.SensorRegistered() {
+			if detail := readSvcRegLastError(); detail != "" {
+				return fmt.Errorf("EDRAgent still missing after register: %s", detail)
+			}
 			return fmt.Errorf("EDRAgent still missing after register")
 		}
-		// Best-effort recovery/ACL hardening inside the sensor binary.
 		cmd := exec.Command(bin, "--install")
 		hideConsole(cmd)
 		_ = cmd.Run()
@@ -124,15 +133,40 @@ func runAgentInstallPrivileged() error {
 			if serviceAlreadyPresentError(err.Error()) {
 				return nil
 			}
-			return fmt.Errorf("register service: %w", err)
+			return err
 		}
 		return nil
+	}
+	if st, err := os.Stat(svcreg); err == nil && !st.IsDir() {
+		if err := shellRunAs(svcreg, []string{bin, cfg}, false, true); err != nil {
+			detail := readSvcRegLastError()
+			if detail != "" {
+				return fmt.Errorf("register service: %s", detail)
+			}
+			return fmt.Errorf("register service: %w", err)
+		}
+		if hostperm.SensorRegistered() {
+			return nil
+		}
+		return fmt.Errorf("EDRAgent still missing after register")
 	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	return shellRunAs(exe, []string{"--register-service", "--already-elevated"}, false, true)
+}
+
+func readSvcRegLastError() string {
+	pd := os.Getenv("ProgramData")
+	if pd == "" {
+		pd = `C:\ProgramData`
+	}
+	raw, err := os.ReadFile(filepath.Join(pd, "EDR Agent", "logs", "svcreg.last"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func shellRunAs(exe string, args []string, show, wait bool) error {

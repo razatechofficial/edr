@@ -27,9 +27,17 @@ func main() {
 	logf("begin exe=%s cfg=%s", exe, cfg)
 	if err := hostperm.EnsureSensorService(exe, cfg); err != nil {
 		logf("fail: %v", err)
+		writeLast("FAIL: " + err.Error())
 		os.Exit(1)
 	}
 	logf("ok")
+	writeLast("OK")
+}
+
+func writeLast(msg string) {
+	dir := platform.LogDir()
+	_ = os.MkdirAll(dir, 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "svcreg.last"), []byte(msg+"\n"), 0o644)
 }
 
 func logf(format string, args ...any) {

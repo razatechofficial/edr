@@ -3,13 +3,17 @@
 package hostperm
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/razatechofficial/edr/internal/platform"
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
@@ -42,6 +46,9 @@ func EnsureSensorService(exePath, cfgPath string) error {
 
 	m, err := mgr.Connect()
 	if err != nil {
+		if scErr := createWithSC(absExe, absCfg); scErr == nil {
+			return nil
+		}
 		return err
 	}
 	defer m.Disconnect()
@@ -53,25 +60,25 @@ func EnsureSensorService(exePath, cfgPath string) error {
 			return fmt.Errorf("read EDRAgent config: %w", cerr)
 		}
 		cfg.StartType = mgr.StartAutomatic
-		cfg.DelayedAutoStart = true
+		cfg.DelayedAutoStart = false
 		cfg.DisplayName = "EDR Agent"
 		cfg.Description = "Endpoint Detection and Response Agent"
 		cfg.BinaryPathName = binLine
 		if err := s.UpdateConfig(cfg); err != nil {
 			return fmt.Errorf("update EDRAgent: %w", err)
 		}
+		cfg.DelayedAutoStart = true
+		_ = s.UpdateConfig(cfg)
 		_ = s.SetRecoveryActions(defaultRecoveryActions(), 86400)
 		return nil
 	}
 
-	// Do not Control(Stop) here: a wedged START_PENDING service blocks MSI
-	// and the operator window for a long time. binPath can be updated live.
 	if s, err := m.OpenService(windowsServiceName); err == nil {
 		defer s.Close()
 		return apply(s)
 	}
 
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(12 * time.Second)
 	var last error
 	for time.Now().Before(deadline) {
 		if s, err := m.OpenService(windowsServiceName); err == nil {
@@ -82,26 +89,67 @@ func EnsureSensorService(exePath, cfgPath string) error {
 			}
 			last = uerr
 		}
+		// Do not set DelayedAutoStart or Description on CreateService.
+		// x/sys deletes the new service if ChangeServiceConfig2 fails, which
+		// leaves EDRAgent missing after MSI and Start on some Server SKUs.
 		s, err := m.CreateService(
 			windowsServiceName,
 			absExe,
 			mgr.Config{
-				StartType:        mgr.StartAutomatic,
-				DisplayName:      "EDR Agent",
-				Description:      "Endpoint Detection and Response Agent",
-				DelayedAutoStart: true,
+				StartType:   mgr.StartAutomatic,
+				DisplayName: "EDR Agent",
 			},
 			"--config", absCfg,
 		)
 		if err == nil {
+			cfg, _ := s.Config()
+			cfg.StartType = mgr.StartAutomatic
+			cfg.DisplayName = "EDR Agent"
+			cfg.Description = "Endpoint Detection and Response Agent"
+			cfg.BinaryPathName = binLine
+			cfg.DelayedAutoStart = false
+			_ = s.UpdateConfig(cfg)
+			cfg.DelayedAutoStart = true
+			_ = s.UpdateConfig(cfg)
 			_ = s.SetRecoveryActions(defaultRecoveryActions(), 86400)
 			_ = s.Close()
 			return nil
 		}
 		last = err
-		time.Sleep(250 * time.Millisecond)
+		if !serviceBusyErr(err) {
+			break
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	if scErr := createWithSC(absExe, absCfg); scErr == nil {
+		return nil
 	}
 	return fmt.Errorf("register EDRAgent: %w", last)
+}
+
+func createWithSC(exe, cfg string) error {
+	sys := filepath.Join(os.Getenv("SystemRoot"), "System32", "sc.exe")
+	if os.Getenv("SystemRoot") == "" {
+		sys = `C:\Windows\System32\sc.exe`
+	}
+	binPath := `"` + exe + `" --config "` + cfg + `"`
+	cmd := exec.Command(sys, "create", windowsServiceName,
+		"binPath=", binPath,
+		"start=", "auto",
+		"DisplayName=", "EDR Agent",
+	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	out, err := cmd.CombinedOutput()
+	msg := strings.TrimSpace(string(out))
+	if err == nil || strings.Contains(strings.ToLower(msg), "already exists") {
+		_ = exec.Command(sys, "config", windowsServiceName, "start=", "auto").Run()
+		_ = exec.Command(sys, "description", windowsServiceName, "Endpoint Detection and Response Agent").Run()
+		return nil
+	}
+	if msg != "" {
+		return fmt.Errorf("sc create: %s", msg)
+	}
+	return fmt.Errorf("sc create: %w", err)
 }
 
 func defaultRecoveryActions() []mgr.RecoveryAction {
@@ -114,4 +162,15 @@ func defaultRecoveryActions() []mgr.RecoveryAction {
 
 func quotedServiceBin(exe, cfg string) string {
 	return `"` + exe + `" "--config" "` + cfg + `"`
+}
+
+func serviceBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, windows.ERROR_SERVICE_EXISTS) || errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "already exists") || strings.Contains(s, "marked for deletion")
 }

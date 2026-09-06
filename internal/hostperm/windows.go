@@ -80,16 +80,26 @@ func evaluateFirewall(it Item) Item {
 }
 
 func openEDRService() (*mgr.Service, func(), error) {
-	m, err := mgr.Connect()
+	// Query-only rights so a non-elevated console can see EDRAgent.
+	// mgr.Connect / OpenService use ALL_ACCESS and fail for a filtered admin token.
+	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT|windows.SC_MANAGER_ENUMERATE_SERVICE)
 	if err != nil {
 		return nil, nil, err
 	}
-	s, err := m.OpenService("EDRAgent")
+	name, err := windows.UTF16PtrFromString("EDRAgent")
 	if err != nil {
-		_ = m.Disconnect()
+		_ = windows.CloseServiceHandle(scm)
 		return nil, nil, err
 	}
-	return s, func() { _ = s.Close(); _ = m.Disconnect() }, nil
+	sh, err := windows.OpenService(scm, name, windows.SERVICE_QUERY_STATUS|windows.SERVICE_QUERY_CONFIG)
+	if err != nil {
+		_ = windows.CloseServiceHandle(scm)
+		return nil, nil, err
+	}
+	return &mgr.Service{Name: "EDRAgent", Handle: sh}, func() {
+		_ = windows.CloseServiceHandle(sh)
+		_ = windows.CloseServiceHandle(scm)
+	}, nil
 }
 
 func evaluateBoot(it Item) Item {
