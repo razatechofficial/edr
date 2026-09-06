@@ -59,23 +59,19 @@ Else
     Log "FAIL EDRAgent missing after create (reboot if marked for deletion)"
   End If
 
-  ' Server: Win32 console (no OpenGL). Pro/11: Fyne tray when present.
+  ' Launcher (edr-console) sets Mesa env then starts the original Fyne UI.
   Dim ui, prod, runCmd
   ui = pf & "\EDR Agent\edr-console.exe"
+  If Not fso.FileExists(ui) Then
+    ui = pf & "\EDR Agent\edr-agent-ui.exe"
+  End If
   runCmd = """" & ui & """"
   prod = ""
   On Error Resume Next
   prod = sh.RegRead("HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProductName")
   On Error Resume Next
   If InStr(1, LCase(CStr(prod)), "server", 1) = 0 Then
-    If fso.FileExists(pf & "\EDR Agent\edr-agent-ui.exe") Then
-      ui = pf & "\EDR Agent\edr-agent-ui.exe"
-      runCmd = """" & ui & """ --tray"
-    End If
-  End If
-  If Not fso.FileExists(ui) Then
-    ui = pf & "\EDR Agent\edr-agent-ui.exe"
-    runCmd = """" & ui & """"
+    runCmd = """" & ui & """ --tray"
   End If
   If fso.FileExists(ui) Then
     sh.RegWrite "HKLM\Software\Microsoft\Windows\CurrentVersion\Run\EDR Agent", runCmd, "REG_SZ"

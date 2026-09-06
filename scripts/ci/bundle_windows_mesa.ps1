@@ -86,12 +86,25 @@ function Copy-MesaFromTree([string]$ExtractDir) {
 		Select-Object -First 1
 	if (-not $gl) { throw "opengl32.dll not found under $search" }
 	Copy-Item -LiteralPath $gl.FullName -Destination $destGl -Force
-	$gallium = Get-ChildItem -LiteralPath $search -Recurse -Filter 'libgallium_wgl.dll' -File -ErrorAction SilentlyContinue |
-		Sort-Object Length -Descending |
-		Select-Object -First 1
-	if ($gallium) {
-		Copy-Item -LiteralPath $gallium.FullName -Destination $destGallium -Force
-		Write-Host "bundled $($gallium.Name) ($([math]::Round($gallium.Length/1MB,1)) MiB)"
+	$glDir = $gl.DirectoryName
+	$companions = @(
+		'libgallium_wgl.dll',
+		'libglapi.dll',
+		'zlib.dll',
+		'zstd.dll',
+		'libwinpthread-1.dll'
+	)
+	foreach ($name in $companions) {
+		$hit = Get-ChildItem -LiteralPath $glDir -Filter $name -File -ErrorAction SilentlyContinue | Select-Object -First 1
+		if (-not $hit) {
+			$hit = Get-ChildItem -LiteralPath $search -Recurse -Filter $name -File -ErrorAction SilentlyContinue |
+				Sort-Object Length -Descending |
+				Select-Object -First 1
+		}
+		if ($hit) {
+			Copy-Item -LiteralPath $hit.FullName -Destination (Join-Path $dist $hit.Name) -Force
+			Write-Host "bundled $($hit.Name) ($([math]::Round($hit.Length/1MB,1)) MiB)"
+		}
 	}
 	Write-Host "bundled $($gl.Name) ($([math]::Round($gl.Length/1MB,1)) MiB) -> $destGl"
 }

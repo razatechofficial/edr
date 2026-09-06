@@ -41,14 +41,11 @@ func prepareWindowsUIRuntime() {
 			hasMesa = true
 		}
 	}
-	// App-dir opengl32.dll is used automatically. Force llvmpipe only when
-	// hardware WGL is known-broken (Server / RDP); on Pro/11 local sessions
-	// Mesa can use GLonD3D12 when available.
-	if hasMesa && (windowsProductIsServer() || windowsIsRemoteSession()) {
+	// Prefer values the parent launcher already set. Do not set
+	// MESA_GL_VERSION_OVERRIDE here; that has crashed Fyne on Server.
+	if hasMesa && os.Getenv("GALLIUM_DRIVER") == "" && (windowsProductIsServer() || windowsIsRemoteSession()) {
 		_ = os.Setenv("GALLIUM_DRIVER", "llvmpipe")
 		_ = os.Setenv("LIBGL_ALWAYS_SOFTWARE", "1")
-		_ = os.Setenv("MESA_GL_VERSION_OVERRIDE", "3.3")
-		_ = os.Setenv("MESA_GLSL_VERSION_OVERRIDE", "330")
 	}
 
 	uiLog("init pid=%d go=%s os=%s/%s server=%v rdp=%v mesa=%v args=%v",

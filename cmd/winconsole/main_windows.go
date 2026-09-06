@@ -153,10 +153,73 @@ type serviceStatus struct {
 
 func main() {
 	logf("winconsole start args=%v", os.Args)
-	if err := runWindow(); err != nil {
-		logf("fatal: %v", err)
-		alert("EDR Agent", err.Error())
+	native := false
+	var uiArgs []string
+	for _, a := range os.Args[1:] {
+		if a == "--native" {
+			native = true
+			continue
+		}
+		uiArgs = append(uiArgs, a)
+	}
+	if native {
+		if err := runWindow(); err != nil {
+			logf("fatal: %v", err)
+			alert("EDR Agent", err.Error())
+			os.Exit(1)
+		}
+		return
+	}
+	if err := launchOriginalUI(uiArgs...); err != nil {
+		logf("original UI: %v", err)
+		alert("EDR Agent", "The console could not stay open.\n\n"+err.Error()+"\n\nCheck %ProgramData%\\EDR Agent\\logs\\ui.log")
 		os.Exit(1)
+	}
+}
+
+// launchOriginalUI starts edr-agent-ui.exe with Mesa env already set.
+// Fyne/GLFW reads OpenGL at process start; setting GALLIUM_DRIVER inside
+// the UI process is too late. This parent does not import Fyne.
+func launchOriginalUI(args ...string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(self)
+	ui := filepath.Join(dir, "edr-agent-ui.exe")
+	if st, err := os.Stat(ui); err != nil || st.IsDir() {
+		return fmt.Errorf("missing %s", ui)
+	}
+	applyMesaLaunchEnv(dir)
+	cmd := exec.Command(ui, args...)
+	cmd.Dir = dir
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	logf("started edr-agent-ui.exe pid=%d mesa_env=1", cmd.Process.Pid)
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("console exited: %w", err)
+		}
+		return fmt.Errorf("console exited immediately")
+	case <-time.After(3 * time.Second):
+		return nil
+	}
+}
+
+func applyMesaLaunchEnv(dir string) {
+	_ = os.Setenv("EDR_MESA_READY", "1")
+	// Only llvmpipe. MESA_GL_VERSION_OVERRIDE has crashed Fyne on Server.
+	_ = os.Setenv("GALLIUM_DRIVER", "llvmpipe")
+	_ = os.Setenv("LIBGL_ALWAYS_SOFTWARE", "1")
+	_ = os.Setenv("MESA_LOADER_DRIVER_OVERRIDE", "llvmpipe")
+	path := os.Getenv("PATH")
+	if !strings.Contains(strings.ToLower(path), strings.ToLower(dir)) {
+		_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+path)
 	}
 }
 

@@ -250,7 +250,7 @@ $modelsWixobj = Join-Path $root 'build/windows/models.wixobj'
 $lightInputs = @($wixobj, $rulesWixobj, $modelsWixobj)
 
 $agentDist = Join-Path $root 'dist/windows-amd64'
-$mesaNames = @('opengl32.dll', 'libgallium_wgl.dll')
+$mesaNames = @('opengl32.dll', 'libgallium_wgl.dll', 'libglapi.dll', 'zlib.dll', 'zstd.dll', 'libwinpthread-1.dll')
 $mesaFiles = @()
 foreach ($n in $mesaNames) {
     $p = Join-Path $agentDist $n

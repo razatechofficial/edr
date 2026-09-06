@@ -14,15 +14,11 @@ import (
 const windowsRunKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 
 func installLoginAutostart(paths installPaths) error {
-	// Server/RDP: Win32 console (Fyne blinks with no OpenGL). Pro/11: Fyne tray.
+	// Launcher sets Mesa env then starts the original Fyne UI.
 	ui := filepath.Join(paths.binDir, "edr-console.exe")
 	cmd := `"` + ui + `"`
 	if !windowsInstallationIsServer() {
-		fyne := filepath.Join(paths.binDir, agentUIBinaryName())
-		if st, err := os.Stat(fyne); err == nil && !st.IsDir() {
-			ui = fyne
-			cmd = `"` + ui + `" --tray`
-		}
+		cmd = `"` + ui + `" --tray`
 	}
 	if st, err := os.Stat(ui); err != nil || st.IsDir() {
 		ui = filepath.Join(paths.binDir, agentUIBinaryName())
