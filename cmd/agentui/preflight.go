@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -147,6 +149,9 @@ func preflightCanStart(items []preflightItem) bool {
 }
 
 func waitForService(d time.Duration) operatorStatus {
+	if isWindows() {
+		return waitForWindowsService(d)
+	}
 	deadline := time.Now().Add(d)
 	var st operatorStatus
 	for {
@@ -159,6 +164,52 @@ func waitForService(d time.Duration) operatorStatus {
 		}
 		time.Sleep(400 * time.Millisecond)
 	}
+}
+
+func waitForWindowsService(d time.Duration) operatorStatus {
+	deadline := time.Now().Add(d)
+	var last string
+	stable := 0
+	for {
+		last = hostperm.SensorRuntimeStatus()
+		if serviceHealthy(last) {
+			stable++
+			if stable >= 5 {
+				st := loadStatus()
+				if !serviceHealthy(st.Service) {
+					st.Service = last
+				}
+				return st
+			}
+		} else {
+			stable = 0
+		}
+		if time.Now().After(deadline) {
+			st := loadStatus()
+			if last != "" {
+				st.Service = last
+			}
+			return st
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+}
+
+func windowsStartFaultDetail(service string) string {
+	detail := "Service: " + firstNonEmpty(service, "stopped")
+	pd := os.Getenv("ProgramData")
+	if pd == "" {
+		pd = `C:\ProgramData`
+	}
+	raw, err := os.ReadFile(filepath.Join(pd, "EDR Agent", "logs", "service.last"))
+	if err != nil {
+		return detail
+	}
+	msg := strings.TrimSpace(string(raw))
+	if msg == "" || strings.EqualFold(msg, "OK") {
+		return detail
+	}
+	return detail + "\n" + firstLine(msg)
 }
 
 func checkVisual(s checkState) (color.Color, fyne.Resource) {

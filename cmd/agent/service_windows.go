@@ -49,7 +49,6 @@ func quotedBinPath(exe string, extra ...string) string {
 
 func openOrCreateService(m *mgr.Mgr, exePath, cfgPath string) (*mgr.Service, error) {
 	if existing, err := m.OpenService(windowsServiceName); err == nil {
-		_, _ = existing.Control(svc.Stop)
 		cfg, cerr := existing.Config()
 		if cerr == nil {
 			cfg.StartType = mgr.StartAutomatic

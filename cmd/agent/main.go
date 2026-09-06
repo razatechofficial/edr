@@ -202,7 +202,14 @@ func runAgent() error {
 	return runAgentCore(ctx, configPath)
 }
 
-func runAgentCore(ctx context.Context, cfgPath string) error {
+func runAgentCore(ctx context.Context, cfgPath string) (err error) {
+	defer func() {
+		if err != nil {
+			writeServiceLastError(err)
+		} else {
+			writeServiceLastError(nil)
+		}
+	}()
 	if dataDir != "" {
 		_ = os.Setenv("DATA_DIR", dataDir)
 	}
@@ -223,6 +230,9 @@ func runAgentCore(ctx context.Context, cfgPath string) error {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	if err := xdrclient.InstallStagedIdentity(cfgPath, cfg.XDR, cfg.Agent.DataDir); err != nil {
+		fmt.Fprintf(os.Stderr, "staged identity: %v\n", err)
 	}
 	// Resolve token file → env so NewWithFiles/Load sees bootstrap credentials.
 	if _, err := xdrclient.ApplyBootstrap(&cfg.XDR, xdrclient.BootstrapOverrides{

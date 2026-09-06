@@ -166,6 +166,34 @@ func defaultRecoveryActions() []mgr.RecoveryAction {
 	}
 }
 
+// SensorRuntimeStatus is the SCM state: running, starting, stopped, or installed.
+func SensorRuntimeStatus() string {
+	s, closer, err := openEDRService()
+	if err != nil {
+		if !SensorRegistered() {
+			return "not installed"
+		}
+		return "unknown"
+	}
+	defer closer()
+	st, err := s.Query()
+	if err != nil {
+		return "unknown"
+	}
+	switch st.State {
+	case svc.Running:
+		return "running"
+	case svc.StartPending, svc.ContinuePending:
+		return "starting"
+	case svc.StopPending:
+		return "stopping"
+	case svc.Stopped:
+		return "stopped"
+	default:
+		return "installed"
+	}
+}
+
 // StartSensorService asks SCM to start EDRAgent. Already running is success.
 // Open with START+QUERY only. SERVICE_ALL_ACCESS fails when the service DACL
 // denies STOP/DELETE to Everyone (that deny applies to Administrators too).

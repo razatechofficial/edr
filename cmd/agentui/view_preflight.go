@@ -214,7 +214,7 @@ func (c *console) startSensor() {
 		}
 
 		setLine("Waiting for the sensor…")
-		st := waitForService(15 * time.Second)
+		st := waitForService(45 * time.Second)
 		fyne.Do(func() {
 			c.setBusy(false)
 			st = mergeEnrollment(st, c.last)
@@ -223,7 +223,7 @@ func (c *console) startSensor() {
 				f := uiFault{
 					Title:  "The sensor did not start",
 					Body:   "EDRAgent is registered but is not running. Check %ProgramData%\\EDR Agent\\logs and Start again.",
-					Detail: "Service: " + firstNonEmpty(st.Service, "stopped"),
+					Detail: windowsStartFaultDetail(firstNonEmpty(st.Service, "stopped")),
 					Action: "OK",
 				}
 				c.setPreflightFault(f)

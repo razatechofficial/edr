@@ -151,7 +151,8 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		rs, err = rules.Load(cfg.RulesFile)
 	}
 	if err != nil {
-		return nil, err
+		slog.Default().Warn("rules file missing; starting with an empty ruleset", "error", err, "path", cfg.RulesFile)
+		rs = rules.RuleSet{}
 	}
 
 	zapLogger, _ := zap.NewProduction(zap.WithCaller(false))
@@ -188,15 +189,10 @@ func NewWithFiles(configPath string) (*Agent, error) {
 	// credentials exist so the sensor still starts for local monitoring.
 	if xdrclient.ShouldInitXDR(cfg.XDR, cfg.Agent.DataDir) {
 		if err := a.initXDR(); err != nil {
-			store := xdrclient.Store{
-				Dir:     xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir),
-				DataDir: cfg.Agent.DataDir,
-				Backend: cfg.XDR.SecureStorage,
-			}
-			if store.HasCredentials() || cfg.XDR.HasBootstrapCredentials() {
-				return nil, err
-			}
-			a.logger.Warn("xdr ingest deferred until enrollment completes", "error", err)
+			// Never fail process start on ingest/enrollment. The console promises
+			// local monitoring when the cloud is unreachable; LocalSystem also
+			// cannot always read a user-scoped keystore on first service start.
+			a.logger.Warn("xdr ingest deferred; sensor continues locally", "error", err)
 		}
 	} else if telEP != "" {
 		qdir := filepath.Join(cfg.Agent.DataDir, "telemetry-queue")
