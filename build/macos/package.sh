@@ -9,6 +9,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${ROOT}"
+# shellcheck source=scripts/ci/macos_codesign.sh
+source "${ROOT}/scripts/ci/macos_codesign.sh"
 
 VERSION="${1:-dev}"
 ARCH="${2:-arm64}"
@@ -55,7 +57,7 @@ fi
 INSTALLER_BIN="bin/edr-installer-darwin-${ARCH}"
 CGO_ENABLED=0 GOOS=darwin GOARCH="${ARCH}" go build -trimpath -o "${INSTALLER_BIN}" ./cmd/installer
 if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
-	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${INSTALLER_BIN}" || true
+	macos_codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${INSTALLER_BIN}" || true
 fi
 
 EDR_BASE="/Library/Application Support/EDR"
@@ -93,12 +95,12 @@ if [[ -d "${APP_BUNDLE}/Contents" ]]; then
 		ENT="${ROOT}/build/macos/edr-agent.entitlements.plist"
 		for dylib in "${FRAMEWORKS}"/*.dylib; do
 			[[ -f "${dylib}" ]] || continue
-			codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${dylib}"
+			macos_codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${dylib}"
 		done
-		codesign --force --options runtime --timestamp \
+		macos_codesign --force --options runtime --timestamp \
 			--entitlements "${ENT}" \
 			--sign "${APPLE_SIGN_IDENTITY}" "${AGENT_APP_DST}/Contents/MacOS/edr-agent"
-		codesign --force --options runtime --timestamp \
+		macos_codesign --force --options runtime --timestamp \
 			--preserve-metadata=entitlements,flags,runtime \
 			--sign "${APPLE_SIGN_IDENTITY}" "${AGENT_APP_DST}"
 		codesign --verify --deep --strict "${AGENT_APP_DST}"
@@ -115,9 +117,9 @@ cp "${CTL_BIN}" "${PKG_ROOT}/usr/local/bin/edr"
 cp "${INSTALLER_BIN}" "${PKG_ROOT}/usr/local/bin/edr-installer"
 chmod 755 "${PKG_ROOT}/usr/local/bin/edrctl" "${PKG_ROOT}/usr/local/bin/edr" "${PKG_ROOT}/usr/local/bin/edr-installer"
 if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
-	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edrctl"
-	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edr"
-	codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edr-installer"
+	macos_codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edrctl"
+	macos_codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edr"
+	macos_codesign --force --options runtime --timestamp --sign "${APPLE_SIGN_IDENTITY}" "${PKG_ROOT}/usr/local/bin/edr-installer"
 fi
 fi
 

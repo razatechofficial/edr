@@ -76,6 +76,9 @@ if ! otool -L "${AGENT_OUT}" | grep -Eiq 'EndpointSecurity|/System/Library/Frame
 	exit 1
 fi
 
+# shellcheck source=scripts/ci/macos_codesign.sh
+source "${ROOT}/scripts/ci/macos_codesign.sh"
+
 # Hardened Runtime rejects unsigned Homebrew libyara; bundle in .app/Frameworks.
 # ES entitlement requires embedded.provisionprofile (app-like wrapper per Apple TN3125).
 APP_BUNDLE="dist/edr-agent-${ARCH}.app"
@@ -108,27 +111,27 @@ if [ -n "${APPLE_SIGN_IDENTITY:-}" ] && [ -f "${ENTITLEMENTS}" ]; then
 	FRAMEWORKS="${APP_BUNDLE}/Contents/Frameworks"
 	for dylib in "${FRAMEWORKS}"/*.dylib; do
 		[[ -f "${dylib}" ]] || continue
-		codesign --force --options runtime --timestamp \
+		macos_codesign --force --options runtime --timestamp \
 			--sign "${APPLE_SIGN_IDENTITY}" "${dylib}"
 	done
-	if ! codesign --force --options runtime --timestamp \
+	if ! macos_codesign --force --options runtime --timestamp \
 		--entitlements "${ENTITLEMENTS}" \
 		--sign "${APPLE_SIGN_IDENTITY}" "${AGENT_OUT}"; then
 		echo "codesign with APPLE_SIGN_IDENTITY failed" >&2
 		exit 1
 	fi
-	if ! codesign --force --options runtime --timestamp \
+	if ! macos_codesign --force --options runtime --timestamp \
 		--preserve-metadata=entitlements,flags,runtime \
 		--sign "${APPLE_SIGN_IDENTITY}" "${APP_BUNDLE}"; then
 		echo "codesign for ${APP_BUNDLE} failed" >&2
 		exit 1
 	fi
-	if ! codesign --force --options runtime --timestamp \
+	if ! macos_codesign --force --options runtime --timestamp \
 		--sign "${APPLE_SIGN_IDENTITY}" "${CTL_OUT}"; then
 		echo "codesign for edrctl failed" >&2
 		exit 1
 	fi
-	if ! codesign --force --options runtime --timestamp \
+	if ! macos_codesign --force --options runtime --timestamp \
 		--sign "${APPLE_SIGN_IDENTITY}" "${UI_OUT}"; then
 		echo "codesign for edr-agent-ui failed" >&2
 		exit 1

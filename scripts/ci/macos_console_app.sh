@@ -8,6 +8,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/ci/macos_codesign.sh
+source "${ROOT}/scripts/ci/macos_codesign.sh"
 UI_BIN="${1:-}"
 CTL_BIN="${2:-}"
 APP_OUT="${3:-}"
@@ -38,11 +40,11 @@ sign_target() {
 	shift || true
 	if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
 		if [[ $# -gt 0 ]]; then
-			codesign --force --options runtime --timestamp \
+			macos_codesign --force --options runtime --timestamp \
 				"$@" \
 				--sign "${APPLE_SIGN_IDENTITY}" "${path}"
 		else
-			codesign --force --options runtime --timestamp \
+			macos_codesign --force --options runtime --timestamp \
 				--sign "${APPLE_SIGN_IDENTITY}" "${path}"
 		fi
 	else

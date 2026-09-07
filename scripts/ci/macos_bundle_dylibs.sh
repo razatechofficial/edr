@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/ci/macos_codesign.sh
+source "${ROOT}/scripts/ci/macos_codesign.sh"
 BINARY="${1:-}"
 if [[ -z "${BINARY}" || ! -f "${BINARY}" ]]; then
 	echo "usage: macos_bundle_dylibs.sh path/to/edr-agent" >&2
@@ -32,6 +34,9 @@ bundle_dylib() {
 	local dest="${LIB_DIR}/${base}"
 	cp -f "${src}" "${dest}"
 	chmod 755 "${dest}"
+	# Homebrew bottles are already signed; install_name_tool invalidates that
+	# and a later --timestamp codesign then depends on Apple's TSA.
+	/usr/bin/codesign --remove-signature "${dest}" 2>/dev/null || true
 }
 
 DEPS=(
@@ -76,7 +81,7 @@ fi
 if [[ -n "${APPLE_SIGN_IDENTITY:-}" ]]; then
 	for dylib in "${DEPS[@]}"; do
 		dest="${LIB_DIR}/$(basename "${dylib}")"
-		codesign --force --options runtime --timestamp \
+		macos_codesign --force --options runtime --timestamp \
 			--sign "${APPLE_SIGN_IDENTITY}" "${dest}"
 	done
 fi
