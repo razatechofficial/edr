@@ -11,6 +11,7 @@ import (
 	telemetryv1 "github.com/razatechofficial/xdr/api/proto/telemetry/v1"
 
 	"github.com/razatechofficial/edr/internal/collector"
+	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/forwarder"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
@@ -19,7 +20,8 @@ import (
 
 func (a *Agent) initXDR() error {
 	if !xdrclient.ShouldInitXDR(a.cfg.XDR, a.cfg.Agent.DataDir) {
-		return nil
+		return fmt.Errorf("xdr ingest not configured (enabled=%v storage=%s data_dir=%s)",
+			a.cfg.XDR.Enabled, a.cfg.XDR.SecureStorage, a.cfg.Agent.DataDir)
 	}
 
 	boot, err := xdrclient.ApplyBootstrap(&a.cfg.XDR, xdrclient.BootstrapOverrides{
@@ -50,7 +52,13 @@ func (a *Agent) initXDR() error {
 		TokenFileUsed: boot.TokenFileUsed,
 	})
 	if err != nil {
-		return fmt.Errorf("xdr enroll: %w", err)
+		if fallback, ferr := resumeIngestFromCert(store, a.cfg.XDR, a.cfg.Agent.ID); ferr == nil {
+			a.logger.Warn("xdr enroll resume failed; starting ingest from existing device cert", "error", err)
+			res = fallback
+			err = nil
+		} else {
+			return fmt.Errorf("xdr enroll: %w", err)
+		}
 	}
 	// Drop bootstrap token from in-memory config after successful enroll.
 	if res.Fresh {
@@ -160,4 +168,30 @@ func (a *Agent) handleIngestCommand(ctx context.Context, cmd *telemetryv1.AgentC
 		return fmt.Errorf("%s", result.Message)
 	}
 	return nil
+}
+
+func persistXDRInitFault(cfg config.Config, detail string) {
+	certDir := xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir)
+	xdrclient.PersistIngestStatus(certDir, false, "", detail)
+	if dd := strings.TrimSpace(cfg.Agent.DataDir); dd != "" && dd != certDir {
+		xdrclient.PersistIngestStatus(dd, false, "", detail)
+		_ = os.WriteFile(filepath.Join(dd, "xdr.init"), []byte(detail+"\n"), 0o644)
+	}
+}
+
+func resumeIngestFromCert(store xdrclient.Store, cfg config.XDRConfig, agentID string) (*xdrclient.EnrollResult, error) {
+	if !store.HasCredentials() {
+		return nil, fmt.Errorf("no device certificate")
+	}
+	st, err := store.Load()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(st.AgentID) == "" {
+		st.AgentID = strings.TrimSpace(agentID)
+	}
+	if len(st.IngestHosts) == 0 {
+		st.IngestHosts = xdrclient.DefaultIngestHosts()
+	}
+	return &xdrclient.EnrollResult{State: st, Store: store, Fresh: false}, nil
 }

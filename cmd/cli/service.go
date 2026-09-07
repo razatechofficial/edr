@@ -41,19 +41,26 @@ func newConnectStreamCmd() *cobra.Command {
 func waitIngestLive(d time.Duration) error {
 	deadline := time.Now().Add(d)
 	var last string
+	sawAPI := false
 	for time.Now().Before(deadline) {
 		st := collectOperatorStatus(false)
 		if st.IngestOK {
 			fmt.Println("ingest stream connected")
 			return nil
 		}
-		if f := strings.TrimSpace(st.IngestFault); f != "" && f != "ingest client not started" {
+		f := strings.TrimSpace(st.IngestFault)
+		if st.ControlAPI == "ok" {
+			sawAPI = true
+			if f != "" {
+				last = f
+			}
+		} else if !sawAPI && f != "" {
 			last = f
 		}
 		time.Sleep(800 * time.Millisecond)
 	}
 	if last == "" {
-		last = "ingest did not connect; enroll this PC if there is no device certificate"
+		last = "ingest client did not start; check %ProgramData%\\EDR Agent\\logs\\agent.log"
 	}
 	return fmt.Errorf("%s", last)
 }

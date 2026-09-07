@@ -11,4 +11,11 @@ func restrictSensitivePath(path string) {
 	_ = os.Chmod(path, 0o600)
 }
 
+func restrictOperatorTree(dir string) {
+	if dir == "" {
+		return
+	}
+	_ = os.MkdirAll(dir, 0o755)
+}
+
 func publishOperatorStatusDirs(string) {}
