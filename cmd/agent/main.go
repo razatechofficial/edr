@@ -58,6 +58,17 @@ func main() {
 			os.Exit(0)
 		}
 	}
+	for _, a := range os.Args[1:] {
+		if a == "--version" || a == "-version" || a == "version" {
+			fmt.Printf("edr-agent %s (built %s)\n  commit:  %s\n  go:      %s\n  os/arch: %s/%s\n",
+				Version, BuildTime, Commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+			writeAgentBoot(fmt.Sprintf("version %s commit %s", Version, Commit))
+			if a == "version" || !hasServiceConfigArg() {
+				os.Exit(0)
+			}
+			break
+		}
+	}
 	if handled, code := tryRunWindowsService(); handled {
 		os.Exit(code)
 	}
@@ -147,7 +158,13 @@ func newLogger(logMode string, cfg config.Config) (*zap.Logger, error) {
 		}
 	}
 
-	logPath := filepath.Join(cfg.Agent.DataDir, "logs", "agent.log")
+	logRoot := strings.TrimSpace(cfg.Agent.DataDir)
+	if logRoot == "" || runtime.GOOS == "windows" {
+		if w := windowsDataRootForLogs(); w != "" {
+			logRoot = w
+		}
+	}
+	logPath := filepath.Join(logRoot, "logs", "agent.log")
 	logDir := filepath.Dir(logPath)
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		writeServiceLastError(fmt.Errorf("create log dir: %w", err))
@@ -211,11 +228,14 @@ func runAgent() error {
 }
 
 func runAgentCore(ctx context.Context, cfgPath string) (err error) {
+	writeAgentBoot(fmt.Sprintf("runAgentCore start version=%s commit=%s config=%s", Version, Commit, cfgPath))
 	defer func() {
 		if err != nil {
 			writeServiceLastError(err)
+			writeAgentBoot("runAgentCore exit: " + err.Error())
 		} else {
 			writeServiceLastError(nil)
+			writeAgentBoot("runAgentCore exit: ok")
 		}
 	}()
 	if dataDir != "" {
@@ -240,7 +260,10 @@ func runAgentCore(ctx context.Context, cfgPath string) (err error) {
 		return fmt.Errorf("load config: %w", err)
 	}
 	publishOperatorStatusDirs(cfg.Agent.DataDir)
+	writeAgentBoot(fmt.Sprintf("config loaded data_dir=%s xdr.enabled=%v storage=%s",
+		cfg.Agent.DataDir, cfg.XDR.Enabled, cfg.XDR.SecureStorage))
 	if err := xdrclient.InstallStagedIdentity(cfgPath, cfg.XDR, cfg.Agent.DataDir); err != nil {
+		writeAgentBoot("staged identity: " + err.Error())
 		fmt.Fprintf(os.Stderr, "staged identity: %v\n", err)
 	}
 	enableIngestIfEnrolled(cfgPath, cfg)

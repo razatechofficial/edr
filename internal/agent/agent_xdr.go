@@ -13,6 +13,7 @@ import (
 	"github.com/razatechofficial/edr/internal/collector"
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/forwarder"
+	"github.com/razatechofficial/edr/internal/platform"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/xdrclient"
@@ -110,6 +111,7 @@ func (a *Agent) initXDR() error {
 	}
 	a.xdrIngest = ingest
 	a.telemetryRelay = forwarder.NewTelemetryRelayWithSender(ingest, qm, a.logger)
+	persistXDRInitNote(a.cfg, "ingest client started host="+strings.Join(res.State.IngestHosts, ","))
 	connectCtx, connectCancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer connectCancel()
 	if err := ingest.Connect(connectCtx); err != nil {
@@ -170,13 +172,23 @@ func (a *Agent) handleIngestCommand(ctx context.Context, cmd *telemetryv1.AgentC
 	return nil
 }
 
-func persistXDRInitFault(cfg config.Config, detail string) {
-	certDir := xdrclient.ResolveCertDir(cfg.XDR, cfg.Agent.DataDir)
-	xdrclient.PersistIngestStatus(certDir, false, "", detail)
-	if dd := strings.TrimSpace(cfg.Agent.DataDir); dd != "" && dd != certDir {
-		xdrclient.PersistIngestStatus(dd, false, "", detail)
-		_ = os.WriteFile(filepath.Join(dd, "xdr.init"), []byte(detail+"\n"), 0o644)
+func persistXDRInitNote(cfg config.Config, detail string) {
+	dd := strings.TrimSpace(cfg.Agent.DataDir)
+	if dd == "" {
+		dd = platform.DataDir()
 	}
+	_ = os.WriteFile(filepath.Join(dd, "xdr.init"), []byte(detail+"\n"), 0o644)
+}
+
+func persistXDRInitFault(cfg config.Config, detail string) {
+	dd := strings.TrimSpace(cfg.Agent.DataDir)
+	if dd == "" {
+		dd = platform.DataDir()
+	}
+	certDir := xdrclient.ResolveCertDir(cfg.XDR, dd)
+	xdrclient.PersistIngestStatus(certDir, false, "", detail)
+	xdrclient.PersistIngestStatus(dd, false, "", detail)
+	persistXDRInitNote(cfg, detail)
 }
 
 func resumeIngestFromCert(store xdrclient.Store, cfg config.XDRConfig, agentID string) (*xdrclient.EnrollResult, error) {

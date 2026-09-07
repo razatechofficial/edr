@@ -37,7 +37,12 @@ If fso.FolderExists(pd & "\EDR Agent\logs") Then fso.DeleteFolder pd & "\EDR Age
 If fso.FolderExists(pd & "\EDR Agent\alerts") Then fso.DeleteFolder pd & "\EDR Agent\alerts", True
 If fso.FolderExists(pd & "\EDR\setup") Then fso.DeleteFolder pd & "\EDR\setup", True
 If fso.FolderExists(pd & "\EDR") Then fso.DeleteFolder pd & "\EDR", True
+If fso.FolderExists(pd & "\EDR Agent\com.razatech.edr.identity-stage") Then fso.DeleteFolder pd & "\EDR Agent\com.razatech.edr.identity-stage", True
 If fso.FileExists(pd & "\EDR Agent\enrollment.json") Then fso.DeleteFile pd & "\EDR Agent\enrollment.json", True
+If fso.FileExists(pd & "\EDR Agent\ingest.status") Then fso.DeleteFile pd & "\EDR Agent\ingest.status", True
+If fso.FileExists(pd & "\EDR Agent\xdr.init") Then fso.DeleteFile pd & "\EDR Agent\xdr.init", True
+If fso.FileExists(pd & "\EDR Agent\agent.boot") Then fso.DeleteFile pd & "\EDR Agent\agent.boot", True
+If fso.FileExists(pd & "\EDR Agent\enroll.progress") Then fso.DeleteFile pd & "\EDR Agent\enroll.progress", True
 If fso.FileExists(pd & "\EDR Agent\agent_id") Then fso.DeleteFile pd & "\EDR Agent\agent_id", True
 If fso.FileExists(pd & "\EDR Agent\enrollment.token") Then fso.DeleteFile pd & "\EDR Agent\enrollment.token", True
 If fso.FileExists(pd & "\EDR Agent\.env") Then fso.DeleteFile pd & "\EDR Agent\.env", True

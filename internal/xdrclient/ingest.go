@@ -544,6 +544,7 @@ func PersistIngestStatus(dir string, ok bool, host, detail string) {
 		return
 	}
 	path := filepath.Join(dir, ingestStatusFileName)
+	clearFileWriteBarrier(path)
 	_ = os.WriteFile(path, b, 0o644)
 	grantUsersRead(path)
 	if strings.EqualFold(filepath.Base(dir), "xdr-tls") {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/razatechofficial/edr/internal/config"
@@ -23,6 +24,10 @@ var identityStageRoot = "/tmp"
 // StageIdentityFromLocalKeystore writes PEMs from this user's OS store into
 // /tmp for privileged start. No root required. Files are 0600.
 func StageIdentityFromLocalKeystore(cfg config.XDRConfig, dataDir string) error {
+	if windowsMachineIdentityReady(cfg, dataDir) {
+		_ = os.RemoveAll(identityStageDir())
+		return nil
+	}
 	src := Store{
 		Dir:     ResolveCertDir(cfg, dataDir),
 		DataDir: dataDir,
@@ -71,6 +76,10 @@ func StageIdentityFromLocalKeystore(cfg config.XDRConfig, dataDir string) error 
 // InstallStagedIdentity seals staged PEMs into the agent cert dir and pins
 // yaml to the file backend so the LaunchDaemon can load identity.
 func InstallStagedIdentity(cfgPath string, cfg config.XDRConfig, dataDir string) error {
+	if windowsMachineIdentityReady(cfg, dataDir) {
+		_ = os.RemoveAll(identityStageDir())
+		return nil
+	}
 	dir := identityStageDir()
 	if _, err := os.Stat(filepath.Join(dir, "agent.key")); err != nil {
 		return nil
@@ -107,6 +116,21 @@ func InstallStagedIdentity(cfgPath string, cfg config.XDRConfig, dataDir string)
 	}
 	_ = os.RemoveAll(dir)
 	return nil
+}
+
+// windowsMachineIdentityReady is true when Windows already has a device cert
+// (DPAPI or file). Staging PEMs under ProgramData then pinning file storage
+// left LocalSystem with no ingest client after a successful enroll.
+func windowsMachineIdentityReady(cfg config.XDRConfig, dataDir string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	s := Store{
+		Dir:     ResolveCertDir(cfg, dataDir),
+		DataDir: dataDir,
+		Backend: cfg.SecureStorage,
+	}
+	return s.HasAnyCredentials()
 }
 
 func daemonOwnsSealedIdentity(s Store, loadErr error) bool {

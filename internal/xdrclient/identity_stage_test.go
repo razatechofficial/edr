@@ -3,6 +3,7 @@ package xdrclient
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -96,5 +97,26 @@ func TestStageIdentitySkipsDaemonOwnedBlobs(t *testing.T) {
 	cfg := config.XDRConfig{CertDir: certDir, SecureStorage: "file"}
 	if err := StageIdentityFromLocalKeystore(cfg, data); err != nil {
 		t.Fatalf("daemon-owned identity should not fail stage: %v", err)
+	}
+}
+
+func TestWindowsMachineIdentityReadyOffWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses DPAPI presence, not this guard")
+	}
+	data := t.TempDir()
+	certDir := filepath.Join(data, "xdr-tls")
+	if err := os.MkdirAll(certDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(certDir, "agent.key.dpapi"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(certDir, "agent.crt.dpapi"), []byte("y"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.XDRConfig{CertDir: certDir, SecureStorage: "dpapi"}
+	if windowsMachineIdentityReady(cfg, data) {
+		t.Fatal("macOS/Linux must still use the stage→file path")
 	}
 }
