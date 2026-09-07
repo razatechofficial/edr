@@ -354,18 +354,28 @@ func enableIngestIfEnrolled(cfgPath string, cfg config.Config) {
 		DataDir: cfg.Agent.DataDir,
 		Backend: cfg.XDR.SecureStorage,
 	}.WithExistingCredentials()
-	if !store.HasCredentials() {
-		return
+	st, loaded := xdrclient.State{}, false
+	if store.HasCredentials() {
+		if got, err := store.Load(); err == nil {
+			st, loaded = got, true
+		}
 	}
-	st, err := store.Load()
-	if err != nil {
-		st = xdrclient.State{IngestHosts: xdrclient.DefaultIngestHosts(), SecureStorage: store.BackendName()}
+	if !loaded {
+		st, loaded = xdrclient.LoadEnrollmentSidecar(cfg.XDR, cfg.Agent.DataDir)
+	}
+	if !loaded {
+		return
 	}
 	if len(st.IngestHosts) == 0 {
 		st.IngestHosts = xdrclient.DefaultIngestHosts()
 	}
-	st.SecureStorage = store.BackendName()
+	if runtime.GOOS == "windows" && store.Backend != "file" {
+		st.SecureStorage = "dpapi"
+	} else if strings.TrimSpace(st.SecureStorage) == "" {
+		st.SecureStorage = store.BackendName()
+	}
 	if err := xdrclient.EnableIngestFromEnrollment(cfgPath, st); err != nil {
+		writeAgentBoot("enable ingest: " + err.Error())
 		fmt.Fprintf(os.Stderr, "enable ingest: %v\n", err)
 	}
 }

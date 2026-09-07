@@ -94,6 +94,7 @@ type Agent struct {
 	// telemetrySealSender mirrors forwarder seal settings for diagnostics (no live transport).
 	telemetrySealSender *telemetry.Sender
 
+	xdrMu     sync.Mutex
 	xdrIngest *xdrclient.IngestClient
 	xdrStore  xdrclient.Store
 	xdrState  xdrclient.State

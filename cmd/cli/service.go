@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,14 +30,42 @@ func newConnectStreamCmd() *cobra.Command {
 			if err := enableIngestFromLocalIdentity(); err != nil {
 				return err
 			}
+			if startIngestViaAPI() {
+				return waitIngestLive(45 * time.Second)
+			}
 			_ = controlAgentService("stop")
 			time.Sleep(600 * time.Millisecond)
 			if err := controlAgentService("start"); err != nil {
 				return err
 			}
+			_ = startIngestViaAPI()
 			return waitIngestLive(45 * time.Second)
 		},
 	}
+}
+
+func startIngestViaAPI() bool {
+	client := &http.Client{Timeout: 40 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(httpAddr, "/")+"/api/v1/ingest/connect", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var got struct {
+		OK bool `json:"ok"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&got) != nil {
+		return false
+	}
+	if got.OK {
+		fmt.Println("ingest stream connected")
+		return true
+	}
+	return false
 }
 
 func waitIngestLive(d time.Duration) error {

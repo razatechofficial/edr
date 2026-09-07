@@ -195,8 +195,12 @@ func ShouldInitXDR(cfg config.XDRConfig, dataDir string) bool {
 		Dir:     resolveCertDir(cfg, dataDir),
 		DataDir: dataDir,
 		Backend: cfg.SecureStorage,
+	}.WithExistingCredentials()
+	if store.HasAnyCredentials() {
+		return true
 	}
-	return store.HasAnyCredentials()
+	_, ok := LoadEnrollmentSidecar(cfg, dataDir)
+	return ok
 }
 
 // PatchXDRConfigFile enables XDR settings in agent.yaml without embedding the token.

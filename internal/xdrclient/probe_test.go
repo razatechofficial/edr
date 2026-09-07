@@ -141,6 +141,17 @@ func TestHasCredentialsSeesDPAPIFilesWithoutOpeningStore(t *testing.T) {
 	}
 }
 
+func TestShouldInitXDRFromSidecar(t *testing.T) {
+	dir := t.TempDir()
+	meta := []byte(`{"agent_id":"late-1","ingest_hosts":["ingest.example:443"]}`)
+	if err := os.WriteFile(filepath.Join(dir, "enrollment.json"), meta, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !ShouldInitXDR(config.XDRConfig{}, dir) {
+		t.Fatal("enrollment.json sidecar must start ingest even when xdr.enabled is false")
+	}
+}
+
 func TestProbeLocalEnrollmentIngestStatus(t *testing.T) {
 	dir := t.TempDir()
 	tls := filepath.Join(dir, "xdr-tls")

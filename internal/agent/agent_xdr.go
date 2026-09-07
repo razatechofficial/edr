@@ -130,6 +130,7 @@ func (a *Agent) runXDRBackground(ctx context.Context) {
 	if a.xdrIngest != nil {
 		go a.xdrIngest.RunHeartbeat(ctx)
 	}
+	go a.watchLateIngest(ctx)
 	if a.xdrStore.Dir == "" || a.cfg.XDR.EnrollmentHost == "" {
 		return
 	}
@@ -146,6 +147,50 @@ func (a *Agent) runXDRBackground(ctx context.Context) {
 			_ = a.xdrIngest.Close()
 		}
 	})
+}
+
+// watchLateIngest starts the ingest client after enroll writes a cert while
+// the sensor is already running. Windows MSI starts EDRAgent before Enroll;
+// if service stop does not recycle the process, ingest stayed nil forever.
+func (a *Agent) watchLateIngest(ctx context.Context) {
+	t := time.NewTicker(4 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			a.xdrMu.Lock()
+			ready := a.xdrIngest != nil
+			a.xdrMu.Unlock()
+			if ready {
+				continue
+			}
+			if !xdrclient.ShouldInitXDR(a.cfg.XDR, a.cfg.Agent.DataDir) {
+				continue
+			}
+			if err := a.ensureIngest(ctx); err != nil {
+				a.logger.Info("xdr ingest still deferred", "error", err)
+			}
+		}
+	}
+}
+
+func (a *Agent) ensureIngest(ctx context.Context) error {
+	a.xdrMu.Lock()
+	defer a.xdrMu.Unlock()
+	if a.xdrIngest != nil {
+		cctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		return a.xdrIngest.Connect(cctx)
+	}
+	if err := a.initXDR(); err != nil {
+		return err
+	}
+	if a.xdrIngest != nil {
+		go a.xdrIngest.RunHeartbeat(ctx)
+	}
+	return nil
 }
 
 func (a *Agent) handleIngestCommand(ctx context.Context, cmd *telemetryv1.AgentCommand) error {
@@ -192,6 +237,7 @@ func persistXDRInitFault(cfg config.Config, detail string) {
 }
 
 func resumeIngestFromCert(store xdrclient.Store, cfg config.XDRConfig, agentID string) (*xdrclient.EnrollResult, error) {
+	store = store.WithExistingCredentials()
 	if !store.HasCredentials() {
 		return nil, fmt.Errorf("no device certificate")
 	}

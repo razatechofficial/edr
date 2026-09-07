@@ -22,6 +22,7 @@ func (a *Agent) startLocalControlAPI(ctx context.Context) {
 	a.startedAt = time.Now()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/status", a.handleLocalStatus)
+	mux.HandleFunc("/api/v1/ingest/connect", a.handleIngestConnect)
 
 	newServer := func() *http.Server {
 		return &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
@@ -86,9 +87,12 @@ func (a *Agent) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 		alerts = a.advEngine.Stats().DetectionsEmitted
 	}
 	cpu, memMB := sampleSelfResources()
+	a.xdrMu.Lock()
+	ingest := a.xdrIngest
+	a.xdrMu.Unlock()
 	ingestOK, ingestHost, ingestFault := false, "", "ingest client not started"
-	if a.xdrIngest != nil {
-		ingestOK, ingestHost, ingestFault = a.xdrIngest.Status()
+	if ingest != nil {
+		ingestOK, ingestHost, ingestFault = ingest.Status()
 	}
 	body := map[string]any{
 		"status":           "running",
@@ -110,4 +114,35 @@ func (a *Agent) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func (a *Agent) handleIngestConnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+	defer cancel()
+	if err := a.ensureIngest(ctx); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":     false,
+			"detail": err.Error(),
+		})
+		return
+	}
+	a.xdrMu.Lock()
+	ingest := a.xdrIngest
+	a.xdrMu.Unlock()
+	ok, host, detail := false, "", "ingest client not started"
+	if ingest != nil {
+		ok, host, detail = ingest.Status()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":     ok,
+		"host":   host,
+		"detail": detail,
+	})
 }

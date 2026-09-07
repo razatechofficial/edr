@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -61,7 +62,14 @@ func ResolveCertDir(cfg config.XDRConfig, dataDir string) string {
 	if dataDir == "" {
 		dataDir = platform.DataDir()
 	}
-	return filepath.Join(dataDir, "xdr-tls")
+	primary := filepath.Join(dataDir, "xdr-tls")
+	if runtime.GOOS == "windows" {
+		alt := filepath.Join(platform.DataDir(), "xdr-tls")
+		if !hasDeviceCertPair(primary) && hasDeviceCertPair(alt) {
+			return alt
+		}
+	}
+	return primary
 }
 
 func resolveCertDir(cfg config.XDRConfig, dataDir string) string {
@@ -78,7 +86,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		Dir:     resolveCertDir(opt.Config, opt.DataDir),
 		DataDir: opt.DataDir,
 		Backend: opt.Config.SecureStorage,
-	}
+	}.WithExistingCredentials()
 	WriteEnrollProgress(opt.DataDir, "token")
 	if !opt.Force && store.HasCredentials() {
 		st, err := store.Load()

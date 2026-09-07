@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/razatechofficial/edr/internal/hostperm"
 	"golang.org/x/sys/windows"
@@ -28,7 +29,20 @@ func windowsControlAgentService(action string) error {
 	}
 	defer closer()
 	if _, err := s.Control(svc.Stop); err != nil {
+		if st, qerr := s.Query(); qerr == nil && st.State == svc.Stopped {
+			fmt.Println("EDRAgent already stopped")
+			return nil
+		}
 		return fmt.Errorf("stop service: %w", err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		st, err := s.Query()
+		if err == nil && st.State == svc.Stopped {
+			fmt.Println("EDRAgent stop requested")
+			return nil
+		}
+		time.Sleep(400 * time.Millisecond)
 	}
 	fmt.Println("EDRAgent stop requested")
 	return nil
