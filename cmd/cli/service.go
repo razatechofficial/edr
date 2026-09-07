@@ -68,14 +68,15 @@ func enableIngestFromLocalIdentity() error {
 		DataDir: cfg.Agent.DataDir,
 		Backend: cfg.XDR.SecureStorage,
 	}.WithExistingCredentials()
-	st, err := store.Load()
-	if err != nil || !store.HasCredentials() {
+	if !store.HasCredentials() {
 		detail := "no device certificate; enroll this PC first"
-		if err != nil {
-			detail = err.Error()
-		}
 		xdrclient.PersistIngestStatus(store.Dir, false, "", detail)
-		return fmt.Errorf("no device certificate; enroll this PC first")
+		return fmt.Errorf("%s", detail)
+	}
+	st, err := store.Load()
+	if err != nil {
+		xdrclient.PersistIngestStatus(store.Dir, false, "", err.Error())
+		return fmt.Errorf("device certificate found but identity could not be loaded: %w", err)
 	}
 	if len(st.IngestHosts) == 0 {
 		st.IngestHosts = xdrclient.DefaultIngestHosts()

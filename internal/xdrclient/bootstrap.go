@@ -270,10 +270,12 @@ func EnableIngestFromEnrollment(path string, st State) error {
 	setMapStringList(xdr, "ingest_hosts", ingest)
 	setMapString(xdr, "secure_storage", backend)
 	setMapString(xdr, "enrollment_token", "")
-	if err := writeYAMLRoot(path, root, 0o644); err != nil {
-		return err
+	yamlErr := writeYAMLRoot(path, root, 0o644)
+	envErr := WriteXDRRuntimeEnv(filepath.Dir(path), true, backend)
+	if yamlErr != nil && envErr != nil {
+		return fmt.Errorf("enable ingest: %w", yamlErr)
 	}
-	return WriteXDRRuntimeEnv(filepath.Dir(path), true, backend)
+	return nil
 }
 
 // daemonSecureStorage is the backend the machine-wide sensor can actually open.
@@ -393,6 +395,7 @@ func writeYAMLRoot(path string, root *yaml.Node, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
+	clearFileWriteBarrier(path)
 	if err := os.WriteFile(path, out, perm); err != nil {
 		return err
 	}

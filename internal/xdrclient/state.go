@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -142,25 +143,98 @@ func (s Store) LoadCSRPEM() ([]byte, error) {
 	return ks.LoadCSRPEM()
 }
 
-// Load reads enrollment metadata and certificate PEM.
+func (s Store) metadataPaths() []string {
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	add(s.statePath())
+	if dd := strings.TrimSpace(s.DataDir); dd != "" {
+		add(filepath.Join(dd, stateFileName))
+	}
+	return out
+}
+
+// Load reads enrollment metadata and certificate PEM. If enrollment.json was
+// wiped (Windows ACL / MSI folder recreate) but the device cert is still in
+// DPAPI or the file store, rebuild metadata so Connect stream can enable ingest.
 func (s Store) Load() (State, error) {
-	data, err := os.ReadFile(s.statePath())
+	var firstErr error
+	for _, p := range s.metadataPaths() {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		var st State
+		if err := json.Unmarshal(data, &st); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		certPEM, err := s.LoadCertificatePEM()
+		if err != nil {
+			return State{}, err
+		}
+		st.CertificatePEM = string(certPEM)
+		if st.SecureStorage == "" {
+			st.SecureStorage = s.BackendName()
+		}
+		if len(st.IngestHosts) == 0 {
+			st.IngestHosts = DefaultIngestHosts()
+		}
+		return st, nil
+	}
+	if !s.HasAnyCredentials() {
+		if firstErr == nil {
+			firstErr = fmt.Errorf("enrollment.json: file not found")
+		}
+		return State{}, firstErr
+	}
+	st, err := s.recoverMetadataFromCert()
 	if err != nil {
+		if firstErr != nil {
+			return State{}, fmt.Errorf("%v", firstErr)
+		}
 		return State{}, err
 	}
-	var st State
-	if err := json.Unmarshal(data, &st); err != nil {
-		return State{}, err
-	}
-	certPEM, err := s.LoadCertificatePEM()
-	if err != nil {
-		return State{}, err
-	}
-	st.CertificatePEM = string(certPEM)
-	if st.SecureStorage == "" {
-		st.SecureStorage = s.BackendName()
-	}
+	_ = s.SaveMetadata(st)
 	return st, nil
+}
+
+func (s Store) recoverMetadataFromCert() (State, error) {
+	certPEM, err := s.LoadCertificatePEM()
+	if err != nil || len(certPEM) == 0 {
+		return State{}, fmt.Errorf("load certificate: %w", err)
+	}
+	agentID, err := AgentIDFromCert(string(certPEM))
+	if err != nil || strings.TrimSpace(agentID) == "" {
+		return State{}, fmt.Errorf("cannot derive agent_id from device certificate")
+	}
+	notAfter, _ := CertNotAfter(string(certPEM))
+	return State{
+		AgentID:        agentID,
+		MachineID:      MachineIDFromCert(string(certPEM)),
+		CertificatePEM: string(certPEM),
+		CAChainPEM:     s.LoadCAChainPEM(),
+		IngestHosts:    DefaultIngestHosts(),
+		HeartbeatSec:   30,
+		CertNotAfter:   notAfter,
+		EnrolledAt:     time.Now().UTC(),
+		SecureStorage:  s.BackendName(),
+	}, nil
 }
 
 // SaveMetadata rewrites enrollment.json (+ backend name) without rotating key/cert.
@@ -180,15 +254,52 @@ func (s Store) persistMetadata(st State) error {
 	if err != nil {
 		return err
 	}
-	tmp := s.statePath() + ".tmp"
-	if err := os.WriteFile(tmp, meta, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.statePath()); err != nil {
+	if err := replaceFile(s.statePath(), meta, 0o644); err != nil {
 		return err
 	}
 	s.relaxIdentityPerms()
-	return os.Chmod(s.statePath(), 0o644)
+	if dd := strings.TrimSpace(s.DataDir); dd != "" && filepath.Clean(dd) != filepath.Clean(s.Dir) {
+		_ = replaceFile(filepath.Join(dd, stateFileName), meta, 0o644)
+	}
+	PublishEnrollmentSidecar(s.DataDir, s.Dir)
+	return nil
+}
+
+func replaceFile(path string, data []byte, perm os.FileMode) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("empty path")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	clearFileWriteBarrier(path)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(path)
+		if err2 := os.Rename(tmp, path); err2 != nil {
+			_ = os.Remove(tmp)
+			if err3 := os.WriteFile(path, data, perm); err3 != nil {
+				return err
+			}
+		}
+	}
+	_ = os.Chmod(path, perm)
+	grantUsersRead(path)
+	return nil
+}
+
+// PublishEnrollmentSidecar lets the unelevated console read enrollment.json
+// after restrictSensitiveTree locks xdr-tls to SYSTEM+Administrators.
+func PublishEnrollmentSidecar(dataDir, certDir string) {
+	grantUsersRead(filepath.Join(strings.TrimSpace(certDir), stateFileName))
+	if dd := strings.TrimSpace(dataDir); dd != "" {
+		grantUsersRead(filepath.Join(dd, stateFileName))
+		grantUsersRead(filepath.Join(dd, "xdr-tls", stateFileName))
+	}
 }
 
 // RebindDaemonReadable rewrites key+cert+metadata so the machine-wide sensor
@@ -210,9 +321,18 @@ func (s Store) ExportDaemonReadable(st State, keyPEM []byte, csrPEM string) erro
 		return fmt.Errorf("export identity: empty key")
 	}
 	backend := strings.ToLower(strings.TrimSpace(s.Backend))
-	if backend == keystore.BackendFile || s.BackendName() == keystore.BackendFile {
+	name := s.BackendName()
+	if backend == keystore.BackendFile || name == keystore.BackendFile {
 		s.relaxIdentityPerms()
+		PublishEnrollmentSidecar(s.DataDir, s.Dir)
 		return os.Chmod(s.statePath(), 0o644)
+	}
+	// Windows sensor reads machine-scope DPAPI. A second file-backend Save
+	// used to rewrite enrollment.json via Rename-over-existing, which fails
+	// on Windows and left Connect stream looking at a missing sidecar.
+	if runtime.GOOS == "windows" && name == keystore.BackendDPAPI {
+		s.relaxIdentityPerms()
+		return s.persistMetadata(st)
 	}
 	file := Store{Dir: s.Dir, DataDir: s.DataDir, Backend: keystore.BackendFile}
 	return file.SaveWithCSR(st, keyPEM, csrPEM)

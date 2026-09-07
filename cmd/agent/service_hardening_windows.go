@@ -14,6 +14,7 @@ import (
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/hostperm"
 	"github.com/razatechofficial/edr/internal/selfprotect"
+	"github.com/razatechofficial/edr/internal/xdrclient"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -272,6 +273,7 @@ func restrictOperatorTree(dir string) {
 func publishOperatorStatusDirs(dataDir string) {
 	restrictOperatorTree(dataDir)
 	restrictOperatorTree(filepath.Join(dataDir, "logs"))
+	xdrclient.PublishEnrollmentSidecar(dataDir, filepath.Join(dataDir, "xdr-tls"))
 }
 
 func hardenServiceInstallDirACL(dir string) error {

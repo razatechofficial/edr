@@ -10,6 +10,15 @@ import (
 // grantUsersRead lets the unelevated console read a status sidecar. xdr-tls
 // is SYSTEM+Administrators only after MSI hardening, so ingest.status there
 // is invisible to edrctl ui and the dashboard stays on Retrying.
+func clearFileWriteBarrier(path string) {
+	if path == "" {
+		return
+	}
+	cmd := exec.Command("attrib", "-R", path)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	_ = cmd.Run()
+}
+
 func grantUsersRead(path string) {
 	if path == "" {
 		return

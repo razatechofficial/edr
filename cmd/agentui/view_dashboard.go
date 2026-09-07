@@ -376,10 +376,12 @@ func (c *console) connectStream() {
 				if detail == "" && err != nil {
 					detail = err.Error()
 				}
-				body := "Local detections continue. Enroll this PC if there is no device certificate."
+				body := "Local detections continue. Connect stream again after the sensor reloads the device certificate."
 				low := strings.ToLower(detail)
-				if strings.Contains(low, "certificate") || strings.Contains(low, "enroll") || strings.Contains(low, "credentials") {
+				if ingestNeedsEnroll(operatorStatus{IngestFault: detail}) {
 					body = "This PC has no device certificate. Enroll with a new one-time token."
+				} else if strings.Contains(low, "enrollment.json") {
+					body = "Enrollment metadata is missing. Connect stream will rebuild it from the device certificate."
 				}
 				c.setDashFault(uiFault{
 					Title:  "Could not connect the stream",

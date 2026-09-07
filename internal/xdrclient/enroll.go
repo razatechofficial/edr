@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/platform"
 	enrollmentv1 "github.com/razatechofficial/xdr/api/proto/enrollment/v1"
 )
 
@@ -47,7 +48,18 @@ type EnrollResult struct {
 
 func ResolveCertDir(cfg config.XDRConfig, dataDir string) string {
 	if d := strings.TrimSpace(cfg.CertDir); d != "" {
-		return d
+		if filepath.IsAbs(d) {
+			return d
+		}
+		base := strings.TrimSpace(dataDir)
+		if base == "" {
+			base = platform.DataDir()
+		}
+		return filepath.Join(base, d)
+	}
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		dataDir = platform.DataDir()
 	}
 	return filepath.Join(dataDir, "xdr-tls")
 }

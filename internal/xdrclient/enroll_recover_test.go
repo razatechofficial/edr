@@ -80,3 +80,59 @@ func TestRecoverStateFromCredentials(t *testing.T) {
 		t.Fatal("missing ingest_hosts")
 	}
 }
+
+func TestStoreLoadRecoversWithoutJSON(t *testing.T) {
+	dir := t.TempDir()
+	store := Store{Dir: filepath.Join(dir, "xdr-tls"), DataDir: dir, Backend: "file"}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "agent-load-1"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	if err := store.SaveWithCSR(State{
+		AgentID:        "agent-load-1",
+		CertificatePEM: string(certPEM),
+		IngestHosts:    []string{"ingest.xdr.averox.com:443"},
+	}, keyPEM, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveMetadata(State{
+		AgentID:     "agent-load-1",
+		IngestHosts: []string{"ingest.xdr.averox.com:443"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(store.statePath()); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(filepath.Join(dir, "enrollment.json"))
+	st, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load should recover from device cert: %v", err)
+	}
+	if st.AgentID != "agent-load-1" {
+		t.Fatalf("agent_id=%s", st.AgentID)
+	}
+	if len(st.IngestHosts) == 0 {
+		t.Fatal("ingest_hosts empty after recover")
+	}
+	if _, err := os.Stat(store.statePath()); err != nil {
+		t.Fatalf("Load should rewrite enrollment.json: %v", err)
+	}
+}

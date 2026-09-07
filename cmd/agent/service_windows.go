@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/razatechofficial/edr/internal/config"
+	"github.com/razatechofficial/edr/internal/xdrclient"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
@@ -180,6 +181,7 @@ func installService() error {
 	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "models"))
 	restrictOperatorTree(filepath.Join(WindowsDataRoot(), "logs"))
 	restrictSensitiveTree(filepath.Join(WindowsDataRoot(), "xdr-tls"))
+	xdrclient.PublishEnrollmentSidecar(WindowsDataRoot(), filepath.Join(WindowsDataRoot(), "xdr-tls"))
 
 	_ = eventlog.Remove(windowsServiceName)
 	if err := eventlog.InstallAsEventCreate(windowsServiceName, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {

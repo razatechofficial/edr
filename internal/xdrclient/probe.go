@@ -70,36 +70,48 @@ func peekYAMLDataDir(configPath string) string {
 
 func probeEnrollmentDir(dataDir string) LocalEnrollment {
 	tls := filepath.Join(dataDir, "xdr-tls")
-	path := filepath.Join(tls, "enrollment.json")
-	if raw, err := os.ReadFile(path); err == nil {
-		var meta diskEnrollMeta
-		if json.Unmarshal(raw, &meta) == nil {
-			id := strings.TrimSpace(meta.AgentID)
-			if id != "" || len(meta.IngestHosts) > 0 {
-				out := LocalEnrollment{
-					Enrolled:  true,
-					AgentID:   id,
-					MachineID: strings.TrimSpace(meta.MachineID),
-					Ingest:    strings.Join(meta.IngestHosts, ","),
-				}
-				if !meta.CertNotAfter.IsZero() {
-					out.CertExpiry = meta.CertNotAfter.UTC().Format(time.RFC3339)
-				}
-				return out
-			}
-		}
-	} else if isDenied(err) {
-		// File exists but is unreadable (0600 SYSTEM). A denied directory
-		// Stat also fails — MSI creates empty xdr-tls then locks it, which
-		// must not skip Enroll.
-		if _, serr := os.Stat(path); serr == nil {
-			return LocalEnrollment{Enrolled: true}
+	for _, path := range []string{
+		filepath.Join(tls, "enrollment.json"),
+		filepath.Join(dataDir, "enrollment.json"),
+	} {
+		if hint := probeEnrollmentJSON(path); hint.Enrolled {
+			return hint
 		}
 	}
 	if hasDeviceCertPair(tls) {
 		return LocalEnrollment{Enrolled: true}
 	}
 	return LocalEnrollment{}
+}
+
+func probeEnrollmentJSON(path string) LocalEnrollment {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if isDenied(err) {
+			if _, serr := os.Stat(path); serr == nil {
+				return LocalEnrollment{Enrolled: true}
+			}
+		}
+		return LocalEnrollment{}
+	}
+	var meta diskEnrollMeta
+	if json.Unmarshal(raw, &meta) != nil {
+		return LocalEnrollment{}
+	}
+	id := strings.TrimSpace(meta.AgentID)
+	if id == "" && len(meta.IngestHosts) == 0 {
+		return LocalEnrollment{}
+	}
+	out := LocalEnrollment{
+		Enrolled:  true,
+		AgentID:   id,
+		MachineID: strings.TrimSpace(meta.MachineID),
+		Ingest:    strings.Join(meta.IngestHosts, ","),
+	}
+	if !meta.CertNotAfter.IsZero() {
+		out.CertExpiry = meta.CertNotAfter.UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 func hasDeviceCertPair(tls string) bool {

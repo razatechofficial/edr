@@ -57,9 +57,15 @@ func ingestNeedsEnroll(st operatorStatus) bool {
 	if f == "" {
 		return false
 	}
-	return strings.Contains(f, "certificate") ||
-		strings.Contains(f, "credentials") ||
-		strings.Contains(f, "enroll")
+	// "enrollment.json" contains "enroll" but means the sidecar is missing,
+	// not that this PC was never enrolled.
+	if strings.Contains(f, "enrollment.json") {
+		return false
+	}
+	return strings.Contains(f, "no device certificate") ||
+		strings.Contains(f, "credentials required") ||
+		strings.Contains(f, "enroll this") ||
+		strings.Contains(f, "enroll first")
 }
 
 func ingestIdleBanner(configured, env bool, fault string) string {
@@ -71,7 +77,9 @@ func ingestIdleBanner(configured, env bool, fault string) string {
 	}
 	f := strings.ToLower(fault)
 	switch {
-	case strings.Contains(f, "certificate") || strings.Contains(f, "credentials") || strings.Contains(f, "enroll"):
+	case strings.Contains(f, "enrollment.json"):
+		return "Ingest is not connected. Local detections continue."
+	case strings.Contains(f, "no device certificate") || strings.Contains(f, "credentials required") || strings.Contains(f, "enroll this") || strings.Contains(f, "enroll first"):
 		return "No device certificate. Enroll this PC with a new token."
 	case strings.Contains(f, "502") || strings.Contains(f, "bad gateway"):
 		return "Cloud ingest is unavailable (502). Local detections continue."

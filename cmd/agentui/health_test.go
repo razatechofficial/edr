@@ -16,6 +16,9 @@ func TestIngestNeedsEnroll(t *testing.T) {
 	if ingestNeedsEnroll(operatorStatus{IngestFault: "rpc error: 502 Bad Gateway"}) {
 		t.Fatal("cloud 502 must stay on Retry stream")
 	}
+	if ingestNeedsEnroll(operatorStatus{IngestFault: `open C:\ProgramData\EDR Agent\xdr-tls\enrollment.json: The system cannot find the file specified.`}) {
+		t.Fatal("missing enrollment.json sidecar must not look like a missing device cert")
+	}
 }
 
 func TestIngestIdleBannerNotConfigured(t *testing.T) {

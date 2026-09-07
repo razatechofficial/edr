@@ -63,6 +63,18 @@ func TestProbeLocalEnrollmentSealedCert(t *testing.T) {
 	}
 }
 
+func TestProbeLocalEnrollmentReadsDataRootJSON(t *testing.T) {
+	dir := t.TempDir()
+	meta := []byte(`{"agent_id":"from-root","ingest_hosts":["ingest.example:443"]}`)
+	if err := os.WriteFile(filepath.Join(dir, "enrollment.json"), meta, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := ProbeLocalEnrollment("", dir)
+	if !got.Enrolled || got.AgentID != "from-root" {
+		t.Fatalf("%#v", got)
+	}
+}
+
 func TestProbeLocalEnrollmentEmpty(t *testing.T) {
 	dir := t.TempDir()
 	got := ProbeLocalEnrollment(filepath.Join(dir, "missing.yaml"), dir)
