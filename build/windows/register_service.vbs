@@ -15,6 +15,15 @@ logDir = pd & "\EDR Agent\logs"
 If Not fso.FolderExists(pd & "\EDR Agent") Then fso.CreateFolder pd & "\EDR Agent"
 If Not fso.FolderExists(logDir) Then fso.CreateFolder logDir
 logFile = logDir & "\msi_register.log"
+If Not fso.FileExists(cfg) Then
+  Dim stock
+  stock = pf & "\EDR Agent\config.default.yml"
+  If fso.FileExists(stock) Then
+    fso.CopyFile stock, cfg, True
+  ElseIf fso.FileExists(pd & "\EDR Agent\config.enterprise.yml") Then
+    fso.CopyFile pd & "\EDR Agent\config.enterprise.yml", cfg, True
+  End If
+End If
 
 Sub Log(msg)
   Dim f

@@ -306,6 +306,20 @@ func TestLoadYAML(t *testing.T) {
 	}
 }
 
+func TestLoadSeedsMissingWindowsStock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	if err := os.WriteFile(filepath.Join(dir, "config.enterprise.yml"), []byte("agent:\n  id: seeded\n  data_dir: "+dir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("config.yml was not written")
+	}
+}
+
 func TestLoadXDREnabledYAMLWithoutEnv(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DATA_DIR", dir)

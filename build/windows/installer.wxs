@@ -110,8 +110,10 @@
       <Custom Action="CaRegisterServiceVbs" After="CaRegisterService">NOT REMOVE</Custom>
       <Custom Action="CaRegisterServiceHardening" After="CaRegisterServiceVbs">NOT REMOVE</Custom>
       <Custom Action="CaRegisterServiceRetry" After="InstallFinalize">NOT REMOVE</Custom>
-      <Custom Action="CaMsiPurge" Before="CaInstallerPurge">REMOVE="ALL"</Custom>
-      <Custom Action="CaInstallerPurge" Before="CaUnregisterService">REMOVE="ALL"</Custom>
+      <!-- UPGRADINGPRODUCTCODE is set on the *old* product during MajorUpgrade.
+           Purge must not run then — it deleted config.yml and the device cert. -->
+      <Custom Action="CaMsiPurge" Before="CaInstallerPurge">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="CaInstallerPurge" Before="CaUnregisterService">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
       <Custom Action="CaUnregisterService" Before="RemoveFiles">REMOVE="ALL"</Custom>
     </InstallExecuteSequence>
     <InstallUISequence>
@@ -218,12 +220,18 @@
                        Value="[INSTALLFOLDER]"
                        KeyPath="yes"/>
       </Component>
-      <Component Id="cmpConfigYml" Guid="*" Directory="DATAROOT" Win64="yes" NeverOverwrite="yes">
+      <Component Id="cmpConfigYml" Guid="*" Directory="DATAROOT" Win64="yes" NeverOverwrite="yes" Permanent="yes">
         <File Id="ConfigFile"
               Source="$(var.EdrConfigYml)"
               Name="config.yml"
               KeyPath="yes"/>
         <CreateFolder/>
+      </Component>
+      <Component Id="cmpConfigDefaultYml" Guid="*" Directory="INSTALLFOLDER" Win64="yes">
+        <File Id="ConfigDefaultFile"
+              Source="$(var.EdrConfigYml)"
+              Name="config.default.yml"
+              KeyPath="yes"/>
       </Component>
       <Component Id="cmpConfigHardenedYml" Guid="*" Directory="DATAROOT" Win64="yes">
         <File Id="ConfigHardenedFile"

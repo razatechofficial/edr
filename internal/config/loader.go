@@ -24,6 +24,12 @@ import (
 func Load(path string) (Config, error) {
 	cfg := Defaults()
 
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if serr := EnsureFile(path); serr != nil {
+			return Config{}, fmt.Errorf("reading config %s: %w", path, err)
+		}
+	}
+
 	v := viper.New()
 	v.SetConfigFile(path)
 

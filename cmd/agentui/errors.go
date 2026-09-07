@@ -40,6 +40,13 @@ func classifyEnrollError(raw string) uiFault {
 			Detail: "Typical causes: token, tenant mismatch, or this device is already enrolled. See your admin.",
 			Action: "Try again",
 		}
+	case strings.Contains(s, "config.yml") && (strings.Contains(s, "cannot find") || strings.Contains(s, "no such file") || strings.Contains(s, "not exist")):
+		return uiFault{
+			Title:  "Agent config is missing",
+			Body:   "An in-place upgrade removed config.yml. The next installer recreates it. You can also copy config.enterprise.yml to config.yml under ProgramData\\EDR Agent.",
+			Detail: strings.TrimSpace(raw),
+			Action: "Try again",
+		}
 	case strings.Contains(s, "expired"):
 		return uiFault{
 			Title:  "This token has expired",

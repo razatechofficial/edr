@@ -19,6 +19,9 @@ func TestParseTasklistMemMB(t *testing.T) {
 }
 
 func TestClassifyEnrollError(t *testing.T) {
+	if classifyEnrollError(`load config C:\ProgramData\EDR Agent\config.yml: open C:\ProgramData\EDR Agent\config.yml: The system cannot find the file specified.`).Title != "Agent config is missing" {
+		t.Fatal("missing config")
+	}
 	if classifyEnrollError("dial enrollment: i/o timeout").Title != "Can’t reach the enrollment service" {
 		t.Fatal("timeout")
 	}
