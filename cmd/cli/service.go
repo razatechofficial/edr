@@ -75,20 +75,28 @@ func enableIngestFromLocalIdentity() error {
 		DataDir: cfg.Agent.DataDir,
 		Backend: cfg.XDR.SecureStorage,
 	}.WithExistingCredentials()
-	if !store.HasCredentials() {
+	st, loaded := xdrclient.State{}, false
+	if store.HasCredentials() {
+		if got, lerr := store.Load(); lerr == nil {
+			st, loaded = got, true
+		}
+	}
+	if !loaded {
+		st, loaded = xdrclient.LoadEnrollmentSidecar(cfg.XDR, cfg.Agent.DataDir)
+	}
+	if !loaded {
 		detail := "no device certificate; enroll this PC first"
 		xdrclient.PersistIngestStatus(store.Dir, false, "", detail)
 		return fmt.Errorf("%s", detail)
 	}
-	st, err := store.Load()
-	if err != nil {
-		xdrclient.PersistIngestStatus(store.Dir, false, "", err.Error())
-		return fmt.Errorf("device certificate found but identity could not be loaded: %w", err)
-	}
 	if len(st.IngestHosts) == 0 {
 		st.IngestHosts = xdrclient.DefaultIngestHosts()
 	}
-	st.SecureStorage = store.BackendName()
+	if runtime.GOOS == "windows" && store.Backend != "file" {
+		st.SecureStorage = "dpapi"
+	} else if strings.TrimSpace(st.SecureStorage) == "" {
+		st.SecureStorage = store.BackendName()
+	}
 	if err := xdrclient.EnableIngestFromEnrollment(configFile, st); err != nil {
 		return fmt.Errorf("enable ingest: %w", err)
 	}

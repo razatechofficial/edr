@@ -271,6 +271,7 @@ func EnableIngestFromEnrollment(path string, st State) error {
 	setMapString(xdr, "secure_storage", backend)
 	setMapString(xdr, "enrollment_token", "")
 	yamlErr := writeYAMLRoot(path, root, 0o644)
+	grantUsersRead(path)
 	envErr := WriteXDRRuntimeEnv(filepath.Dir(path), true, backend)
 	if yamlErr != nil && envErr != nil {
 		return fmt.Errorf("enable ingest: %w", yamlErr)

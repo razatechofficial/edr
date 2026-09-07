@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/razatechofficial/edr/internal/config"
 )
 
 func TestProbeLocalEnrollmentReadsJSON(t *testing.T) {
@@ -107,6 +109,35 @@ func TestProbeLocalEnrollmentEmptyTLSDirIsNotEnrolled(t *testing.T) {
 	got := ProbeLocalEnrollment("", dir)
 	if got.Enrolled {
 		t.Fatalf("empty xdr-tls must not look enrolled: %#v", got)
+	}
+}
+
+func TestLoadEnrollmentSidecarFromDataRoot(t *testing.T) {
+	dir := t.TempDir()
+	meta := []byte(`{"agent_id":"side-1","ingest_hosts":["ingest.example:443"],"secure_storage":"dpapi"}`)
+	if err := os.WriteFile(filepath.Join(dir, "enrollment.json"), meta, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, ok := LoadEnrollmentSidecar(config.XDRConfig{}, dir)
+	if !ok || st.AgentID != "side-1" || len(st.IngestHosts) != 1 {
+		t.Fatalf("ok=%v %#v", ok, st)
+	}
+}
+
+func TestHasCredentialsSeesDPAPIFilesWithoutOpeningStore(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "agent.key.dpapi"), []byte("k"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent.crt.dpapi"), []byte("c"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := Store{Dir: dir, Backend: "dpapi"}
+	if !s.HasCredentials() {
+		t.Fatal("on-disk DPAPI blobs must count as credentials")
+	}
+	if b, ok := s.existingBackend(); !ok || b != "dpapi" {
+		t.Fatalf("backend=%s ok=%v", b, ok)
 	}
 }
 

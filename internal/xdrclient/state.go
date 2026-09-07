@@ -375,8 +375,33 @@ func (s Store) HasCredentials() bool {
 }
 
 func (s Store) hasOnBackend(backend string) bool {
+	if s.hasIdentityBlobs(backend) {
+		return true
+	}
 	ks, err := keystore.New(keystore.Options{Backend: backend, Dir: s.Dir, DataDir: s.DataDir})
 	return err == nil && ks.Has()
+}
+
+// hasIdentityBlobs is true when key+cert files exist. Used when DPAPI New()
+// cannot probe (UAC split token / ACL) but LocalSystem can still load them.
+func (s Store) hasIdentityBlobs(backend string) bool {
+	dir := strings.TrimSpace(s.Dir)
+	if dir == "" {
+		return false
+	}
+	dpapi := fileExists(dir, "agent.key.dpapi") && fileExists(dir, "agent.crt.dpapi")
+	sealed := fileExists(dir, "agent.key.enc") && fileExists(dir, "agent.crt.enc")
+	plain := fileExists(dir, "agent.key") && fileExists(dir, "agent.crt")
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case "", "auto":
+		return dpapi || sealed || plain
+	case "dpapi":
+		return dpapi
+	case "file":
+		return sealed || plain
+	default:
+		return false
+	}
 }
 
 // HasAnyCredentials is true when any supported backend has a device cert.
@@ -398,11 +423,11 @@ func (s Store) WithExistingCredentials() Store {
 }
 
 func (s Store) existingBackend() (string, bool) {
-	order := []string{s.Backend, "auto", "dpapi", "file", "keychain"}
+	order := []string{s.Backend, "dpapi", "file", "keychain"}
 	seen := map[string]struct{}{}
 	for _, b := range order {
 		b = strings.ToLower(strings.TrimSpace(b))
-		if b == "" {
+		if b == "" || b == "auto" {
 			continue
 		}
 		if _, ok := seen[b]; ok {

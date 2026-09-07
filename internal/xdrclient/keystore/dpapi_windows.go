@@ -29,10 +29,18 @@ func newDPAPIStore(dir string) (Store, error) {
 	probe := []byte("xdr-dpapi-probe")
 	enc, err := dpapiProtect(probe)
 	if err != nil {
+		s := &dpapiStore{dir: dir}
+		if s.Has() {
+			return s, nil
+		}
 		return nil, err
 	}
 	dec, err := dpapiUnprotect(enc)
 	if err != nil || string(dec) != string(probe) {
+		s := &dpapiStore{dir: dir}
+		if s.Has() {
+			return s, nil
+		}
 		return nil, fmt.Errorf("dpapi probe failed: %w", err)
 	}
 	return &dpapiStore{dir: dir}, nil

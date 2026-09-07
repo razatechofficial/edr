@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/razatechofficial/edr/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -112,6 +114,36 @@ func probeEnrollmentJSON(path string) LocalEnrollment {
 		out.CertExpiry = meta.CertNotAfter.UTC().Format(time.RFC3339)
 	}
 	return out
+}
+
+// LoadEnrollmentSidecar reads enrollment.json from the data root or cert dir.
+// The unelevated console can read the data-root copy after xdr-tls is locked.
+func LoadEnrollmentSidecar(cfg config.XDRConfig, dataDir string) (State, bool) {
+	certDir := ResolveCertDir(cfg, dataDir)
+	for _, p := range []string{
+		filepath.Join(strings.TrimSpace(dataDir), stateFileName),
+		filepath.Join(certDir, stateFileName),
+	} {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var st State
+		if json.Unmarshal(raw, &st) != nil {
+			continue
+		}
+		if strings.TrimSpace(st.AgentID) == "" && len(st.IngestHosts) == 0 {
+			continue
+		}
+		if len(st.IngestHosts) == 0 {
+			st.IngestHosts = DefaultIngestHosts()
+		}
+		if strings.TrimSpace(st.SecureStorage) == "" && runtime.GOOS == "windows" {
+			st.SecureStorage = "dpapi"
+		}
+		return st, true
+	}
+	return State{}, false
 }
 
 func hasDeviceCertPair(tls string) bool {

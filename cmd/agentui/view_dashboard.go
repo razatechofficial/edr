@@ -309,7 +309,7 @@ func (c *console) updateDashAction(st operatorStatus) {
 	if needsOSGrants() {
 		c.dashAction.SetText("Grant Full Disk Access")
 		show = true
-	} else if !st.Enrolled || ingestNeedsEnroll(st) {
+	} else if !st.Enrolled {
 		c.dashAction.SetText("Enroll this device")
 		show = true
 	} else if !serviceHealthy(st.Service) {
@@ -348,7 +348,7 @@ func (c *console) onDashAction() {
 		c.show(uistate.Permissions)
 		return
 	}
-	if !c.last.Enrolled || ingestNeedsEnroll(c.last) {
+	if !c.last.Enrolled {
 		c.show(uistate.Enroll)
 		return
 	}
@@ -378,7 +378,7 @@ func (c *console) connectStream() {
 				}
 				body := "Local detections continue. Connect stream again after the sensor reloads the device certificate."
 				low := strings.ToLower(detail)
-				if ingestNeedsEnroll(operatorStatus{IngestFault: detail}) {
+				if ingestNeedsEnroll(operatorStatus{IngestFault: detail}) && !st.Enrolled {
 					body = "This PC has no device certificate. Enroll with a new one-time token."
 				} else if strings.Contains(low, "enrollment.json") {
 					body = "Enrollment metadata is missing. Connect stream will rebuild it from the device certificate."
