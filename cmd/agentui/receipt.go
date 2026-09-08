@@ -4,6 +4,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/razatechofficial/edr/internal/platform"
+	"github.com/razatechofficial/edr/internal/xdrclient"
 )
 
 type identityReceipt struct {
@@ -56,13 +59,27 @@ func parseEnrollReceipt(s string) map[string]string {
 }
 
 func enrollLooksSuccessful(out string, err error, st operatorStatus) bool {
-	if st.Enrolled && strings.TrimSpace(st.AgentID) != "" {
+	if xdrclient.ProbeLocalEnrollment(platform.ResolveConfigFile(), platform.DataDir()).Enrolled {
 		return true
 	}
-	if parseEnrollReceipt(out)["agent_id"] != "" {
+	fields := parseEnrollReceipt(out)
+	if fields["agent_id"] != "" && fields["cert_not_after"] != "" {
 		return true
 	}
-	return err == nil && strings.TrimSpace(st.AgentID) != ""
+	if st.Enrolled && strings.TrimSpace(st.CertExpiry) != "" && !ingestNeedsEnroll(st) {
+		return true
+	}
+	return false
+}
+
+func lastEnrollDetail(out, fallback string) string {
+	if s := strings.TrimSpace(out); s != "" {
+		return s
+	}
+	if s := xdrclient.ReadEnrollLast(platform.DataDir()); s != "" {
+		return s
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func (c *console) applyEnrolled(st operatorStatus, r identityReceipt) {
@@ -83,11 +100,16 @@ func (c *console) applyEnrolled(st operatorStatus, r identityReceipt) {
 
 // mergeEnrollment keeps a successful in-session enroll when user-level
 // `edrctl ui` cannot read root-owned agent.yaml / enrollment.json.
+// The installer agent_id file is not enrollment.
 func mergeEnrollment(st, session operatorStatus) operatorStatus {
-	if st.Enrolled && strings.TrimSpace(st.AgentID) != "" {
+	if ingestNeedsEnroll(st) {
+		st.Enrolled = false
 		return st
 	}
-	if session.Enrolled || strings.TrimSpace(session.AgentID) != "" {
+	if st.Enrolled {
+		return st
+	}
+	if session.Enrolled && strings.TrimSpace(session.CertExpiry) != "" && !ingestNeedsEnroll(session) {
 		st.Enrolled = true
 		st.AgentID = firstNonEmpty(st.AgentID, session.AgentID)
 		st.MachineID = firstNonEmpty(st.MachineID, session.MachineID)

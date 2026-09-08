@@ -2,6 +2,7 @@ package xdrclient
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +22,21 @@ func TestEnrollProgressFile(t *testing.T) {
 	}
 	ClearEnrollProgress(dir)
 	if got := ReadEnrollProgress(dir); got != "" {
+		t.Fatalf("cleared %q", got)
+	}
+}
+
+func TestEnrollLastFile(t *testing.T) {
+	dir := t.TempDir()
+	if ReadEnrollLast(dir) != "" {
+		t.Fatal("empty dir")
+	}
+	WriteEnrollLast(dir, "enrollment register enroll.xdr.averox.com:443: connection refused")
+	if got := ReadEnrollLast(dir); !strings.Contains(got, "connection refused") {
+		t.Fatalf("got %q", got)
+	}
+	ClearEnrollLast(dir)
+	if got := ReadEnrollLast(dir); got != "" {
 		t.Fatalf("cleared %q", got)
 	}
 }

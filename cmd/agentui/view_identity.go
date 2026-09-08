@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"image/color"
-	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -136,6 +135,7 @@ func (c *console) startIdentity(host, token string) {
 	c.renderIdentity(0, false, false, true)
 	c.setBusy(true)
 	xdrclient.ClearEnrollProgress(platform.DataDir())
+	xdrclient.ClearEnrollLast(platform.DataDir())
 
 	type result struct {
 		out string
@@ -145,8 +145,9 @@ func (c *console) startIdentity(host, token string) {
 	doneCh := make(chan result, 1)
 	go func() {
 		out, err := runEdrctlPrivileged("enroll", "--host", host, "--token", token)
+		out = lastEnrollDetail(out, "")
 		st := loadStatus()
-		if fields := parseEnrollReceipt(out); fields["agent_id"] != "" {
+		if fields := parseEnrollReceipt(out); fields["agent_id"] != "" && fields["cert_not_after"] != "" {
 			st.Enrolled = true
 			st.AgentID = firstNonEmpty(st.AgentID, fields["agent_id"])
 			st.MachineID = firstNonEmpty(st.MachineID, fields["machine_id"])
@@ -200,7 +201,7 @@ func (c *console) startIdentity(host, token string) {
 			case r := <-doneCh:
 				res = r
 				if !enrollLooksSuccessful(res.out, res.err, res.st) {
-					msg := strings.TrimSpace(res.out)
+					msg := lastEnrollDetail(res.out, "")
 					if msg == "" && res.err != nil {
 						msg = res.err.Error()
 					}

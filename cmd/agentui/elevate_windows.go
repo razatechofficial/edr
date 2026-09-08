@@ -12,6 +12,8 @@ import (
 	"unsafe"
 
 	"github.com/razatechofficial/edr/internal/hostperm"
+	"github.com/razatechofficial/edr/internal/platform"
+	"github.com/razatechofficial/edr/internal/xdrclient"
 	"golang.org/x/sys/windows"
 )
 
@@ -70,10 +72,12 @@ func runEdrctlPrivileged(args ...string) (string, error) {
 	if processIsAdmin() {
 		return runEdrctl(args...)
 	}
-	if err := shellRunAs(edrctlPath(), args, false, true); err != nil {
-		return "", err
+	err := shellRunAs(edrctlPath(), args, false, true)
+	out := ""
+	if len(args) > 0 && strings.EqualFold(args[0], "enroll") {
+		out = xdrclient.ReadEnrollLast(platform.DataDir())
 	}
-	return "", nil
+	return out, err
 }
 
 func startSensorServicePrivileged() error {
@@ -281,6 +285,12 @@ func shellRunAs(exe string, args []string, show, wait bool) error {
 	}
 	event, _ := windows.WaitForSingleObject(info.HProcess, waitMS)
 	if event == 0x00000102 { // WAIT_TIMEOUT
+		_ = windows.TerminateProcess(info.HProcess, 1)
+		for _, a := range args {
+			if strings.EqualFold(a, "enroll") {
+				return fmt.Errorf("enrollment timed out contacting the enrollment service")
+			}
+		}
 		return fmt.Errorf("Administrator approval timed out. Allow the prompt, then Start again.")
 	}
 	var code uint32

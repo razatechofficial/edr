@@ -57,11 +57,8 @@ func newPreflightItems() []preflightItem {
 func runOneCheck(id string, st operatorStatus) (ok bool, detail string) {
 	switch id {
 	case "cert":
-		if !st.Enrolled && strings.TrimSpace(st.AgentID) == "" {
-			return false, "This host is not enrolled. Return to Enroll with a new token."
-		}
 		if !st.Enrolled {
-			return true, "Device identity from this session. Certificate is in the OS keystore."
+			return false, "This host is not enrolled. Return to Enroll with a new token."
 		}
 		if st.CertExpiry != "" {
 			t, err := time.Parse(time.RFC3339, st.CertExpiry)

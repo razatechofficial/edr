@@ -1,6 +1,9 @@
 package xdrclient
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestIsLoopbackEnrollmentHost(t *testing.T) {
 	t.Parallel()
@@ -11,5 +14,12 @@ func TestIsLoopbackEnrollmentHost(t *testing.T) {
 	}
 	if isLoopbackEnrollmentHost(DefaultEnrollmentHost) {
 		t.Fatal("prod enrollment host must use TLS")
+	}
+}
+
+func TestProbeEnrollmentHostEmpty(t *testing.T) {
+	t.Parallel()
+	if err := ProbeEnrollmentHost("", time.Second); err == nil {
+		t.Fatal("empty host")
 	}
 }

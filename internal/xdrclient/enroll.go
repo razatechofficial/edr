@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 
 	"github.com/razatechofficial/edr/internal/config"
 	"github.com/razatechofficial/edr/internal/platform"
@@ -107,6 +108,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 			}
 			enableIngestYAML(opt, st, log)
 			WriteEnrollProgress(opt.DataDir, "done")
+			writeEnrollReceipt(opt.DataDir, st, false)
 			return &EnrollResult{State: st, Store: store, Fresh: false}, nil
 		}
 		// Industry: device identity is the key+cert. enrollment.json is a sidecar.
@@ -131,6 +133,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 			}
 			enableIngestYAML(opt, recovered, log)
 			WriteEnrollProgress(opt.DataDir, "done")
+			writeEnrollReceipt(opt.DataDir, recovered, false)
 			return &EnrollResult{State: recovered, Store: store, Fresh: false}, nil
 		}
 		if err != nil {
@@ -145,10 +148,10 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 	host := strings.TrimSpace(opt.Config.EnrollmentHost)
 	token := strings.TrimSpace(opt.Config.EnrollmentToken)
 	if host == "" || token == "" {
-		return nil, fmt.Errorf("no usable local enrollment (need device cert + ingest_hosts, or %s/enrollment.json); set enrollment_host and a one-time enrollment_token to Register, then restart without the token", store.Dir)
+		return nil, failEnroll(opt.DataDir, fmt.Errorf("no usable local enrollment (need device cert + ingest_hosts, or %s/enrollment.json); set enrollment_host and a one-time enrollment_token to Register, then restart without the token", store.Dir))
 	}
 	if opt.AgentID == "" {
-		return nil, fmt.Errorf("agent_id required")
+		return nil, failEnroll(opt.DataDir, fmt.Errorf("agent_id required"))
 	}
 
 	agentVer := opt.AgentVer
@@ -161,7 +164,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 	WriteEnrollProgress(opt.DataDir, "key")
 	keyCSR, err := GenerateKeyAndCSRWithIdentity(dev)
 	if err != nil {
-		return nil, err
+		return nil, failEnroll(opt.DataDir, err)
 	}
 	WriteEnrollProgress(opt.DataDir, "csr")
 	log.Info("xdr device identity keypair generated for secure storage",
@@ -177,14 +180,18 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		"enrollment_token_fp", truncFP(dev.EnrollmentTokenFP),
 	)
 
+	if err := ProbeEnrollmentHost(host, 10*time.Second); err != nil {
+		return nil, failEnroll(opt.DataDir, fmt.Errorf("dial enrollment %s: %w", host, err))
+	}
 	conn, err := grpc.NewClient(host, EnrollmentDialOptions(host, opt.Config.InsecureSkipTLS)...)
 	if err != nil {
-		return nil, fmt.Errorf("dial enrollment %s: %w", host, err)
+		return nil, failEnroll(opt.DataDir, fmt.Errorf("dial enrollment %s: %w", host, err))
 	}
 	defer conn.Close()
 
 	client := enrollmentv1.NewEnrollmentServiceClient(conn)
 	WriteEnrollProgress(opt.DataDir, "sign")
+	WriteEnrollLast(opt.DataDir, "signing CSR with "+host)
 	resp, err := client.Register(ctx, &enrollmentv1.RegisterRequest{
 		EnrollmentToken: token,
 		AgentId:         opt.AgentID,
@@ -197,10 +204,10 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		Labels:          dev.Labels(),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("enrollment register: %w", err)
+		return nil, failEnroll(opt.DataDir, fmt.Errorf("enrollment register %s: %s", host, formatGRPCError(err)))
 	}
 	if !resp.GetAccepted() || resp.GetCertificatePem() == "" {
-		return nil, fmt.Errorf("enrollment rejected: %s", resp.GetMessage())
+		return nil, failEnroll(opt.DataDir, fmt.Errorf("enrollment rejected: %s", resp.GetMessage()))
 	}
 	WriteEnrollProgress(opt.DataDir, "cert")
 
@@ -213,7 +220,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		hosts = append([]string(nil), opt.Config.IngestHosts...)
 	}
 	if len(hosts) == 0 {
-		return nil, fmt.Errorf("enrollment returned no ingest_hosts")
+		return nil, failEnroll(opt.DataDir, fmt.Errorf("enrollment returned no ingest_hosts"))
 	}
 
 	st := State{
@@ -227,7 +234,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 		EnrolledAt:     time.Now().UTC(),
 	}
 	if err := store.SaveWithCSR(st, keyCSR.KeyPEM, keyCSR.CSRPEM); err != nil {
-		return nil, err
+		return nil, failEnroll(opt.DataDir, err)
 	}
 	if err := store.ExportDaemonReadable(st, keyCSR.KeyPEM, keyCSR.CSRPEM); err != nil {
 		log.Warn("xdr could not export identity for the sensor service", "error", err)
@@ -256,6 +263,7 @@ func EnsureEnrolled(ctx context.Context, opt EnrollOptions) (*EnrollResult, erro
 	)
 	enableIngestYAML(opt, st, log)
 	WriteEnrollProgress(opt.DataDir, "done")
+	writeEnrollReceipt(opt.DataDir, st, true)
 	return &EnrollResult{State: st, Store: store, Fresh: true}, nil
 }
 
@@ -317,4 +325,34 @@ func defaultIngestHosts(enrollmentHost string) []string {
 		return []string{"127.0.0.1:9020"}
 	}
 	return DefaultIngestHosts()
+}
+
+func failEnroll(dataDir string, err error) error {
+	if err != nil {
+		WriteEnrollLast(dataDir, err.Error())
+	}
+	return err
+}
+
+func writeEnrollReceipt(dataDir string, st State, fresh bool) {
+	kind := "credentials loaded"
+	if fresh {
+		kind = "enrolled"
+	}
+	WriteEnrollLast(dataDir, fmt.Sprintf(
+		"%s agent_id=%s machine_id=%s secure_storage=%s cert_not_after=%s",
+		kind, st.AgentID, st.MachineID, st.SecureStorage, st.CertNotAfter.UTC().Format(time.RFC3339)))
+}
+
+func formatGRPCError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if st, ok := status.FromError(err); ok {
+		if msg := strings.TrimSpace(st.Message()); msg != "" {
+			return fmt.Sprintf("%s (%s)", msg, st.Code())
+		}
+		return st.Code().String()
+	}
+	return err.Error()
 }

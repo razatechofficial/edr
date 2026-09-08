@@ -101,6 +101,9 @@ func applyLocalEnrollment(st *operatorStatus) {
 	if st.IngestOK {
 		st.Enrolled = true
 	}
+	if ingestNeedsEnroll(*st) && !hint.Enrolled && !st.IngestOK {
+		st.Enrolled = false
+	}
 	if serviceLooksMissing(st.Service) && hostperm.SensorRegistered() {
 		st.Service = "installed"
 	}

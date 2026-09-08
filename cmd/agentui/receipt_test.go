@@ -34,6 +34,12 @@ func TestEnrollLooksSuccessfulFromStdout(t *testing.T) {
 	if enrollLooksSuccessful("permission denied", errors.New("fail"), operatorStatus{}) {
 		t.Fatal("failed enroll")
 	}
+	if enrollLooksSuccessful("", nil, operatorStatus{AgentID: "installer-uuid"}) {
+		t.Fatal("installer agent_id is not a device certificate")
+	}
+	if enrollLooksSuccessful("", nil, operatorStatus{Enrolled: true, AgentID: "installer-uuid"}) {
+		t.Fatal("Enrolled without cert_not_after is not success")
+	}
 }
 
 func TestMergeEnrollmentKeepsSessionWhenStatusEmpty(t *testing.T) {
@@ -48,6 +54,21 @@ func TestMergeEnrollmentKeepsSessionWhenStatusEmpty(t *testing.T) {
 	live := mergeEnrollment(operatorStatus{Enrolled: true, AgentID: "from-disk"}, session)
 	if live.AgentID != "from-disk" {
 		t.Fatalf("disk status should win, got %q", live.AgentID)
+	}
+}
+
+func TestMergeEnrollmentIgnoresInstallerAgentID(t *testing.T) {
+	st := mergeEnrollment(operatorStatus{Service: "running"}, operatorStatus{AgentID: "installer-uuid"})
+	if st.Enrolled {
+		t.Fatal("installer agent_id must not mark the host enrolled")
+	}
+}
+
+func TestMergeEnrollmentClearsMissingCertFault(t *testing.T) {
+	session := operatorStatus{Enrolled: true, AgentID: "dev-abc", CertExpiry: "2027-01-02T03:04:05Z"}
+	st := mergeEnrollment(operatorStatus{IngestFault: "no device certificate; enroll this PC first"}, session)
+	if st.Enrolled {
+		t.Fatal("missing device cert must not keep a session enroll")
 	}
 }
 

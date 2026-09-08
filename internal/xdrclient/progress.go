@@ -11,6 +11,11 @@ import (
 // GUI/TUI can advance identity steps without streaming osascript output.
 const EnrollProgressName = "enroll.progress"
 
+// EnrollLastName is the last Register/enroll error or receipt line. The
+// unelevated Windows console cannot capture ShellExecute stdout, so it reads
+// this sidecar after `edrctl enroll` exits.
+const EnrollLastName = "enroll.last"
+
 const publicEnrollProgressName = "com.razatech.edr.enroll.progress"
 
 func EnrollProgressPath(dataDir string) string {
@@ -66,5 +71,31 @@ func ClearEnrollProgress(dataDir string) {
 	if err := os.Remove(pub); err != nil {
 		_ = os.WriteFile(pub, []byte("\n"), 0o666)
 		_ = os.Chmod(pub, 0o666)
+	}
+}
+
+func EnrollLastPath(dataDir string) string {
+	return filepath.Join(dataDir, EnrollLastName)
+}
+
+func WriteEnrollLast(dataDir, detail string) {
+	detail = strings.TrimSpace(detail)
+	if detail == "" || strings.TrimSpace(dataDir) == "" {
+		return
+	}
+	_ = os.MkdirAll(dataDir, 0o755)
+	writeProgressFile(EnrollLastPath(dataDir), detail, 0o644)
+}
+
+func ReadEnrollLast(dataDir string) string {
+	if strings.TrimSpace(dataDir) == "" {
+		return ""
+	}
+	return readProgressFile(EnrollLastPath(dataDir))
+}
+
+func ClearEnrollLast(dataDir string) {
+	if strings.TrimSpace(dataDir) != "" {
+		_ = os.Remove(EnrollLastPath(dataDir))
 	}
 }

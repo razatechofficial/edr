@@ -260,6 +260,7 @@ func linuxEnroll(in *bufio.Reader) error {
 	fmt.Println("Securing device identity (private key never leaves this host)…")
 	titles := identityTitles()
 	xdrclient.ClearEnrollProgress(platform.DataDir())
+	xdrclient.ClearEnrollLast(platform.DataDir())
 
 	type enrollRes struct {
 		out string
@@ -268,6 +269,7 @@ func linuxEnroll(in *bufio.Reader) error {
 	done := make(chan enrollRes, 1)
 	go func() {
 		out, err := runEdrctlPrivileged("enroll", "--host", host, "--token", tok)
+		out = lastEnrollDetail(out, "")
 		done <- enrollRes{out, err}
 	}()
 
@@ -292,7 +294,7 @@ wait:
 
 	st := loadStatus()
 	if !enrollLooksSuccessful(res.out, res.err, st) {
-		msg := strings.TrimSpace(res.out)
+		msg := lastEnrollDetail(res.out, "")
 		if msg == "" && res.err != nil {
 			msg = res.err.Error()
 		}

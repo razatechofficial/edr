@@ -98,6 +98,7 @@ Examples (same on Windows, macOS, and Linux; Windows may omit sudo):
 			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cancel()
 			defer xdrclient.ClearEnrollProgress(cfg.Agent.DataDir)
+			xdrclient.ClearEnrollLast(cfg.Agent.DataDir)
 
 			res, err := xdrclient.EnsureEnrolled(ctx, xdrclient.EnrollOptions{
 				Config:        cfg.XDR,
@@ -110,6 +111,9 @@ Examples (same on Windows, macOS, and Linux; Windows may omit sudo):
 				Force:         force,
 			})
 			if err != nil {
+				if last := xdrclient.ReadEnrollLast(cfg.Agent.DataDir); last != "" {
+					return fmt.Errorf("%s", last)
+				}
 				return err
 			}
 			if res.Fresh {
