@@ -41,7 +41,6 @@ import (
 	"github.com/razatechofficial/edr/internal/selfprotect"
 	"github.com/razatechofficial/edr/internal/spool"
 	"github.com/razatechofficial/edr/internal/telemetry"
-	"github.com/razatechofficial/edr/internal/telemetryqueue"
 	"github.com/razatechofficial/edr/internal/threatintel"
 	"github.com/razatechofficial/edr/internal/xdrclient"
 	"github.com/razatechofficial/edr/pkg/events"
@@ -200,10 +199,9 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		persistXDRInitFault(cfg, "device credentials required; enroll this PC first")
 	}
 	if a.xdrIngest == nil && telEP != "" {
-		qdir := filepath.Join(cfg.Agent.DataDir, "telemetry-queue")
-		qm, qerr := telemetryqueue.NewManager(qdir, telemetryqueue.EffectiveMaxBytes(cfg.XDR.SpoolMaxBytes))
-		if qerr != nil {
-			a.logger.Warn("telemetry disk queue init failed", "error", qerr)
+		qm, qdir := openIngestQueue(cfg.Agent.DataDir, cfg.XDR.SpoolMaxBytes, a.logger)
+		if qm == nil {
+			a.logger.Warn("telemetry disk queue init failed")
 		} else {
 			a.telemetryRelay = forwarder.NewTelemetryRelay(telEP, qm, a.logger)
 			sealFn, _, serr := buildTelemetryEnvelopeSealer(cfg)

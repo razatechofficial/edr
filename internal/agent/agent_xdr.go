@@ -82,15 +82,10 @@ func (a *Agent) initXDR() error {
 		_ = os.WriteFile(filepath.Join(a.cfg.Agent.DataDir, "agent_id"), []byte(id+"\n"), 0o600)
 	}
 
-	maxBytes := telemetryqueue.EffectiveMaxBytes(a.cfg.XDR.SpoolMaxBytes)
-	qdir := filepath.Join(a.cfg.Agent.DataDir, "telemetry-queue")
-	qm, qerr := telemetryqueue.NewManager(qdir, maxBytes)
-	if qerr != nil {
-		return fmt.Errorf("xdr telemetry queue: %w", qerr)
-	}
-	if days := a.cfg.XDR.SpoolMaxAgeDays; days > 0 {
-		if n := qm.PurgeOlderThan(time.Duration(days) * 24 * time.Hour); n > 0 {
-			a.logger.Info("purged expired telemetry spool segments", "count", n, "max_age_days", days)
+	qm, qdir := openIngestQueue(a.cfg.Agent.DataDir, a.cfg.XDR.SpoolMaxBytes, a.logger)
+	if qm != nil && a.cfg.XDR.SpoolMaxAgeDays > 0 {
+		if n := qm.PurgeOlderThan(time.Duration(a.cfg.XDR.SpoolMaxAgeDays) * 24 * time.Hour); n > 0 {
+			a.logger.Info("purged expired telemetry spool segments", "count", n, "max_age_days", a.cfg.XDR.SpoolMaxAgeDays)
 		}
 	}
 
@@ -124,6 +119,41 @@ func (a *Agent) initXDR() error {
 		"queue_dir", qdir,
 	)
 	return nil
+}
+
+// openIngestQueue prefers the durable spool, then a fresh sibling folder, then
+// %TEMP%. A locked telemetry-queue must not block the ingest stream.
+func openIngestQueue(dataDir string, spoolMax int64, log interface {
+	Warn(msg string, args ...any)
+}) (*telemetryqueue.Manager, string) {
+	maxBytes := telemetryqueue.EffectiveMaxBytes(spoolMax)
+	dd := strings.TrimSpace(dataDir)
+	if dd == "" {
+		dd = platform.DataDir()
+	}
+	dirs := []string{
+		filepath.Join(dd, "telemetry-queue"),
+		filepath.Join(dd, "telemetry-spool"),
+		filepath.Join(os.TempDir(), "edr-agent-telemetry-queue"),
+	}
+	var last error
+	for _, dir := range dirs {
+		qm, err := telemetryqueue.NewManager(dir, maxBytes)
+		if err == nil {
+			if dir != dirs[0] && log != nil {
+				log.Warn("xdr telemetry queue using fallback path", "dir", dir)
+			}
+			return qm, dir
+		}
+		last = err
+		if log != nil {
+			log.Warn("xdr telemetry queue unavailable", "dir", dir, "error", err)
+		}
+	}
+	if last != nil && log != nil {
+		log.Warn("xdr ingest continuing without a disk spool", "error", last)
+	}
+	return nil, ""
 }
 
 func (a *Agent) runXDRBackground(ctx context.Context) {
