@@ -14,6 +14,22 @@ import (
 // path: it appends many records, rotates, drains the segment, and verifies
 // each line is observed via send without ever reading the file into a
 // single buffer.
+func TestMaxExistingSegID(t *testing.T) {
+	dir := t.TempDir()
+	if maxExistingSegID(dir) != 0 {
+		t.Fatal("empty dir")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "seg_000003.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "seg_000001.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := maxExistingSegID(dir); got != 3 {
+		t.Fatalf("max=%d", got)
+	}
+}
+
 func TestManagerAppendAndStreamingDrain(t *testing.T) {
 	dir := t.TempDir()
 	m, err := NewManager(dir, 16<<20)

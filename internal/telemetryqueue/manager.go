@@ -73,10 +73,12 @@ func NewManager(dir string, maxTotal int64) (*Manager, error) {
 	if maxTotal <= 0 {
 		maxTotal = DefaultMaxBytes
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	prepareQueueDir(dir)
 	m := &Manager{dir: dir, maxTotal: maxTotal}
+	m.seq.Store(maxExistingSegID(dir))
 	if err := m.openNextSegment(); err != nil {
 		return nil, err
 	}
@@ -89,16 +91,58 @@ func (m *Manager) openNextSegment() error {
 		_ = m.current.Close()
 		m.current = nil
 	}
-	id := m.seq.Add(1)
-	m.currentPath = filepath.Join(m.dir, fmt.Sprintf("seg_%06d.jsonl", id))
-	f, err := os.OpenFile(m.currentPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return err
+	var last error
+	for i := 0; i < 8; i++ {
+		id := m.seq.Add(1)
+		path := filepath.Join(m.dir, fmt.Sprintf("seg_%06d.jsonl", id))
+		f, err := openQueueFile(path)
+		if err != nil {
+			last = err
+			continue
+		}
+		st, _ := f.Stat()
+		m.currentPath = path
+		m.current = f
+		m.currentSize = st.Size()
+		return nil
 	}
-	st, _ := f.Stat()
-	m.current = f
-	m.currentSize = st.Size()
-	return nil
+	if last == nil {
+		last = fmt.Errorf("open telemetry queue segment")
+	}
+	return last
+}
+
+func maxExistingSegID(dir string) uint64 {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var max uint64
+	for _, e := range ents {
+		n := e.Name()
+		if !strings.HasPrefix(n, "seg_") || !strings.HasSuffix(n, ".jsonl") {
+			continue
+		}
+		var id uint64
+		if _, err := fmt.Sscanf(n, "seg_%d.jsonl", &id); err == nil && id > max {
+			max = id
+		}
+	}
+	return max
+}
+
+func openQueueFile(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err == nil {
+		return f, nil
+	}
+	relaxQueuePath(path)
+	f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err == nil {
+		return f, nil
+	}
+	_ = os.Remove(path)
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 }
 
 func (m *Manager) recomputeTotalLocked() {
