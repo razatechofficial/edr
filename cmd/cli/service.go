@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,7 +31,7 @@ func newConnectStreamCmd() *cobra.Command {
 			if err := enableIngestFromLocalIdentity(); err != nil {
 				return err
 			}
-			if startIngestViaAPI() {
+			if ok, _ := startIngestViaAPI(); ok {
 				return waitIngestLive(45 * time.Second)
 			}
 			_ = controlAgentService("stop")
@@ -38,34 +39,47 @@ func newConnectStreamCmd() *cobra.Command {
 			if err := controlAgentService("start"); err != nil {
 				return err
 			}
-			_ = startIngestViaAPI()
-			return waitIngestLive(45 * time.Second)
+			_, detail := startIngestViaAPI()
+			if err := waitIngestLive(45 * time.Second); err != nil {
+				if detail != "" {
+					return fmt.Errorf("%s", detail)
+				}
+				return err
+			}
+			return nil
 		},
 	}
 }
 
-func startIngestViaAPI() bool {
+func startIngestViaAPI() (bool, string) {
 	client := &http.Client{Timeout: 40 * time.Second}
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(httpAddr, "/")+"/api/v1/ingest/connect", nil)
 	if err != nil {
-		return false
+		return false, err.Error()
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return false
+		return false, err.Error()
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
 	var got struct {
-		OK bool `json:"ok"`
+		OK     bool   `json:"ok"`
+		Detail string `json:"detail"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&got) != nil {
-		return false
+	_ = json.Unmarshal(body, &got)
+	detail := strings.TrimSpace(got.Detail)
+	if detail == "" {
+		detail = strings.TrimSpace(string(body))
 	}
 	if got.OK {
 		fmt.Println("ingest stream connected")
-		return true
+		return true, ""
 	}
-	return false
+	if detail != "" {
+		fmt.Fprintf(os.Stderr, "ingest/connect: %s\n", detail)
+	}
+	return false, detail
 }
 
 func waitIngestLive(d time.Duration) error {
@@ -106,13 +120,21 @@ func enableIngestFromLocalIdentity() error {
 		Backend: cfg.XDR.SecureStorage,
 	}.WithExistingCredentials()
 	st, loaded := xdrclient.State{}, false
+	var loadErr error
 	if store.HasCredentials() {
-		if got, lerr := store.Load(); lerr == nil {
+		got, lerr := store.Load()
+		if lerr != nil {
+			loadErr = lerr
+		} else {
 			st, loaded = got, true
 		}
 	}
 	if !loaded {
 		st, loaded = xdrclient.LoadEnrollmentSidecar(cfg.XDR, cfg.Agent.DataDir)
+	}
+	if loadErr != nil {
+		xdrclient.PersistIngestStatus(store.Dir, false, "", loadErr.Error())
+		return fmt.Errorf("device certificate on disk but unreadable: %w", loadErr)
 	}
 	if !loaded {
 		detail := "no device certificate; enroll this PC first"

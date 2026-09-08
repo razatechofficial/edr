@@ -124,6 +124,7 @@ func (a *Agent) handleIngestConnect(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
 	defer cancel()
 	if err := a.ensureIngest(ctx); err != nil {
+		persistXDRInitFault(a.cfg, err.Error())
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]any{

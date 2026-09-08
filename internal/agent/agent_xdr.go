@@ -185,6 +185,7 @@ func (a *Agent) ensureIngest(ctx context.Context) error {
 		return a.xdrIngest.Connect(cctx)
 	}
 	if err := a.initXDR(); err != nil {
+		persistXDRInitFault(a.cfg, err.Error())
 		return err
 	}
 	if a.xdrIngest != nil {
