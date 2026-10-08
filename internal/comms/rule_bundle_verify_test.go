@@ -40,7 +40,7 @@ func TestVerifyRuleBundleHashAndSignature(t *testing.T) {
 	_, priv, pubPath := testPolicyKeypair(t)
 	sig := SignRuleBundle(data, priv)
 
-	if err := VerifyRuleBundle("test", data, hash, sig, pubPath); err != nil {
+	if err := VerifyRuleBundle("test", data, hash, sig, pubPath, false); err != nil {
 		t.Fatalf("expected valid bundle: %v", err)
 	}
 }
@@ -54,7 +54,7 @@ func TestVerifyRuleBundleRejectsBadSignature(t *testing.T) {
 	_, priv, pubPath := testPolicyKeypair(t)
 	sig := SignRuleBundle([]byte("other"), priv)
 
-	if err := VerifyRuleBundle("test", data, hash, sig, pubPath); err == nil {
+	if err := VerifyRuleBundle("test", data, hash, sig, pubPath, false); err == nil {
 		t.Fatal("expected signature failure")
 	}
 }
@@ -67,7 +67,7 @@ func TestVerifyRuleBundleRequiresSignatureWhenPubKeySet(t *testing.T) {
 	hash := "sha256:" + hex.EncodeToString(sum[:])
 	_, _, pubPath := testPolicyKeypair(t)
 
-	if err := VerifyRuleBundle("test", data, hash, "", pubPath); err == nil {
+	if err := VerifyRuleBundle("test", data, hash, "", pubPath, false); err == nil {
 		t.Fatal("expected missing signature error")
 	}
 }
@@ -79,7 +79,17 @@ func TestVerifyRuleBundleSkipsSignatureWithoutPubKey(t *testing.T) {
 	sum := sha256.Sum256(data)
 	hash := "sha256:" + hex.EncodeToString(sum[:])
 
-	if err := VerifyRuleBundle("test", data, hash, "", ""); err != nil {
-		t.Fatalf("expected hash-only verification: %v", err)
+	// With no signing key configured the bundle is refused outright: rule
+	// content is executable in effect, so unverified content is unverified code.
+	if err := VerifyRuleBundle("test", data, hash, "", "", false); err == nil {
+		t.Fatal("an unsigned bundle was accepted with no signing key configured")
+	}
+
+	// An operator may opt in explicitly, and then the hash still has to be there.
+	if err := VerifyRuleBundle("test", data, hash, "", "", true); err != nil {
+		t.Fatalf("explicitly allowed unsigned bundle rejected: %v", err)
+	}
+	if err := VerifyRuleBundle("test", data, "", "", "", true); err == nil {
+		t.Fatal("a bundle with neither signature nor hash was accepted")
 	}
 }

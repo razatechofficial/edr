@@ -448,7 +448,10 @@ compliance:
   rules_dir: ""
   scan_on_start: true
   interval_hours: 12
-  commands_enabled: true
+  # Runs an arbitrary binary as root for every SCA rule of type `c:`. Leave
+  # off unless the rule source is trusted AND rule bundles are signature-verified
+  # (rules_verify_pubkey_path / policy_verify_pubkey_path below).
+  commands_enabled: false
   command_timeout_sec: 30
   enable_posture: true
   enable_rootcheck: true
