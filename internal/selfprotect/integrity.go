@@ -129,10 +129,22 @@ func NewIntegrityChecker(paths []string, backupDir, dataDir string, logger *zap.
 			ic.expectedHashes[p] = h
 		}
 		for _, p := range paths {
-			if _, ok := manifest.Files[p]; !ok {
+			// The manifest is keyed by the path the signer was given at build
+			// time — typically dist/linux-amd64/edr-agent — while this runs
+			// against the installed absolute path. Matching only exactly meant
+			// every entry missed and nothing was ever verified, with a Warn as
+			// the only trace: the mechanism appeared to work and checked
+			// nothing.
+			key, hash, ok := matchManifestEntry(manifest.Files, p)
+			if !ok {
 				logger.Warn("integrity: path not in signed manifest, skipping",
 					zap.String("path", p))
 				continue
+			}
+			if key != p {
+				// Record under the runtime path too, so later checks of this
+				// file find the expected hash without repeating the match.
+				ic.expectedHashes[p] = hash
 			}
 			if err := ic.createBackup(p); err != nil {
 				return nil, fmt.Errorf("integrity: backup %s: %w", p, err)
@@ -147,7 +159,20 @@ func NewIntegrityChecker(paths []string, backupDir, dataDir string, logger *zap.
 		return ic, nil
 	}
 
-	logger.Warn("integrity: no embedded manifest, falling back to disk baseline (development only)")
+	// No verified manifest. Baselining from disk hashes whatever is there now,
+	// so a binary replaced before first start becomes the trusted baseline —
+	// precisely the install-time tamper this code exists to catch. That is
+	// worse than no integrity checking, because it produces an assurance that
+	// is not merely absent but false.
+	if RequireSignedManifest() {
+		return nil, fmt.Errorf("%w: no verified manifest embedded (source %q); "+
+			"build with a signed manifest or disable the requirement",
+			ErrIntegrityManifestUnverified, manifestSource)
+	}
+	logger.Warn("integrity: NO VERIFIED MANIFEST — baselining from disk; "+
+		"a binary tampered with before this point will be trusted. Development builds only.",
+		zap.String("manifest_source", manifestSource),
+	)
 	for _, p := range paths {
 		h, err := hashFile(p)
 		if err != nil {
@@ -430,4 +455,53 @@ func sanitizePath(path string) string {
 	s = strings.ReplaceAll(s, "\\", "_")
 	s = strings.TrimLeft(s, "_")
 	return s
+}
+
+// requireSignedManifestFlag makes a missing or unverified manifest fatal.
+//
+// It is a build-time switch rather than configuration: whether a binary trusts
+// an unverified baseline is a property of how it was produced, and an attacker
+// who can edit the configuration file can also turn the requirement off.
+//
+// It is a string because the linker's -X only sets string variables; declaring
+// it as a bool makes the build fail with "not a var of type string" rather than
+// quietly leaving the requirement off.
+//
+//	go build -ldflags "-X github.com/razatechofficial/edr/internal/selfprotect.requireSignedManifestFlag=true"
+var requireSignedManifestFlag = ""
+
+// RequireSignedManifest reports whether an unverified manifest is fatal.
+func RequireSignedManifest() bool {
+	switch strings.ToLower(strings.TrimSpace(requireSignedManifestFlag)) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// matchManifestEntry finds the manifest entry covering a runtime path.
+//
+// An exact match wins. Failing that, a unique entry with the same base name is
+// accepted, which is what bridges the build-time path the signer recorded and
+// the installed path seen at runtime. An ambiguous base name is refused rather
+// than guessed at: verifying the wrong file against the right hash would report
+// integrity it had not checked.
+func matchManifestEntry(files map[string]string, path string) (key, hash string, ok bool) {
+	if h, found := files[path]; found {
+		return path, h, true
+	}
+	base := filepath.Base(path)
+	var matchKey, matchHash string
+	var matches int
+	for k, h := range files {
+		if filepath.Base(k) == base {
+			matches++
+			matchKey, matchHash = k, h
+		}
+	}
+	if matches == 1 {
+		return matchKey, matchHash, true
+	}
+	return "", "", false
 }
