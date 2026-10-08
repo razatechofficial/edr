@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package xdr.forensics.v1;
+
+option go_package = "github.com/razatechofficial/xdr/api/proto/forensics/v1;forensicsv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ForensicsService receives evidence collected on an endpoint.
+//
+// Separate from TelemetryService on purpose. That stream is the agent's
+// control plane as well as its data plane — response commands travel down it —
+// so a multi-megabyte memory dump sharing the connection would stall the
+// channel that cancels an isolation. Evidence is also bursty and rare where
+// telemetry is steady and continuous, and the two want different timeouts,
+// different message sizes and different backpressure.
+//
+// The endpoint's identity comes from its mutual-TLS client certificate and is
+// never read from a request field. An identifier in the payload is a claim; the
+// certificate is an identity. This matters more here than elsewhere, because a
+// bundle attributed to the wrong endpoint is worse than no bundle: it puts an
+// investigator on the wrong host.
+service ForensicsService {
+  // UploadBundle streams one evidence bundle to the platform.
+  //
+  // Streaming rather than unary because a memory dump has no useful upper
+  // bound, and a single message would put one in gRPC's maximum message size.
+  rpc UploadBundle(stream BundleFrame) returns (UploadAck);
+
+  // GetUploadState reports what the platform already holds for a bundle, so an
+  // agent that was interrupted can resume rather than resend. An endpoint that
+  // has just been isolated may be on a link that cannot carry the whole
+  // bundle in one attempt.
+  rpc GetUploadState(UploadStateRequest) returns (UploadStateResponse);
+}
+
+message BundleFrame {
+  oneof body {
+    // header must be the first frame.
+    BundleHeader header = 1;
+    BundleChunk chunk = 2;
+  }
+}
+
+message BundleHeader {
+  // bundle_uid identifies this evidence across retries. It is chosen by the
+  // agent and must be stable for a given collection, because that is what makes
+  // a resumed upload the same upload rather than a second copy.
+  string bundle_uid = 1;
+  // alert_uid ties the evidence to the detection that caused it to be taken.
+  // Evidence that cannot name its detection is a pile of facts with nothing to
+  // attach them to.
+  string alert_uid = 2;
+  string rule_uid = 3;
+  // kind is "artifact_bundle", "memory_dump", "dfir_package".
+  string kind = 4;
+  // content_type is the encoding of the chunk stream, e.g. "application/json"
+  // or "application/gzip".
+  string content_type = 5;
+  // total_bytes lets the receiver refuse an oversized upload before accepting
+  // any of it, rather than discovering the size after writing it.
+  int64 total_bytes = 6;
+  // sha256 is the digest of the complete payload, hex, no prefix. The receiver
+  // verifies it: evidence that arrived corrupted must not be stored as though
+  // it were intact.
+  string sha256 = 7;
+  google.protobuf.Timestamp collected_at = 8;
+  // resume_from_offset asks the server to continue an interrupted upload. Zero
+  // starts from the beginning.
+  int64 resume_from_offset = 9;
+}
+
+message BundleChunk {
+  bytes data = 1;
+  // offset is the position of this chunk in the whole payload, so an
+  // out-of-order or duplicated frame is detected rather than concatenated.
+  int64 offset = 2;
+}
+
+message UploadAck {
+  bool accepted = 1;
+  // bytes_stored is what the platform holds after this call, which an agent
+  // compares against what it sent before deleting its local copy.
+  int64 bytes_stored = 2;
+  // digest_verified is false when the payload arrived but its hash did not
+  // match. The agent should not delete its copy in that case.
+  bool digest_verified = 3;
+  string message = 4;
+  // storage_ref is where the evidence landed, for an investigator to follow.
+  string storage_ref = 5;
+}
+
+message UploadStateRequest {
+  string bundle_uid = 1;
+}
+
+message UploadStateResponse {
+  bool known = 1;
+  int64 bytes_stored = 2;
+  bool complete = 3;
+}
