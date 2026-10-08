@@ -11,11 +11,15 @@ const defaultAlertArtifactTimeout = 2 * time.Minute
 
 // AlertTriggerMeta is minimal context forwarded from detection/response when an
 // artifact pass is queued (WHIDS-class alert-driven IR).
+// The field names are tagged because this struct is serialised into every
+// stored bundle, where it is the evidence's only statement of which detection
+// produced it. A tool reading the bundle later — including this agent's own
+// shipper — matches on these names.
 type AlertTriggerMeta struct {
-	AlertID    string
-	RuleID     string
-	Severity   string
-	EndpointID string
+	AlertID    string `json:"alert_id"`
+	RuleID     string `json:"rule_id"`
+	Severity   string `json:"severity,omitempty"`
+	EndpointID string `json:"endpoint_id,omitempty"`
 }
 
 // CollectArtifactsForAlert performs a bounded version of CollectAll intended for
