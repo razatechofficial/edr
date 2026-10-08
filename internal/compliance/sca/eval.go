@@ -14,14 +14,19 @@ import (
 
 // EvalConfig controls SCA rule evaluation behavior.
 type EvalConfig struct {
-	CommandTimeout time.Duration
+	CommandTimeout  time.Duration
 	CommandsEnabled bool
 }
 
 func defaultEvalConfig() EvalConfig {
 	return EvalConfig{
-		CommandTimeout:  30 * time.Second,
-		CommandsEnabled: true,
+		CommandTimeout: 30 * time.Second,
+		// Off by default. A `c:` rule runs an arbitrary binary with arbitrary
+		// arguments as root, so enabling it turns the compliance rule set into
+		// a code-execution channel: anyone who can place a rule file in the
+		// loaded tree owns the host. Operators who need command checks must say
+		// so explicitly, having understood what they are turning on.
+		CommandsEnabled: false,
 	}
 }
 

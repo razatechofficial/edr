@@ -311,27 +311,27 @@ type Config struct {
 	} `yaml:"baseline"`
 
 	Compliance struct {
-		Enabled              bool   `yaml:"enabled" env:"EDR_COMPLIANCE_ENABLED"`
-		RulesDir             string `yaml:"rules_dir" env:"EDR_COMPLIANCE_RULES_DIR"`
-		ScanOnStart          bool   `yaml:"scan_on_start"`
-		IntervalHours        int    `yaml:"interval_hours"`
-		CommandsEnabled      bool   `yaml:"commands_enabled"`
-		CommandTimeoutSec    int    `yaml:"command_timeout_sec"`
-		EnablePosture        bool   `yaml:"enable_posture"`
-		EnableRootcheck      bool   `yaml:"enable_rootcheck"`
-		EmitPassedFindings   bool   `yaml:"emit_passed_findings"`
+		Enabled            bool   `yaml:"enabled" env:"EDR_COMPLIANCE_ENABLED"`
+		RulesDir           string `yaml:"rules_dir" env:"EDR_COMPLIANCE_RULES_DIR"`
+		ScanOnStart        bool   `yaml:"scan_on_start"`
+		IntervalHours      int    `yaml:"interval_hours"`
+		CommandsEnabled    bool   `yaml:"commands_enabled"`
+		CommandTimeoutSec  int    `yaml:"command_timeout_sec"`
+		EnablePosture      bool   `yaml:"enable_posture"`
+		EnableRootcheck    bool   `yaml:"enable_rootcheck"`
+		EmitPassedFindings bool   `yaml:"emit_passed_findings"`
 	} `yaml:"compliance"`
 
 	// Monitoring controls host telemetry collectors (userland vs kernel hooks).
 	Monitoring struct {
-		Mode             string   `yaml:"mode" env:"EDR_MONITORING_MODE"` // auto|userland|kernel
-		KernelEnabled    bool     `yaml:"kernel_enabled" env:"EDR_MONITORING_KERNEL"`
-		FIMPaths         []string `yaml:"fim_paths"`
+		Mode          string   `yaml:"mode" env:"EDR_MONITORING_MODE"` // auto|userland|kernel
+		KernelEnabled bool     `yaml:"kernel_enabled" env:"EDR_MONITORING_KERNEL"`
+		FIMPaths      []string `yaml:"fim_paths"`
 		// FIMPreset selects built-in watch lists when fim_paths is empty: standard (default), default, custom.
 		FIMPreset string `yaml:"fim_preset" env:"EDR_MONITORING_FIM_PRESET"`
 		// FIMIgnorePatterns are glob patterns (basename) skipped by fsnotify FIM, e.g. "*.log".
 		FIMIgnorePatterns []string `yaml:"fim_ignore_patterns"`
-		UserlandFallback bool     `yaml:"userland_fallback"`
+		UserlandFallback  bool     `yaml:"userland_fallback"`
 		// SecurityProfile standard (default), regulated, or strict_complete.
 		// regulated/strict_complete forbid pillar stubs and require inventory;
 		// strict_complete also requires all mandatory pillars to attach.
@@ -584,10 +584,10 @@ type Config struct {
 		SealKeyID     string `yaml:"seal_key_id"`
 	} `yaml:"forwarder"`
 
-	RulesFile             string `yaml:"rules_file"`
-	RulesVerifyPubKeyPath string `yaml:"rules_verify_pubkey_path"`
+	RulesFile              string `yaml:"rules_file"`
+	RulesVerifyPubKeyPath  string `yaml:"rules_verify_pubkey_path"`
 	PolicyVerifyPubKeyPath string `yaml:"policy_verify_pubkey_path"`
-	ConfigVerifyPubKey    string `yaml:"config_verify_pubkey"`
+	ConfigVerifyPubKey     string `yaml:"config_verify_pubkey"`
 }
 
 // CustomFeed represents an external threat intelligence feed.
@@ -655,7 +655,9 @@ func Defaults() Config {
 	cfg.Compliance.RulesDir = "rules/compliance/sca"
 	cfg.Compliance.ScanOnStart = true
 	cfg.Compliance.IntervalHours = 12
-	cfg.Compliance.CommandsEnabled = true
+	// Off by default: an SCA `c:` rule executes an arbitrary binary as root.
+	// See internal/compliance/sca/eval.go.
+	cfg.Compliance.CommandsEnabled = false
 	cfg.Compliance.CommandTimeoutSec = 30
 	cfg.Compliance.EnablePosture = true
 	cfg.Compliance.EnableRootcheck = true
