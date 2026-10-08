@@ -2,6 +2,7 @@ package actions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -46,18 +47,26 @@ func (a *SnapshotAction) Execute(ctx context.Context) (err error) {
 	case EnvGCP:
 		return a.createGCPSnapshot(ctx)
 	case EnvVMware, EnvHyperV:
-		// No generic API without host integration
-		return nil
+		return fmt.Errorf("%w: no snapshot API for a %v guest without host integration", errSnapshotUnavailable, detectEnvironment())
 	case EnvBareMetal:
 		if a.Logger != nil {
 			a.Logger.Warn("take_snapshot: bare metal or unknown environment has no built-in volume snapshot; enable cloud/VMware APIs to snapshot disks",
 				zap.String("reason", a.Reason),
 			)
 		}
-		return nil
+		return errSnapshotUnavailable
 	}
-	return nil
+	return errSnapshotUnavailable
 }
+
+// errSnapshotUnavailable is returned where no snapshot can actually be taken.
+//
+// These paths used to return nil, which reports success for a snapshot that was
+// never created. A responder reading the result would believe a disk image
+// existed and could be returned to — the same class of failure as collecting
+// forensic evidence and discarding it, and more damaging here, because the
+// belief persists until someone needs the snapshot and finds nothing.
+var errSnapshotUnavailable = errors.New("take_snapshot: no snapshot mechanism available in this environment")
 
 // detectEnvironment probes DMI and link-local metadata.
 func detectEnvironment() Environment {
@@ -90,13 +99,24 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
+// The cloud providers are not implemented. Each needs its vendor SDK, an
+// instance role carrying the snapshot permission, and the volume and instance
+// context to act on — none of which the agent has today.
+//
+// They return an error rather than nil so that an unimplemented snapshot is
+// reported as not taken. Returning nil made every cloud snapshot look like it
+// had succeeded.
 func (a *SnapshotAction) createAWSSnapshot(_ context.Context) error {
-	// BLOCKER: real EC2 EBS CreateSnapshot needs AWS SDK, IAM with ec2:CreateSnapshot, and
-	// volume/instance context; the agent has no hard dependency on AWS here.
-	return nil
+	return fmt.Errorf("%w: AWS EBS snapshots need the AWS SDK and ec2:CreateSnapshot", errSnapshotUnavailable)
 }
-func (a *SnapshotAction) createAzureSnapshot(_ context.Context) error { return nil }
-func (a *SnapshotAction) createGCPSnapshot(_ context.Context) error   { return nil }
+
+func (a *SnapshotAction) createAzureSnapshot(_ context.Context) error {
+	return fmt.Errorf("%w: Azure disk snapshots are not implemented", errSnapshotUnavailable)
+}
+
+func (a *SnapshotAction) createGCPSnapshot(_ context.Context) error {
+	return fmt.Errorf("%w: GCP disk snapshots are not implemented", errSnapshotUnavailable)
+}
 
 // LocalIP returns a non-loopback IP for allow lists.
 func LocalIP() string {
