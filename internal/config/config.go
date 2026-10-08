@@ -587,7 +587,11 @@ type Config struct {
 	RulesFile              string `yaml:"rules_file"`
 	RulesVerifyPubKeyPath  string `yaml:"rules_verify_pubkey_path"`
 	PolicyVerifyPubKeyPath string `yaml:"policy_verify_pubkey_path"`
-	ConfigVerifyPubKey     string `yaml:"config_verify_pubkey"`
+	// AllowUnsignedRules accepts rule bundles when no signing key is set.
+	// Rule content reaches the SCA, Sigma and YARA loaders, so this is a
+	// decision to run unverified content; it defaults to false.
+	AllowUnsignedRules bool   `yaml:"rules_allow_unsigned"`
+	ConfigVerifyPubKey string `yaml:"config_verify_pubkey"`
 }
 
 // CustomFeed represents an external threat intelligence feed.

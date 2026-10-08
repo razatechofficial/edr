@@ -87,6 +87,7 @@ func (a *Agent) applyControlPlanePolicy(ctx context.Context, resp *protocol.Poli
 			bundle.GetHash(),
 			bundle.GetSignature(),
 			a.cfg.PolicyVerifyPubKeyPath,
+			a.cfg.AllowUnsignedRules,
 		); err != nil {
 			return err
 		}
