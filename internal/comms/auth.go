@@ -34,7 +34,17 @@ func LoadTLSConfig(certPath, keyPath, caPath string, mutualTLS bool) (*tls.Confi
 		cfg.RootCAs = pool
 	}
 
-	if mutualTLS && certPath != "" && keyPath != "" {
+	if mutualTLS {
+		// Refuse rather than degrade. Silently presenting no client certificate
+		// while the configuration says mutual_tls leaves an operator believing
+		// the connection is mutually authenticated when it is server-authenticated
+		// at best. If server authentication is what is wanted, mutual_tls: false
+		// says so honestly.
+		if certPath == "" || keyPath == "" {
+			return nil, fmt.Errorf(
+				"auth: mutual_tls is enabled but tls_cert and tls_key are not both set; " +
+					"set them, or set mutual_tls: false for server-authenticated TLS")
+		}
 		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
 			return nil, fmt.Errorf("auth: load client keypair: %w", err)

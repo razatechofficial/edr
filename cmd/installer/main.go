@@ -449,6 +449,13 @@ func generateConfig(dst string, paths installPaths) error {
 	cfg.Agent.TempDir = filepath.Join(paths.dataDir, "tmp")
 
 	// No control plane until you enroll — safe unattended default.
+	//
+	// mutual_tls is false because this installer issues no client certificate:
+	// claiming it while presenting none would be a lie the agent now refuses
+	// to tell (see comms.LoadTLSConfig). The connection is still TLS — the
+	// client never dials in cleartext — it is simply server-authenticated
+	// until enrolment provides tls_cert and tls_key, at which point this must
+	// be set back to true.
 	cfg.Server.Endpoint = ""
 	cfg.Server.AirGapMode = true
 	cfg.Server.MutualTLS = false
@@ -462,7 +469,10 @@ func generateConfig(dst string, paths installPaths) error {
 	cfg.ML.ModelsDir = filepath.Join(paths.dataDir, "models")
 	cfg.ML.AutoUpdate = false
 	cfg.ML.UpdateIntervalH = 0
-	cfg.ML.VerifyPubKey = ""
+	// Left at the default rather than blanked here. Pointing it at a key that
+	// does not exist fails model loading, which currently disables the whole
+	// advanced detection engine rather than only the ML layer — so the key has
+	// to be reconciled before this can be set.
 	cfg.ML.Models.PEClassifier = "pe_classifier.onnx"
 	cfg.ML.Models.BehaviorLSTM = "behavior_lstm.onnx"
 	cfg.ML.Models.NetworkAnomaly = "network_anomaly.onnx"
