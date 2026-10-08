@@ -78,6 +78,11 @@ func (a *NetworkBlockAction) applyArgv() []string {
 }
 
 // rollbackArgv returns the command that removes the rule again.
+// RollbackArgv is the command that lifts this block, exported so the caller can
+// persist it. A rollback held only as a closure dies with the process, and the
+// block outlives it.
+func (a *NetworkBlockAction) RollbackArgv() []string { return a.rollbackArgv() }
+
 func (a *NetworkBlockAction) rollbackArgv() []string {
 	switch runtime.GOOS {
 	case "windows":

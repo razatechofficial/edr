@@ -215,7 +215,7 @@ func (e *DefaultActionExecutor) runNetworkBlock(ctx context.Context, params map[
 		if target == ":" {
 			target = "network"
 		}
-		e.registerContainment(d, ActionNetworkBlock, target, act.DurationMinutes, rollback)
+		e.registerContainmentWithArgv(d, ActionNetworkBlock, target, act.DurationMinutes, rollback, act.RollbackArgv())
 	}
 	_ = log
 	return nil
@@ -305,6 +305,15 @@ func boolParamAny(m map[string]interface{}, k string) bool {
 }
 
 func (e *DefaultActionExecutor) registerContainment(d detection.Detection, act Action, target string, durationMin int, rollback func(context.Context) error) {
+	e.registerContainmentWithArgv(d, act, target, durationMin, rollback, nil)
+}
+
+// registerContainmentWithArgv also records how to undo the action as a command.
+//
+// Actions that can supply one survive a restart; those that cannot are still
+// recorded, so at least an operator is told what is still in force rather than
+// the containment vanishing with the process.
+func (e *DefaultActionExecutor) registerContainmentWithArgv(d detection.Detection, act Action, target string, durationMin int, rollback func(context.Context) error, rollbackArgv []string) {
 	if e == nil || e.RegisterContainment == nil || rollback == nil {
 		return
 	}
@@ -314,15 +323,16 @@ func (e *DefaultActionExecutor) registerContainment(d detection.Detection, act A
 		exp = time.Now().Add(time.Duration(durationMin) * time.Minute)
 	}
 	e.RegisterContainment(Containment{
-		ID:         id,
-		HostID:     e.HostID,
-		Action:     act,
-		Target:     target,
-		AppliedAt:  time.Now(),
-		ExpiresAt:  exp,
-		Detection:  d,
-		Status:     ContainmentActive,
-		RollbackFn: rollback,
+		ID:           id,
+		HostID:       e.HostID,
+		Action:       act,
+		Target:       target,
+		AppliedAt:    time.Now(),
+		ExpiresAt:    exp,
+		Detection:    d,
+		Status:       ContainmentActive,
+		RollbackFn:   rollback,
+		RollbackArgv: rollbackArgv,
 	})
 }
 

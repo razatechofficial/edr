@@ -520,6 +520,10 @@ type Containment struct {
 	ApprovedBy string
 	Status     ContainmentStatus
 	RollbackFn func(ctx context.Context) error
+	// RollbackArgv is the same undo expressed as a command, so it can be
+	// persisted. A closure cannot be, and without this a restart leaves the
+	// containment in place with nothing able to lift it.
+	RollbackArgv []string
 }
 
 // ContainmentStatus is the lifecycle of a containment record.

@@ -20,6 +20,10 @@ type EngineConfig struct {
 	PlaybooksPath string
 	ForensicsDir  string
 	QuarantineDir string
+	// StatePath is where active containments are recorded so a restart does
+	// not orphan them. Empty keeps everything in memory, which loses every
+	// pending expiry when the process ends.
+	StatePath     string
 	AgentIP       string
 	HostID        string
 	Logger        *zap.Logger
@@ -74,7 +78,7 @@ func NewEngine(cfg EngineConfig) (ResponseEngine, error) {
 		cfg.AgentIP = "127.0.0.1"
 	}
 	sl := &standardLayer{
-		rm:            NewRollbackManager(),
+		rm:            newRollbackManagerFor(cfg),
 		logger:        cfg.Logger,
 		cmap:          make(map[string]Containment),
 		callbackAddr:  strings.TrimSpace(cfg.Approval.CallbackListenAddr),
@@ -299,4 +303,12 @@ func (s *standardLayer) startApprovalCallback() {
 			}
 		}
 	}()
+}
+
+// newRollbackManagerFor picks a persistent manager when a state path was given.
+func newRollbackManagerFor(cfg EngineConfig) *RollbackManager {
+	if strings.TrimSpace(cfg.StatePath) == "" {
+		return NewRollbackManager()
+	}
+	return NewPersistentRollbackManager(cfg.StatePath, cfg.Logger)
 }
