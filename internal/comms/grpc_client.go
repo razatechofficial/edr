@@ -293,11 +293,17 @@ func (c *GRPCClient) Close() error {
 func (c *GRPCClient) dial(ctx context.Context) error {
 	addr := fmt.Sprintf("%s:%d", c.endpoint, c.port)
 
-	var opts []grpc.DialOption
-	if c.tlsCfg != nil {
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(c.tlsCfg)))
-	} else {
-		opts = append(opts, grpc.WithInsecure()) //nolint:staticcheck
+	// Always TLS. The control plane carries response commands — kill, isolate,
+	// quarantine — so a cleartext connection hands those to anyone on the
+	// network path, and the protocol has no message-level signature to fall
+	// back on. When no TLS configuration was supplied, fall back to server
+	// authentication against the system roots rather than to no protection.
+	tlsCfg := c.tlsCfg
+	if tlsCfg == nil {
+		tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
 	}
 
 	conn, err := grpc.DialContext(ctx, addr, opts...)
