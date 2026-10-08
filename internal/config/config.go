@@ -268,8 +268,13 @@ type Config struct {
 			CallbackURL string `yaml:"callback_url"`
 			// CallbackListenAddr is the HTTP bind address for /approve and /reject (e.g. ":18765"). Empty disables the callback server.
 			CallbackListenAddr string `yaml:"callback_listen_addr"`
-			ApprovalDir        string `yaml:"approval_dir"`
-			TimeoutSec         int    `yaml:"timeout_sec"`
+			// CallbackToken authenticates /approve and /reject. The callback
+			// server refuses to start without it: an endpoint that approves a
+			// destructive playbook on an unauthenticated request is a control
+			// surface, not a convenience.
+			CallbackToken string `yaml:"callback_token"`
+			ApprovalDir   string `yaml:"approval_dir"`
+			TimeoutSec    int    `yaml:"timeout_sec"`
 		} `yaml:"approval"`
 	} `yaml:"response"`
 
@@ -615,8 +620,8 @@ type XDRConfig struct {
 	// auto = Keychain (macOS/CGO), DPAPI (Windows), sealed file otherwise.
 	SecureStorage   string `yaml:"secure_storage" env:"XDR_SECURE_STORAGE"`
 	RenewBeforeDays int    `yaml:"renew_before_days"`
-	InsecureSkipTLS bool   `yaml:"insecure_skip_tls"` // local/dev only for enrollment bootstrap
-	SpoolMaxBytes   int64  `yaml:"spool_max_bytes"`   // default 1GiB
+	InsecureSkipTLS bool   `yaml:"insecure_skip_tls"`  // local/dev only for enrollment bootstrap
+	SpoolMaxBytes   int64  `yaml:"spool_max_bytes"`    // default 1GiB
 	SpoolMaxAgeDays int    `yaml:"spool_max_age_days"` // default 7
 }
 

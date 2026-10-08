@@ -1712,6 +1712,7 @@ func (a *Agent) initResponseLayer() error {
 			WebhookURL:         a.cfg.Response.Approval.WebhookURL,
 			CallbackURL:        a.cfg.Response.Approval.CallbackURL,
 			CallbackListenAddr: a.cfg.Response.Approval.CallbackListenAddr,
+			CallbackToken:      a.cfg.Response.Approval.CallbackToken,
 			ApprovalDir:        a.cfg.Response.Approval.ApprovalDir,
 			TimeoutSec:         a.cfg.Response.Approval.TimeoutSec,
 		},

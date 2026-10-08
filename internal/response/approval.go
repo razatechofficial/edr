@@ -31,11 +31,37 @@ type PlaybookYAML struct {
 }
 
 // AutoApprovalGateway always approves.
+//
+// It must be selected deliberately (response.approval.mode: auto). It is not a
+// fallback: a playbook that declares approval_required asks a human to sanction
+// an action that kills a process, isolates a host or moves a file away, and
+// answering that automatically because nothing was configured defeats the
+// declaration entirely.
 type AutoApprovalGateway struct{}
 
 // RequestApproval implements [ApprovalGateway].
 func (g *AutoApprovalGateway) RequestApproval(_ context.Context, _ detection.Detection, _ PlaybookYAML) (bool, error) {
 	return true, nil
+}
+
+// DenyApprovalGateway refuses every request, and is what an unconfigured
+// deployment gets.
+//
+// Refusing leaves a destructive action untaken, which is recoverable. Approving
+// by default takes it, which is not.
+type DenyApprovalGateway struct {
+	Logger *zap.Logger
+}
+
+// RequestApproval implements [ApprovalGateway].
+func (g *DenyApprovalGateway) RequestApproval(_ context.Context, _ detection.Detection, pb PlaybookYAML) (bool, error) {
+	if g != nil && g.Logger != nil {
+		g.Logger.Warn("playbook requires approval but no approval mode is configured; refusing",
+			zap.String("playbook", pb.ID),
+			zap.String("name", pb.Name),
+		)
+	}
+	return false, nil
 }
 
 var (
