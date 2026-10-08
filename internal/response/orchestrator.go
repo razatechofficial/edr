@@ -2,6 +2,7 @@ package response
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strings"
@@ -33,8 +34,11 @@ type ApprovalConfig struct {
 	WebhookURL         string
 	CallbackURL        string
 	CallbackListenAddr string
-	ApprovalDir        string
-	TimeoutSec         int
+	// CallbackToken authenticates callers of /approve and /reject. Without it
+	// the callback server does not start.
+	CallbackToken string
+	ApprovalDir   string
+	TimeoutSec    int
 }
 
 // standardLayer implements [ResponseEngine].
@@ -47,9 +51,10 @@ type standardLayer struct {
 	rollCtx  context.Context
 	rollStop context.CancelFunc
 	// callbackSrv serves GET /approve/{id} and /reject/{id} for webhook approval mode.
-	callbackSrv  *http.Server
-	callbackAddr string
-	approvalMode string
+	callbackSrv   *http.Server
+	callbackAddr  string
+	callbackToken string
+	approvalMode  string
 
 	actionsExec         atomic.Uint64
 	actionsOK           atomic.Uint64
@@ -69,11 +74,12 @@ func NewEngine(cfg EngineConfig) (ResponseEngine, error) {
 		cfg.AgentIP = "127.0.0.1"
 	}
 	sl := &standardLayer{
-		rm:           NewRollbackManager(),
-		logger:       cfg.Logger,
-		cmap:         make(map[string]Containment),
-		callbackAddr: strings.TrimSpace(cfg.Approval.CallbackListenAddr),
-		approvalMode: strings.TrimSpace(strings.ToLower(cfg.Approval.Mode)),
+		rm:            NewRollbackManager(),
+		logger:        cfg.Logger,
+		cmap:          make(map[string]Containment),
+		callbackAddr:  strings.TrimSpace(cfg.Approval.CallbackListenAddr),
+		callbackToken: strings.TrimSpace(cfg.Approval.CallbackToken),
+		approvalMode:  strings.TrimSpace(strings.ToLower(cfg.Approval.Mode)),
 	}
 	exec := &DefaultActionExecutor{
 		Eng:                 cfg.ActionEng,
@@ -110,8 +116,12 @@ func buildApprovalGateway(ac ApprovalConfig, log *zap.Logger) ApprovalGateway {
 		}
 	case "file":
 		return &FileApprovalGateway{ApprovalDir: ac.ApprovalDir}
-	default:
+	case "auto":
 		return &AutoApprovalGateway{}
+	default:
+		// Unset or unrecognised. Refuse rather than approve: an unconfigured
+		// deployment should not silently sanction destructive actions.
+		return &DenyApprovalGateway{Logger: log}
 	}
 }
 
@@ -217,15 +227,45 @@ func (s *standardLayer) Stop() {
 	s.mu.Unlock()
 }
 
-// startApprovalCallback serves GET /approve/{id} and /reject/{id} and calls [SubmitApprovalResult].
+// startApprovalCallback serves POST /approve/{id} and /reject/{id} and calls
+// [SubmitApprovalResult].
+//
+// Approving a pending playbook authorises a destructive action, so the endpoint
+// is a credential-protected control surface rather than a convenience:
+//
+//   - It refuses to start without a shared token. An endpoint that approves on
+//     a bare request only needs an attacker to reach the port and learn an id,
+//     and the id travels in a webhook that may itself be logged or proxied.
+//   - It is POST, not GET. A GET is reachable from a browser on the host by a
+//     page the operator merely visits, and is retried and prefetched by things
+//     that have no business approving anything.
+//   - The token is compared in constant time, because a timing oracle on an
+//     approval token is as good as the token.
 func (s *standardLayer) startApprovalCallback() {
 	if s.logger == nil {
 		s.logger = zap.NewNop()
 	}
+	token := strings.TrimSpace(s.callbackToken)
+	if token == "" {
+		s.logger.Error("approval callback not started: no callback_token configured",
+			zap.String("addr", s.callbackAddr),
+			zap.String("remedy", "set response.approval.callback_token, or clear callback_listen_addr"),
+		)
+		return
+	}
 	mux := http.NewServeMux()
 	writeOK := func(w http.ResponseWriter, r *http.Request, id string, approved bool) {
-		if r.Method != http.MethodGet {
+		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		presented := r.Header.Get("X-EDR-Approval-Token")
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(token)) != 1 {
+			s.logger.Warn("approval callback rejected: bad token",
+				zap.String("path", r.URL.Path),
+				zap.String("remote", r.RemoteAddr),
+			)
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		if id == "" {
