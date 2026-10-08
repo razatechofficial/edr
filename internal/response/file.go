@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -70,14 +71,29 @@ func (h *FileHandler) Execute(ctx context.Context, params map[string]interface{}
 			fmt.Errorf("file handler: missing path param")
 	}
 
-	info, err := os.Stat(srcPath)
+	// The path arrives from the server verbatim, so it is checked here rather
+	// than trusted. Lstat, not Stat: Stat follows symlinks, so a link pointing
+	// at /etc/shadow would be quarantined as though it were the link itself.
+	srcPath, err := filepath.Abs(srcPath)
+	if err != nil {
+		return failResult(OpQuarantineFile, fmt.Sprintf("resolve %s: %s", srcPath, err)),
+			fmt.Errorf("file handler: resolve %s: %w", srcPath, err)
+	}
+	if reason := protectedPathReason(srcPath); reason != "" {
+		return failResult(OpQuarantineFile, reason), fmt.Errorf("file handler: %s", reason)
+	}
+	info, err := os.Lstat(srcPath)
 	if err != nil {
 		return failResult(OpQuarantineFile, fmt.Sprintf("stat %s: %s", srcPath, err)),
 			fmt.Errorf("file handler: stat %s: %w", srcPath, err)
 	}
-	if info.IsDir() {
-		return failResult(OpQuarantineFile, "cannot quarantine a directory"),
-			fmt.Errorf("file handler: %s is a directory", srcPath)
+	if info.Mode()&os.ModeSymlink != 0 {
+		return failResult(OpQuarantineFile, "refusing to quarantine a symlink"),
+			fmt.Errorf("file handler: %s is a symlink", srcPath)
+	}
+	if !info.Mode().IsRegular() {
+		return failResult(OpQuarantineFile, "refusing to quarantine a non-regular file"),
+			fmt.Errorf("file handler: %s is not a regular file", srcPath)
 	}
 
 	hash, err := sha256File(srcPath)
@@ -237,4 +253,78 @@ func moveFile(src, dst string) error {
 		return fmt.Errorf("file handler: close destination: %w", err)
 	}
 	return os.Remove(src)
+}
+
+// protectedPaths are files and trees that quarantining would break the host or
+// the agent itself.
+//
+// Quarantine moves a file away and leaves nothing behind. A server — or, on a
+// deployment without mutual TLS, anyone on the network path — asking the agent
+// to quarantine /etc/shadow, the sudoers file or the agent's own binary would
+// be handed a denial-of-service primitive and a way to disable the agent. The
+// list is deliberately coarse: a false refusal costs one quarantine, a false
+// acceptance can cost the host.
+var protectedPaths = []string{
+	"/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/lib", "/lib64",
+	"/boot", "/dev", "/proc", "/sys", "/run",
+	"/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow",
+	"/etc/sudoers", "/etc/sudoers.d", "/etc/ssh", "/etc/pam.d",
+	"/etc/edr-agent",
+	"C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)",
+}
+
+// protectedPathReason returns why a path may not be quarantined, or "".
+//
+// Both the candidate and the agent's own location are compared in their
+// as-given and symlink-resolved forms. Comparing only one form leaves the check
+// trivially evadable: /var/x and /private/var/x are the same file on macOS, and
+// a link into a protected tree is the obvious way to try to slip past a
+// denylist.
+func protectedPathReason(path string) string {
+	candidates := resolvedForms(path)
+
+	if self, err := os.Executable(); err == nil {
+		for _, selfForm := range resolvedForms(self) {
+			selfDir := filepath.Dir(selfForm)
+			for _, c := range candidates {
+				if pathWithin(c, selfDir) {
+					return "refusing to quarantine the agent's own installation"
+				}
+			}
+		}
+	}
+	for _, p := range protectedPaths {
+		for _, c := range candidates {
+			if pathWithin(c, p) {
+				return fmt.Sprintf("refusing to quarantine a protected path (%s)", p)
+			}
+		}
+	}
+	return ""
+}
+
+// resolvedForms returns the path as given and with symlinks resolved, skipping
+// the duplicate when they are the same. EvalSymlinks fails for a path that does
+// not exist, which is not an error here — the as-given form still gets checked.
+func resolvedForms(path string) []string {
+	clean := filepath.Clean(path)
+	forms := []string{clean}
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil && resolved != clean {
+		forms = append(forms, resolved)
+	}
+	return forms
+}
+
+// pathWithin reports whether path is prefix itself or sits beneath it, compared
+// on path boundaries so that /etc/sshd does not match /etc/ssh.
+func pathWithin(path, prefix string) bool {
+	if prefix == "" {
+		return false
+	}
+	path = filepath.Clean(path)
+	prefix = filepath.Clean(prefix)
+	if strings.EqualFold(path, prefix) {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(path), strings.ToLower(prefix)+string(filepath.Separator))
 }
