@@ -15,9 +15,20 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 GOFLAGS := -trimpath
+# Integrity manifest. MANIFEST_PUBKEY is the hex Ed25519 public key that the
+# agent verifies its embedded manifest against; REQUIRE_SIGNED_MANIFEST makes an
+# unverified manifest fatal rather than falling back to hashing whatever is on
+# disk. Both are empty by default so development builds keep working; a release
+# must set them, or the integrity check silently baselines a tampered binary.
+SELFPROTECT  := github.com/razatechofficial/edr/internal/selfprotect
+MANIFEST_PUBKEY ?=
+REQUIRE_SIGNED_MANIFEST ?=
+
 LDFLAGS := -s -w \
 	-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(DATE) \
-	-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.Commit=$(COMMIT)
+	-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.Commit=$(COMMIT) \
+	$(if $(MANIFEST_PUBKEY),-X $(SELFPROTECT).embeddedManifestPublicKey=$(MANIFEST_PUBKEY)) \
+	$(if $(REQUIRE_SIGNED_MANIFEST),-X $(SELFPROTECT).requireSignedManifestFlag=$(REQUIRE_SIGNED_MANIFEST))
 
 BIN_DIR     := bin
 PROTO_DIR   := proto
@@ -808,3 +819,22 @@ clean:
 	rm -f platform/linux/ebpf/*.o
 	rm -f $(PROTO_OUT)/*.pb.go
 	@echo "==> Clean complete"
+
+## sign-manifest: hash the built binaries and write a signed integrity manifest.
+##
+## The agent verifies this at startup against the key baked in via
+## MANIFEST_PUBKEY, so the two must come from the same key pair. Without it the
+## agent falls back to hashing whatever is on disk at first start, which trusts
+## a binary that may already have been replaced.
+##
+##   make sign-manifest MANIFEST_KEY=/path/to/ed25519.hex
+##   make build MANIFEST_PUBKEY=<hex public key> REQUIRE_SIGNED_MANIFEST=true
+.PHONY: sign-manifest
+sign-manifest:
+ifndef MANIFEST_KEY
+	$(error MANIFEST_KEY is required: the Ed25519 private key, as hex or a path to it)
+endif
+	go run ./tools/sign_manifest -key "$(MANIFEST_KEY)" -version "$(VERSION)" \
+		-output internal/selfprotect/integrity_manifest.json \
+		$(wildcard dist/*/edr-agent) $(wildcard dist/*/edr-agent.exe)
+	@echo "manifest written; rebuild with MANIFEST_PUBKEY set to the matching public key"
