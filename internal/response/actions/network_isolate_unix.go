@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -70,10 +73,21 @@ func (a *NetworkIsolateAction) Execute(ctx context.Context) (rollback func(conte
 	}()
 	allow := MergeAllowList(a.AgentIP, a.AllowList)
 	if a.BackupPath == "" {
-		a.BackupPath = "/tmp/edr_iptables.bak"
+		// Not /tmp. A world-writable directory lets anyone pre-create the
+		// backup as a symlink, and the old shell redirection would then
+		// truncate whatever it pointed at, as root. systemd's PrivateTmp hid
+		// that on Linux; launchd has no equivalent.
+		a.BackupPath = defaultIsolateBackupPath()
 	}
 	if runtime.GOOS == "linux" {
-		_ = exec.CommandContext(ctx, "sh", "-c", "iptables-save > "+a.BackupPath).Run()
+		// Save the ruleset before changing it. If this fails, isolation does
+		// not proceed: an isolation that cannot be reversed is a denial of
+		// service the agent inflicts on its own host, and control-plane
+		// commands carry no signature, so an attacker who can reach the
+		// channel could use irreversible isolation as the attack itself.
+		if err := saveIPTables(ctx, a.BackupPath); err != nil {
+			return nil, fmt.Errorf("network_isolate: refusing to isolate without a restorable ruleset: %w", err)
+		}
 		_ = exec.CommandContext(ctx, "iptables", "-P", "INPUT", "DROP").Run()
 		_ = exec.CommandContext(ctx, "iptables", "-P", "OUTPUT", "DROP").Run()
 		_ = exec.CommandContext(ctx, "iptables", "-P", "FORWARD", "DROP").Run()
@@ -92,13 +106,15 @@ func (a *NetworkIsolateAction) Execute(ctx context.Context) (rollback func(conte
 		}
 		backup := a.BackupPath
 		rollback = func(rctx context.Context) error {
+			// A missing backup used to return nil, so releasing a host
+			// reported success while leaving it isolated. Say so instead.
 			if backup == "" {
-				return nil
+				return fmt.Errorf("network_isolate: no backup path recorded; release the host manually")
 			}
-			if _, e := os.Stat(backup); e != nil {
-				return nil
+			if _, e := os.Lstat(backup); e != nil {
+				return fmt.Errorf("network_isolate: ruleset backup %s is missing; release the host manually: %w", backup, e)
 			}
-			return exec.CommandContext(rctx, "sh", "-c", "iptables-restore < "+backup).Run()
+			return restoreIPTables(rctx, backup)
 		}
 	} else {
 		// BLOCKER: macOS isolation uses pf(4). A production agent must load a dedicated anchor
@@ -118,4 +134,61 @@ func (a *NetworkIsolateAction) Execute(ctx context.Context) (rollback func(conte
 		})
 	}
 	return rollback, nil
+}
+
+// defaultIsolateBackupPath keeps the saved ruleset out of a shared directory.
+func defaultIsolateBackupPath() string {
+	if dir := strings.TrimSpace(os.Getenv("EDR_DATA_DIR")); dir != "" {
+		return filepath.Join(dir, "iptables.bak")
+	}
+	return filepath.Join(os.TempDir(), "edr-isolate", "iptables.bak")
+}
+
+// saveIPTables writes the current ruleset without a shell.
+//
+// The file is opened O_EXCL|O_NOFOLLOW so an existing file — or a symlink
+// planted where the backup will go — is refused rather than followed and
+// truncated. Any stale backup is removed first, but only after confirming it is
+// a regular file, so the removal cannot be aimed at something else.
+func saveIPTables(ctx context.Context, path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create backup dir: %w", err)
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("backup path %s is not a regular file", path)
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove stale backup: %w", err)
+		}
+	}
+	// 0600: the ruleset describes the host's whole network posture.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return fmt.Errorf("open backup: %w", err)
+	}
+	defer f.Close()
+
+	cmd := exec.CommandContext(ctx, "iptables-save")
+	cmd.Stdout = f
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("iptables-save: %w", err)
+	}
+	return f.Sync()
+}
+
+// restoreIPTables reapplies a saved ruleset without a shell.
+func restoreIPTables(ctx context.Context, path string) error {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("open ruleset backup: %w", err)
+	}
+	defer f.Close()
+
+	cmd := exec.CommandContext(ctx, "iptables-restore")
+	cmd.Stdin = f
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("iptables-restore: %w", err)
+	}
+	return nil
 }
