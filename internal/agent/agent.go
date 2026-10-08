@@ -94,6 +94,10 @@ type Agent struct {
 	xdrIngest *xdrclient.IngestClient
 	xdrStore  xdrclient.Store
 	xdrState  xdrclient.State
+	// forensicsShipper moves collected evidence off the endpoint. Nil until the
+	// agent is enrolled with a platform, because there is nowhere to send it
+	// before then.
+	forensicsShipper *forensics.Shipper
 
 	healthMu           sync.Mutex
 	lastHealthSnapshot time.Time
@@ -703,6 +707,15 @@ func (a *Agent) Run(ctx context.Context) error {
 			"max_age", policy.MaxAge.String(),
 			"max_bytes", policy.MaxBytes,
 		)
+	}
+
+	// Get the evidence off the host. Retention above bounds the local tree, so
+	// without shipping, every bundle is eventually deleted from the only place
+	// it ever existed — and the host it was collected from is usually reimaged
+	// before anyone reads it.
+	if a.forensicsShipper.Enabled() {
+		go a.forensicsShipper.Run(ctx)
+		a.logger.Info("forensic evidence shipping active", "dir", a.forensicsDir())
 	}
 
 	if a.durableSpool != nil {

@@ -11,6 +11,7 @@ import (
 	telemetryv1 "github.com/razatechofficial/xdr/api/proto/telemetry/v1"
 
 	"github.com/razatechofficial/edr/internal/collector"
+	"github.com/razatechofficial/edr/internal/forensics"
 	"github.com/razatechofficial/edr/internal/forwarder"
 	"github.com/razatechofficial/edr/internal/response"
 	"github.com/razatechofficial/edr/internal/telemetryqueue"
@@ -99,6 +100,19 @@ func (a *Agent) initXDR() error {
 		"hosts", res.State.IngestHosts,
 		"queue_dir", qdir,
 	)
+
+	// Evidence goes to the same hosts, authenticated by the same device
+	// certificate, but over its own connection: a memory dump must not sit in
+	// front of the frames that carry response commands to this endpoint.
+	if dir := a.forensicsDir(); dir != "" {
+		uploader := platformUploader{client: xdrclient.NewForensicsClient(
+			res.State.IngestHosts,
+			res.Store,
+			a.cfg.XDR.InsecureSkipTLS,
+			a.logger,
+		)}
+		a.forensicsShipper = forensics.NewShipper(dir, uploader, forensics.DefaultShipperPolicy(), a.zapLogger)
+	}
 	return nil
 }
 
