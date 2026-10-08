@@ -1698,9 +1698,12 @@ func (a *Agent) initResponseLayer() error {
 		PlaybooksPath: pp,
 		ForensicsDir:  fd,
 		QuarantineDir: qd,
-		AgentIP:       agentIP,
-		HostID:        a.cfg.Service.EndpointID,
-		Logger:        a.zapLogger,
+		// Beside the other response state, so an isolation survives a restart
+		// instead of staying in force with nothing able to lift it.
+		StatePath: filepath.Join(a.cfg.Agent.DataDir, "response", "containments.json"),
+		AgentIP:   agentIP,
+		HostID:    a.cfg.Service.EndpointID,
+		Logger:    a.zapLogger,
 		ForensicsDeep: forensics.ForensicsDeepConfig{
 			WindowsPrefetchEnabled:    a.cfg.Response.Forensics.WindowsPrefetchEnabled,
 			WindowsAmcacheEnabled:     a.cfg.Response.Forensics.WindowsAmcacheEnabled,
