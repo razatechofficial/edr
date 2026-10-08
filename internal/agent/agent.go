@@ -1568,7 +1568,21 @@ func (a *Agent) initSelfProtect() error {
 		protectedPaths = append(protectedPaths, a.protectedAssetPaths()...)
 		if len(protectedPaths) > 0 {
 			a.tamper = selfprotect.NewTamperDetector(protectedPaths, a.zapLogger)
-			a.logger.Debug("self-protection: tamper detector enabled", "watched_paths", len(protectedPaths))
+
+			// Install the hooks the detector was built to take. Without them
+			// emitResponse returns early and a tamper event produces nothing
+			// beyond one log line — detected, then silently swallowed. Nothing
+			// reaches the server, the alert queue or the alert file, so the
+			// one event self-protection exists to report is the one event
+			// nobody is told about.
+			a.tamper.SetResponseHook(a.onTamperEvent)
+			if a.integrity != nil {
+				a.tamper.SetRestoreFn(a.integrity.Restore)
+			}
+			a.logger.Debug("self-protection: tamper detector enabled",
+				"watched_paths", len(protectedPaths),
+				"self_restore", a.integrity != nil,
+			)
 		}
 	}
 
@@ -2005,4 +2019,48 @@ func (a *Agent) forensicsDir() string {
 		return filepath.Join(d, "forensics")
 	}
 	return ""
+}
+
+// onTamperEvent turns a tamper detection into an alert on the normal path.
+//
+// It is called synchronously from the watcher goroutine, so it must not block:
+// the alert is handed to the existing pipeline and this returns. A failure to
+// deliver is logged rather than retried here, because the alert queue already
+// owns durability and blocking the watcher would stop the next detection.
+func (a *Agent) onTamperEvent(r selfprotect.TamperResponse) {
+	if a == nil {
+		return
+	}
+	alert := schema.Alert{
+		SchemaVersion: schema.SchemaVersionV1,
+		AlertID:       uuid.NewString(),
+		RuleID:        "SELFPROTECT-TAMPER",
+		EndpointID:    a.cfg.Service.EndpointID,
+		// Tampering with the agent's own files is an attack on the sensor, and
+		// the sensor is what everything else depends on. There is no lower
+		// reading of it.
+		Severity:    schema.SeverityCritical,
+		Title:       "Agent file tampering detected",
+		Description: tamperDescription(r),
+		Timestamp:   r.Timestamp,
+		ProcessPID:  r.KillerPID,
+		FilePath:    r.Path,
+	}
+	if alert.Timestamp.IsZero() {
+		alert.Timestamp = time.Now().UTC()
+	}
+	if err := a.handleAlerts([]schema.Alert{alert}); err != nil {
+		a.logger.Error("could not report tamper event", "error", err, "path", r.Path)
+	}
+}
+
+func tamperDescription(r selfprotect.TamperResponse) string {
+	desc := fmt.Sprintf("%s on protected file %s; response: %s", r.Operation, r.Path, r.Action)
+	if r.Restored {
+		desc += "; file restored from integrity backup"
+	}
+	if r.Error != "" {
+		desc += "; error: " + r.Error
+	}
+	return desc
 }
