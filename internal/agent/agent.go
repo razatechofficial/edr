@@ -690,6 +690,21 @@ func (a *Agent) Run(ctx context.Context) error {
 		go a.feedbackIngester.Run(ctx.Done(), 0)
 	}
 
+	// Bound the forensics tree. Every detection that collects artifacts, dumps
+	// memory or builds a DFIR package writes here and nothing removed anything;
+	// on a host that detects repeatedly the tree grows until the disk does not,
+	// and an agent that fills the disk has caused the incident it was deployed
+	// to catch.
+	if dir := a.forensicsDir(); dir != "" {
+		policy := forensics.DefaultRetentionPolicy()
+		go forensics.SweepPeriodically(ctx, dir, policy, time.Hour, a.zapLogger)
+		a.logger.Info("forensics retention active",
+			"dir", dir,
+			"max_age", policy.MaxAge.String(),
+			"max_bytes", policy.MaxBytes,
+		)
+	}
+
 	if a.durableSpool != nil {
 		defer func() { _ = a.durableSpool.Close() }()
 	}
@@ -1972,4 +1987,22 @@ func registryTelemetryToFile(re schema.RegistryEvent) schema.FileEvent {
 		Operation: re.Operation,
 		ActorPID:  re.ActorPID,
 	}
+}
+
+// forensicsDir is where collected evidence lands, matching what the response
+// handlers were given.
+func (a *Agent) forensicsDir() string {
+	if a == nil {
+		return ""
+	}
+	if d := strings.TrimSpace(a.cfg.Response.ForensicsDir); d != "" {
+		return d
+	}
+	if d := strings.TrimSpace(a.cfg.Response.Forensics.OutputDir); d != "" {
+		return d
+	}
+	if d := strings.TrimSpace(a.cfg.Agent.DataDir); d != "" {
+		return filepath.Join(d, "forensics")
+	}
+	return ""
 }
