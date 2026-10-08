@@ -3,12 +3,21 @@ package actions
 import (
 	"context"
 	"fmt"
+	"net"
 	"os/exec"
+	"regexp"
 	"runtime"
-	"strings"
+	"strconv"
 )
 
 // NetworkBlockAction blocks a specific IP/port (OS-specific implementation).
+//
+// Every field here originates in event data. A playbook substitutes values such
+// as {{detection.event.dst_ip}} straight out of the observed event, and those
+// values are influenced by whatever produced the event — which, in a detection
+// product, routinely means an attacker. So the fields are validated before a
+// command is built, and the commands are argument vectors rather than shell
+// lines: there is no shell, so there is nothing to inject into.
 type NetworkBlockAction struct {
 	Direction       string
 	DstIP           string
@@ -17,64 +26,84 @@ type NetworkBlockAction struct {
 	RuleID          string
 }
 
-// RollbackCommands returns commands to remove the rule.
-func (a *NetworkBlockAction) RollbackCommands() []string {
-	switch runtime.GOOS {
-	case "windows":
-		if a.RuleID == "" {
-			return nil
-		}
-		return []string{fmt.Sprintf(`netsh advfirewall firewall delete rule name="EDR-Block-%s"`, a.RuleID)}
-	case "darwin":
-		return []string{fmt.Sprintf(`# pf: remove edr block %s`, a.RuleID)}
-	default:
-		return []string{fmt.Sprintf(`iptables -D OUTPUT -d %s -p tcp --dport %s -j DROP`, a.DstIP, a.DstPort)}
+// ruleIDPattern bounds the rule identifier to characters that are safe in a
+// firewall rule name on every supported platform.
+var ruleIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+// Validate rejects anything that is not a real address, port or identifier.
+//
+// Rejecting is deliberately preferred to escaping: escaping has to be correct
+// for each platform's shell, and getting it wrong fails open. A value that is
+// not an IP address has no business reaching a firewall command at all.
+func (a *NetworkBlockAction) Validate() error {
+	if net.ParseIP(a.DstIP) == nil {
+		return fmt.Errorf("network_block: %q is not a valid IP address", a.DstIP)
 	}
+	port, err := strconv.Atoi(a.DstPort)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("network_block: %q is not a valid port", a.DstPort)
+	}
+	if !ruleIDPattern.MatchString(a.RuleID) {
+		return fmt.Errorf("network_block: rule id %q contains characters that are not permitted", a.RuleID)
+	}
+	return nil
 }
 
-// ApplyCommands returns add-rule command lines.
-func (a *NetworkBlockAction) ApplyCommands() []string {
+// applyArgv returns the command that adds the rule, as program and arguments.
+// A nil result means this platform has no implementation.
+func (a *NetworkBlockAction) applyArgv() []string {
 	switch runtime.GOOS {
 	case "windows":
-		if a.RuleID == "" {
-			return nil
+		return []string{
+			"netsh", "advfirewall", "firewall", "add", "rule",
+			"name=EDR-Block-" + a.RuleID,
+			"dir=out", "action=block",
+			"remoteip=" + a.DstIP,
+			"remoteport=" + a.DstPort,
 		}
-		return []string{fmt.Sprintf(
-			`netsh advfirewall firewall add rule name="EDR-Block-%s" dir=out action=block remoteip=%s remoteport=%s`,
-			a.RuleID, a.DstIP, a.DstPort,
-		)}
 	case "darwin":
-		return []string{fmt.Sprintf(`# pf: block %s -> %s:%s id=%s`, a.DstIP, a.DstIP, a.DstPort, a.RuleID)}
-	default:
-		if a.RuleID == "" {
-			return nil
-		}
-		return []string{fmt.Sprintf(
-			`iptables -I OUTPUT -d %s -p tcp --dport %s -j DROP -m comment --comment "edr-%s"`,
-			a.DstIP, a.DstPort, a.RuleID,
-		)}
-	}
-}
-
-// buildRollbackFromCommands runs the first non-comment rollback line (same shell strategy as apply).
-func (a *NetworkBlockAction) buildRollback() func(context.Context) error {
-	rbs := a.RollbackCommands()
-	if len(rbs) == 0 {
+		// pf rules are applied through an anchor file rather than a one-liner.
+		// There is no implementation here, and the previous comment-string
+		// placeholder made a silent no-op look like a successful block.
 		return nil
+	default:
+		return []string{
+			"iptables", "-I", "OUTPUT",
+			"-d", a.DstIP,
+			"-p", "tcp", "--dport", a.DstPort,
+			"-j", "DROP",
+			"-m", "comment", "--comment", "edr-" + a.RuleID,
+		}
 	}
-	rl := strings.TrimSpace(rbs[0])
-	if strings.HasPrefix(rl, "#") {
+}
+
+// rollbackArgv returns the command that removes the rule again.
+func (a *NetworkBlockAction) rollbackArgv() []string {
+	switch runtime.GOOS {
+	case "windows":
+		return []string{
+			"netsh", "advfirewall", "firewall", "delete", "rule",
+			"name=EDR-Block-" + a.RuleID,
+		}
+	case "darwin":
+		return nil
+	default:
+		return []string{
+			"iptables", "-D", "OUTPUT",
+			"-d", a.DstIP,
+			"-p", "tcp", "--dport", a.DstPort,
+			"-j", "DROP",
+		}
+	}
+}
+
+func (a *NetworkBlockAction) buildRollback() func(context.Context) error {
+	argv := a.rollbackArgv()
+	if len(argv) < 2 {
 		return nil
 	}
 	return func(rctx context.Context) error {
-		if runtime.GOOS == "windows" {
-			fs := strings.Fields(rl)
-			if len(fs) < 2 {
-				return nil
-			}
-			return exec.CommandContext(rctx, fs[0], fs[1:]...).Run()
-		}
-		return exec.CommandContext(rctx, "sh", "-c", rl).Run()
+		return exec.CommandContext(rctx, argv[0], argv[1:]...).Run()
 	}
 }
 
@@ -85,27 +114,19 @@ func (a *NetworkBlockAction) Execute(ctx context.Context) (rollback func(context
 			err = fmt.Errorf("network_block panic: %v", r)
 		}
 	}()
-	cmds := a.ApplyCommands()
-	if len(cmds) == 0 {
+
+	// Validate before anything is built, so a malformed value is refused rather
+	// than blocked on a best-effort basis.
+	if err = a.Validate(); err != nil {
+		return nil, err
+	}
+
+	argv := a.applyArgv()
+	if len(argv) < 2 {
 		return nil, nil
 	}
-	line := strings.TrimSpace(cmds[0])
-	if strings.HasPrefix(line, "#") {
-		return nil, nil
+	if err = exec.CommandContext(ctx, argv[0], argv[1:]...).Run(); err != nil {
+		return nil, err
 	}
-	if runtime.GOOS == "windows" {
-		fs := strings.Fields(line)
-		if len(fs) < 2 {
-			return nil, nil
-		}
-		if err = exec.CommandContext(ctx, fs[0], fs[1:]...).Run(); err != nil {
-			return nil, err
-		}
-	} else {
-		if err = exec.CommandContext(ctx, "sh", "-c", line).Run(); err != nil {
-			return nil, err
-		}
-	}
-	rb := a.buildRollback()
-	return rb, nil
+	return a.buildRollback(), nil
 }
