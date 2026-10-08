@@ -1634,6 +1634,25 @@ func (a *Agent) initResponseEngine() error {
 	eng.RegisterHandler(response.OpBlockHash,
 		response.NewBlockHashHandler(a.zapLogger, blockDBPath))
 
+	// These four were implemented and never registered, so the control plane's
+	// COLLECT_FORENSIC, TAKE_SNAPSHOT, memory dump and registry operations all
+	// failed with "no handler registered" against working code.
+	//
+	// Their output lands beside the other forensic evidence, and the registry
+	// handler is a deliberate no-op that reports a clear error off Windows
+	// rather than pretending to have run.
+	forensicsDir := a.cfg.Response.ForensicsDir
+	if forensicsDir == "" {
+		forensicsDir = filepath.Join(a.cfg.Agent.DataDir, "forensics")
+	}
+	eng.RegisterHandler(response.OpCollectForensics,
+		response.NewForensicsHandler(a.zapLogger, forensicsDir, encKey))
+	eng.RegisterHandler(response.OpMemoryDump,
+		response.NewMemoryHandler(a.zapLogger, forensicsDir, encKey))
+	eng.RegisterHandler(response.OpSnapshot, response.NewSnapshotHandler(a.zapLogger))
+	eng.RegisterHandler(response.OpRegistryDelete, response.NewRegistryHandler(a.zapLogger))
+	eng.RegisterHandler(response.OpRegistryRestore, response.NewRegistryHandler(a.zapLogger))
+
 	a.respEngine = eng
 	a.logger.Info("response engine initialized with playbook support")
 	return nil
