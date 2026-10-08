@@ -122,8 +122,29 @@ func (e *DefaultActionExecutor) runCollectArtifacts(ctx context.Context, params 
 		d := e.ForensicsDeep
 		deep = &d
 	}
-	_, err := forensics.CollectArtifactsForAlert(ctx, log, meta, deep)
-	return err
+	bundle, err := forensics.CollectArtifactsForAlert(ctx, log, meta, deep)
+	if err != nil {
+		return err
+	}
+	// Write it. Collecting evidence and discarding it is worse than not
+	// collecting: the host has already been scanned, and the only thing the
+	// work produced was the belief that evidence exists somewhere.
+	res, err := forensics.WriteBundle(e.ForensicsDir, meta, bundle)
+	if err != nil {
+		return fmt.Errorf("collect_artifacts: %w", err)
+	}
+	if log != nil {
+		log.Info("forensic bundle written",
+			zap.String("alert_id", meta.AlertID),
+			zap.String("path", res.Path),
+			zap.String("sha256", res.SHA256),
+			zap.Int64("bytes", res.Bytes),
+		)
+	}
+	if e.OnForensic != nil {
+		e.OnForensic()
+	}
+	return nil
 }
 
 func (e *DefaultActionExecutor) runForensics(ctx context.Context, params map[string]interface{}, d detection.Detection, log *zap.Logger) error {
