@@ -12,10 +12,19 @@ import (
 	"strings"
 )
 
-// VerifyRuleBundle checks bundle integrity and optional Ed25519 signature.
-// When pubKeyPath is empty, only the hash is validated when present.
-// When pubKeyPath is set, signature must verify over the raw bundle bytes.
-func VerifyRuleBundle(name string, data []byte, hash, signature, pubKeyPath string) error {
+// VerifyRuleBundle checks a rule bundle before it is written to disk.
+//
+// A bundle is executable content in everything but name: it lands in the tree
+// the Sigma, YARA and SCA loaders read, and an SCA rule of type `c:` runs an
+// arbitrary binary as root. Accepting one whose origin cannot be proven is
+// therefore equivalent to accepting code from whoever is on the other end of
+// the connection — which, on a deployment without mutual TLS, is anybody on the
+// network path.
+//
+// So an unconfigured signing key fails closed. allowUnsigned exists for
+// development and for operators who have deliberately accepted the risk, and it
+// still requires a hash so that at least corruption is caught.
+func VerifyRuleBundle(name string, data []byte, hash, signature, pubKeyPath string, allowUnsigned bool) error {
 	if len(data) == 0 {
 		return fmt.Errorf("rule_bundle %q: empty payload", name)
 	}
@@ -24,6 +33,15 @@ func VerifyRuleBundle(name string, data []byte, hash, signature, pubKeyPath stri
 	}
 	pubKeyPath = strings.TrimSpace(pubKeyPath)
 	if pubKeyPath == "" {
+		if !allowUnsigned {
+			return fmt.Errorf(
+				"rule_bundle %q: refused because no signing key is configured; "+
+					"set policy_verify_pubkey_path, or set rules_allow_unsigned to accept unverified rule content",
+				name)
+		}
+		if strings.TrimSpace(hash) == "" {
+			return fmt.Errorf("rule_bundle %q: refused because it carries neither a signature nor a hash", name)
+		}
 		return nil
 	}
 	signature = strings.TrimSpace(signature)
