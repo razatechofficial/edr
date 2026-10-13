@@ -36,6 +36,15 @@ const forensicsChunkBytes = 1 << 20
 // burning the endpoint's bandwidth and filling its own logs.
 var ErrForensicsUnsupported = errors.New("xdrclient: the platform does not accept forensic uploads")
 
+// ErrForensicsOverBudget means the platform refused the bundle because this
+// tenant's evidence allowance for the day is spent.
+//
+// Distinct from both a transient failure and an unsupported platform. Nothing
+// is wrong with the bundle and nothing is wrong with the agent, so retrying in
+// a couple of minutes would be refused just as flatly; the right response is to
+// hold the evidence and come back after the allowance refills.
+var ErrForensicsOverBudget = errors.New("xdrclient: the platform's evidence allowance for this tenant is spent")
+
 // Bundle is a local evidence file to be shipped.
 type Bundle struct {
 	// Path is the file on this endpoint.
@@ -112,6 +121,11 @@ func (c *ForensicsClient) Upload(ctx context.Context, b Bundle) (UploadOutcome, 
 			// Not host-specific: every replica serves the same build.
 			return UploadOutcome{}, err
 		}
+		if errors.Is(err, ErrForensicsOverBudget) {
+			// Also not host-specific: the allowance is the tenant's, so trying
+			// another replica would spend bandwidth to be refused again.
+			return UploadOutcome{}, err
+		}
 		if ctx.Err() != nil {
 			return UploadOutcome{}, ctx.Err()
 		}
@@ -149,6 +163,8 @@ func (c *ForensicsClient) uploadTo(ctx context.Context, host string, b Bundle, s
 		}
 	case status.Code(err) == codes.Unimplemented:
 		return UploadOutcome{}, ErrForensicsUnsupported
+	case status.Code(err) == codes.ResourceExhausted:
+		return UploadOutcome{}, fmt.Errorf("%w: %s", ErrForensicsOverBudget, status.Convert(err).Message())
 	default:
 		// A failed state query is not a reason to skip the upload; it only
 		// means the whole bundle is sent rather than the remainder.
@@ -182,10 +198,7 @@ func (c *ForensicsClient) send(ctx context.Context, client forensicsv1.Forensics
 
 	stream, err := client.UploadBundle(ctx)
 	if err != nil {
-		if status.Code(err) == codes.Unimplemented {
-			return UploadOutcome{}, ErrForensicsUnsupported
-		}
-		return UploadOutcome{}, err
+		return UploadOutcome{}, classifyUploadErr(err)
 	}
 
 	collected := b.CollectedAt
@@ -241,10 +254,7 @@ func (c *ForensicsClient) send(ctx context.Context, client forensicsv1.Forensics
 
 	ack, err := stream.CloseAndRecv()
 	if err != nil {
-		if status.Code(err) == codes.Unimplemented {
-			return UploadOutcome{}, ErrForensicsUnsupported
-		}
-		return UploadOutcome{}, err
+		return UploadOutcome{}, classifyUploadErr(err)
 	}
 	return UploadOutcome{
 		// Both flags are required. "Accepted" alone can mean the bytes arrived
@@ -257,6 +267,22 @@ func (c *ForensicsClient) send(ctx context.Context, client forensicsv1.Forensics
 	}, nil
 }
 
+// classifyUploadErr turns a gRPC status into the error the caller should act on.
+//
+// The two cases worth separating from a generic failure are a platform that has
+// no upload API and a tenant whose allowance is spent: both mean retrying soon
+// is pointless, and for opposite reasons.
+func classifyUploadErr(err error) error {
+	switch status.Code(err) {
+	case codes.Unimplemented:
+		return ErrForensicsUnsupported
+	case codes.ResourceExhausted:
+		return fmt.Errorf("%w: %s", ErrForensicsOverBudget, status.Convert(err).Message())
+	default:
+		return err
+	}
+}
+
 // uploadSendErr turns a send failure into the server's reason for it.
 //
 // A gRPC Send reports a broken stream as io.EOF and keeps the real status for
@@ -264,7 +290,7 @@ func (c *ForensicsClient) send(ctx context.Context, client forensicsv1.Forensics
 // server took the trouble to explain.
 func uploadSendErr(stream forensicsv1.ForensicsService_UploadBundleClient, sendErr error) error {
 	if _, err := stream.CloseAndRecv(); err != nil {
-		return err
+		return classifyUploadErr(err)
 	}
 	return sendErr
 }

@@ -365,3 +365,73 @@ func TestHashFileMatchesTheFileContents(t *testing.T) {
 		t.Fatalf("digest %q, expected %q", got, digest)
 	}
 }
+
+func TestUploadReportsASpentAllowanceDistinctly(t *testing.T) {
+	// A server that refuses on allowance grounds. The agent must be able to
+	// tell this from a transient failure, or it will retry every cycle and be
+	// refused every time.
+	addr := serve(t, func(s *grpc.Server) {
+		forensicsv1.RegisterForensicsServiceServer(s, &budgetRefusingForensics{})
+	})
+	path, _ := writeBundleFile(t, 1024)
+
+	_, err := testClient(addr).Upload(context.Background(), Bundle{
+		Path: path, UID: "budget-1", Kind: "artifact_bundle", ContentType: "application/json",
+	})
+	if !errors.Is(err, ErrForensicsOverBudget) {
+		t.Fatalf("expected ErrForensicsOverBudget, got %v", err)
+	}
+	// Not conflated with an unsupported platform: one clears on its own, the
+	// other never does.
+	if errors.Is(err, ErrForensicsUnsupported) {
+		t.Fatal("a spent allowance was reported as an unsupported platform")
+	}
+}
+
+// budgetRefusingForensics answers every upload with ResourceExhausted.
+type budgetRefusingForensics struct {
+	forensicsv1.UnimplementedForensicsServiceServer
+}
+
+func (budgetRefusingForensics) GetUploadState(context.Context, *forensicsv1.UploadStateRequest) (*forensicsv1.UploadStateResponse, error) {
+	return &forensicsv1.UploadStateResponse{}, nil
+}
+
+func (budgetRefusingForensics) UploadBundle(stream forensicsv1.ForensicsService_UploadBundleServer) error {
+	return status.Error(codes.ResourceExhausted, "the tenant's daily evidence budget is spent")
+}
+
+func TestASpentAllowanceIsNotRetriedAcrossHosts(t *testing.T) {
+	// The allowance belongs to the tenant, so trying a second replica would
+	// spend bandwidth to be refused again.
+	calls := 0
+	addr := serve(t, func(s *grpc.Server) {
+		forensicsv1.RegisterForensicsServiceServer(s, &countingBudgetRefusal{calls: &calls})
+	})
+	path, _ := writeBundleFile(t, 512)
+	client := NewForensicsClient([]string{addr, addr, addr}, Store{}, true,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if _, err := client.Upload(context.Background(), Bundle{
+		Path: path, UID: "budget-2", Kind: "artifact_bundle", ContentType: "application/json",
+	}); !errors.Is(err, ErrForensicsOverBudget) {
+		t.Fatalf("expected ErrForensicsOverBudget, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("the upload was attempted %d times across hosts, expected 1", calls)
+	}
+}
+
+type countingBudgetRefusal struct {
+	forensicsv1.UnimplementedForensicsServiceServer
+	calls *int
+}
+
+func (c *countingBudgetRefusal) GetUploadState(context.Context, *forensicsv1.UploadStateRequest) (*forensicsv1.UploadStateResponse, error) {
+	return &forensicsv1.UploadStateResponse{}, nil
+}
+
+func (c *countingBudgetRefusal) UploadBundle(stream forensicsv1.ForensicsService_UploadBundleServer) error {
+	*c.calls++
+	return status.Error(codes.ResourceExhausted, "spent")
+}
