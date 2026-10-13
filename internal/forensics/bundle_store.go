@@ -17,6 +17,13 @@ import (
 // The alert metadata travels with the evidence rather than only in the
 // filename: a bundle that cannot say which detection produced it, on which
 // endpoint, is a collection of facts with nothing to attach them to.
+//
+// The field order is load-bearing. Go encodes a struct in declaration order, and
+// the shipper reads only the first megabyte of a file to find out which
+// detection a bundle belongs to — a bundle can be far larger than that, and
+// decoding all of it just to read an identifier would be a denial of service
+// against the agent. Moving Bundle ahead of Alert would push the attribution
+// past that bound, and every large bundle would ship with no alert against it.
 type StoredBundle struct {
 	Alert     AlertTriggerMeta `json:"alert"`
 	Collected time.Time        `json:"collected_at"`

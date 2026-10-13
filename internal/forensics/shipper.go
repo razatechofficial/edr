@@ -418,23 +418,95 @@ type bundleMeta struct {
 	Collected time.Time `json:"collected_at"`
 }
 
-// readBundleMeta reads the header of a JSON bundle.
+// metaReadLimit guards against a file in this directory that is not one of
+// ours. A bundle is written by this agent, but the directory is on a host that
+// may be compromised, and walking an arbitrary multi-gigabyte file looking for
+// an identifier would be a denial of service against the agent itself.
+const metaReadLimit = 1 << 20
+
+// readBundleMeta reads the attribution from the front of a JSON bundle.
 //
-// Bounded: a bundle is written by this agent, but a file in this directory is
-// not necessarily one, and decoding an arbitrary multi-gigabyte file to find an
-// alert identifier would be a denial of service against the agent itself.
+// Decoded token by token, stopping as soon as the alert and the collection time
+// have been read, so the body is never touched. Decoding into a struct would
+// not do: json.Decode has to parse the whole document to succeed, so on a
+// bundle larger than the read limit it fails with an unexpected EOF and the
+// attribution is lost completely — which is what happened before this was
+// written as a streaming read. A memory dump bundle is routinely larger than
+// the limit, so that was most of them.
+//
+// This is why StoredBundle declares Alert before Bundle: the early exit depends
+// on the attribution arriving first.
 func readBundleMeta(path string) (bundleMeta, bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		return bundleMeta{}, false
 	}
 	defer func() { _ = f.Close() }()
-	var meta bundleMeta
-	dec := json.NewDecoder(newBoundedReader(f, 1<<20))
-	if err := dec.Decode(&meta); err != nil {
+
+	dec := json.NewDecoder(newBoundedReader(f, metaReadLimit))
+	tok, err := dec.Token()
+	if err != nil || tok != json.Delim('{') {
 		return bundleMeta{}, false
 	}
-	return meta, true
+
+	var meta bundleMeta
+	gotAlert, gotCollected := false, false
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		key, _ := keyTok.(string)
+		switch key {
+		case "alert":
+			if err := dec.Decode(&meta.Alert); err != nil {
+				return bundleMeta{}, false
+			}
+			gotAlert = true
+		case "collected_at":
+			// A malformed timestamp is not worth discarding the alert for.
+			if err := dec.Decode(&meta.Collected); err != nil {
+				return meta, gotAlert
+			}
+			gotCollected = true
+		default:
+			if err := skipJSONValue(dec); err != nil {
+				// Ran past the read limit while stepping over a field. Whatever
+				// was found before that still stands.
+				return meta, gotAlert || gotCollected
+			}
+		}
+		if gotAlert && gotCollected {
+			// Everything needed is in hand; the body is left unread.
+			break
+		}
+	}
+	return meta, gotAlert || gotCollected
+}
+
+// skipJSONValue steps over one value without keeping it.
+func skipJSONValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if tok != json.Delim('{') && tok != json.Delim('[') {
+		return nil
+	}
+	depth := 1
+	for depth > 0 {
+		t, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch t {
+		case json.Delim('{'), json.Delim('['):
+			depth++
+		case json.Delim('}'), json.Delim(']'):
+			depth--
+		}
+	}
+	return nil
 }
 
 // markShipped records the platform's confirmation beside the bundle.
