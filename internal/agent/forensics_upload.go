@@ -34,6 +34,9 @@ func (p platformUploader) Upload(ctx context.Context, up forensics.Upload) (fore
 		if errors.Is(err, xdrclient.ErrForensicsUnsupported) {
 			return forensics.Outcome{}, errors.Join(forensics.ErrUnsupported, err)
 		}
+		if errors.Is(err, xdrclient.ErrForensicsOverBudget) {
+			return forensics.Outcome{}, errors.Join(forensics.ErrOverBudget, err)
+		}
 		return forensics.Outcome{}, err
 	}
 	return forensics.Outcome{
