@@ -46,6 +46,16 @@ type Uploader interface {
 // The shipper stops after seeing it rather than retrying every cycle.
 var ErrUnsupported = errors.New("forensics: the platform does not accept uploads")
 
+// ErrOverBudget is returned when the platform has refused the bundle because
+// this tenant's evidence allowance is spent.
+//
+// Held back rather than retried and rather than given up on. The allowance
+// refills, so the evidence will be accepted later; retrying on the normal cycle
+// would spend the endpoint's bandwidth being refused every few minutes, and
+// counting it against the attempt cap would abandon evidence over a condition
+// that has nothing to do with the bundle.
+var ErrOverBudget = errors.New("forensics: the platform's evidence allowance is spent")
+
 // shippedSuffix marks a bundle the platform has confirmed.
 //
 // A marker file beside the bundle rather than a database: the agent may be
@@ -66,6 +76,10 @@ type ShipperPolicy struct {
 	// it is left alone. Without a cap, a bundle the platform will always refuse
 	// is retried for the life of the host.
 	MaxAttempts int
+	// BudgetBackoff is how long to stop offering evidence after the platform
+	// says the allowance is spent. The allowance is daily, so this only has to
+	// be long enough to stop a tight loop.
+	BudgetBackoff time.Duration
 }
 
 // DefaultShipperPolicy ships promptly without making the upload itself a
@@ -75,6 +89,7 @@ func DefaultShipperPolicy() ShipperPolicy {
 		Interval:         2 * time.Minute,
 		PerBundleTimeout: 10 * time.Minute,
 		MaxAttempts:      8,
+		BudgetBackoff:    time.Hour,
 	}
 }
 
@@ -95,6 +110,13 @@ type Shipper struct {
 	attempts map[string]int
 	// unsupported latches once the platform says it has no upload API.
 	unsupported bool
+	// holdUntil pauses shipping after the platform refuses on allowance
+	// grounds. Not persisted: a restart retrying once is harmless, and
+	// persisting it would hold evidence back across a restart that may have
+	// been days later.
+	holdUntil time.Time
+	// now is overridable so the hold can be tested without sleeping.
+	now func() time.Time
 }
 
 // NewShipper returns a shipper over dir. A nil uploader disables it, which is
@@ -112,12 +134,16 @@ func NewShipper(dir string, uploader Uploader, policy ShipperPolicy, logger *zap
 	if policy.MaxAttempts <= 0 {
 		policy.MaxAttempts = DefaultShipperPolicy().MaxAttempts
 	}
+	if policy.BudgetBackoff <= 0 {
+		policy.BudgetBackoff = DefaultShipperPolicy().BudgetBackoff
+	}
 	return &Shipper{
 		dir:      strings.TrimSpace(dir),
 		uploader: uploader,
 		policy:   policy,
 		logger:   logger,
 		attempts: map[string]int{},
+		now:      time.Now,
 	}
 }
 
@@ -130,6 +156,13 @@ func (s *Shipper) Enabled() bool {
 // returns the number of bundles the platform accepted.
 func (s *Shipper) ShipOnce(ctx context.Context) (int, error) {
 	if !s.Enabled() {
+		return 0, nil
+	}
+	if held := s.heldUntil(); !held.IsZero() {
+		// Nothing is attempted while the allowance is known to be spent. The
+		// bundles stay on disk and the next cycle after the hold tries again.
+		s.logger.Debug("evidence shipping held until the platform allowance refills",
+			zap.Time("until", held))
 		return 0, nil
 	}
 	pending, err := s.pending()
@@ -153,6 +186,18 @@ func (s *Shipper) ShipOnce(ctx context.Context) (int, error) {
 			// existed.
 			s.unsupported = true
 			s.logger.Info("platform does not accept forensic uploads; evidence stays on the endpoint")
+			return shipped, nil
+		}
+		if errors.Is(err, ErrOverBudget) {
+			// Not counted against the attempt cap: the bundle is fine and will
+			// be accepted once the allowance refills. Counting it would
+			// abandon evidence for a reason that is not about the evidence.
+			s.holdUntil = s.clock().Add(s.policy.BudgetBackoff)
+			s.logger.Warn("platform evidence allowance is spent; holding evidence locally",
+				zap.String("bundle_uid", up.UID),
+				zap.Duration("retry_in", s.policy.BudgetBackoff),
+				zap.Error(err),
+			)
 			return shipped, nil
 		}
 		if err != nil {
@@ -194,6 +239,26 @@ func (s *Shipper) ShipOnce(ctx context.Context) (int, error) {
 		)
 	}
 	return shipped, nil
+}
+
+// heldUntil reports the time shipping is paused until, or the zero time when
+// it is not paused.
+func (s *Shipper) heldUntil() time.Time {
+	if s.holdUntil.IsZero() {
+		return time.Time{}
+	}
+	if s.clock().Before(s.holdUntil) {
+		return s.holdUntil
+	}
+	s.holdUntil = time.Time{}
+	return time.Time{}
+}
+
+func (s *Shipper) clock() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
 }
 
 // Run ships on a timer until ctx ends, starting immediately so evidence

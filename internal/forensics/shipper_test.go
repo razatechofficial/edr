@@ -318,3 +318,106 @@ func TestReadBundleMetaIsBounded(t *testing.T) {
 		t.Fatal("a file larger than the metadata bound was decoded in full")
 	}
 }
+
+func TestShipOnceHoldsEvidenceWhenTheAllowanceIsSpent(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "bundle.dmp", []byte("memory"))
+	up := &recordingUploader{outcome: func(Upload) (Outcome, error) {
+		return Outcome{}, fmt.Errorf("refused: %w", ErrOverBudget)
+	}}
+	policy := DefaultShipperPolicy()
+	policy.MaxAttempts = 3
+	policy.BudgetBackoff = time.Hour
+	s := NewShipper(dir, up, policy, nil)
+
+	for i := 0; i < 5; i++ {
+		if _, err := s.ShipOnce(context.Background()); err != nil {
+			t.Fatalf("cycle %d: %v", i, err)
+		}
+	}
+	// One attempt, then nothing: retrying every cycle would spend the
+	// endpoint's bandwidth being refused.
+	if len(up.calls) != 1 {
+		t.Fatalf("uploader called %d times while the allowance was spent, expected 1", len(up.calls))
+	}
+	// The bundle stays on disk, unmarked, so it ships once the allowance
+	// refills.
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the bundle was removed: %v", err)
+	}
+	if _, err := os.Stat(path + shippedSuffix); err == nil {
+		t.Fatal("a bundle that was never stored was marked as shipped")
+	}
+	// The shipper stays enabled: unlike an unsupported platform, this clears.
+	if !s.Enabled() {
+		t.Fatal("the shipper disabled itself over a spent allowance")
+	}
+}
+
+func TestASpentAllowanceDoesNotBurnTheAttemptCap(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "bundle.dmp", []byte("memory"))
+	refusals := 0
+	up := &recordingUploader{outcome: func(u Upload) (Outcome, error) {
+		refusals++
+		if refusals == 1 {
+			return Outcome{}, fmt.Errorf("refused: %w", ErrOverBudget)
+		}
+		return Outcome{Stored: true, BytesStored: 6, StorageRef: "s3://t/" + u.UID}, nil
+	}}
+	policy := DefaultShipperPolicy()
+	policy.MaxAttempts = 1
+	policy.BudgetBackoff = time.Hour
+	s := NewShipper(dir, up, policy, nil)
+
+	if _, err := s.ShipOnce(context.Background()); err != nil {
+		t.Fatalf("first cycle: %v", err)
+	}
+	// Pretend the hold has elapsed. With MaxAttempts of 1, a budget refusal
+	// that counted as an attempt would have abandoned this bundle for good.
+	s.now = func() time.Time { return time.Now().Add(2 * time.Hour) }
+
+	shipped, err := s.ShipOnce(context.Background())
+	if err != nil {
+		t.Fatalf("second cycle: %v", err)
+	}
+	if shipped != 1 {
+		t.Fatal("a bundle refused on allowance grounds was abandoned rather than retried")
+	}
+}
+
+func TestTheHoldClearsOnceItHasElapsed(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "bundle.dmp", []byte("memory"))
+	up := &recordingUploader{outcome: func(Upload) (Outcome, error) {
+		return Outcome{}, fmt.Errorf("refused: %w", ErrOverBudget)
+	}}
+	policy := DefaultShipperPolicy()
+	policy.BudgetBackoff = 30 * time.Minute
+	s := NewShipper(dir, up, policy, nil)
+
+	if _, err := s.ShipOnce(context.Background()); err != nil {
+		t.Fatalf("ship: %v", err)
+	}
+	if s.heldUntil().IsZero() {
+		t.Fatal("no hold was set after a spent allowance")
+	}
+	s.now = func() time.Time { return time.Now().Add(time.Hour) }
+	if !s.heldUntil().IsZero() {
+		t.Fatal("the hold did not clear after it elapsed")
+	}
+	if _, err := s.ShipOnce(context.Background()); err != nil {
+		t.Fatalf("ship after the hold: %v", err)
+	}
+	if len(up.calls) != 2 {
+		t.Fatalf("uploader called %d times, expected a second attempt after the hold", len(up.calls))
+	}
+}
+
+func TestBudgetBackoffFallsBackToADefault(t *testing.T) {
+	policy := ShipperPolicy{BudgetBackoff: 0}
+	s := NewShipper(t.TempDir(), accepting(), policy, nil)
+	if s.policy.BudgetBackoff != DefaultShipperPolicy().BudgetBackoff {
+		t.Fatalf("backoff %v", s.policy.BudgetBackoff)
+	}
+}
