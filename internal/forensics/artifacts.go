@@ -31,6 +31,18 @@ type ArtifactBundle struct {
 	Auth      *AuthArtifacts    `json:"auth,omitempty"`
 	System    *SystemArtifacts  `json:"system,omitempty"`
 	Errors    []string          `json:"errors,omitempty"`
+
+	// CompletedAt is when the last stage finished. With Timestamp it bounds the
+	// window the bundle describes: artifacts inside one bundle are not
+	// simultaneous, and pretending otherwise invites wrong conclusions about
+	// what happened before what.
+	CompletedAt time.Time `json:"completed_at,omitempty"`
+	// CollectionOrder is the order the stages actually ran, most volatile
+	// first, recorded so the evidence can show it was ordered rather than
+	// leaving a reader to trust that it was.
+	CollectionOrder []string `json:"collection_order,omitempty"`
+	// Timings is when each stage ran and how long it took.
+	Timings []StageTiming `json:"timings,omitempty"`
 }
 
 // ProcessArtifacts contains process tree, handles, connections, and modules.
@@ -49,11 +61,24 @@ type ProcessInfo struct {
 }
 
 // FileArtifacts contains filesystem evidence.
+//
+// The path lists are kept for anything already reading this bundle, but the
+// records are the evidence: a path says a file existed, while a record says how
+// large it was, when it was last written and — where it could be read — the
+// digest of its contents. By the time a bundle is examined the file itself is
+// usually gone, so a path alone leads nowhere.
 type FileArtifacts struct {
 	RecentFiles    []string `json:"recent_files,omitempty"`
 	BrowserHistory []string `json:"browser_history_paths,omitempty"`
 	TempFiles      []string `json:"temp_files,omitempty"`
 	DownloadFiles  []string `json:"download_files,omitempty"`
+
+	TempRecords     []FileRecord `json:"temp_records,omitempty"`
+	DownloadRecords []FileRecord `json:"download_records,omitempty"`
+	BrowserRecords  []FileRecord `json:"browser_history_records,omitempty"`
+	// ScanNote explains what bounded the scan, so a short list is not mistaken
+	// for a quiet host.
+	ScanNote string `json:"scan_note,omitempty"`
 }
 
 // NetworkArtifacts contains networking evidence.
@@ -83,11 +108,11 @@ type AuthArtifacts struct {
 
 // SystemArtifacts contains system configuration evidence.
 type SystemArtifacts struct {
-	Services      []string `json:"services,omitempty"`
-	Software      []string `json:"software,omitempty"`
-	StartupItems  []string `json:"startup_items,omitempty"`
-	KernelModules []string `json:"kernel_modules,omitempty"`
-	USBHistory    []string `json:"usb_history,omitempty"`
+	Services      []string             `json:"services,omitempty"`
+	Software      []string             `json:"software,omitempty"`
+	StartupItems  []string             `json:"startup_items,omitempty"`
+	KernelModules []string             `json:"kernel_modules,omitempty"`
+	USBHistory    []string             `json:"usb_history,omitempty"`
 	Deep          *DeepArtifactsBundle `json:"deep,omitempty"`
 }
 
@@ -116,68 +141,133 @@ func NewArtifactCollector(logger *zap.Logger, deep *ForensicsDeepConfig) *Artifa
 // CollectAll runs every sub-collector and returns an ArtifactBundle.
 // Individual sub-collector failures are recorded in bundle.Errors rather
 // than aborting the entire collection.
+// stage is one category of artifact, with the order it must be collected in.
+//
+// The order is the point. RFC 3227, "Guidelines for Evidence Collection and
+// Archiving", requires collection in order of volatility: the state that
+// disappears fastest is captured first, because anything slower taken ahead of
+// it destroys it. This collector previously walked the filesystem before
+// reading sockets, which can take seconds to minutes — by the time the network
+// state was read, the connection that triggered the detection had closed.
+type stage struct {
+	name string
+	// why records the volatility reasoning with the evidence, so a reader
+	// years later can see the collection was ordered deliberately.
+	why     string
+	collect func(context.Context, *ArtifactBundle)
+}
+
+// StageTiming is when one stage ran and how long it took.
+//
+// Part of the evidence rather than a log line: an analyst comparing two
+// artifacts needs to know they were not captured ten minutes apart, and a
+// bundle that cannot say when each part was read cannot support that.
+type StageTiming struct {
+	Stage      string        `json:"stage"`
+	StartedAt  time.Time     `json:"started_at"`
+	Duration   time.Duration `json:"duration_ns"`
+	DurationMS int64         `json:"duration_ms"`
+}
+
+// stages lists the collection order, most volatile first.
+func (ac *ArtifactCollector) stages() []stage {
+	return []stage{
+		{
+			name: "network",
+			why:  "sockets, ARP and DNS caches: a connection can close within seconds of the detection",
+			collect: func(ctx context.Context, b *ArtifactBundle) {
+				b.Network = ac.collectNetworkArtifacts(ctx)
+			},
+		},
+		{
+			name: "process",
+			why:  "the process table: a process can exit at any moment, taking its command line and parent with it",
+			collect: func(ctx context.Context, b *ArtifactBundle) {
+				b.Process = ac.collectProcessArtifacts(ctx)
+			},
+		},
+		{
+			name: "auth",
+			why:  "active sessions are volatile; the login history behind them is on disk and is not",
+			collect: func(ctx context.Context, b *ArtifactBundle) {
+				b.Auth = ac.collectAuthArtifacts(ctx)
+			},
+		},
+		{
+			name: "system",
+			why:  "services, modules and persistence: configuration, which changes slowly",
+			collect: func(ctx context.Context, b *ArtifactBundle) {
+				b.System = ac.collectSystemArtifacts(ctx)
+			},
+		},
+		{
+			name: "file",
+			why:  "on-disk artifacts: the least volatile, and the slowest to gather, so it runs last",
+			collect: func(ctx context.Context, b *ArtifactBundle) {
+				b.File = ac.collectFileArtifacts(ctx)
+			},
+		},
+	}
+}
+
+// CollectAll gathers every artifact category in order of volatility.
+//
+// Sequential, not parallel. Running the stages concurrently would make the
+// bundle a blend of several moments and would have them competing for the same
+// disk and process table, which is the opposite of what ordering by volatility
+// is for.
 func (ac *ArtifactCollector) CollectAll(ctx context.Context) (*ArtifactBundle, error) {
 	hostname, _ := os.Hostname()
+	started := time.Now().UTC()
 	bundle := &ArtifactBundle{
-		Timestamp: time.Now().UTC(),
+		Timestamp: started,
 		Hostname:  hostname,
 		OS:        runtime.GOOS,
 	}
 
-	type result struct {
-		name string
-		err  error
-	}
-
-	collect := func(name string, fn func(context.Context) error) result {
-		if err := fn(ctx); err != nil {
-			return result{name, err}
+	for _, st := range ac.stages() {
+		// A stage that cannot run must not stop the ones after it: a host
+		// where the process table is unreadable still has network state worth
+		// having, and a partial bundle is far better than none.
+		if ctx.Err() != nil {
+			bundle.Errors = append(bundle.Errors,
+				st.name+": not collected, the collection deadline passed")
+			continue
 		}
-		return result{name, nil}
+		stageStart := time.Now().UTC()
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					bundle.Errors = append(bundle.Errors,
+						fmt.Sprintf("%s: panicked during collection: %v", st.name, rec))
+				}
+			}()
+			st.collect(ctx, bundle)
+		}()
+		elapsed := time.Since(stageStart)
+		bundle.Timings = append(bundle.Timings, StageTiming{
+			Stage:      st.name,
+			StartedAt:  stageStart,
+			Duration:   elapsed,
+			DurationMS: elapsed.Milliseconds(),
+		})
+		ac.logger.Debug("artifact stage collected",
+			zap.String("stage", st.name),
+			zap.String("volatility", st.why),
+			zap.Duration("took", elapsed),
+		)
 	}
 
-	r := collect("process", func(ctx context.Context) error {
-		bundle.Process = ac.collectProcessArtifacts(ctx)
-		return nil
-	})
-	if r.err != nil {
-		bundle.Errors = append(bundle.Errors, r.name+": "+r.err.Error())
+	bundle.CollectionOrder = make([]string, 0, len(bundle.Timings))
+	for _, t := range bundle.Timings {
+		bundle.CollectionOrder = append(bundle.CollectionOrder, t.Stage)
 	}
-
-	r = collect("file", func(ctx context.Context) error {
-		bundle.File = ac.collectFileArtifacts(ctx)
-		return nil
-	})
-	if r.err != nil {
-		bundle.Errors = append(bundle.Errors, r.name+": "+r.err.Error())
-	}
-
-	r = collect("network", func(ctx context.Context) error {
-		bundle.Network = ac.collectNetworkArtifacts(ctx)
-		return nil
-	})
-	if r.err != nil {
-		bundle.Errors = append(bundle.Errors, r.name+": "+r.err.Error())
-	}
-
-	r = collect("auth", func(ctx context.Context) error {
-		bundle.Auth = ac.collectAuthArtifacts(ctx)
-		return nil
-	})
-	if r.err != nil {
-		bundle.Errors = append(bundle.Errors, r.name+": "+r.err.Error())
-	}
-
-	r = collect("system", func(ctx context.Context) error {
-		bundle.System = ac.collectSystemArtifacts(ctx)
-		return nil
-	})
-	if r.err != nil {
-		bundle.Errors = append(bundle.Errors, r.name+": "+r.err.Error())
-	}
+	bundle.CompletedAt = time.Now().UTC()
 
 	ac.logger.Info("artifact collection complete",
 		zap.Int("errors", len(bundle.Errors)),
+		zap.Duration("took", bundle.CompletedAt.Sub(started)),
+		zap.Strings("order", bundle.CollectionOrder),
 	)
 	return bundle, nil
 }
@@ -265,21 +355,33 @@ func (ac *ArtifactCollector) collectProcessesCmd(ctx context.Context) []ProcessI
 // File artifacts
 // ---------------------------------------------------------------------------
 
-func (ac *ArtifactCollector) collectFileArtifacts(_ context.Context) *FileArtifacts {
+func (ac *ArtifactCollector) collectFileArtifacts(ctx context.Context) *FileArtifacts {
 	fa := &FileArtifacts{}
-	fa.TempFiles = listDir(os.TempDir(), 200)
+	limits := DefaultFileScanLimits()
+	// One budget for the whole stage, not per directory, so three slow
+	// directories cannot add up to a scan that outlasts the incident.
+	deadline := time.Now().Add(limits.Budget)
+
+	fa.TempRecords = scanDir(ctx, os.TempDir(), limits, deadline)
+	fa.TempFiles = Paths(fa.TempRecords)
 
 	home, _ := os.UserHomeDir()
 	if home != "" {
-		dlDir := filepath.Join(home, "Downloads")
-		fa.DownloadFiles = listDir(dlDir, 200)
+		fa.DownloadRecords = scanDir(ctx, filepath.Join(home, "Downloads"), limits, deadline)
+		fa.DownloadFiles = Paths(fa.DownloadRecords)
 
 		for _, bp := range browserHistoryPaths(home) {
-			if _, err := os.Stat(bp); err == nil {
-				fa.BrowserHistory = append(fa.BrowserHistory, bp)
+			if rec, ok := statFile(ctx, bp, limits, deadline); ok {
+				fa.BrowserRecords = append(fa.BrowserRecords, rec)
+				fa.BrowserHistory = append(fa.BrowserHistory, rec.Path)
 			}
 		}
 	}
+
+	fa.ScanNote = fmt.Sprintf(
+		"newest %d files per directory, hashed up to %d bytes each, within a %s budget",
+		limits.MaxFiles, limits.MaxHashBytes, limits.Budget,
+	)
 	return fa
 }
 
@@ -555,21 +657,6 @@ func runCmd(ctx context.Context, name string, args ...string) string {
 		return ""
 	}
 	return string(out)
-}
-
-func listDir(dir string, max int) []string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var names []string
-	for i, e := range entries {
-		if i >= max {
-			break
-		}
-		names = append(names, filepath.Join(dir, e.Name()))
-	}
-	return names
 }
 
 func decodeHexAddr(s string) string {
