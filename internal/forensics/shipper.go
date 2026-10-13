@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -346,7 +347,31 @@ func (s *Shipper) describe(path, name string, modTime time.Time) Upload {
 		ContentType: contentTypeFromName(name),
 		CollectedAt: modTime.UTC(),
 	}
-	if up.Kind == string(KindArtifactBundle) {
+
+	// A memory dump is compressed binary and carries nothing inside it, so its
+	// attribution lives in a sidecar written next to it. Without reading that,
+	// the most expensive evidence the agent collects arrives naming no
+	// detection at all — a pile of memory with nothing to attach it to.
+	if strings.HasSuffix(strings.ToLower(name), metaSidecarSuffix) {
+		if alert, rule, when, ok := readDumpSidecar(path); ok {
+			up.AlertUID, up.RuleUID = alert, rule
+			if !when.IsZero() {
+				up.CollectedAt = when
+			}
+		}
+		return up
+	}
+	if up.Kind == KindMemoryDump {
+		if alert, rule, when, ok := readDumpSidecar(sidecarFor(path)); ok {
+			up.AlertUID, up.RuleUID = alert, rule
+			if !when.IsZero() {
+				up.CollectedAt = when
+			}
+		}
+		return up
+	}
+
+	if up.Kind == KindArtifactBundle {
 		if meta, ok := readBundleMeta(path); ok {
 			up.AlertUID = safeName(meta.Alert.AlertID, "")
 			up.RuleUID = safeName(meta.Alert.RuleID, "")
@@ -356,6 +381,60 @@ func (s *Shipper) describe(path, name string, modTime time.Time) Upload {
 		}
 	}
 	return up
+}
+
+// sidecarFor is the metadata file beside a dump.
+//
+// The dump is named memdump_<pid>_<timestamp> with one or more extensions
+// appended — .gz, and .gz.enc when a key is configured — while the sidecar
+// takes .meta.json. Neither the pid nor the timestamp contains a dot, so
+// everything from the first one is the extension chain.
+func sidecarFor(dumpPath string) string {
+	dir, name := filepath.Split(dumpPath)
+	if i := strings.Index(name, "."); i > 0 {
+		name = name[:i]
+	}
+	return filepath.Join(dir, name+metaSidecarSuffix)
+}
+
+// dumpSidecar is the part of the memory handler's metadata the shipper needs.
+//
+// RuleID is read although the memory handler does not currently write it: the
+// detection is identified by its alert today, and a rule identifier would be
+// recorded here if one is ever passed through. An absent field reads as empty
+// rather than failing the whole sidecar.
+type dumpSidecar struct {
+	AlertID    string    `json:"alert_id"`
+	RuleID     string    `json:"rule_id"`
+	CapturedAt time.Time `json:"captured_at"`
+}
+
+// readDumpSidecar reads the detection a dump belongs to.
+//
+// Read whole rather than streamed: the sidecar is a few hundred bytes by
+// construction, and the limit is there in case the file is not what is
+// expected.
+func readDumpSidecar(path string) (alert, rule string, when time.Time, ok bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", "", time.Time{}, false
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(newBoundedReader(f, 64<<10))
+	if err != nil {
+		return "", "", time.Time{}, false
+	}
+	var side dumpSidecar
+	if err := json.Unmarshal(data, &side); err != nil {
+		return "", "", time.Time{}, false
+	}
+	alert = safeName(side.AlertID, "")
+	rule = safeName(side.RuleID, "")
+	if alert == "" && rule == "" && side.CapturedAt.IsZero() {
+		// Not a sidecar, or one that says nothing useful.
+		return "", "", time.Time{}, false
+	}
+	return alert, rule, side.CapturedAt.UTC(), true
 }
 
 // Kind values match the platform's closed set.
@@ -370,9 +449,27 @@ const (
 	KindDFIRPackage kind = "dfir_package"
 )
 
+// memoryDumpPrefix is how the memory handler names what it captures.
+//
+// Classified by prefix rather than extension because a dump is written
+// compressed, and encrypted when a key is configured, so its name ends in .gz
+// or .gz.enc — neither of which says "memory". Going by extension alone filed
+// every dump as a generic package.
+const memoryDumpPrefix = "memdump_"
+
+// metaSidecarSuffix is the small JSON file the memory handler writes beside a
+// dump, holding the detection, the process and the loaded modules.
+const metaSidecarSuffix = ".meta.json"
+
 func kindFromName(name string) string {
 	lower := strings.ToLower(name)
 	switch {
+	case strings.HasSuffix(lower, metaSidecarSuffix):
+		// Metadata about a dump: small, JSON, and evidence in its own right —
+		// the module list is not recorded anywhere else.
+		return KindArtifactBundle
+	case strings.HasPrefix(lower, memoryDumpPrefix):
+		return KindMemoryDump
 	case strings.HasSuffix(lower, ".json"):
 		return KindArtifactBundle
 	case strings.HasSuffix(lower, ".dmp"), strings.HasSuffix(lower, ".raw"),

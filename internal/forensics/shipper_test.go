@@ -555,3 +555,157 @@ func TestStoredBundlePutsAttributionBeforeTheBody(t *testing.T) {
 		t.Fatal("the bundle body is encoded before its alert; the shipper reads only the first megabyte, so large bundles would lose attribution")
 	}
 }
+
+// writeDump lays out a memory dump the way the memory handler does: the
+// compressed capture, plus a sidecar holding the detection it belongs to.
+func writeDump(t *testing.T, dir, base, alertID string, captured time.Time) (dump, sidecar string) {
+	t.Helper()
+	dump = writeFile(t, dir, base+".gz", []byte("compressed memory"))
+	meta := map[string]any{
+		"pid":          4242,
+		"process_name": "evil.exe",
+		"dump_path":    dump,
+		"platform":     "linux",
+		"captured_at":  captured.UTC().Format(time.RFC3339Nano),
+		"alert_id":     alertID,
+		"modules":      []string{"libc.so.6"},
+	}
+	body, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal sidecar: %v", err)
+	}
+	sidecar = writeFile(t, dir, base+".meta.json", body)
+	return dump, sidecar
+}
+
+func TestAMemoryDumpIsClassifiedAndAttributed(t *testing.T) {
+	dir := t.TempDir()
+	captured := time.Date(2026, 10, 13, 9, 30, 0, 0, time.UTC)
+	writeDump(t, dir, "memdump_4242_20261013T093000Z", "alert-mem", captured)
+
+	up := accepting()
+	if _, err := NewShipper(dir, up, DefaultShipperPolicy(), nil).ShipOnce(context.Background()); err != nil {
+		t.Fatalf("ship: %v", err)
+	}
+	if len(up.calls) != 2 {
+		t.Fatalf("shipped %d files, expected the dump and its sidecar", len(up.calls))
+	}
+
+	byKind := map[string]Upload{}
+	for _, c := range up.calls {
+		byKind[c.Kind] = c
+	}
+	dump, ok := byKind[KindMemoryDump]
+	if !ok {
+		// A dump is written compressed, and encrypted when a key is set, so
+		// going by extension filed every one as a generic package.
+		t.Fatalf("the dump was not classified as a memory dump: %+v", up.calls)
+	}
+	// The most expensive evidence the agent collects must not arrive naming no
+	// detection.
+	if dump.AlertUID != "alert-mem" {
+		t.Fatalf("the dump was shipped with alert %q", dump.AlertUID)
+	}
+	if !dump.CollectedAt.Equal(captured) {
+		t.Fatalf("the dump's capture time %v did not come from the sidecar", dump.CollectedAt)
+	}
+	if dump.ContentType != "application/gzip" {
+		t.Fatalf("dump content type %q", dump.ContentType)
+	}
+
+	side, ok := byKind[KindArtifactBundle]
+	if !ok {
+		t.Fatalf("the sidecar was not shipped: %+v", up.calls)
+	}
+	// The sidecar is evidence too: the module list is recorded nowhere else.
+	if side.AlertUID != "alert-mem" {
+		t.Fatalf("the sidecar was shipped with alert %q", side.AlertUID)
+	}
+}
+
+func TestAnEncryptedDumpIsStillClassifiedAsMemory(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "memdump_1_20261013T093000Z.gz.enc", []byte("ciphertext"))
+	up := accepting()
+	if _, err := NewShipper(dir, up, DefaultShipperPolicy(), nil).ShipOnce(context.Background()); err != nil {
+		t.Fatalf("ship: %v", err)
+	}
+	if len(up.calls) != 1 || up.calls[0].Kind != KindMemoryDump {
+		t.Fatalf("calls: %+v", up.calls)
+	}
+}
+
+func TestADumpAndItsSidecarGetDifferentIdentifiers(t *testing.T) {
+	dir := t.TempDir()
+	writeDump(t, dir, "memdump_7_20261013T093000Z", "alert-x", time.Now())
+	up := accepting()
+	if _, err := NewShipper(dir, up, DefaultShipperPolicy(), nil).ShipOnce(context.Background()); err != nil {
+		t.Fatalf("ship: %v", err)
+	}
+	if len(up.calls) != 2 {
+		t.Fatalf("%d calls", len(up.calls))
+	}
+	// The platform's ledger is keyed on tenant and bundle identifier alone, so
+	// two files sharing one would make the second be answered "already stored"
+	// and never uploaded.
+	if up.calls[0].UID == up.calls[1].UID {
+		t.Fatalf("the dump and its sidecar share the identifier %q", up.calls[0].UID)
+	}
+}
+
+func TestSidecarForFindsTheMetadataBesideADump(t *testing.T) {
+	cases := map[string]string{
+		"/f/memdump_1_TS.gz":     "/f/memdump_1_TS.meta.json",
+		"/f/memdump_1_TS.gz.enc": "/f/memdump_1_TS.meta.json",
+		"/f/memdump_1_TS":        "/f/memdump_1_TS.meta.json",
+	}
+	for dump, want := range cases {
+		if got := sidecarFor(dump); got != want {
+			t.Errorf("sidecarFor(%q) = %q, expected %q", dump, got, want)
+		}
+	}
+}
+
+func TestADumpWithNoSidecarStillShips(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "memdump_9_20261013T093000Z.gz", []byte("orphan"))
+	up := accepting()
+	if _, err := NewShipper(dir, up, DefaultShipperPolicy(), nil).ShipOnce(context.Background()); err != nil {
+		t.Fatalf("ship: %v", err)
+	}
+	// Unattributed evidence off the host still beats evidence lost with it.
+	if len(up.calls) != 1 {
+		t.Fatalf("%d calls", len(up.calls))
+	}
+	if up.calls[0].AlertUID != "" {
+		t.Fatalf("an alert was invented: %q", up.calls[0].AlertUID)
+	}
+}
+
+func TestReadDumpSidecarRejectsWhatIsNotOne(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "notasidecar.meta.json", []byte(`{"unrelated":"fields"}`))
+	if _, _, _, ok := readDumpSidecar(path); ok {
+		t.Fatal("a file with no attribution was accepted as a sidecar")
+	}
+	missing := filepath.Join(dir, "absent.meta.json")
+	if _, _, _, ok := readDumpSidecar(missing); ok {
+		t.Fatal("a missing sidecar was accepted")
+	}
+}
+
+func TestMemoryDumpKindBeatsTheExtension(t *testing.T) {
+	// Prefix wins: the compression and encryption extensions say nothing about
+	// what the file holds.
+	for _, name := range []string{
+		"memdump_1_TS.gz", "memdump_1_TS.gz.enc", "memdump_1_TS.bin", "memdump_1_TS",
+	} {
+		if got := kindFromName(name); got != KindMemoryDump {
+			t.Errorf("%s classified as %q", name, got)
+		}
+	}
+	// The sidecar is JSON metadata, not the dump.
+	if got := kindFromName("memdump_1_TS.meta.json"); got != KindArtifactBundle {
+		t.Errorf("sidecar classified as %q", got)
+	}
+}
