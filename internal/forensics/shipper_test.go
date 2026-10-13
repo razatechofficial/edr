@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -303,19 +304,89 @@ func TestShipOnceToleratesAMissingDirectory(t *testing.T) {
 	}
 }
 
-func TestReadBundleMetaIsBounded(t *testing.T) {
+func TestReadBundleMetaReadsAttributionAheadOfAHugeBody(t *testing.T) {
 	dir := t.TempDir()
-	// A file far larger than the metadata bound, whose JSON only completes past
-	// it: the read must give up rather than consume the whole file.
-	padding := make([]byte, 2<<20)
-	for i := range padding {
-		padding[i] = 'x'
+	// The body is far past the read limit. The attribution comes first, so it
+	// is read and the rest is never touched. This used to return nothing at
+	// all: decoding into a struct needs the whole document to parse, so it
+	// failed with an unexpected EOF at the limit — and a memory dump bundle is
+	// routinely larger than the limit, so that was most of them.
+	padding := strings.Repeat("x", 2<<20)
+	body := `{"alert":{"alert_id":"a1","rule_id":"r1"},"collected_at":"2026-10-13T09:00:00Z","bundle":{"blob":"` + padding + `"}}`
+	path := writeFile(t, dir, "huge.json", []byte(body))
+
+	meta, ok := readBundleMeta(path)
+	if !ok {
+		t.Fatal("attribution was not read from a bundle larger than the read limit")
 	}
-	body := append([]byte(`{"alert":{"alert_id":"a"},"blob":"`), padding...)
-	body = append(body, []byte(`"}`)...)
-	path := writeFile(t, dir, "huge.json", body)
+	if meta.Alert.AlertID != "a1" || meta.Alert.RuleID != "r1" {
+		t.Fatalf("attribution %+v", meta.Alert)
+	}
+	if meta.Collected.IsZero() {
+		t.Fatal("collection time was not read")
+	}
+}
+
+func TestReadBundleMetaGivesUpOnAFileWithNoAttribution(t *testing.T) {
+	dir := t.TempDir()
+	// A file in this directory need not be one of ours. With no attribution at
+	// the front, stepping over the body runs into the read limit and the read
+	// gives up rather than walking a multi-gigabyte file.
+	body := `{"blob":"` + strings.Repeat("x", 2<<20) + `","alert":{"alert_id":"too-late"}}`
+	path := writeFile(t, dir, "foreign.json", []byte(body))
+
 	if _, ok := readBundleMeta(path); ok {
-		t.Fatal("a file larger than the metadata bound was decoded in full")
+		t.Fatal("a file whose attribution sits past the read limit was reported as attributed")
+	}
+}
+
+func TestReadBundleMetaRejectsWhatIsNotAJSONObject(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"array.json":     `[{"alert":{"alert_id":"a"}}]`,
+		"scalar.json":    `"just a string"`,
+		"truncated.json": `{"alert":{"alert_id":`,
+		"empty.json":     `   `,
+	} {
+		path := writeFile(t, dir, name, []byte(body))
+		if _, ok := readBundleMeta(path); ok {
+			t.Errorf("%s was accepted as a bundle", name)
+		}
+	}
+}
+
+func TestSkipJSONValueStepsOverNestedStructures(t *testing.T) {
+	dec := json.NewDecoder(strings.NewReader(`{"a":{"b":[1,2,{"c":3}]},"d":7}`))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		t.Fatalf("opening token: %v %v", tok, err)
+	}
+	// Step over "a" and its whole nested value, then confirm the decoder is
+	// positioned on "d" rather than somewhere inside what was skipped.
+	if _, err := dec.Token(); err != nil {
+		t.Fatalf("key token: %v", err)
+	}
+	if err := skipJSONValue(dec); err != nil {
+		t.Fatalf("skip: %v", err)
+	}
+	keyTok, err := dec.Token()
+	if err != nil {
+		t.Fatalf("next key: %v", err)
+	}
+	if key, _ := keyTok.(string); key != "d" {
+		t.Fatalf("decoder landed on %q, expected \"d\"", key)
+	}
+}
+
+func TestSkipJSONValueReportsATruncatedValue(t *testing.T) {
+	dec := json.NewDecoder(strings.NewReader(`{"a":{"b":`))
+	if _, err := dec.Token(); err != nil {
+		t.Fatalf("opening token: %v", err)
+	}
+	if _, err := dec.Token(); err != nil {
+		t.Fatalf("key token: %v", err)
+	}
+	if err := skipJSONValue(dec); err == nil {
+		t.Fatal("a truncated value was skipped without error, so a bounded read would look complete")
 	}
 }
 
@@ -419,5 +490,68 @@ func TestBudgetBackoffFallsBackToADefault(t *testing.T) {
 	s := NewShipper(t.TempDir(), accepting(), policy, nil)
 	if s.policy.BudgetBackoff != DefaultShipperPolicy().BudgetBackoff {
 		t.Fatalf("backoff %v", s.policy.BudgetBackoff)
+	}
+}
+
+func TestABundleLargerThanTheMetadataBoundIsStillAttributed(t *testing.T) {
+	dir := t.TempDir()
+	// A bundle whose body is comfortably past the one-megabyte window the
+	// shipper reads to find the alert. StoredBundle puts the alert before the
+	// body, so this works; moving the body first would silently strip
+	// attribution from every large bundle.
+	padding := make([]FileRecord, 0, 8000)
+	for i := 0; i < 8000; i++ {
+		padding = append(padding, FileRecord{
+			Path:   fmt.Sprintf("/tmp/padding-%06d-%s.bin", i, strings.Repeat("x", 120)),
+			SHA256: strings.Repeat("a", 64),
+		})
+	}
+	meta := AlertTriggerMeta{AlertID: "alert-large", RuleID: "rule-large"}
+	res, err := WriteBundle(dir, meta, &ArtifactBundle{
+		Timestamp: time.Now().UTC(),
+		File:      &FileArtifacts{TempRecords: padding},
+	})
+	if err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	if res.Bytes < 1<<20 {
+		t.Fatalf("the test bundle is only %d bytes; it does not exercise the bound", res.Bytes)
+	}
+
+	up := accepting()
+	if _, err := NewShipper(dir, up, DefaultShipperPolicy(), nil).ShipOnce(context.Background()); err != nil {
+		t.Fatalf("ship: %v", err)
+	}
+	if len(up.calls) != 1 {
+		t.Fatalf("uploader called %d times", len(up.calls))
+	}
+	if up.calls[0].AlertUID != "alert-large" {
+		t.Fatalf("alert attribution lost on a large bundle: %q", up.calls[0].AlertUID)
+	}
+	if up.calls[0].RuleUID != "rule-large" {
+		t.Fatalf("rule attribution lost on a large bundle: %q", up.calls[0].RuleUID)
+	}
+}
+
+func TestStoredBundlePutsAttributionBeforeTheBody(t *testing.T) {
+	// Asserted on the encoding rather than through the shipper, so a reordering
+	// of StoredBundle fails here with a clear reason rather than as a confusing
+	// loss of attribution somewhere downstream.
+	data, err := json.Marshal(StoredBundle{
+		Alert:     AlertTriggerMeta{AlertID: "a"},
+		Collected: time.Now().UTC(),
+		Bundle:    &ArtifactBundle{Hostname: "h"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	encoded := string(data)
+	alertAt := strings.Index(encoded, `"alert"`)
+	bundleAt := strings.Index(encoded, `"bundle"`)
+	if alertAt < 0 || bundleAt < 0 {
+		t.Fatalf("encoding does not carry both fields: %s", encoded[:80])
+	}
+	if alertAt > bundleAt {
+		t.Fatal("the bundle body is encoded before its alert; the shipper reads only the first megabyte, so large bundles would lose attribution")
 	}
 }
