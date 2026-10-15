@@ -435,3 +435,78 @@ func (c *countingBudgetRefusal) UploadBundle(stream forensicsv1.ForensicsService
 	*c.calls++
 	return status.Error(codes.ResourceExhausted, "spent")
 }
+
+// completeAtWrongSize reports a bundle complete at a size that does not match
+// the file in hand — the shape of a reused identifier.
+type completeAtWrongSize struct {
+	forensicsv1.UnimplementedForensicsServiceServer
+	reportBytes int64
+	uploads     *int
+}
+
+func (c *completeAtWrongSize) GetUploadState(context.Context, *forensicsv1.UploadStateRequest) (*forensicsv1.UploadStateResponse, error) {
+	return &forensicsv1.UploadStateResponse{
+		Known: true, Complete: true, BytesStored: c.reportBytes,
+	}, nil
+}
+
+func (c *completeAtWrongSize) UploadBundle(stream forensicsv1.ForensicsService_UploadBundleServer) error {
+	*c.uploads++
+	for {
+		if _, err := stream.Recv(); err != nil {
+			break
+		}
+	}
+	return stream.SendAndClose(&forensicsv1.UploadAck{
+		Accepted: true, DigestVerified: true, BytesStored: 1024,
+	})
+}
+
+func TestACompleteReportAtTheWrongSizeIsNotTrusted(t *testing.T) {
+	uploads := 0
+	addr := serve(t, func(s *grpc.Server) {
+		forensicsv1.RegisterForensicsServiceServer(s,
+			&completeAtWrongSize{reportBytes: 99, uploads: &uploads})
+	})
+	path, _ := writeBundleFile(t, 1024)
+
+	out, err := testClient(addr).Upload(context.Background(), Bundle{
+		Path: path, UID: "reused", Kind: "artifact_bundle", ContentType: "application/json",
+	})
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	// The platform's ledger is keyed on the identifier alone. Trusting
+	// "complete" at a different size would mark the local copy shipped and let
+	// retention delete evidence the platform never received.
+	if uploads != 1 {
+		t.Fatalf("the bundle was not uploaded (%d attempts); a mismatched size was trusted", uploads)
+	}
+	if !out.Stored {
+		t.Fatalf("outcome: %+v", out)
+	}
+}
+
+func TestACompleteReportAtTheRightSizeIsTrusted(t *testing.T) {
+	uploads := 0
+	addr := serve(t, func(s *grpc.Server) {
+		forensicsv1.RegisterForensicsServiceServer(s,
+			&completeAtWrongSize{reportBytes: 1024, uploads: &uploads})
+	})
+	path, _ := writeBundleFile(t, 1024)
+
+	out, err := testClient(addr).Upload(context.Background(), Bundle{
+		Path: path, UID: "same", Kind: "artifact_bundle", ContentType: "application/json",
+	})
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	// Sizes agree, so the endpoint's bandwidth is not spent re-sending a
+	// byte-identical object during an incident.
+	if uploads != 0 {
+		t.Fatalf("a bundle the platform already holds was uploaded again (%d times)", uploads)
+	}
+	if !out.Stored || out.Message != "already stored" {
+		t.Fatalf("outcome: %+v", out)
+	}
+}

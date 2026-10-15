@@ -152,11 +152,24 @@ func (c *ForensicsClient) uploadTo(ctx context.Context, host string, b Bundle, s
 	switch {
 	case err == nil:
 		if state.GetComplete() {
-			return UploadOutcome{
-				Stored:      true,
-				BytesStored: state.GetBytesStored(),
-				Message:     "already stored",
-			}, nil
+			// The platform reports a bundle complete from its ledger, which is
+			// keyed on the identifier alone and does not know the size of the
+			// file in hand. If the two disagree, that identifier holds
+			// different bytes over there — and accepting it would have this
+			// agent mark the local copy shipped and let retention delete
+			// evidence the platform never received.
+			if state.GetBytesStored() == size {
+				return UploadOutcome{
+					Stored:      true,
+					BytesStored: state.GetBytesStored(),
+					Message:     "already stored",
+				}, nil
+			}
+			c.log.Warn("platform reports this bundle complete at a different size; uploading rather than trusting it",
+				"bundle_uid", b.UID,
+				"platform_bytes", state.GetBytesStored(),
+				"local_bytes", size,
+			)
 		}
 		if state.GetKnown() && state.GetBytesStored() > 0 && state.GetBytesStored() < size {
 			resumeFrom = state.GetBytesStored()
