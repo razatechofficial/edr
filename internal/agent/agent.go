@@ -181,7 +181,18 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		telEP = strings.TrimSpace(cfg.Forwarder.Endpoint)
 	}
 	// Prefer XDR gRPC ingest when configured; otherwise keep HTTP telemetry relay.
-	if cfg.XDR.EnabledForEnrollment() {
+	//
+	// The decision is left to ShouldInitXDR rather than repeated here. It
+	// accepts either a configured enrollment or credentials already in the
+	// keystore, and that second case is the normal state of an enrolled agent:
+	// enrollment deletes the bootstrap token on success, so a restart has no
+	// token, and an agent enrolled through its own CLI flags never had
+	// `enabled: true` written to its config either. Gating on
+	// EnabledForEnrollment here made that branch unreachable, and such an agent
+	// came back holding a valid device certificate it would never use — no
+	// ingest client, no telemetry relay, no evidence shipping, no renewal, and
+	// nothing logged to say so.
+	if xdrclient.ShouldInitXDR(cfg.XDR, cfg.Agent.DataDir) {
 		if err := a.initXDR(); err != nil {
 			return nil, err
 		}
@@ -1683,10 +1694,11 @@ func (a *Agent) initResponseEngine() error {
 	// Their output lands beside the other forensic evidence, and the registry
 	// handler is a deliberate no-op that reports a clear error off Windows
 	// rather than pretending to have run.
-	forensicsDir := a.cfg.Response.ForensicsDir
-	if forensicsDir == "" {
-		forensicsDir = filepath.Join(a.cfg.Agent.DataDir, "forensics")
-	}
+	// The same resolution the shipper and the retention sweep use. Resolving it
+	// separately here skipped Response.Forensics.OutputDir, so a config that
+	// set it had the collection handlers writing to one tree while the shipper
+	// watched another: evidence was never uploaded and never bounded.
+	forensicsDir := a.forensicsDir()
 	eng.RegisterHandler(response.OpCollectForensics,
 		response.NewForensicsHandler(a.zapLogger, forensicsDir, encKey))
 	eng.RegisterHandler(response.OpMemoryDump,
