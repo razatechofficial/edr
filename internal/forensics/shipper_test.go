@@ -709,3 +709,79 @@ func TestMemoryDumpKindBeatsTheExtension(t *testing.T) {
 		t.Errorf("sidecar classified as %q", got)
 	}
 }
+
+func TestProgressDoesNotCountAgainstTheAttemptCap(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "big.dmp", []byte("a large dump"))
+	// Every attempt times out, but each one leaves more on the platform than
+	// the last. That is the slow-link case the resume machinery exists for, and
+	// it must not be abandoned.
+	advanced := int64(0)
+	up := &recordingUploader{outcome: func(Upload) (Outcome, error) {
+		advanced += 1000
+		return Outcome{BytesStored: advanced}, fmt.Errorf("context deadline exceeded")
+	}}
+	policy := DefaultShipperPolicy()
+	policy.MaxAttempts = 3
+	s := NewShipper(dir, up, policy, nil)
+
+	for i := 0; i < 10; i++ {
+		if _, err := s.ShipOnce(context.Background()); err != nil {
+			t.Fatalf("cycle %d: %v", i, err)
+		}
+	}
+	if len(up.calls) != 10 {
+		t.Fatalf("uploader called %d times; progress was counted as failure and the bundle was abandoned", len(up.calls))
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the bundle was removed: %v", err)
+	}
+}
+
+func TestAnAttemptThatAchievesNothingStillCountsAgainstTheCap(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "stuck.dmp", []byte("never moves"))
+	// No progress at all: the cap must still stop a tight loop.
+	up := &recordingUploader{outcome: func(Upload) (Outcome, error) {
+		return Outcome{BytesStored: 0}, fmt.Errorf("connection refused")
+	}}
+	policy := DefaultShipperPolicy()
+	policy.MaxAttempts = 3
+	s := NewShipper(dir, up, policy, nil)
+
+	for i := 0; i < 6; i++ {
+		if _, err := s.ShipOnce(context.Background()); err != nil {
+			t.Fatalf("cycle %d: %v", i, err)
+		}
+	}
+	if len(up.calls) != 3 {
+		t.Fatalf("uploader called %d times, expected the cap of 3", len(up.calls))
+	}
+}
+
+func TestProgressThenStallStillStopsEventually(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "partial.dmp", []byte("some progress then nothing"))
+	calls := 0
+	up := &recordingUploader{outcome: func(Upload) (Outcome, error) {
+		calls++
+		if calls <= 2 {
+			return Outcome{BytesStored: int64(calls) * 500}, fmt.Errorf("timeout")
+		}
+		// Stalls at the same offset from here on.
+		return Outcome{BytesStored: 1000}, fmt.Errorf("timeout")
+	}}
+	policy := DefaultShipperPolicy()
+	policy.MaxAttempts = 2
+	s := NewShipper(dir, up, policy, nil)
+
+	for i := 0; i < 8; i++ {
+		if _, err := s.ShipOnce(context.Background()); err != nil {
+			t.Fatalf("cycle %d: %v", i, err)
+		}
+	}
+	// Two progressing attempts, then two that achieved nothing, then stop.
+	if len(up.calls) != 4 {
+		t.Fatalf("uploader called %d times, expected 2 progressing plus the cap of 2", len(up.calls))
+	}
+}

@@ -109,6 +109,9 @@ type Shipper struct {
 	// persisted: a restart is a reasonable moment to try again, and the cap
 	// exists to stop a tight loop, not to give up permanently.
 	attempts map[string]int
+	// progress is the furthest the platform has confirmed for each bundle, so
+	// an attempt that advanced it can be told from one that achieved nothing.
+	progress map[string]int64
 	// unsupported latches once the platform says it has no upload API.
 	unsupported bool
 	// holdUntil pauses shipping after the platform refuses on allowance
@@ -144,6 +147,7 @@ func NewShipper(dir string, uploader Uploader, policy ShipperPolicy, logger *zap
 		policy:   policy,
 		logger:   logger,
 		attempts: map[string]int{},
+		progress: map[string]int64{},
 		now:      time.Now,
 	}
 }
@@ -202,6 +206,23 @@ func (s *Shipper) ShipOnce(ctx context.Context) (int, error) {
 			return shipped, nil
 		}
 		if err != nil {
+			// An attempt that moved the platform's committed offset forward is
+			// not a failed attempt. Counting it as one abandoned exactly the
+			// uploads the resume machinery exists for: a multi-gigabyte dump on
+			// a link slower than the per-bundle timeout makes steady progress,
+			// times out, and after MaxAttempts is skipped for the life of the
+			// process — then deleted by retention. Progress resets the count,
+			// so only an attempt that achieved nothing counts against the cap.
+			if out.BytesStored > s.progress[up.UID] {
+				s.progress[up.UID] = out.BytesStored
+				delete(s.attempts, up.UID)
+				s.logger.Info("forensic bundle upload interrupted after making progress; will resume",
+					zap.String("bundle_uid", up.UID),
+					zap.Int64("bytes_on_platform", out.BytesStored),
+					zap.Error(err),
+				)
+				continue
+			}
 			s.attempts[up.UID]++
 			s.logger.Warn("forensic bundle could not be shipped",
 				zap.String("bundle_uid", up.UID),
@@ -231,6 +252,7 @@ func (s *Shipper) ShipOnce(ctx context.Context) (int, error) {
 				zap.String("bundle_uid", up.UID), zap.Error(err))
 		}
 		delete(s.attempts, up.UID)
+		delete(s.progress, up.UID)
 		shipped++
 		s.logger.Info("forensic bundle shipped",
 			zap.String("bundle_uid", up.UID),
