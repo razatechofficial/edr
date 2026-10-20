@@ -5,6 +5,9 @@ description: Detect unlink (delete) operations in sensitive directories such as 
   or system configs.
 author: Eric Brown - Nebulock, Inc.
 date: 2025-10-29
+tags:
+    - attack.defense_evasion
+    - attack.t1070.004
 logsource:
   product: macos
   service: endpointsecurity

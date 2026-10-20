@@ -4,6 +4,9 @@ status: experimental
 description: Detect creation of launchd persistence files in LaunchAgents/LaunchDaemons.
 author: Eric Brown - Nebulock, Inc.
 date: 2025-10-29
+tags:
+    - attack.persistence
+    - attack.t1543.001
 logsource:
   product: macos
   service: endpointsecurity

@@ -5,6 +5,9 @@ description: Detect renaming a file to a hidden path (dotfile) which may indicat
   stealthy behavior.
 author: Eric Brown - Nebulock, Inc.
 date: 2025-10-29
+tags:
+    - attack.defense_evasion
+    - attack.t1564.001
 logsource:
   product: macos
   service: endpointsecurity
