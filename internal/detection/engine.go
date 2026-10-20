@@ -67,16 +67,16 @@ type EngineConfig struct {
 	MLModelMemoryInjection     string
 
 	// ML detection thresholds (0.0–1.0). Zero values fall back to defaults.
-	MLThresholdPE                float64
-	MLThresholdNetwork           float64
-	MLThresholdBehavior          float64
-	MLThresholdRansomware        float64
-	MLThresholdLOLBin            float64
-	MLThresholdSupplyChain       float64
-	MLThresholdAIGen             float64
-	MLThresholdIdentity          float64
-	MLThresholdMemoryInjection   float64
-	MLThresholdNetworkLGBM       float64
+	MLThresholdPE                  float64
+	MLThresholdNetwork             float64
+	MLThresholdBehavior            float64
+	MLThresholdRansomware          float64
+	MLThresholdLOLBin              float64
+	MLThresholdSupplyChain         float64
+	MLThresholdAIGen               float64
+	MLThresholdIdentity            float64
+	MLThresholdMemoryInjection     float64
+	MLThresholdNetworkLGBM         float64
 	MLThresholdBehaviorTransformer float64
 
 	// ONNX Runtime settings.
@@ -86,7 +86,7 @@ type EngineConfig struct {
 
 	// LayerTimeout is the maximum duration each detection layer is allowed
 	// before its result is discarded. Default: 50ms. ML layer uses MLLayerTimeout.
-	LayerTimeout   time.Duration
+	LayerTimeout time.Duration
 	// MLLayerTimeout is the extended timeout for ML inference. Default: 150ms.
 	MLLayerTimeout time.Duration
 
@@ -268,24 +268,36 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 				peThr = 0.80
 			}
 			me, err := ml.NewEngine(ml.Config{
-				ModelsDir:                cfg.MLModelsDir,
-				PEClassifierFile:         cfg.MLModelPEClassifier,
-				BehaviorLSTMFile:         cfg.MLModelBehaviorLSTM,
-				NetworkAnomalyFile:       cfg.MLModelNetworkAnomaly,
+				ModelsDir:               cfg.MLModelsDir,
+				PEClassifierFile:        cfg.MLModelPEClassifier,
+				BehaviorLSTMFile:        cfg.MLModelBehaviorLSTM,
+				NetworkAnomalyFile:      cfg.MLModelNetworkAnomaly,
 				NetworkLGBMFile:         cfg.MLModelNetworkLGBM,
-				RansomwareFile:           cfg.MLModelRansomware,
+				RansomwareFile:          cfg.MLModelRansomware,
 				RATC2File:               cfg.MLModelRATC2,
-				BehaviorTransformerFile:  cfg.MLModelBehaviorTransformer,
+				BehaviorTransformerFile: cfg.MLModelBehaviorTransformer,
 				LOLBinFile:              cfg.MLModelLOLBin,
-				SupplyChainFile:          cfg.MLModelSupplyChain,
+				SupplyChainFile:         cfg.MLModelSupplyChain,
 				AIGenFile:               cfg.MLModelAIGen,
 				IdentityFile:            cfg.MLModelIdentity,
 				MemoryInjectionFile:     cfg.MLModelMemoryInjection,
-				VerifyPubKeyHex:          cfg.MLVerifyPubKey,
-				PEMaliciousThreshold:     peThr,
+				VerifyPubKeyHex:         cfg.MLVerifyPubKey,
+				PEMaliciousThreshold:    peThr,
 			}, logger)
 			if err != nil {
-				logger.Warn("engine: ml layer init failed, disabling", zap.Error(err))
+				// Error, not Warn, and it names the consequence.
+				//
+				// A single model whose signature does not verify fails the
+				// whole engine, so every model stops scoring at once. That was
+				// previously one Warn line reading "disabling", after which the
+				// agent ran with no machine learning at all and said nothing
+				// further — which is indistinguishable from the models simply
+				// not detecting anything.
+				logger.Error("engine: machine learning is DISABLED; no model will score any event until this is fixed",
+					zap.Error(err),
+					zap.String("common_cause", "a model signature does not verify against ml.verify_pubkey, or libonnxruntime is not installed"),
+					zap.String("effect", "detection falls back to rules, Sigma and YARA only"),
+				)
 			} else {
 				e.ml = me
 			}
@@ -1591,12 +1603,17 @@ func deduplicateMITRE(attacks []events.MITREAttack) []events.MITREAttack {
 	return out
 }
 
-// logONNXInitFailure uses Info when the shared library is simply missing (typical dev
-// machines); Warn for unexpected init errors.
+// logONNXInitFailure reports a missing runtime at Warn, not Info.
+//
+// Info was chosen because a developer machine without the library is normal,
+// but the shipped packages do not contain libonnxruntime either, so on a real
+// endpoint this is the reason machine learning never runs. At the default
+// log level of warn, an Info line is invisible: the models appear installed,
+// the config appears correct, and nothing scores.
 func logONNXInitFailure(logger *zap.Logger, err error) {
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "no such file") || strings.Contains(msg, "cannot open shared object file") {
-		logger.Info("engine: ONNX Runtime not found; ML layer disabled - install the library or extend DYLD_LIBRARY_PATH / LD_LIBRARY_PATH",
+		logger.Warn("engine: ONNX Runtime not found, so machine learning is disabled; install libonnxruntime beside the agent binary or on the library path",
 			zap.Error(err))
 		return
 	}
