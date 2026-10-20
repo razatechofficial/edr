@@ -56,9 +56,9 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgent()
 		},
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		Args:          cobra.ArbitraryArgs,
+		SilenceUsage:       true,
+		SilenceErrors:      true,
+		Args:               cobra.ArbitraryArgs,
 		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 	}
 
@@ -164,9 +164,15 @@ func runAgent() error {
 		return nil
 	}
 	if installSvc {
+		if err := requireServicePrivilege("--install"); err != nil {
+			return err
+		}
 		return installService()
 	}
 	if removeSvc {
+		if err := requireServicePrivilege("--uninstall"); err != nil {
+			return err
+		}
 		return uninstallService()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
