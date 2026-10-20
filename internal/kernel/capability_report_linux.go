@@ -66,9 +66,8 @@ var ebpfHookCategories = map[string][]CapabilityCategory{
 
 	// network_monitor.c
 	"tracepoint__syscalls__sys_enter_connect": {CapNetworkConnect},
-	"tracepoint__syscalls__sys_enter_accept":  {CapNetworkAccept},
-	"tracepoint__syscalls__sys_enter_accept4": {CapNetworkAccept},
 	"tracepoint__syscalls__sys_enter_bind":    {CapNetworkBind},
+	"kretp_inet_csk_accept":                   {CapNetworkAccept},
 	"tp_dns_sendto":                           {CapNetworkDNS},
 	"kp_tcp_v4_connect":                       {CapNetworkConnect},
 	"kp_tcp_v6_connect":                       {CapNetworkConnect},
@@ -138,15 +137,19 @@ const ebpfReasonLSMEnforcement = "LSM enforcement hook: the program returns -EPE
 // capability report does not present a category as healthy when the events it
 // produces are unusable. buildCapabilityReport carries these through on
 // attached categories as well as unattached ones.
-var ebpfAttachedHookCaveats = map[string]string{
-	"tracepoint__syscalls__sys_enter_accept":  ebpfReasonAcceptNoAddresses,
-	"tracepoint__syscalls__sys_enter_accept4": ebpfReasonAcceptNoAddresses,
-}
-
-// TODO(monitoring): parse the accepted peer address in the accept/accept4
-// programs, or move inbound-connection telemetry to the attached
-// inet_sock_set_state path once kprobe attach exists.
-const ebpfReasonAcceptNoAddresses = "attached and producing, but the accept/accept4 programs in network_monitor.c submit the event immediately after memset and fill_header without parsing a sockaddr, so every inbound-connection event carries zeroed local and remote addresses and ports"
+//
+// It is empty. It held the accept and accept4 syscall tracepoints, which
+// attached, produced one event per inbound connection, and left every address
+// and port at zero — so network_accept read present+attached+producing while
+// carrying nothing a detection rule could use. network_monitor.c now reports
+// inbound connections from kretprobe/inet_csk_accept, which reads both ends of
+// the connection out of the returned struct sock, and the caveat is gone with
+// the programs that earned it.
+//
+// Keep it for the next one. A category that is attached and producing garbage
+// is the hardest failure for an operator to see, because every signal the
+// report has says the hook is healthy.
+var ebpfAttachedHookCaveats = map[string]string{}
 
 // ebpfUnattachableHooks records why each program the loader deliberately does
 // not attach is left out, so the capability report can tell an operator the
