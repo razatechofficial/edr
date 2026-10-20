@@ -5,6 +5,9 @@ description: Detect logs referencing TCC errors or denials that might indicate a
   to bypass privacy controls.
 author: Eric Brown - Nebulock, Inc.
 date: 2025-10-29
+tags:
+    - attack.privilege_escalation
+    - attack.t1548
 logsource:
   product: macos
   service: unifiedlog

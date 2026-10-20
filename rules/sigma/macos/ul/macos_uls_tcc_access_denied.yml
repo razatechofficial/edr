@@ -4,6 +4,9 @@ status: experimental
 description: Detect tccd denials indicating apps denied access to protected categories.
 author: Eric Brown - Nebulock, Inc.
 date: 2025-10-29
+tags:
+    - attack.privilege_escalation
+    - attack.t1548
 logsource:
   product: macos
   service: unifiedlog

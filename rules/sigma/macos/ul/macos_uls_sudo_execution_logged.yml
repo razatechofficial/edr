@@ -5,6 +5,9 @@ description: Detect sudo execution messages in Unified Logging. Adjust subsystem
   and message patterns to environment.
 author: Eric Brown - Nebulock, Inc.
 date: 2025-10-29
+tags:
+    - attack.privilege_escalation
+    - attack.t1548.003
 logsource:
   product: macos
   service: unifiedlog
