@@ -22,6 +22,11 @@ func goESFEventCallback(eventType C.int, pid C.int, ppid C.int, uid C.int, gid C
 	}
 	d.received.Add(1)
 
+	// Credit the capability tracker before the policy gate below, so a
+	// category the policy currently disables reads as "attached, not
+	// forwarded" rather than as a broken ESF subscription.
+	d.caps.observe(darwinCapabilityForESFEvent(int(eventType)))
+
 	evtType := mapESFEventType(int(eventType))
 
 	d.mu.RLock()

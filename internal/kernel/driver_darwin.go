@@ -783,8 +783,8 @@ type ESFDriver struct {
 	// path's team-id lookup. We cap entries so a fork-bombing
 	// adversary cannot blow the map up, and TTL them so a binary
 	// that gets re-signed eventually re-evaluates.
-	trustedTeamMu     sync.RWMutex
-	trustedTeamCache  map[string]trustedTeamEntry
+	trustedTeamMu    sync.RWMutex
+	trustedTeamCache map[string]trustedTeamEntry
 
 	notifyCh               chan ESFNotifyPayload
 	notifyDropped          atomic.Uint64
@@ -796,6 +796,11 @@ type ESFDriver struct {
 	authSampleMu   sync.Mutex
 	authSamples    []uint32
 	authSampleRing int // next slot when ring is full (1024)
+
+	// caps records, per event category, that an event of that category
+	// actually arrived, so CapabilityReport can distinguish a live
+	// subscription from one that is merely subscribed.
+	caps *capabilityTracker
 
 	// mutePrefixes is the userspace mirror of the ESF NOTIFY-event mute
 	// list. AUTH callbacks always run; only NOTIFY emission is suppressed
@@ -815,6 +820,7 @@ func NewESFDriver(agentID string) (*ESFDriver, error) {
 		policy:      DefaultPolicy(),
 		cache:       newAuthCache(defaultAuthCacheTTL),
 		authTimeout: defaultAuthTimeout,
+		caps:        newCapabilityTracker(),
 	}, nil
 }
 
@@ -1220,6 +1226,96 @@ func mapESFEventType(raw int) events.EventType {
 	default:
 		return events.EventProcess
 	}
+}
+
+// esfEventTypeValues resolves the ESF event-type names used as attachment
+// names in the capability report to their numeric values from the macOS SDK.
+//
+// It exists because cgo is not available in _test.go files: without it a test
+// cannot reach C.ES_EVENT_TYPE_* at all, and the mapping from subscribed event
+// to capability category would go unchecked. Only the event types
+// esf_subscribe_all subscribes unconditionally appear here; the #ifdef-guarded
+// ones cannot be named outside a guard.
+var esfEventTypeValues = map[string]int{
+	esfAuthExec:     int(C.ES_EVENT_TYPE_AUTH_EXEC),
+	esfNotifyExec:   int(C.ES_EVENT_TYPE_NOTIFY_EXEC),
+	esfNotifyFork:   int(C.ES_EVENT_TYPE_NOTIFY_FORK),
+	esfNotifyExit:   int(C.ES_EVENT_TYPE_NOTIFY_EXIT),
+	esfAuthOpen:     int(C.ES_EVENT_TYPE_AUTH_OPEN),
+	esfAuthCreate:   int(C.ES_EVENT_TYPE_AUTH_CREATE),
+	esfNotifyWrite:  int(C.ES_EVENT_TYPE_NOTIFY_WRITE),
+	esfNotifyTrunc:  int(C.ES_EVENT_TYPE_NOTIFY_TRUNCATE),
+	esfNotifyExch:   int(C.ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA),
+	esfNotifyFcntl:  int(C.ES_EVENT_TYPE_NOTIFY_FCNTL),
+	esfAuthCopyfile: int(C.ES_EVENT_TYPE_AUTH_COPYFILE),
+	esfAuthUnlink:   int(C.ES_EVENT_TYPE_AUTH_UNLINK),
+	esfNotifyUnlink: int(C.ES_EVENT_TYPE_NOTIFY_UNLINK),
+	esfAuthRename:   int(C.ES_EVENT_TYPE_AUTH_RENAME),
+	esfNotifyRename: int(C.ES_EVENT_TYPE_NOTIFY_RENAME),
+	esfAuthMmap:     int(C.ES_EVENT_TYPE_AUTH_MMAP),
+	esfNotifyMmap:   int(C.ES_EVENT_TYPE_NOTIFY_MMAP),
+	esfAuthKextload: int(C.ES_EVENT_TYPE_AUTH_KEXTLOAD),
+	esfAuthMount:    int(C.ES_EVENT_TYPE_AUTH_MOUNT),
+	esfAuthSignal:   int(C.ES_EVENT_TYPE_AUTH_SIGNAL),
+	esfNotifySignal: int(C.ES_EVENT_TYPE_NOTIFY_SIGNAL),
+	esfAuthGetTask:  int(C.ES_EVENT_TYPE_AUTH_GET_TASK),
+	esfNotifyMprot:  int(C.ES_EVENT_TYPE_NOTIFY_MPROTECT),
+	esfNotifyRemote: int(C.ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE),
+}
+
+// darwinCapabilityForESFEvent maps a raw ES event type to the capability
+// category the tracker should credit.
+//
+// This is finer-grained than mapESFEventType, which collapses to a coarse
+// events.EventType. The report needs exec distinguished from exit and writes
+// from deletes, because that is the distinction that decides whether a
+// detection rule can fire.
+func darwinCapabilityForESFEvent(raw int) CapabilityCategory {
+	switch raw {
+	case int(C.ES_EVENT_TYPE_AUTH_EXEC), int(C.ES_EVENT_TYPE_NOTIFY_EXEC):
+		return CapProcessExec
+	case int(C.ES_EVENT_TYPE_NOTIFY_FORK):
+		return CapProcessFork
+	case int(C.ES_EVENT_TYPE_NOTIFY_EXIT):
+		return CapProcessExit
+
+	case int(C.ES_EVENT_TYPE_AUTH_OPEN), int(C.ES_EVENT_TYPE_AUTH_CREATE):
+		return CapFileOpen
+	case int(C.ES_EVENT_TYPE_NOTIFY_WRITE),
+		int(C.ES_EVENT_TYPE_NOTIFY_TRUNCATE),
+		int(C.ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA),
+		int(C.ES_EVENT_TYPE_NOTIFY_FCNTL),
+		int(C.ES_EVENT_TYPE_AUTH_COPYFILE):
+		return CapFileWrite
+	case int(C.ES_EVENT_TYPE_AUTH_UNLINK), int(C.ES_EVENT_TYPE_NOTIFY_UNLINK):
+		return CapFileDelete
+	case int(C.ES_EVENT_TYPE_AUTH_RENAME), int(C.ES_EVENT_TYPE_NOTIFY_RENAME):
+		return CapFileRename
+
+	case int(C.ES_EVENT_TYPE_AUTH_MMAP),
+		int(C.ES_EVENT_TYPE_NOTIFY_MMAP),
+		int(C.ES_EVENT_TYPE_AUTH_KEXTLOAD):
+		return CapModuleLoad
+
+	case int(C.ES_EVENT_TYPE_AUTH_MOUNT):
+		return CapMount
+	case int(C.ES_EVENT_TYPE_AUTH_SIGNAL), int(C.ES_EVENT_TYPE_NOTIFY_SIGNAL):
+		return CapSignal
+	case int(C.ES_EVENT_TYPE_AUTH_GET_TASK):
+		return CapPtrace
+	case int(C.ES_EVENT_TYPE_NOTIFY_MPROTECT),
+		int(C.ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE):
+		return CapMemoryWrite
+	}
+
+	// The SDK-conditional event types cannot be named in a switch here
+	// without the same #ifdef problem, so they are matched by the
+	// numeric fallback table that already exists for newer SDK types.
+	switch esfOperationNameFallback(raw) {
+	case "setuid", "setgid":
+		return CapCredentialChange
+	}
+	return ""
 }
 
 func esfIsSignalType(raw int) bool {
