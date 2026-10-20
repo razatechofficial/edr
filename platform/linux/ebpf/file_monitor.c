@@ -20,13 +20,39 @@ struct {
 	__type(value, __u8);
 } file_pid_filter SEC(".maps");
 
-/* Prefix match on monitored directories. Key is a null-terminated path prefix. */
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 256);
-	__type(key, char[MAX_PATH_LEN]);
-	__type(value, __u8);
-} path_filter SEC(".maps");
+/*
+ * There is deliberately no path_filter map here.
+ *
+ * One used to be defined at this point: a BPF_MAP_TYPE_HASH keyed by a
+ * 256-byte path prefix, which userspace cleared and repopulated from
+ * EventPolicy.FIMPaths on every policy sync, and whose comment claimed the
+ * kernel dropped file events outside those prefixes before they reached
+ * userspace. No program ever looked at it, and no program could have: a hash
+ * map answers "is this exact 256-byte key present", and prefix matching needs
+ * "is any key a prefix of this path". There is no sequence of hash lookups
+ * that answers the second question, so the map was not an unfinished feature,
+ * it was an impossible one.
+ *
+ * In-kernel path filtering is still the right thing — it is the difference
+ * between filtering before and after a ringbuf slot, a userspace decode and a
+ * JSON encode. The data structure for it is BPF_MAP_TYPE_LPM_TRIE, which does
+ * longest-prefix match natively: key is {__u32 prefixlen; char path[256]},
+ * userspace inserts each prefix with prefixlen = 8*len(prefix), and each
+ * program does one lookup with prefixlen = 8*256 against evt->filename.
+ *
+ * Two details decide whether that is safe to ship, and both have to be got
+ * right before anyone writes it:
+ *
+ *   - It must fail open. An empty trie matches nothing, so a program that
+ *     drops on a lookup miss would drop every file event on the host the
+ *     moment the map write failed or ran late. Insert a prefixlen=0 entry
+ *     (which matches everything) whenever the policy lists no prefixes, and
+ *     treat a miss as "capture" rather than "drop" until that entry is
+ *     confirmed present.
+ *   - Write filtering can only apply after fd_path_map has resolved the fd to
+ *     a path. emit_write_event gets an fd, not a filename, and a write whose
+ *     fd has no binding has no path to match, so it must be captured.
+ */
 
 /*
  * P1-6: fd -> path tracking.
