@@ -6,11 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/link"
 )
 
 func (d *EBPFDriver) collectOwnProgramIDs() {
@@ -87,29 +85,12 @@ func (d *EBPFDriver) reattachMissingLinks(missing []uint32) error {
 			_ = old.Unpin()
 			_ = old.Close()
 		}
-		if spec.lsm {
-			nl, err := link.AttachLSM(link.LSMOptions{Program: prog})
-			if err != nil {
-				hadErr = true
-				continue
-			}
-			d.linkByProg[id] = nl
-			d.links = append(d.links, nl)
-			d.tryPinTraceLink(spec.progName, nl)
-			continue
-		}
-		pinBase := strings.TrimSpace(d.bpfPinPath)
-		if pinBase != "" {
-			pp := ebpfPinnedTraceLinkPath(pinBase, spec.progName)
-			if pl, err := linkLoadPinnedFn(pp); err == nil && pl != nil {
-				d.linkByProg[id] = pl
-				d.links = append(d.links, pl)
-				d.tryPinTraceLink(spec.progName, pl)
-				continue
-			}
-		}
-		nl, err := link.Tracepoint(spec.group, spec.tp, prog, nil)
-		if err != nil {
+		// Re-attach through the same planner the first attach used, so
+		// a kprobe comes back as a kprobe. Before SEC()-driven attach
+		// this branch could only rebuild tracepoints and LSM links,
+		// because those were the only two kinds that existed.
+		nl, err := d.reattachBySpec(spec, prog)
+		if err != nil || nl == nil {
 			hadErr = true
 			continue
 		}
