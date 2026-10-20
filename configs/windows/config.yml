@@ -43,7 +43,14 @@ monitoring:
   security_profile: standard
   windows_service_hardening: true
   windows_service_hardening_acl: true
-  windows_service_dacl_hardened: true
+  # Left off deliberately. The service DACL this applies was rewritten after the
+  # previous descriptor denied DELETE to Everyone — including Administrators and
+  # SYSTEM — which left `sc delete` and the MSI's uninstall action refused on
+  # every host that installed it, recoverable only by editing the service's
+  # Security registry key. The replacement is allow-only and keeps WRITE_DAC for
+  # Administrators, so it is recoverable; verify an install, stop, and full
+  # uninstall on a test host before turning this back on.
+  windows_service_dacl_hardened: false
 compliance:
   enabled: true
   rules_dir: "C:\\ProgramData\\EDR Agent\\rules\\compliance\\sca"
