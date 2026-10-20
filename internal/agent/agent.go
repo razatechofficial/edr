@@ -332,6 +332,8 @@ func (a *Agent) initAdvancedDetection() error {
 	}
 	ecfg := detection.EngineConfig{
 		BehavioralEnabled:       true,
+		MaxCPUPercent:           float64(a.cfg.Performance.MaxCPUPercent),
+		MaxMemoryMB:             a.cfg.Performance.MaxMemoryMB,
 		SigmaEnabled:            a.cfg.Detection.Sigma.Enabled,
 		DataDir:                 dataDir,
 		YARAEnabled:             a.cfg.Detection.YARA.Enabled,
