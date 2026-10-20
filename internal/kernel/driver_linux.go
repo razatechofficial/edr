@@ -214,6 +214,11 @@ type EBPFDriver struct {
 
 	tamperByProgMu sync.Mutex
 	tamperByProg   map[uint32]uint64 // per-program missing detections
+
+	// caps records, per event category, that an event of that category
+	// actually arrived. It is what makes CapabilityReport able to say
+	// "attached but producing nothing" instead of only "attached".
+	caps *capabilityTracker
 }
 
 type tracepointAttachSpec struct {
@@ -243,6 +248,7 @@ func NewEBPFDriver(agentID string, objectPathOverride string) (*EBPFDriver, erro
 		bpfObjectPath: objectPathOverride,
 		linkByProg:    make(map[uint32]link.Link),
 		specByProg:    make(map[uint32]tracepointAttachSpec),
+		caps:          newCapabilityTracker(),
 	}, nil
 }
 
@@ -931,6 +937,13 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 		return fmt.Errorf("record too short: %d bytes", len(raw))
 	}
 	typ := binary.LittleEndian.Uint32(raw[:4])
+
+	// Credit the capability tracker before the policy gate below. The
+	// report's "producing" flag answers whether the kernel mechanism works,
+	// which is a separate question from whether the current policy wants the
+	// event forwarded; crediting after the gate would make a disabled
+	// category look like a broken hook.
+	d.caps.observe(linuxCapabilityForEventType(typ))
 
 	d.mu.RLock()
 	p := d.policy
