@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -108,6 +109,12 @@ type Agent struct {
 
 	controlPlane      *comms.ControlPlane
 	controlPlaneQueue *comms.AlertQueue
+
+	// localAlerts counts the detections this agent has raised since start.
+	// The control-plane heartbeat keeps the same tally, but only when a
+	// control plane is configured, and the local control API has to be able
+	// to report a detection count on every agent.
+	localAlerts atomic.Uint64
 }
 
 // SetValidationSink registers a callback invoked for each detection surfaced by the agent.
@@ -777,6 +784,17 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.logger.Info("compliance sca runner started")
 	}
 
+	// Serve the local control API. edrctl has always issued these six
+	// requests and nothing answered them, so isolate, release, scan,
+	// forensics collect and rules update were all inert. It also publishes
+	// the world-readable status file the native UI reads, which is the only
+	// way an unprivileged console sees an enrolled agent as enrolled.
+	if localSrv, err := a.startLocalControl(ctx); err != nil {
+		a.logger.Error("local control api unavailable", "error", err)
+	} else {
+		defer func() { _ = localSrv.Close() }()
+	}
+
 	a.logger.Info("agent started")
 	a.logger.Debug("rules loaded", "count", len(a.ruleSet.Rules))
 
@@ -1340,6 +1358,7 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 			"reason", al.Title,
 			"correlation_id", correlationID)
 		a.alertSpool.Push(*al)
+		a.localAlerts.Add(1)
 		a.recordControlPlaneAlert()
 		if data, err := marshalAlertOCSF(*al, productVersion); err == nil {
 			if a.durableSpool != nil {
