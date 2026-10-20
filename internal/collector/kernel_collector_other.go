@@ -16,12 +16,13 @@ import (
 
 // NewKernelCollector returns a non-nil tier-minimal kernel capability probe so
 // monitoring_health always carries an explicit kernel row on rare GOOS builds.
-func NewKernelCollector(endpointID string, _ config.Config, _ *UsernameCache) *KernelCollector {
+func NewKernelCollector(endpointID string, cfg config.Config, _ *UsernameCache) *KernelCollector {
 	host, _ := os.Hostname()
 	return &KernelCollector{
 		probe:      kernelCapabilityProbe(),
 		endpointID: endpointID,
 		hostname:   host,
+		queue:      NewTelemetryQueue(cfg),
 	}
 }
 
@@ -31,22 +32,20 @@ type KernelCollector struct {
 	probe      kernelCapability
 	endpointID string
 	hostname   string
-	mu       sync.Mutex
-	events   []Telemetry
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	epsIn    atomic.Uint64
-	epsOut   atomic.Uint64
+	// queue is the bounded hand-off to Collect(); see event_queue.go.
+	queue *TelemetryQueue
+
+	mu     sync.Mutex
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	epsIn  atomic.Uint64
+	epsOut atomic.Uint64
 }
 
 func (kc *KernelCollector) Name() string { return "kernel" }
 
 func (kc *KernelCollector) Collect(_ context.Context) ([]Telemetry, error) {
-	kc.mu.Lock()
-	b := kc.events
-	kc.events = nil
-	kc.mu.Unlock()
-	return b, nil
+	return kc.queue.Drain(), nil
 }
 
 func (kc *KernelCollector) Start(ctx context.Context) error {
@@ -149,10 +148,7 @@ func (kc *KernelCollector) run(ctx context.Context) {
 					Outcome:  "success",
 				},
 			}
-			kc.mu.Lock()
-			kc.events = append(kc.events, pe, ne, ae)
-			kc.mu.Unlock()
-			kc.epsOut.Add(3)
+			kc.epsOut.Add(uint64(kc.queue.PushAll([]Telemetry{pe, ne, ae})))
 		}
 	}
 }

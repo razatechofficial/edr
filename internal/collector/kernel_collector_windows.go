@@ -37,8 +37,12 @@ type KernelCollector struct {
 	// Kernel-Registry ETW is active (see WireWindowsKernelRegistryETW).
 	registryPeer *RegistryCollector
 
+	// queue is the bounded hand-off to Collect(); see event_queue.go. It
+	// has its own locking, so mu below guards only cancel and the
+	// collector's own mutable fields.
+	queue *TelemetryQueue
+
 	mu     sync.Mutex
-	events []Telemetry
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
@@ -51,8 +55,8 @@ type KernelCollector struct {
 
 	jsonMapOpts KernelJSONOpts
 
-	ppidChecks    atomic.Uint64
-	ppidMismatch  atomic.Uint64
+	ppidChecks   atomic.Uint64
+	ppidMismatch atomic.Uint64
 }
 
 func isWindowsElevated() bool {
@@ -101,6 +105,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		},
 	}
 	kc.prio = newKernelRingPriority(cfg)
+	kc.queue = NewTelemetryQueue(cfg)
 	return kc
 }
 
@@ -117,6 +122,7 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if pd := kc.priorityDrop.Load(); pd > 0 {
 		extras["priority_sampling_kernel_drops"] = pd
 	}
+	extras = kc.queue.HealthExtras(extras)
 	extras["etw_threat_intel_requested"] = kc.cfg.Monitoring.ETWThreatIntel
 	tih := kc.driver.ThreatIntelHealthSnapshot()
 	extras["etw_threat_intel_probed"] = tih.Probed
@@ -229,11 +235,7 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 }
 
 func (kc *KernelCollector) Collect(_ context.Context) ([]Telemetry, error) {
-	kc.mu.Lock()
-	batch := kc.events
-	kc.events = nil
-	kc.mu.Unlock()
-	return batch, nil
+	return kc.queue.Drain(), nil
 }
 
 func (kc *KernelCollector) Stop() {
@@ -382,9 +384,7 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 			continue
 		}
 		kc.maybeEnrichProcessImageHash(tel)
-		kc.mu.Lock()
-		kc.events = append(kc.events, *tel)
-		kc.mu.Unlock()
+		kc.queue.Push(*tel)
 	}
 }
 
