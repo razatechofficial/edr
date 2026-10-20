@@ -23,6 +23,31 @@ type GovernorConfig struct {
 	QueueLowWatermark int
 	// SampleInterval controls how often resource usage is polled. Default: 1s.
 	SampleInterval time.Duration
+
+	// ShedSampleEvery keeps one event in N while shedding, instead of
+	// dropping all of them. Default: 16. Set to 1 to keep everything (which
+	// defeats shedding) or to 0 for the default.
+	//
+	// Dropping every event under pressure makes the agent blind at exactly
+	// the moment something is generating enough activity to cause the
+	// pressure, which is the moment an EDR is least useful blind. A
+	// deterministic one-in-N sample costs a bounded fraction of the work and
+	// keeps the detection layers seeing the shape of what is happening; the
+	// shed counter says how much was not seen, so nobody mistakes the
+	// sample for the whole.
+	ShedSampleEvery uint64
+
+	// ThrottleEvery applies the CPU micro-sleep on one admitted event in N
+	// rather than on every one. Default: 64.
+	//
+	// The sleep is how the governor gives CPU back: there is no other way
+	// for a userspace process to cap its own usage. But sleeping 2ms on
+	// every event caps throughput at 500 events/second the instant CPU goes
+	// over budget, and Gate() runs on the same goroutine that drives the
+	// collectors, so that stall is paid by telemetry collection as well as
+	// by detection. Amortising it over N events keeps the same duty cycle
+	// available while bounding the per-event latency cost to 1/N of it.
+	ThrottleEvery uint64
 }
 
 // DefaultGovernorConfig returns conservative resource limits matching
@@ -35,6 +60,8 @@ func DefaultGovernorConfig() GovernorConfig {
 		QueueHighWatermark: 10000,
 		QueueLowWatermark:  5000,
 		SampleInterval:     time.Second,
+		ShedSampleEvery:    16,
+		ThrottleEvery:      64,
 	}
 }
 
@@ -44,17 +71,26 @@ type ResourceGovernor struct {
 	cfg    GovernorConfig
 	logger *zap.Logger
 
-	cpuPercent  atomic.Int64
-	memBytes    atomic.Uint64
-	queueDepth  atomic.Int64
-	shedding    atomic.Bool
+	cpuPercent atomic.Int64
+	memBytes   atomic.Uint64
+	queueDepth atomic.Int64
+	shedding   atomic.Bool
 
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	// shedSeq and throttleSeq count calls so the shed sample and the CPU
+	// micro-sleep can be applied to one call in N without a timer or a
+	// random source. Both are plain atomic adds: Gate() is on the hot path
+	// of every event and must not allocate.
+	shedSeq     atomic.Uint64
+	throttleSeq atomic.Uint64
+
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 
 	// Stats
 	eventsAdmitted atomic.Uint64
 	eventsShed     atomic.Uint64
+	eventsSampled  atomic.Uint64
 	throttleCount  atomic.Uint64
 }
 
@@ -78,6 +114,12 @@ func NewResourceGovernor(cfg GovernorConfig, logger *zap.Logger) *ResourceGovern
 	if cfg.SampleInterval <= 0 {
 		cfg.SampleInterval = time.Second
 	}
+	if cfg.ShedSampleEvery == 0 {
+		cfg.ShedSampleEvery = 16
+	}
+	if cfg.ThrottleEvery == 0 {
+		cfg.ThrottleEvery = 64
+	}
 	return &ResourceGovernor{
 		cfg:    cfg,
 		logger: logger,
@@ -87,69 +129,123 @@ func NewResourceGovernor(cfg GovernorConfig, logger *zap.Logger) *ResourceGovern
 
 // Start begins background resource monitoring.
 func (g *ResourceGovernor) Start() {
+	if g == nil {
+		return
+	}
 	g.wg.Add(1)
 	go g.monitorLoop()
 }
 
 // Stop halts background monitoring.
 func (g *ResourceGovernor) Stop() {
-	close(g.stopCh)
-	g.wg.Wait()
+	if g == nil {
+		return
+	}
+	g.stopOnce.Do(func() {
+		close(g.stopCh)
+		g.wg.Wait()
+	})
 }
 
 // Gate returns true if the event should be processed, false if it should
 // be shed due to resource pressure. It also applies micro-throttling when
 // CPU usage is above the sustained limit.
 func (g *ResourceGovernor) Gate() bool {
-	// Memory budget check
-	if g.memBytes.Load() > g.cfg.MaxMemoryBytes {
-		g.eventsShed.Add(1)
-		return false
+	if g == nil {
+		// A nil governor admits everything. Callers hold one as an
+		// optional field, and "governance not configured" must not mean
+		// "monitoring off".
+		return true
 	}
 
-	// Queue backpressure
+	// Memory budget check.
+	if g.memBytes.Load() > g.cfg.MaxMemoryBytes {
+		return g.shed()
+	}
+
+	// Queue backpressure.
 	depth := g.queueDepth.Load()
 	if depth > int64(g.cfg.QueueHighWatermark) {
-		if !g.shedding.Load() {
-			g.shedding.Store(true)
+		if g.shedding.CompareAndSwap(false, true) {
 			g.logger.Warn("governor: queue high watermark reached, shedding events",
-				zap.Int64("depth", depth))
+				zap.Int64("depth", depth),
+				zap.Int("high_watermark", g.cfg.QueueHighWatermark),
+				zap.Uint64("keeping_one_in", g.cfg.ShedSampleEvery))
 		}
-		g.eventsShed.Add(1)
-		return false
+		return g.shed()
 	}
-	if g.shedding.Load() && depth < int64(g.cfg.QueueLowWatermark) {
-		g.shedding.Store(false)
-		g.logger.Info("governor: queue below low watermark, resuming")
-	}
-
-	// CPU throttle: micro-sleep if sustained usage is above limit
-	cpuPct := float64(g.cpuPercent.Load()) / 100.0
-	if cpuPct > g.cfg.BurstCPUPercent/100.0 {
-		g.throttleCount.Add(1)
-		time.Sleep(10 * time.Millisecond)
-	} else if cpuPct > g.cfg.MaxCPUPercent/100.0 {
-		g.throttleCount.Add(1)
-		time.Sleep(2 * time.Millisecond)
+	if depth < int64(g.cfg.QueueLowWatermark) && g.shedding.CompareAndSwap(true, false) {
+		g.logger.Info("governor: queue below low watermark, resuming",
+			zap.Int64("depth", depth))
 	}
 
+	g.throttleCPU()
 	g.eventsAdmitted.Add(1)
 	return true
 }
 
+// shed decides whether this over-budget event is the one in N that is kept.
+//
+// Counting rather than sampling randomly keeps the decision deterministic,
+// allocation-free and reproducible in a test, and over any window it admits
+// the same fraction a random sample would.
+func (g *ResourceGovernor) shed() bool {
+	if g.cfg.ShedSampleEvery <= 1 {
+		g.eventsAdmitted.Add(1)
+		return true
+	}
+	if g.shedSeq.Add(1)%g.cfg.ShedSampleEvery != 0 {
+		g.eventsShed.Add(1)
+		return false
+	}
+	g.eventsSampled.Add(1)
+	g.eventsAdmitted.Add(1)
+	return true
+}
+
+// throttleCPU yields the processor when sustained usage is over budget.
+//
+// The sleep lands on one admitted event in ThrottleEvery, so the duty cycle is
+// the same as a per-event sleep of 1/N the duration without making any single
+// event pay the whole of it.
+func (g *ResourceGovernor) throttleCPU() {
+	cpuPct := float64(g.cpuPercent.Load()) / 100.0
+	var nap time.Duration
+	switch {
+	case cpuPct > g.cfg.BurstCPUPercent/100.0:
+		nap = 10 * time.Millisecond
+	case cpuPct > g.cfg.MaxCPUPercent/100.0:
+		nap = 2 * time.Millisecond
+	default:
+		return
+	}
+	if g.cfg.ThrottleEvery > 1 && g.throttleSeq.Add(1)%g.cfg.ThrottleEvery != 0 {
+		return
+	}
+	g.throttleCount.Add(1)
+	time.Sleep(nap)
+}
+
 // SetQueueDepth updates the governor's view of the current event queue depth.
 func (g *ResourceGovernor) SetQueueDepth(depth int) {
+	if g == nil {
+		return
+	}
 	g.queueDepth.Store(int64(depth))
 }
 
 // Stats returns resource governor counters.
 func (g *ResourceGovernor) Stats() GovernorStats {
+	if g == nil {
+		return GovernorStats{}
+	}
 	return GovernorStats{
 		CPUPercent:     float64(g.cpuPercent.Load()) / 100.0,
 		MemoryBytes:    g.memBytes.Load(),
 		QueueDepth:     g.queueDepth.Load(),
 		EventsAdmitted: g.eventsAdmitted.Load(),
 		EventsShed:     g.eventsShed.Load(),
+		EventsSampled:  g.eventsSampled.Load(),
 		ThrottleCount:  g.throttleCount.Load(),
 		Shedding:       g.shedding.Load(),
 	}
@@ -162,8 +258,11 @@ type GovernorStats struct {
 	QueueDepth     int64
 	EventsAdmitted uint64
 	EventsShed     uint64
-	ThrottleCount  uint64
-	Shedding       bool
+	// EventsSampled counts events admitted *while shedding*, i.e. the one
+	// in ShedSampleEvery that was kept. EventsAdmitted includes them.
+	EventsSampled uint64
+	ThrottleCount uint64
+	Shedding      bool
 }
 
 func (g *ResourceGovernor) monitorLoop() {
