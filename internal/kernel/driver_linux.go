@@ -765,73 +765,29 @@ func (d *EBPFDriver) syncPolicyToMaps() error {
 		return fmt.Errorf("installing self filter: %w", err)
 	}
 
-	if m, ok := d.coll.Maps["policy_config"]; ok {
-		var flags uint64
-		if p.ProcessEvents {
-			flags |= 1 << 0
-		}
-		if p.FileEvents {
-			flags |= 1 << 1
-		}
-		if p.NetworkEvents {
-			flags |= 1 << 2
-		}
-		if p.MemoryEvents {
-			flags |= 1 << 3
-		}
-		if p.ModuleEvents {
-			flags |= 1 << 4
-		}
-		if p.MountEvents {
-			flags |= 1 << 5
-		}
-		if p.SignalEvents {
-			flags |= 1 << 6
-		}
-		if err := m.Put(uint32(0), flags); err != nil {
-			return fmt.Errorf("updating policy_config map: %w", err)
-		}
-	}
-
-	if m, ok := d.coll.Maps["mute_pids"]; ok {
-		for _, pid := range p.MutePIDs {
-			if err := m.Put(pid, uint8(1)); err != nil {
-				return fmt.Errorf("muting pid %d: %w", pid, err)
-			}
-		}
-	}
-
-	// P1-4: push FIM path prefixes into the eBPF path_filter map so the
-	// kernel side drops file events outside those prefixes before they
-	// hit userspace. The map is keyed by a fixed-size [256]byte buffer
-	// (matches the eBPF struct) holding the prefix bytes; value is a
-	// uint8 sentinel (1 = allowed). Clear-then-insert keeps the map in
-	// sync with whatever the policy currently lists.
-	if m, ok := d.coll.Maps["path_filter"]; ok {
-		var key [256]byte
-		var val uint8
-		iter := m.Iterate()
-		var keysToDelete [][256]byte
-		for iter.Next(&key, &val) {
-			keysToDelete = append(keysToDelete, key)
-		}
-		for _, k := range keysToDelete {
-			_ = m.Delete(k)
-		}
-		for _, prefix := range p.FIMPaths {
-			if prefix == "" {
-				continue
-			}
-			var k [256]byte
-			n := copy(k[:255], prefix)
-			// Null-terminate so the eBPF side can find the prefix length.
-			k[n] = 0
-			if err := m.Put(k, uint8(1)); err != nil {
-				return fmt.Errorf("adding FIM prefix %q: %w", prefix, err)
-			}
-		}
-	}
-
+	// There is no policy_config, mute_pids or path_filter write here any
+	// more. All three were guarded by `if m, ok := d.coll.Maps[name]; ok`
+	// against maps the kernel side does not define, so all three were
+	// silent no-ops that made the policy surface look wider than it was.
+	//
+	// policy_config packed seven EventPolicy booleans into a flags word
+	// and wrote key 0. No .c file declared the map, so nothing read it.
+	// Gating in the kernel is worth doing — it saves a ringbuf slot, a
+	// userspace decode and a JSON encode per suppressed event — but it has
+	// to be built to fail open: the flags word has to mean *disable*, so
+	// that a zero-initialised array map, or a write that has not landed
+	// yet, captures everything instead of dropping everything. Until then
+	// processRecord does the gating in userspace, which works.
+	//
+	// mute_pids duplicated installSelfFilter above. That call already
+	// writes the agent's own tgid and every EventPolicy.MutePIDs entry
+	// into the four *_pid_filter maps the programs actually consult, so a
+	// second mute mechanism would have been a second thing to keep in
+	// sync and nothing more.
+	//
+	// path_filter is documented at the point in file_monitor.c where it
+	// used to be defined: a hash map cannot answer a prefix query, so it
+	// could never have done what its comment claimed.
 	return nil
 }
 

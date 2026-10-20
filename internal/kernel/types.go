@@ -34,12 +34,16 @@ type EventPolicy struct {
 	// MutePIDs lists PIDs whose events should be dropped.
 	MutePIDs []uint32
 
-	// FIMPaths lists path prefixes the kernel-side file-monitor should
-	// emit events for. On Linux this is pushed into the eBPF path_filter
-	// map so the verifier-bounded prefix match runs in-kernel, dropping
-	// the vast majority of unrelated file events before they reach the
-	// ringbuf. Empty list disables filtering (capture everything).
-	FIMPaths []string
+	// There is no FIMPaths field. One existed and no platform consumed
+	// it: the Linux driver pushed it into an eBPF path_filter map that no
+	// program read and that could not have worked (see file_monitor.c),
+	// Windows reads cfg.Monitoring.FIMPaths directly, and nothing ever
+	// assigned it on any platform. A policy field that claims to scope
+	// file monitoring and does not is worse than its absence, because it
+	// is the field an operator would reach for.
+	//
+	// Userspace FIM path scoping lives in internal/collector (see
+	// ResolveFIMPaths) and is real.
 
 	// Windows-only optional ETW providers (high volume; default off).
 	ETWWMIActivity      bool
