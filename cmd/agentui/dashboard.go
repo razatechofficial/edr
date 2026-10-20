@@ -81,16 +81,31 @@ func runDashboard() error {
 		}
 	}
 
-	refresh := func() {
-		applyStatus(loadStatus())
-	}
-
 	setBusy := func(on bool) {
 		if on {
 			w.SetTitle("EDR Agent — working…")
 		} else {
 			w.SetTitle("EDR Agent")
 		}
+	}
+
+	// refresh never runs loadStatus on the UI goroutine.
+	//
+	// loadStatus forks edrctl, which TCP-dials every enrollment and ingest
+	// host with a four-second timeout each. Calling it inline froze the window
+	// for as long as those dials took — which is why the UI was unresponsive
+	// intermittently rather than always: it only stalls when a configured host
+	// is slow or unreachable. On launch it also meant the window did not
+	// appear at all until the probes finished.
+	refresh := func() {
+		setBusy(true)
+		go func() {
+			st := loadStatus()
+			fyne.Do(func() {
+				applyStatus(st)
+				setBusy(false)
+			})
+		}()
 	}
 
 	runAction := func(title string, privileged bool, args ...string) {
@@ -103,9 +118,14 @@ func runDashboard() error {
 			} else {
 				out, err = runEdrctl(args...)
 			}
+			// The status re-read stays on this goroutine. Inside fyne.Do it
+			// would be back on the UI thread, so every Start, Stop, Enroll and
+			// connection test froze the window again once the action itself had
+			// finished.
+			st := loadStatus()
 			fyne.Do(func() {
 				appendActivity(title, out, err)
-				applyStatus(loadStatus())
+				applyStatus(st)
 				setBusy(false)
 			})
 		}()
