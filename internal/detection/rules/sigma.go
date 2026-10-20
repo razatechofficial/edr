@@ -26,9 +26,9 @@ import (
 
 // compiledSigmaSet is swapped atomically on successful reload.
 type compiledSigmaSet struct {
-	evaluators  []*sigmaeval.RuleEvaluator
-	enabled     map[string]bool
-	byCategory  map[string][]*sigmaeval.RuleEvaluator
+	evaluators []*sigmaeval.RuleEvaluator
+	enabled    map[string]bool
+	byCategory map[string][]*sigmaeval.RuleEvaluator
 }
 
 // SigmaEngine evaluates events against Sigma detection rules.

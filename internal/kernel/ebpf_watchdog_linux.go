@@ -115,11 +115,11 @@ func (d *EBPFDriver) emitTamperEvent(progID uint32) {
 	d.tamperByProg[progID]++
 	d.tamperByProgMu.Unlock()
 	env := map[string]interface{}{
-		"type": "process",
-		"timestamp": time.Now().UTC(),
-		"agent_id": d.agentID,
+		"type":       "process",
+		"timestamp":  time.Now().UTC(),
+		"agent_id":   d.agentID,
 		"event_kind": "tamper",
-		"operation": "ebpf_program_missing",
+		"operation":  "ebpf_program_missing",
 		"program_id": progID,
 	}
 	b, _ := json.Marshal(env)
