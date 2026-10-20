@@ -4,6 +4,9 @@ status: experimental
 description: Detect Gatekeeper blocks logged by spctl or related subsystems.
 author: Eric Brown - Nebulock, Inc.
 date: 2025-10-29
+tags:
+    - attack.defense_evasion
+    - attack.t1553.001
 logsource:
   product: macos
   service: unifiedlog

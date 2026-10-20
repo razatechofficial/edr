@@ -5,6 +5,9 @@ description: Detect logs from securityd indicating code signature failures which
   reflect tampering.
 author: Eric Brown - Nebulock, Inc.
 date: 2025-10-29
+tags:
+    - attack.defense_evasion
+    - attack.t1553.002
 logsource:
   product: macos
   service: unifiedlog
