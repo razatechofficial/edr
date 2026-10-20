@@ -315,6 +315,19 @@ var etwCoreProviders = []providerConfig{
 	{"Registry", kernelRegistryGUID, events.EventRegistry},
 }
 
+// etwProviderNameForGUID resolves a provider GUID back to the name used in
+// etwCoreProviders, which is the key the capability report and the provider
+// health records share. An unknown GUID returns "", which the capability
+// mapper treats as no category.
+func etwProviderNameForGUID(guid windows.GUID) string {
+	for _, pc := range etwCoreProviders {
+		if pc.guid == guid {
+			return pc.name
+		}
+	}
+	return ""
+}
+
 func (d *ETWDriver) providersToStart() []providerConfig {
 	d.mu.RLock()
 	p := d.policy
@@ -421,6 +434,11 @@ type ETWDriver struct {
 
 	secureTrace atomic.Bool
 
+	// caps records, per event category, that an event of that category
+	// actually arrived, so CapabilityReport can distinguish a provider that
+	// enabled from one that is also delivering.
+	caps *capabilityTracker
+
 	sessionRecoverAttempts atomic.Uint64
 	etwRecoverState        atomic.Pointer[string] // active | reopening | degraded
 
@@ -447,6 +465,7 @@ func NewETWDriver(agentID string) (*ETWDriver, error) {
 		fileRWCap:    65536,
 		etwProcByPID: make(map[uint32]etwProcSnap),
 		etwProcCap:   16384,
+		caps:         newCapabilityTracker(),
 	}
 	s := "active"
 	d.etwRecoverState.Store(&s)
@@ -1017,6 +1036,16 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 	d.received.Add(1)
 
 	hdr := &record.EventHeader
+
+	// Credit the capability tracker before the decode and the drop paths
+	// below, so a category reads as "provider delivering" even when a
+	// particular record is deduplicated or fails to decode. The question
+	// the report answers is whether the ETW provider is live.
+	d.caps.observe(windowsCapabilityForETWEvent(
+		etwProviderNameForGUID(hdr.ProviderId),
+		hdr.EventDescriptor.Id,
+		hdr.EventDescriptor.Opcode,
+	))
 	ts := filetimeToGoTime(hdr.TimeStamp)
 
 	envelope := map[string]interface{}{
