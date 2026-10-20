@@ -858,7 +858,9 @@ rules:
     when:
       domain_contains: ["dyndns.", "no-ip.", "duckdns.", "freedns.", "dynu.", "hopto.org", "zapto.org", "sytes.net"]
 
+  # Disabled: Matches any ICMP event rather than raw socket creation.
   - id: "NET-007"
+    enabled: false
     name: "Raw socket creation (ICMP)"
     severity: "high"
     score: 75
@@ -907,7 +909,13 @@ rules:
       dest_port_in: [22]
       protocol_in: ["tcp"]
 
+  # Disabled: Fires on any TCP connection to 443/80/8080/8443, including every
+    # connection this agent makes to the XDR platform. There is no byte-volume
+    # condition in the rule schema, so "large transfer" is not expressible yet.
+    # Re-enable once a bytes_out threshold exists AND the network collectors
+    # populate BytesOut, which they currently never do.
   - id: "NET-012"
+    enabled: false
     name: "Large data transfer to external host"
     severity: "high"
     score: 75
@@ -950,7 +958,10 @@ rules:
   # AUTH RULES  (AUTH-001 → AUTH-010)
   # ───────────────────────────────────────────────────────────────────────────
 
+  # Disabled: Fires on every single authentication failure. "Multiple" needs a count
+    # and a window, neither of which the condition schema supports.
   - id: "AUTH-001"
+    enabled: false
     name: "Multiple failed login attempts"
     severity: "high"
     score: 80
@@ -959,7 +970,10 @@ rules:
     when:
       outcome_in: ["failure", "failed", "denied"]
 
+  # Disabled: No time condition exists, so this fires on every successful interactive
+    # login rather than after-hours ones.
   - id: "AUTH-002"
+    enabled: false
     name: "After-hours login"
     severity: "medium"
     score: 55
@@ -1036,7 +1050,10 @@ rules:
     when:
       auth_type_in: ["publickey", "ssh_key"]
 
+  # Disabled: No concurrency and no source-IP condition, so this fires on every
+    # successful interactive login.
   - id: "AUTH-010"
+    enabled: false
     name: "Concurrent sessions from different IPs"
     severity: "high"
     score: 80
