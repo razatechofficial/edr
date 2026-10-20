@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,24 +22,24 @@ import (
 )
 
 const (
-	rawHdrSize      = 26
-	bpfEvtProcExec  = 1
-	bpfEvtProcExit  = 2
-	bpfEvtProcFork  = 3
-	bpfEvtFileOpen  = 6
-	bpfEvtFileWrite = 7
-	bpfEvtFileDel   = 8
-	bpfEvtFileRen   = 9
-	bpfEvtFileChmod = 28
+	rawHdrSize          = 26
+	bpfEvtProcExec      = 1
+	bpfEvtProcExit      = 2
+	bpfEvtProcFork      = 3
+	bpfEvtFileOpen      = 6
+	bpfEvtFileWrite     = 7
+	bpfEvtFileDel       = 8
+	bpfEvtFileRen       = 9
+	bpfEvtFileChmod     = 28
 	bpfEvtLSMFimUnlink  = 39
 	bpfEvtLSMFimRename  = 40
 	bpfEvtLSMFimSetattr = 41
-	bpfEvtNetConn   = 11
-	bpfEvtNetAccept = 12
-	bpfEvtNetBind   = 13
-	bpfEvtNetClose  = 14
-	bpfEvtModule    = 22
-	bpfEvtDNSQuery  = 35
+	bpfEvtNetConn       = 11
+	bpfEvtNetAccept     = 12
+	bpfEvtNetBind       = 13
+	bpfEvtNetClose      = 14
+	bpfEvtModule        = 22
+	bpfEvtDNSQuery      = 35
 )
 
 // KernelCollector wraps the eBPF kernel driver and presents its real-time
@@ -61,8 +60,13 @@ type KernelCollector struct {
 
 	jsonMapOpts KernelJSONOpts
 
-	mu     sync.Mutex
-	events []Telemetry
+	// queue is the bounded hand-off to Collect(). It replaced an
+	// unbounded `events []Telemetry` that readLoop appended to and
+	// Collect() set to nil: with the reader running at kernel event rate
+	// and Collect() running once per agent cycle, any slow cycle grew that
+	// slice for as long as the stall lasted, with no ceiling and no drop
+	// counter. See event_queue.go.
+	queue  *TelemetryQueue
 	cancel context.CancelFunc
 }
 
@@ -126,6 +130,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		},
 	}
 	kc.prio = newKernelRingPriority(cfg)
+	kc.queue = NewTelemetryQueue(cfg)
 	return kc
 }
 
@@ -156,6 +161,7 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if pd := kc.priorityDrop.Load(); pd > 0 {
 		extras["priority_sampling_kernel_drops"] = pd
 	}
+	extras = kc.queue.HealthExtras(extras)
 	tamperSignals := map[string]any{}
 	for k, v := range kc.driver.TamperMetrics() {
 		extras[k] = v
@@ -185,11 +191,7 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 
 // Collect drains buffered kernel events.
 func (kc *KernelCollector) Collect(_ context.Context) ([]Telemetry, error) {
-	kc.mu.Lock()
-	batch := kc.events
-	kc.events = nil
-	kc.mu.Unlock()
-	return batch, nil
+	return kc.queue.Drain(), nil
 }
 
 func (kc *KernelCollector) Stop() {
@@ -231,9 +233,11 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 			continue
 		}
 		kc.maybeEnrichProcessImageHash(tel)
-		kc.mu.Lock()
-		kc.events = append(kc.events, *tel)
-		kc.mu.Unlock()
+		// A refused push is already counted by the queue and reported
+		// as event_queue_dropped_full, and there is deliberately
+		// nowhere else to put the event: a second buffer behind a
+		// bounded one is an unbounded buffer.
+		kc.queue.Push(*tel)
 	}
 }
 
