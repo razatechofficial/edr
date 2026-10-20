@@ -1,11 +1,32 @@
 package rules
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/razatechofficial/edr/pkg/events"
 )
+
+// reSigmaTechniqueTag matches the technique half of a Sigma attack tag:
+// "t1059" or "t1059.001", which is what every rule in rules/sigma carries.
+//
+// It exists so a technique the curated table has never heard of still comes
+// back with its ID. The table is a convenience for names and tactics, not the
+// authority on which techniques exist — ATT&CK adds techniques faster than any
+// hand-maintained Go slice is updated, and a rule that fires with no technique
+// ID is a rule the console cannot attribute, the validation suite cannot match
+// (it compares on TechniqueID) and an analyst cannot pivot from.
+var reSigmaTechniqueTag = regexp.MustCompile(`^t([0-9]{4})(\.([0-9]{3}))?$`)
+
+// canonicalTechniqueID converts a Sigma tag body to an ATT&CK technique ID,
+// reporting whether it is a well-formed one.
+func canonicalTechniqueID(value string) (string, bool) {
+	if !reSigmaTechniqueTag.MatchString(value) {
+		return "", false
+	}
+	return strings.ToUpper(value), true
+}
 
 // Technique represents a MITRE ATT&CK technique.
 type Technique struct {
@@ -66,6 +87,8 @@ func (m *MITREMapper) initTechniques() {
 	winLinux := []string{"linux", "windows"}
 	winOnly := []string{"windows"}
 	linMac := []string{"linux", "macos"}
+	macOnly := []string{"macos"}
+	linuxOnly := []string{"linux"}
 
 	defs := []Technique{
 		// TA0001 - Initial Access
@@ -215,6 +238,89 @@ func (m *MITREMapper) initTechniques() {
 		{ID: "T1491", Name: "Defacement", TacticID: "TA0040", TacticName: "Impact", Platforms: allPlatforms},
 		{ID: "T1496", Name: "Resource Hijacking", TacticID: "TA0040", TacticName: "Impact", Platforms: allPlatforms},
 		{ID: "T1561", Name: "Disk Wipe", TacticID: "TA0040", TacticName: "Impact", Platforms: allPlatforms},
+
+		// Techniques cited by rules/sigma that this table did not list.
+		//
+		// MapSigmaTag now reports a well-formed technique ID whether or
+		// not it is here, so a gap no longer means an empty MITRE
+		// slice. What it still means is a missing technique name and,
+		// for a technique with no known parent, a tactic that has to be
+		// inferred from the rule's own tactic tag. These 64 entries
+		// close the gap for the corpus as it stands:
+		// TestSigmaCorpusTagsAllMapToTechniques walks every .yml under
+		// rules/sigma and fails on a tag that still resolves to no
+		// technique name, so adding a rule for an unlisted technique
+		// says so here rather than shipping a half-attributed alert.
+		//
+		// Tactic is the primary ATT&CK tactic for each technique. A
+		// handful (T1484, T1556, T1574) are listed under two or three
+		// tactics upstream; the one recorded is the tactic these rules
+		// detect them under, which is also what MapSigmaTags would
+		// otherwise take from the rule tag.
+		{ID: "T1595.002", Name: "Vulnerability Scanning", TacticID: "TA0043", TacticName: "Reconnaissance", Platforms: allPlatforms},
+		{ID: "T1098", Name: "Account Manipulation", TacticID: "TA0003", TacticName: "Persistence", Platforms: allPlatforms},
+		{ID: "T1098.004", Name: "SSH Authorized Keys", TacticID: "TA0003", TacticName: "Persistence", Platforms: linMac},
+		{ID: "T1037.001", Name: "Logon Script (Windows)", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1137", Name: "Office Application Startup", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1176", Name: "Browser Extensions", TacticID: "TA0003", TacticName: "Persistence", Platforms: allPlatforms},
+		{ID: "T1542.003", Name: "Bootkit", TacticID: "TA0003", TacticName: "Persistence", Platforms: winLinux},
+		{ID: "T1546", Name: "Event Triggered Execution", TacticID: "TA0003", TacticName: "Persistence", Platforms: allPlatforms},
+		{ID: "T1546.001", Name: "Change Default File Association", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1546.002", Name: "Screensaver", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1546.003", Name: "Windows Management Instrumentation Event Subscription", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1546.004", Name: "Unix Shell Configuration Modification", TacticID: "TA0003", TacticName: "Persistence", Platforms: linMac},
+		{ID: "T1546.007", Name: "Netsh Helper DLL", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1546.008", Name: "Accessibility Features", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1546.011", Name: "Application Shimming", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1546.012", Name: "Image File Execution Options Injection", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1546.015", Name: "Component Object Model Hijacking", TacticID: "TA0003", TacticName: "Persistence", Platforms: winOnly},
+		{ID: "T1554", Name: "Compromise Host Software Binary", TacticID: "TA0003", TacticName: "Persistence", Platforms: allPlatforms},
+		{ID: "T1574", Name: "Hijack Execution Flow", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: allPlatforms},
+		{ID: "T1574.001", Name: "DLL Search Order Hijacking", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: winOnly},
+		{ID: "T1574.002", Name: "DLL Side-Loading", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: winOnly},
+		{ID: "T1574.006", Name: "Dynamic Linker Hijacking", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: linMac},
+		{ID: "T1574.010", Name: "Services File Permissions Weakness", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: winOnly},
+		{ID: "T1574.011", Name: "Services Registry Permissions Weakness", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: winOnly},
+		{ID: "T1484", Name: "Domain or Tenant Policy Modification", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: winOnly},
+		{ID: "T1014", Name: "Rootkit", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: allPlatforms},
+		{ID: "T1197", Name: "BITS Jobs", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: winOnly},
+		{ID: "T1202", Name: "Indirect Command Execution", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: winOnly},
+		{ID: "T1220", Name: "XSL Script Processing", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: winOnly},
+		{ID: "T1221", Name: "Template Injection", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: winOnly},
+		{ID: "T1222", Name: "File and Directory Permissions Modification", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: allPlatforms},
+		{ID: "T1222.002", Name: "Linux and Mac File and Directory Permissions Modification", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: linMac},
+		{ID: "T1480", Name: "Execution Guardrails", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: allPlatforms},
+		{ID: "T1480.001", Name: "Environmental Keying", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: allPlatforms},
+		{ID: "T1553", Name: "Subvert Trust Controls", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: allPlatforms},
+		{ID: "T1553.001", Name: "Gatekeeper Bypass", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: macOnly},
+		{ID: "T1553.002", Name: "Code Signing", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: allPlatforms},
+		{ID: "T1610", Name: "Deploy Container", TacticID: "TA0005", TacticName: "Defense Evasion", Platforms: linuxOnly},
+		{ID: "T1611", Name: "Escape to Host", TacticID: "TA0004", TacticName: "Privilege Escalation", Platforms: linuxOnly},
+		{ID: "T1648", Name: "Serverless Execution", TacticID: "TA0002", TacticName: "Execution", Platforms: allPlatforms},
+		{ID: "T1129", Name: "Shared Modules", TacticID: "TA0002", TacticName: "Execution", Platforms: allPlatforms},
+		{ID: "T1559", Name: "Inter-Process Communication", TacticID: "TA0002", TacticName: "Execution", Platforms: allPlatforms},
+		{ID: "T1559.001", Name: "Component Object Model", TacticID: "TA0002", TacticName: "Execution", Platforms: winOnly},
+		{ID: "T1555", Name: "Credentials from Password Stores", TacticID: "TA0006", TacticName: "Credential Access", Platforms: allPlatforms},
+		{ID: "T1555.001", Name: "Keychain", TacticID: "TA0006", TacticName: "Credential Access", Platforms: macOnly},
+		{ID: "T1555.003", Name: "Credentials from Web Browsers", TacticID: "TA0006", TacticName: "Credential Access", Platforms: allPlatforms},
+		{ID: "T1556", Name: "Modify Authentication Process", TacticID: "TA0006", TacticName: "Credential Access", Platforms: allPlatforms},
+		{ID: "T1539", Name: "Steal Web Session Cookie", TacticID: "TA0006", TacticName: "Credential Access", Platforms: allPlatforms},
+		{ID: "T1558.003", Name: "Kerberoasting", TacticID: "TA0006", TacticName: "Credential Access", Platforms: winOnly},
+		{ID: "T1558.004", Name: "AS-REP Roasting", TacticID: "TA0006", TacticName: "Credential Access", Platforms: winOnly},
+		{ID: "T1007", Name: "System Service Discovery", TacticID: "TA0007", TacticName: "Discovery", Platforms: allPlatforms},
+		{ID: "T1046", Name: "Network Service Discovery", TacticID: "TA0007", TacticName: "Discovery", Platforms: allPlatforms},
+		{ID: "T1120", Name: "Peripheral Device Discovery", TacticID: "TA0007", TacticName: "Discovery", Platforms: allPlatforms},
+		{ID: "T1614", Name: "System Location Discovery", TacticID: "TA0007", TacticName: "Discovery", Platforms: allPlatforms},
+		{ID: "T1205.001", Name: "Port Knocking", TacticID: "TA0011", TacticName: "Command and Control", Platforms: allPlatforms},
+		{ID: "T1001", Name: "Data Obfuscation", TacticID: "TA0011", TacticName: "Command and Control", Platforms: allPlatforms},
+		{ID: "T1008", Name: "Fallback Channels", TacticID: "TA0011", TacticName: "Command and Control", Platforms: allPlatforms},
+		{ID: "T1104", Name: "Multi-Stage Channels", TacticID: "TA0011", TacticName: "Command and Control", Platforms: allPlatforms},
+		{ID: "T1219", Name: "Remote Access Software", TacticID: "TA0011", TacticName: "Command and Control", Platforms: allPlatforms},
+		{ID: "T1029", Name: "Scheduled Transfer", TacticID: "TA0010", TacticName: "Exfiltration", Platforms: allPlatforms},
+		{ID: "T1030", Name: "Data Transfer Size Limits", TacticID: "TA0010", TacticName: "Exfiltration", Platforms: allPlatforms},
+		{ID: "T1548.003", Name: "Sudo and Sudo Caching", TacticID: "TA0004", TacticName: "Privilege Escalation", Platforms: linMac},
+		{ID: "T1531", Name: "Account Access Removal", TacticID: "TA0040", TacticName: "Impact", Platforms: allPlatforms},
+		{ID: "T1565.001", Name: "Stored Data Manipulation", TacticID: "TA0040", TacticName: "Impact", Platforms: allPlatforms},
 	}
 
 	for i := range defs {
@@ -236,6 +342,12 @@ func (m *MITREMapper) MapSigmaTag(tag string) *events.MITREAttack {
 		return nil
 	}
 	value := strings.TrimPrefix(tag, "attack.")
+	// Sigma tactic tags appear both hyphenated and underscored —
+	// "attack.privilege-escalation" and "attack.privilege_escalation" are
+	// the same tactic, and the corpus contains both. tagMap is keyed with
+	// underscores, so a hyphenated tag used to miss and the rule lost its
+	// tactic for no reason an author could have seen.
+	value = strings.ReplaceAll(value, "-", "_")
 
 	if id, ok := m.tagMap[value]; ok {
 		if strings.HasPrefix(id, "TA") {
@@ -266,7 +378,79 @@ func (m *MITREMapper) MapSigmaTag(tag string) *events.MITREAttack {
 		}
 	}
 
-	return nil
+	// A well-formed technique tag the table does not list still yields its
+	// ID. Returning nil here was the single biggest hole in ATT&CK
+	// attribution: 113 of the 216 distinct technique tags across
+	// rules/sigma named techniques absent from initTechniques, so every
+	// alert from those rules shipped with an empty MITRE slice.
+	//
+	// For an unknown sub-technique the parent is consulted. ATT&CK
+	// sub-techniques always sit under their parent's tactic, so inheriting
+	// the parent's tactic is a fact about the model and not a guess; the
+	// parent's name is carried too, because "Hijack Execution Flow" on
+	// T1574.004 is more use to an analyst than a bare ID.
+	id, ok := canonicalTechniqueID(value)
+	if !ok {
+		return nil
+	}
+	out := &events.MITREAttack{TechniqueID: id}
+	if parent, _, isSub := strings.Cut(id, "."); isSub {
+		if pt, pok := m.techniques[parent]; pok {
+			out.TechniqueName = pt.Name
+			out.TacticID = pt.TacticID
+			out.TacticName = pt.TacticName
+		}
+	}
+	return out
+}
+
+// MapSigmaTags maps every attack tag on one rule, resolving each technique's
+// tactic from the rule's own tactic tag when the technique table cannot supply
+// one.
+//
+// Per-tag mapping alone cannot do this: "attack.t1546.013" and
+// "attack.persistence" are separate tags, and only together do they say which
+// tactic the technique was cited under. Mapping them one at a time produced an
+// alert carrying a tactic-only entry with no technique next to a technique
+// entry with no tactic, and every consumer that keys on TechniqueID (the
+// dedup key in internal/detection/dedup.go, the technique dedup in
+// engine.go, the validation suite's match) saw the first as a duplicate empty
+// string.
+//
+// A tactic-only result is returned only when the rule cites no technique at
+// all, which is the one case where it is the whole of what the rule claims.
+func (m *MITREMapper) MapSigmaTags(tags []string) []events.MITREAttack {
+	var techniques []events.MITREAttack
+	var tacticID, tacticName string
+
+	for _, tag := range tags {
+		mt := m.MapSigmaTag(tag)
+		if mt == nil {
+			continue
+		}
+		if mt.TechniqueID == "" {
+			// A tactic tag. First one wins: a rule citing two
+			// tactics has no way to say which technique belongs to
+			// which, and inventing an answer would be worse than
+			// attributing to the one it named first.
+			if tacticID == "" {
+				tacticID, tacticName = mt.TacticID, mt.TacticName
+			}
+			continue
+		}
+		techniques = append(techniques, *mt)
+	}
+
+	for i := range techniques {
+		if techniques[i].TacticID == "" {
+			techniques[i].TacticID = tacticID
+			techniques[i].TacticName = tacticName
+		}
+	}
+	if len(techniques) == 0 && tacticID != "" {
+		return []events.MITREAttack{{TacticID: tacticID, TacticName: tacticName}}
+	}
+	return techniques
 }
 
 // MapTechnique looks up a MITRE ATT&CK technique by its ID (e.g., "T1059.001").
