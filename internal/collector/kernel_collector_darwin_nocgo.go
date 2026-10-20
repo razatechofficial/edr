@@ -24,8 +24,11 @@ type KernelCollector struct {
 	endpointID string
 	hostname   string
 
+	// queue is the bounded hand-off to Collect(); see event_queue.go. It
+	// has its own locking, so mu below now guards only cancel.
+	queue *TelemetryQueue
+
 	mu     sync.Mutex
-	events []Telemetry
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
@@ -44,17 +47,14 @@ func NewKernelCollector(endpointID string, cfg config.Config, _ *UsernameCache) 
 		cfg:        cfg,
 		endpointID: endpointID,
 		hostname:   host,
+		queue:      NewTelemetryQueue(cfg),
 	}
 }
 
 func (kc *KernelCollector) Name() string { return "kernel" }
 
 func (kc *KernelCollector) Collect(context.Context) ([]Telemetry, error) {
-	kc.mu.Lock()
-	batch := kc.events
-	kc.events = nil
-	kc.mu.Unlock()
-	return batch, nil
+	return kc.queue.Drain(), nil
 }
 
 func (kc *KernelCollector) Start(ctx context.Context) error {
@@ -88,14 +88,14 @@ func (kc *KernelCollector) Stop() {
 
 func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	src := MonitoringSource{
-		Name:   "kernel",
-		OS:     runtime.GOOS,
-		Source: "darwin_userland_log_stream",
-		Status: "healthy",
-		EPSIn:  kc.epsIn.Load(),
-		EPSOut: kc.epsOut.Load(),
+		Name:    "kernel",
+		OS:      runtime.GOOS,
+		Source:  "darwin_userland_log_stream",
+		Status:  "healthy",
+		EPSIn:   kc.epsIn.Load(),
+		EPSOut:  kc.epsOut.Load(),
 		Dropped: kc.dropped.Load(),
-		Notes:  "darwin no-cgo kernel-equivalent: process/file/network/auth stream",
+		Notes:   "darwin no-cgo kernel-equivalent: process/file/network/auth stream",
 	}
 	if errPtr := kc.errs.Load(); errPtr != nil && *errPtr != "" {
 		src.Status = "degraded"
@@ -137,10 +137,11 @@ func (kc *KernelCollector) runLogStream(ctx context.Context) {
 		if len(tels) == 0 {
 			continue
 		}
-		kc.mu.Lock()
-		kc.events = append(kc.events, tels...)
-		kc.mu.Unlock()
-		kc.epsOut.Add(uint64(len(tels)))
+		kept := kc.queue.PushAll(tels)
+		kc.epsOut.Add(uint64(kept))
+		if kept < len(tels) {
+			kc.dropped.Add(uint64(len(tels) - kept))
+		}
 	}
 	if err := sc.Err(); err != nil {
 		kc.recordError(err)
@@ -198,4 +199,3 @@ func (kc *KernelCollector) recordError(err error) {
 	msg := err.Error()
 	kc.errs.Store(&msg)
 }
-

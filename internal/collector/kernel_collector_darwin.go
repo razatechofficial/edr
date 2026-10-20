@@ -25,8 +25,11 @@ type KernelCollector struct {
 	cfg        config.Config
 	users      *UsernameCache
 
-	mu     sync.Mutex
-	events []Telemetry
+	// queue is the bounded hand-off to Collect(); see event_queue.go. It
+	// replaced an unbounded `events []Telemetry` that three producers
+	// appended to — the ESF read loop, the network-extension reader and
+	// the FSEvents fallback — with no ceiling and no drop counter.
+	queue  *TelemetryQueue
 	cancel context.CancelFunc
 
 	neCtl    *kernel.NetworkExtensionCtl
@@ -62,6 +65,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 			users:        users,
 			fallbackFile: NewFSEventsFallbackSource(endpointID, host, cfg.Monitoring.FIMPaths),
 			fallbackMode: true,
+			queue:        NewTelemetryQueue(cfg),
 			jsonMapOpts: KernelJSONOpts{
 				TLSFingerprintLocal:       cfg.Monitoring.TLSFingerprintLocal,
 				TLSFingerprintServerLocal: cfg.Monitoring.TLSFingerprintServerLocal,
@@ -87,6 +91,7 @@ func NewKernelCollector(endpointID string, cfg config.Config, users *UsernameCac
 		},
 	}
 	kc.prio = newKernelRingPriority(cfg)
+	kc.queue = NewTelemetryQueue(cfg)
 	return kc
 }
 
@@ -126,6 +131,7 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if pd := kc.priorityDrop.Load(); pd > 0 {
 		extras["priority_sampling_kernel_drops"] = pd
 	}
+	extras = kc.queue.HealthExtras(extras)
 	rs := kc.buf.Stats()
 	extras["ring_bytes_used"] = rs.BytesUsed
 	extras["ring_capacity_bytes"] = rs.Capacity
@@ -201,11 +207,7 @@ func (kc *KernelCollector) Start(ctx context.Context) error {
 }
 
 func (kc *KernelCollector) Collect(_ context.Context) ([]Telemetry, error) {
-	kc.mu.Lock()
-	batch := kc.events
-	kc.events = nil
-	kc.mu.Unlock()
-	return batch, nil
+	return kc.queue.Drain(), nil
 }
 
 func (kc *KernelCollector) Stop() {
@@ -248,9 +250,7 @@ func (kc *KernelCollector) neIPCLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case t := <-ch:
-				kc.mu.Lock()
-				kc.events = append(kc.events, t)
-				kc.mu.Unlock()
+				kc.queue.Push(t)
 			}
 		}
 	}()
@@ -303,9 +303,7 @@ func (kc *KernelCollector) readLoop(ctx context.Context) {
 			continue
 		}
 		kc.maybeEnrichProcessImageHash(tel)
-		kc.mu.Lock()
-		kc.events = append(kc.events, *tel)
-		kc.mu.Unlock()
+		kc.queue.Push(*tel)
 	}
 }
 
@@ -324,9 +322,7 @@ func (kc *KernelCollector) fallbackLoop(ctx context.Context) {
 			if len(evs) == 0 {
 				continue
 			}
-			kc.mu.Lock()
-			kc.events = append(kc.events, evs...)
-			kc.mu.Unlock()
+			kc.queue.PushAll(evs)
 		}
 	}
 }
