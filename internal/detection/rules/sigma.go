@@ -311,11 +311,10 @@ func (e *SigmaEngine) Evaluate(event map[string]interface{}) []*events.Alert {
 			RawEvent:    event,
 		}
 
-		for _, tag := range eval.Tags {
-			if m := e.mapper.MapSigmaTag(tag); m != nil {
-				alert.MITRE = append(alert.MITRE, *m)
-			}
-		}
+		// Map the rule's tags as a set rather than one at a time: the
+		// technique tag and the tactic tag are separate tags and only
+		// together say which tactic the technique was cited under.
+		alert.MITRE = e.mapper.MapSigmaTags(eval.Tags)
 		alerts = append(alerts, alert)
 	}
 	return alerts
