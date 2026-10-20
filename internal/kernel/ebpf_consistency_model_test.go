@@ -83,19 +83,6 @@ type LoaderModel struct {
 	Source string
 }
 
-const (
-	// ebpfTracepointPrefix is the Go symbol prefix attachTracepoints keys
-	// off (driver_linux.go, attachTracepoints). The remainder is split on
-	// the first "__" into tracepoint group and name.
-	ebpfTracepointPrefix = "tracepoint__"
-
-	// ebpfLSMFimPrefix is the Go symbol prefix attachLSMPrograms keys off
-	// (driver_linux.go, attachLSMPrograms). LSM programs not named this way
-	// are skipped on purpose there — the comment says "enforcement hooks" —
-	// but the effect is the same as an oversight: they never attach.
-	ebpfLSMFimPrefix = "fim_"
-)
-
 var (
 	// A program is `SEC("...")` on one line and the function on the next,
 	// either plain (`int name(ctx)`) or wrapped in BPF_PROG for LSM and
@@ -334,13 +321,20 @@ func lineOfOffset(src string, off int) int {
 // them the model comes back empty and the tests say so instead of passing
 // vacuously.
 func ParseLoaderModel(kernelDir string) (*LoaderModel, error) {
-	// ebpf_watchdog_linux.go is included because it also calls
-	// link.AttachLSM and link.Tracepoint. It only ever re-attaches from a
-	// spec recorded at first attach, so it adds no new attach path today —
-	// but a link.Kprobe appearing there would be just as much a change to
-	// the loader's capabilities as one in driver_linux.go, and the guard
-	// below should see it.
-	wantFiles := []string{"driver_linux.go", "self_exclude_linux.go", "ebpf_watchdog_linux.go"}
+	// ebpf_attach.go and ebpf_attach_linux.go hold the attach planner and
+	// the attach calls; driver_linux.go only calls into them. They are read
+	// here so TestEBPFLoaderAttachMechanismsUnchanged sees the whole attach
+	// surface in one string — a link.Fentry appearing in any of these files
+	// is a change to what the loader can reach and the guard should catch
+	// it wherever it lands. ebpf_watchdog_linux.go is included for the same
+	// reason: it re-attaches links after a tamper signal.
+	wantFiles := []string{
+		"driver_linux.go",
+		"self_exclude_linux.go",
+		"ebpf_watchdog_linux.go",
+		"ebpf_attach.go",
+		"ebpf_attach_linux.go",
+	}
 	var sb strings.Builder
 	for _, f := range wantFiles {
 		raw, err := os.ReadFile(filepath.Join(kernelDir, f))
@@ -393,25 +387,33 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
-// LoaderAttachesProgram mirrors the attach predicates the Linux loader applies
-// and reports whether prog gets an attach call, plus the mechanism name.
+// LoaderAttachesProgram reports whether the loader makes an attach call for
+// prog, plus the name of the attach call it makes.
 //
-// This is a model of driver_linux.go, not a reading of it, so it can drift.
-// TestEBPFLoaderAttachMechanismsUnchanged exists to catch that drift: it
-// asserts the loader still keys off exactly these two prefixes and still makes
-// no kprobe or kretprobe attach call. Change the loader and that test tells
-// you to change this function.
+// This used to be a hand-written model of attachTracepoints and
+// attachLSMPrograms, which keyed off Go symbol prefixes, and it could drift
+// from the loader it modelled. It no longer models anything: it calls
+// ebpfAttachDecision, the same function attachPrograms calls, over the SEC()
+// string parsed out of the C. Loader and test cannot disagree about which
+// programs get an attach call, because there is only one answer and both read
+// it from the same place.
+//
+// "Makes an attach call" is still not "is attached": the kernel can refuse,
+// and that is a runtime fact these static tests cannot see. The capability
+// report covers it, from d.attachMisses.
 func LoaderAttachesProgram(prog EBPFProgram) (bool, string) {
-	if strings.HasPrefix(prog.Name, ebpfTracepointPrefix) {
-		rest := prog.Name[len(ebpfTracepointPrefix):]
-		// attachTracepoints needs a "group__tp" split in the remainder;
-		// without it the program is skipped with `continue`.
-		if i := strings.Index(rest, "__"); i > 0 && i+2 < len(rest) {
-			return true, "link.Tracepoint"
-		}
+	target, attempt, _ := ebpfAttachDecision(prog.Name, prog.Section)
+	if !attempt {
 		return false, ""
 	}
-	if strings.HasPrefix(prog.Section, "lsm/") && strings.HasPrefix(prog.Name, ebpfLSMFimPrefix) {
+	switch target.Kind {
+	case ebpfAttachTracepoint:
+		return true, "link.Tracepoint"
+	case ebpfAttachKprobe:
+		return true, "link.Kprobe"
+	case ebpfAttachKretprobe:
+		return true, "link.Kretprobe"
+	case ebpfAttachLSM:
 		return true, "link.AttachLSM"
 	}
 	return false, ""

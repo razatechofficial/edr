@@ -18,7 +18,7 @@ package kernel
 //     to, so the reader goroutine blocks forever and the buffer's locked
 //     kernel memory is wasted.
 //
-// All four are present in the tree today. Rather than paper over them, each
+// All four were present in the tree. Rather than paper over them, each
 // failing item is listed in an allowlist below with the reason it fails and a
 // TODO. The tests pass, the debt is enumerated in source, and anything *new*
 // that regresses in the same way fails the build. The allowlists are also
@@ -38,54 +38,33 @@ import (
 // knownUnattachedPrograms lists every eBPF program that exists in the sources
 // and that the loader never attaches, with the reason.
 //
-// The loader has exactly two attach paths (driver_linux.go: attachTracepoints
-// keys off the Go symbol prefix "tracepoint__", attachLSMPrograms off "fim_").
-// There is no link.Kprobe or link.Kretprobe call anywhere in the tree, so
-// every kprobe and kretprobe program below is dead on arrival, and every
-// tracepoint program whose C function was named something other than
-// tracepoint__<group>__<name> is skipped by the prefix check.
+// This list held 23 entries. The loader had two attach paths keyed off Go
+// symbol names — attachTracepoints on the "tracepoint__" prefix,
+// attachLSMPrograms on "fim_" — and made no kprobe or kretprobe attach call at
+// all, so nine kprobes were dead on arrival, seven LSM programs were skipped
+// by a prefix check and seven tracepoints were skipped because their C author
+// chose a different function name. attachPrograms now plans from each
+// program's SEC() string (ebpf_attach.go, ebpfAttachDecision) and calls
+// link.Tracepoint, link.Kprobe, link.Kretprobe or link.AttachLSM accordingly,
+// so all 23 of those causes are gone.
 //
-// TODO(monitoring): the fix is to attach by SEC() rather than by Go symbol
-// name — the section string already states the attach type and target for
-// every program here — and to add link.Kprobe/link.Kretprobe support. Until
-// then DNS, UDP, TCP-close, byte-count, TLS-SNI, scheduler and LSM telemetry
-// are compiled, loaded and silent.
+// The three left are not loader defects. They are LSM *enforcement* hooks that
+// return -EPERM on a deny-list hit, and the decision not to attach them is
+// recorded in ebpfEnforcementLSMPrograms with the full reasoning. Attaching
+// one would give the agent the power to block exec, file opens or outbound
+// connections host-wide, with no policy surface, no kill switch and no audit
+// trail — and because nothing writes their deny-list maps, it would also
+// produce no telemetry at all in exchange.
+//
+// TODO(monitoring): if deny-list enforcement is wanted, it needs a policy
+// surface — EventPolicy fields that write exec_deny_list, file_deny_list and
+// connect_deny_list, an operator-visible kill switch, and a blocked-action
+// event — and then these three attach as part of that feature. Attaching them
+// without it is not a fix.
 var knownUnattachedPrograms = map[string]string{
-	// kprobe/kretprobe: no link.Kprobe or link.Kretprobe call exists.
-	// TODO(monitoring): add kprobe attach support to the loader.
-	"kprobe_mem_write":       "SEC(kprobe/mem_write); loader makes no link.Kprobe call, so /proc/pid/mem write telemetry never fires",
-	"kp_tcp_v4_connect":      "SEC(kprobe/tcp_v4_connect); no link.Kprobe call. IPv4 connect detail (socket-level, post-DNS) is lost; only the connect(2) tracepoint survives",
-	"kp_tcp_v6_connect":      "SEC(kprobe/tcp_v6_connect); no link.Kprobe call. IPv6 connect detail is lost",
-	"kp_udp_sendmsg":         "SEC(kprobe/udp_sendmsg); no link.Kprobe call. All outbound UDP telemetry is lost, which includes DNS egress",
-	"kp_udp_recvmsg":         "SEC(kprobe/udp_recvmsg); no link.Kprobe call. Inbound UDP telemetry is lost",
-	"kretp_udp_recvmsg":      "SEC(kretprobe/udp_recvmsg); no link.Kretprobe call. The return-side half of UDP receive, which carries the payload length, is lost",
-	"kp_tcp_close":           "SEC(kprobe/tcp_close); no link.Kprobe call. Connection teardown and the byte counts attached to it are never reported",
-	"kp_inet_sock_set_state": "SEC(kprobe/inet_sock_set_state); no link.Kprobe call. TCP state transitions are never reported",
-	"kp_tls_tcp_sendmsg":     "SEC(kprobe/tcp_sendmsg); no link.Kprobe call. TLS ClientHello SNI extraction never runs, and tls_events has no attached producer as a result",
-
-	// LSM programs not named fim_*: attachLSMPrograms skips them.
-	// TODO(monitoring): decide per program whether it should attach as an
-	// observer; lsm_hooks.c submits to lsm_events, which has a Go reader.
-	"lsm_bprm_check":            "SEC(lsm/bprm_check_security); attachLSMPrograms only attaches the fim_ prefix, so this is skipped. It submits to lsm_events, which a Go reader opens",
-	"lsm_file_open":             "SEC(lsm/file_open); skipped by the fim_ prefix check. Submits to lsm_events",
-	"lsm_socket_connect":        "SEC(lsm/socket_connect); skipped by the fim_ prefix check. Submits to lsm_events",
-	"lsm_task_kill":             "SEC(lsm/task_kill); skipped by the fim_ prefix check. Submits to lsm_events",
-	"lsm_kernel_module_request": "SEC(lsm/kernel_module_request); skipped by the fim_ prefix check. Submits to lsm_events",
-	"lsm_bpf_prog":              "SEC(lsm/bpf); skipped by the fim_ prefix check. BPF-loading-BPF detection never fires",
-	"lsm_bpf_map_prog":          "SEC(lsm/bpf_map); skipped by the fim_ prefix check. BPF map tampering detection never fires",
-
-	// Tracepoint programs whose C function name does not start with
-	// tracepoint__, so attachTracepoints' prefix check skips them even
-	// though the SEC() names a perfectly attachable tracepoint.
-	// TODO(monitoring): rename to tracepoint__<group>__<name>, or switch the
-	// loader to attach from SEC(). Renaming is the one-line fix.
-	"tp_dns_sendto":             "SEC(tracepoint/syscalls/sys_enter_sendto) but named tp_dns_sendto, so the tracepoint__ prefix check skips it. This is the only DNS query program; DNS telemetry from eBPF is entirely absent. Note syscall_monitor.c declares the same tracepoint as tracepoint__syscalls__sys_enter_sendto and that one does attach, so the tracepoint is occupied but the DNS parsing never runs",
-	"tp_cgroup_attach":          "SEC(tracepoint/cgroup/cgroup_attach_task) but named tp_cgroup_attach; skipped by the tracepoint__ prefix check. Container escape signal is absent",
-	"tp_cgroup_mkdir":           "SEC(tracepoint/cgroup/cgroup_mkdir) but named tp_cgroup_mkdir; skipped by the prefix check",
-	"tp_seccomp":                "SEC(tracepoint/syscalls/sys_enter_seccomp) but named tp_seccomp; skipped by the prefix check",
-	"edr_tp_sched_switch":       "SEC(tracepoint/sched/sched_switch) but named edr_tp_sched_switch; skipped by the prefix check. sched_events has a Go reader and a passing decoder unit test for data that cannot arrive",
-	"edr_tp_sched_wakeup":       "SEC(tracepoint/sched/sched_wakeup) but named edr_tp_sched_wakeup; skipped by the prefix check",
-	"edr_tp_sched_migrate_task": "SEC(tracepoint/sched/sched_migrate_task) but named edr_tp_sched_migrate_task; skipped by the prefix check",
+	"lsm_bprm_check":     "SEC(lsm/bprm_check_security); enforcement hook, deliberately not attached. It returns -EPERM when the executable path is in exec_deny_list, which would block process execution host-wide, and it submits to lsm_events only on that same deny hit. Nothing in the agent writes exec_deny_list, so attaching it today buys zero telemetry and risks blocking execs",
+	"lsm_file_open":      "SEC(lsm/file_open); enforcement hook, deliberately not attached. Returns -EPERM on a file_deny_list hit, which would block opens host-wide, and emits only on that hit. Nothing writes file_deny_list. It would also run a 256-byte-key hash lookup on every open(2) on the host to decide to do nothing",
+	"lsm_socket_connect": "SEC(lsm/socket_connect); enforcement hook, deliberately not attached. Returns -EPERM on a connect_deny_list hit, which would block outbound connections host-wide, and emits only on that hit. Nothing writes connect_deny_list",
 }
 
 // knownGoMapsMissingFromC lists maps userspace writes that no .c file defines.
@@ -115,19 +94,28 @@ var knownUnreadMaps = map[string]string{
 // knownRingbufsWithoutAttachedProducer lists ring buffers a Go reader opens
 // where the C programs that submit to them are never attached.
 //
-// Each costs a blocked goroutine plus the buffer's locked kernel memory. The
-// three below are 1<<24 bytes each as declared, so 48 MiB of locked memory for
-// buffers nothing can fill. (The brief's figure of 24 MB counts two of them;
-// the declarations say 16 MiB each.)
+// It is empty, and that is the measurable result of attaching by SEC().
+// lsm_events, sched_events and tls_events each had a Go reader, a declared
+// 1<<24-byte buffer and no reachable producer — 48 MiB of locked kernel memory
+// and three goroutines blocked on reader.Read() forever. All three now have at
+// least one attached producer:
 //
-// TODO(monitoring): attaching the producers fixes all three at once. Until
-// then, openReaders should skip a ring buffer with no attached producer rather
-// than spawn a reader for it.
-var knownRingbufsWithoutAttachedProducer = map[string]string{
-	"lsm_events":   "lsm_hooks.c submits from five lsm/* programs, none of which attach: attachLSMPrograms only attaches the fim_ prefix",
-	"sched_events": "sched_monitor.c submits from three tracepoint/sched/* programs named edr_tp_*, none of which match the tracepoint__ prefix check",
-	"tls_events":   "tls_sni_monitor.c submits from kp_tls_tcp_sendmsg, a kprobe, and the loader makes no link.Kprobe call",
-}
+//	lsm_events   — lsm_task_kill and lsm_kernel_module_request, the two
+//	               observe-only programs in lsm_hooks.c, attach via
+//	               link.AttachLSM. The file's other three programs are
+//	               enforcement hooks and stay out (see
+//	               knownUnattachedPrograms), but they were never the ones
+//	               that would have filled this buffer: they submit only on a
+//	               deny-list hit.
+//	sched_events — edr_tp_sched_switch, edr_tp_sched_wakeup and
+//	               edr_tp_sched_migrate_task attach from their
+//	               SEC("tracepoint/sched/...") strings instead of being
+//	               skipped for not being called tracepoint__sched__*.
+//	tls_events   — kp_tls_tcp_sendmsg attaches via link.Kprobe.
+//
+// Keep it empty. An entry here means a reader is spawned for a buffer nothing
+// can fill, and openReaders has no way to know that.
+var knownRingbufsWithoutAttachedProducer = map[string]string{}
 
 func loadEBPFConsistencyFixtures(t *testing.T) (*EBPFSources, *LoaderModel) {
 	t.Helper()
@@ -167,10 +155,10 @@ func TestEBPFEveryProgramIsAttachedOrAllowlisted(t *testing.T) {
 	for _, p := range unattached {
 		reason, ok := knownUnattachedPrograms[p.Name]
 		if !ok {
-			t.Errorf("program %s (%s:%d, SEC(%q)) is compiled but never attached, and is not on knownUnattachedPrograms.\n"+
-				"The loader attaches only Go symbols prefixed %q (as tracepoint__<group>__<name>) and LSM symbols prefixed %q.\n"+
-				"Either give it an attach path in driver_linux.go, rename it to match a prefix, or add it to knownUnattachedPrograms with the reason it cannot attach yet.",
-				p.Name, p.File, p.Line, p.Section, ebpfTracepointPrefix, ebpfLSMFimPrefix)
+			t.Errorf("program %s (%s:%d, SEC(%q)) is compiled but the loader makes no attach call for it, and it is not on knownUnattachedPrograms.\n"+
+				"attachPrograms plans from the SEC() string via ebpfAttachDecision, which handles tracepoint/, kprobe/, kretprobe/ and lsm/ sections.\n"+
+				"Either teach ebpfAttachDecision this section family, or add the program to knownUnattachedPrograms with the reason it is left out on purpose.",
+				p.Name, p.File, p.Line, p.Section)
 			continue
 		}
 		if strings.TrimSpace(reason) == "" {
@@ -310,14 +298,16 @@ func TestEBPFEveryReaderRingbufHasAnAttachedProducer(t *testing.T) {
 	}, "the ring buffer now has an attached producer, or no longer has a Go reader")
 }
 
-// TestEBPFLoaderAttachMechanismsUnchanged guards LoaderAttachesProgram against
-// drift in the loader it models.
+// TestEBPFLoaderAttachMechanismsUnchanged asserts the loader still attaches
+// from the SEC() string, and still has all four attach calls.
 //
-// LoaderAttachesProgram is a model, not a reading, of driver_linux.go. If
-// someone adds link.Kprobe support — which is the fix for nine of the entries
-// in knownUnattachedPrograms — the model would keep reporting those programs
-// as unattached and the allowlist staleness check would not fire. This test
-// fails instead, pointing at the model.
+// LoaderAttachesProgram no longer models the loader — it calls the loader's own
+// ebpfAttachDecision — so the drift this test used to guard against is gone by
+// construction. What is left to guard is the loader's shape: that the four
+// link calls are present, that attach is planned from the section rather than
+// from a Go symbol name, and in particular that nobody reintroduces the symbol
+// prefix matching. The prefix checks are what made 23 programs silent, and
+// they are easy to put back because "attach the fim_ ones" reads like intent.
 func TestEBPFLoaderAttachMechanismsUnchanged(t *testing.T) {
 	_, model := loadEBPFConsistencyFixtures(t)
 
@@ -325,32 +315,36 @@ func TestEBPFLoaderAttachMechanismsUnchanged(t *testing.T) {
 		needle string
 		why    string
 	}{
-		{`const prefix = "` + ebpfTracepointPrefix + `"`, "attachTracepoints keys off this Go symbol prefix"},
-		{`strings.HasPrefix(name, "` + ebpfLSMFimPrefix + `")`, "attachLSMPrograms keys off this Go symbol prefix"},
+		{"ebpfAttachDecision(", "attach is planned from the SEC() string, not from the Go symbol name"},
+		{"d.sectionForProgram(", "attachPrograms reads each program's section from what was loaded"},
 		{"link.Tracepoint(", "tracepoint attach call"},
+		{"link.Kprobe(", "kprobe attach call — nine programs depend on it"},
+		{"link.Kretprobe(", "kretprobe attach call — kretp_udp_recvmsg depends on it"},
 		{"link.AttachLSM(", "LSM attach call"},
 	}
 	for _, c := range mustContain {
 		if !strings.Contains(model.Source, c.needle) {
-			t.Errorf("driver_linux.go no longer contains %q (%s).\n"+
-				"LoaderAttachesProgram in ebpf_consistency_model_test.go models the loader's attach predicates and is now out of date; update it to match.",
+			t.Errorf("the Linux loader no longer contains %q (%s).\n"+
+				"If an attach call was removed, every program that needed it is silent again; add its programs to knownUnattachedPrograms with the reason, or restore the call.",
 				c.needle, c.why)
 		}
 	}
 
-	// These are the attach calls whose absence is the reason nine programs
-	// cannot attach. When one appears, the model has to learn about it.
+	// Symbol-name prefix matching is the defect this change removed. Any
+	// reappearance makes a program's attachability depend on what its C
+	// author called the function, which is exactly how DNS, scheduler and
+	// TLS telemetry went dark without anyone noticing.
 	mustNotContain := []struct {
 		needle string
 		why    string
 	}{
-		{"link.Kprobe(", "kprobe attach"},
-		{"link.Kretprobe(", "kretprobe attach"},
+		{`"tracepoint__"`, "tracepoint attach keyed off a Go symbol prefix"},
+		{`"fim_"`, "LSM attach keyed off a Go symbol prefix"},
 	}
 	for _, c := range mustNotContain {
 		if strings.Contains(model.Source, c.needle) {
-			t.Errorf("driver_linux.go now calls %s (%s), which LoaderAttachesProgram does not model.\n"+
-				"Teach LoaderAttachesProgram to recognise kprobe/kretprobe sections, then remove the programs it now attaches from knownUnattachedPrograms.",
+			t.Errorf("the Linux loader contains the literal %s (%s).\n"+
+				"Attach must be decided by ebpfAttachDecision over the program's SEC() string. A symbol-name prefix check silently excludes any program whose C function is named differently, which is how 23 of 62 programs came to load into the kernel and never fire.",
 				c.needle, c.why)
 		}
 	}
