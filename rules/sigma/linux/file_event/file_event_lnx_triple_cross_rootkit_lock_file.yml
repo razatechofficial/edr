@@ -8,7 +8,8 @@ author: Nasreddine Bencherchali (Nextron Systems)
 date: 2022-07-05
 modified: 2022-12-31
 tags:
-    - attack.stealth
+    - attack.defense_evasion
+    - attack.t1014
 logsource:
     product: linux
     category: file_event
