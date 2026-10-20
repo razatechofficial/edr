@@ -180,11 +180,14 @@ func startMonitoringForTest(t *testing.T) (*EBPFDriver, *RingBuffer) {
 // requireAttachedProgram skips when the hook a subtest depends on is not
 // attached in this build.
 //
-// This is the skip that keeps these tests honest about the loader's existing
-// gaps: 23 of the 62 compiled programs never attach (see
-// knownUnattachedPrograms), so a test asserting DNS or TCP-close telemetry
-// would fail for a reason that has nothing to do with the kernel it is running
-// on. Skipping names the program, so the message is actionable.
+// This is the skip that keeps these tests honest about what is attached on
+// *this* kernel. The loader now plans from SEC() and attaches 59 of the 62
+// compiled programs, but a kprobe whose symbol this kernel inlined, or an LSM
+// hook on a kernel without CONFIG_BPF_LSM, still will not be there — and a
+// test asserting DNS or TCP-close telemetry would otherwise fail for a reason
+// that has nothing to do with the code. The reason comes from the driver's own
+// attach misses when it recorded one, so the message names the kernel's
+// complaint rather than a guess.
 func requireAttachedProgram(t *testing.T, drv *EBPFDriver, prog string) {
 	t.Helper()
 	for _, p := range drv.AttachedProgramNames() {
@@ -194,6 +197,9 @@ func requireAttachedProgram(t *testing.T, drv *EBPFDriver, prog string) {
 	}
 	reason := "it is not attached by this loader"
 	if r, ok := ebpfUnattachableHooks[prog]; ok {
+		reason = r
+	}
+	if r, ok := drv.attachMissReasons()[prog]; ok {
 		reason = r
 	}
 	t.Skipf("MISSING PREREQUISITE: eBPF program %q is not attached, so this category cannot produce events: %s", prog, reason)
