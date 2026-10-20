@@ -67,10 +67,11 @@ func TestLinuxCapabilityTableCoversEveryProgram(t *testing.T) {
 //
 // ebpfUnattachableHooks exists in shipped code so the capability report can
 // tell an operator *why* a category is dark. knownUnattachedPrograms exists in
-// the consistency test as the debt register. They describe the same 23
-// programs and must stay identical: if one is updated when a program's attach
-// path is fixed and the other is not, the agent reports a stale reason to
-// operators, or the test silently stops guarding a program.
+// the consistency test as the debt register. They describe the same three
+// deliberately-unattached enforcement hooks and must stay identical: if one is
+// updated when a program's attach path changes and the other is not, the agent
+// reports a stale reason to operators, or the test silently stops guarding a
+// program.
 func TestLinuxUnattachableHooksMatchConsistencyAllowlist(t *testing.T) {
 	for hook := range ebpfUnattachableHooks {
 		if _, ok := knownUnattachedPrograms[hook]; !ok {
@@ -132,12 +133,18 @@ func TestLinuxEventTypeCategoryCoverage(t *testing.T) {
 // stand-in for a partial attach — the state this whole report exists to
 // surface.
 func TestLinuxCapabilityReportReadsAttachStateFromDriver(t *testing.T) {
+	const dnsMissReason = "tracepoint syscalls/sys_enter_sendto attach failed on this kernel: no such file or directory"
+
 	d := &EBPFDriver{
 		caps: newCapabilityTracker(),
 		specByProg: map[uint32]tracepointAttachSpec{
-			1: {progName: "tracepoint__syscalls__sys_enter_execve", group: "syscalls", tp: "sys_enter_execve"},
-			2: {progName: "fim_path_unlink", lsm: true},
+			1: {progName: "tracepoint__syscalls__sys_enter_execve", group: "syscalls", tp: "sys_enter_execve", kind: ebpfAttachTracepoint},
+			2: {progName: "fim_path_unlink", lsm: true, kind: ebpfAttachLSM},
 		},
+		// attachPrograms records one of these per program it could not
+		// attach. Seeding it is a faithful stand-in for a kernel that
+		// refused one hook.
+		attachMisses: map[string]string{"tp_dns_sendto": dnsMissReason},
 	}
 	d.running.Store(true)
 	d.caps.observe(CapProcessExec)
@@ -166,9 +173,11 @@ func TestLinuxCapabilityReportReadsAttachStateFromDriver(t *testing.T) {
 		t.Error("file_delete should not be producing: nothing was observed for it")
 	}
 
-	// A category whose only hooks are unattachable must report the real
-	// cause from ebpfUnattachableHooks, which is the operator-visible half
-	// of the debt the consistency tests register.
+	// A category present in the build but with nothing in the attach
+	// records must report a cause, and when the driver recorded a runtime
+	// miss that cause has to be the kernel's, not a compile-time string.
+	// This is what lets an operator tell "this kernel has no such symbol"
+	// apart from "this loader never tries".
 	dns := findCapability(t, rep, CapNetworkDNS)
 	if !dns.Present {
 		t.Error("network_dns should be present: tp_dns_sendto exists in the sources")
@@ -176,22 +185,27 @@ func TestLinuxCapabilityReportReadsAttachStateFromDriver(t *testing.T) {
 	if dns.Attached {
 		t.Error("network_dns must not be attached: tp_dns_sendto is not in the attach records")
 	}
-	if dns.Reason != ebpfReasonTracepointName {
-		t.Errorf("network_dns reason = %q, want the tracepoint-naming cause so an operator learns why DNS is dark", dns.Reason)
+	if dns.Reason != dnsMissReason {
+		t.Errorf("network_dns reason = %q, want the runtime attach-miss reason the driver recorded (%q) so an operator learns why DNS is dark on this host", dns.Reason, dnsMissReason)
 	}
 
-	tls := findCapability(t, rep, CapTLSMetadata)
-	if tls.Reason != ebpfReasonNoKprobeSupport {
-		t.Errorf("tls_metadata reason = %q, want the missing-kprobe-support cause", tls.Reason)
+	// An LSM enforcement hook is left out by decision, not by failure, so
+	// its category keeps the static reason from ebpfUnattachableHooks.
+	// CapSignal is served by lsm_task_kill (attachable, not in the seeded
+	// records) and nothing else, so it falls through to the generic
+	// message; CapFileOpen is served by lsm_file_open among others.
+	fileOpen := findCapability(t, rep, CapFileOpen)
+	if fileOpen.Attached {
+		t.Error("file_open must not be attached: no file_open hook is in the seeded attach records")
+	}
+	if fileOpen.Reason != ebpfReasonLSMEnforcement {
+		t.Errorf("file_open reason = %q, want the LSM-enforcement decision from ebpfUnattachableHooks", fileOpen.Reason)
 	}
 
-	// Scheduler is dark for the same naming reason, and its ring buffer is
-	// one of the three with a Go reader and no attached producer.
 	sched := findCapability(t, rep, CapScheduler)
 	if sched.Attached {
-		t.Error("scheduler must not be attached: all three edr_tp_sched_* programs fail the tracepoint__ prefix check")
+		t.Error("scheduler must not be attached: no edr_tp_sched_* program is in the seeded attach records")
 	}
-
 }
 
 // TestLinuxCapabilityReportStoppedDriver asserts a driver that never started
