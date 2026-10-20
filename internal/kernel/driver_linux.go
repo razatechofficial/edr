@@ -183,6 +183,16 @@ type EBPFDriver struct {
 	selfFiltered []uint32
 	linkByProg   map[uint32]link.Link
 	specByProg   map[uint32]tracepointAttachSpec
+	// secByProg is every program's SEC() string, captured from the
+	// CollectionSpec at load time because ebpf.Collection does not keep
+	// them. It is what attachPrograms plans from, so a program's attach
+	// type comes from the object that was loaded rather than from its Go
+	// symbol name.
+	secByProg map[string]string
+	// attachMisses records, per program name, why it is not attached.
+	// Written once per attach pass and read by the capability report so an
+	// operator sees the kernel's own reason instead of a static guess.
+	attachMisses map[string]string
 	reader       *ringbuf.Reader
 	readers      []*ringbuf.Reader
 
@@ -221,11 +231,21 @@ type EBPFDriver struct {
 	caps *capabilityTracker
 }
 
+// tracepointAttachSpec is what the loader recorded about one successful
+// attach, keyed by kernel program ID, so the watchdog can re-create the exact
+// same link after a program disappears.
+//
+// kind and symbol were added when attach moved to SEC(): lsm plus
+// group/tp could only describe a tracepoint or an LSM hook, and re-attaching
+// kp_tcp_close as a tracepoint would fail forever. lsm is kept because the
+// watchdog's existing branch and its tests read it.
 type tracepointAttachSpec struct {
 	progName string
 	group    string
 	tp       string
 	lsm      bool
+	kind     ebpfAttachKind
+	symbol   string
 }
 
 type linuxFeatureSet struct {
@@ -248,6 +268,7 @@ func NewEBPFDriver(agentID string, objectPathOverride string) (*EBPFDriver, erro
 		bpfObjectPath: objectPathOverride,
 		linkByProg:    make(map[uint32]link.Link),
 		specByProg:    make(map[uint32]tracepointAttachSpec),
+		secByProg:     make(map[string]string),
 		caps:          newCapabilityTracker(),
 	}, nil
 }
@@ -410,11 +431,15 @@ func (d *EBPFDriver) bootstrapLoadedCollection() error {
 	// fix that works regardless of kernel age.
 	d.setBPFFDsCloexec()
 
-	if err := d.attachTracepoints(); err != nil {
+	// Capture every SEC() string before the spec goes out of scope:
+	// attachPrograms plans from the section, and ebpf.Collection does not
+	// carry section names.
+	d.recordSections(spec)
+
+	if err := d.attachPrograms(); err != nil {
 		d.cleanup()
-		return fmt.Errorf("attaching tracepoints: %w", err)
+		return fmt.Errorf("attaching ebpf programs: %w", err)
 	}
-	d.attachLSMPrograms()
 
 	if err := d.openReaders(); err != nil {
 		d.cleanup()
@@ -560,6 +585,8 @@ func (d *EBPFDriver) cleanup() {
 	d.links = nil
 	d.linkByProg = make(map[uint32]link.Link)
 	d.specByProg = make(map[uint32]tracepointAttachSpec)
+	d.secByProg = make(map[string]string)
+	d.attachMisses = nil
 	if d.reader != nil {
 		d.reader.Close()
 		d.reader = nil
@@ -687,103 +714,6 @@ func ebpfPinnedTraceLinkPath(base, progName string) string {
 	safe := strings.ReplaceAll(progName, "/", "_")
 	safe = strings.ReplaceAll(safe, ":", "_")
 	return filepath.Join(base, "link_"+safe)
-}
-
-func (d *EBPFDriver) attachTracepoints() error {
-	for name, prog := range d.coll.Programs {
-		if prog == nil {
-			continue
-		}
-		const prefix = "tracepoint__"
-		if len(name) <= len(prefix) || name[:len(prefix)] != prefix {
-			continue
-		}
-		rest := name[len(prefix):]
-		sep := -1
-		for i := 0; i+1 < len(rest); i++ {
-			if rest[i] == '_' && rest[i+1] == '_' {
-				sep = i
-				break
-			}
-		}
-		if sep <= 0 || sep+2 >= len(rest) {
-			continue
-		}
-		group := rest[:sep]
-		tp := rest[sep+2:]
-		if !d.features.HasCgroupBPF && group == "cgroup" {
-			continue
-		}
-		pinBase := strings.TrimSpace(d.bpfPinPath)
-		if pinBase != "" {
-			pp := ebpfPinnedTraceLinkPath(pinBase, name)
-			if pl, err := linkLoadPinnedFn(pp); err == nil && pl != nil {
-				d.links = append(d.links, pl)
-				if info, ierr := prog.Info(); ierr == nil {
-					if id, ok := info.ID(); ok {
-						pid := uint32(id)
-						d.linkByProg[pid] = pl
-						d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp, lsm: false}
-					}
-				}
-				continue
-			}
-		}
-		l, err := link.Tracepoint(group, tp, prog, nil)
-		if err != nil {
-			if isOptionalTracepointAttachFailure(group, tp, err) {
-				fmt.Fprintf(os.Stderr, "WARN ebpf: skipping optional tracepoint %s/%s: %v\n", group, tp, err)
-				continue
-			}
-			return fmt.Errorf("attaching %s (%s/%s): %w", name, group, tp, err)
-		}
-		d.links = append(d.links, l)
-		if info, ierr := prog.Info(); ierr == nil {
-			if id, ok := info.ID(); ok {
-				pid := uint32(id)
-				d.linkByProg[pid] = l
-				d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp, lsm: false}
-				d.tryPinTraceLink(name, l)
-			}
-		}
-	}
-	if len(d.links) == 0 {
-		return fmt.Errorf("no tracepoints attached; verify ebpf programs are present")
-	}
-	return nil
-}
-
-// attachLSMPrograms links observe-only FIM programs (name prefix fim_). Other LSM
-// programs in the object (e.g. enforcement hooks) are intentionally skipped.
-func (d *EBPFDriver) attachLSMPrograms() {
-	if d == nil || d.coll == nil || !d.features.HasBPFLSM {
-		return
-	}
-	for name, prog := range d.coll.Programs {
-		if prog == nil {
-			continue
-		}
-		if prog.Type() != ebpf.LSM {
-			continue
-		}
-		if !strings.HasPrefix(name, "fim_") {
-			continue
-		}
-		l, err := link.AttachLSM(link.LSMOptions{Program: prog})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARN ebpf: skipping LSM attach %s: %v\n", name, err)
-			continue
-		}
-		d.links = append(d.links, l)
-		if info, ierr := prog.Info(); ierr == nil {
-			if id, ok := info.ID(); ok {
-				pid := uint32(id)
-				d.linkByProg[pid] = l
-				d.specByProg[pid] = tracepointAttachSpec{progName: name, lsm: true}
-			}
-		}
-		d.tryPinTraceLink(name, l)
-	}
 }
 
 func (d *EBPFDriver) tryPinTraceLink(progName string, l link.Link) {
