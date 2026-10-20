@@ -27,43 +27,43 @@ import (
 )
 
 const (
-	bpfCommLen         = 16
-	bpfFilenameLen     = 256
-	bpfArgsLen         = 512
+	bpfCommLen           = 16
+	bpfFilenameLen       = 256
+	bpfArgsLen           = 512
 	bpfObjectPathDefault = "/var/lib/edr/bpf/edr.bpf.o"
-	rawHeaderSize      = 26
-	bpfEvtProcExec     = 1
-	bpfEvtProcExit     = 2
-	bpfEvtProcFork     = 3
-	bpfEvtFileOpen     = 6
-	bpfEvtFileWrite    = 7
-	bpfEvtFileDel      = 8
-	bpfEvtFileRen      = 9
-	bpfEvtFileChmod    = 28
-	bpfEvtBPFLoad      = 29
-	bpfEvtBPFMapAccess = 30
-	bpfEvtCgroupAttach = 31
-	bpfEvtCgroupMkdir  = 32
-	bpfEvtSeccomp      = 33
-	bpfEvtProcMemWrite = 34
-	bpfEvtDNSQuery     = 35
-	bpfEvtSchedSwitch  = 36
-	bpfEvtSchedWakeup  = 37
-	bpfEvtSchedMigrate = 38
-	bpfEvtLSMFimUnlink  = 39
-	bpfEvtLSMFimRename  = 40
-	bpfEvtLSMFimSetattr = 41
-	bpfEvtNetConn      = 11
-	bpfEvtNetAccept    = 12
-	bpfEvtNetBind      = 13
-	bpfEvtNetClose     = 14
-	bpfEvtModule       = 22
-	bpfEvtMount        = 23
-	bpfEvtPtrace       = 24
-	bpfEvtSignal       = 25
-	bpfEvtUnshare      = 26
-	bpfEvtMadvise      = 27
-	bpfEvtPrivilege    = 42
+	rawHeaderSize        = 26
+	bpfEvtProcExec       = 1
+	bpfEvtProcExit       = 2
+	bpfEvtProcFork       = 3
+	bpfEvtFileOpen       = 6
+	bpfEvtFileWrite      = 7
+	bpfEvtFileDel        = 8
+	bpfEvtFileRen        = 9
+	bpfEvtFileChmod      = 28
+	bpfEvtBPFLoad        = 29
+	bpfEvtBPFMapAccess   = 30
+	bpfEvtCgroupAttach   = 31
+	bpfEvtCgroupMkdir    = 32
+	bpfEvtSeccomp        = 33
+	bpfEvtProcMemWrite   = 34
+	bpfEvtDNSQuery       = 35
+	bpfEvtSchedSwitch    = 36
+	bpfEvtSchedWakeup    = 37
+	bpfEvtSchedMigrate   = 38
+	bpfEvtLSMFimUnlink   = 39
+	bpfEvtLSMFimRename   = 40
+	bpfEvtLSMFimSetattr  = 41
+	bpfEvtNetConn        = 11
+	bpfEvtNetAccept      = 12
+	bpfEvtNetBind        = 13
+	bpfEvtNetClose       = 14
+	bpfEvtModule         = 22
+	bpfEvtMount          = 23
+	bpfEvtPtrace         = 24
+	bpfEvtSignal         = 25
+	bpfEvtUnshare        = 26
+	bpfEvtMadvise        = 27
+	bpfEvtPrivilege      = 42
 )
 
 // bpfBytecode holds embedded eBPF bytecode when compiled with `make ebpf-link`
@@ -177,10 +177,14 @@ type EBPFDriver struct {
 	coll       *ebpf.Collection
 	links      []link.Link
 	ownProgIDs []uint32
-	linkByProg map[uint32]link.Link
-	specByProg map[uint32]tracepointAttachSpec
-	reader     *ringbuf.Reader
-	readers    []*ringbuf.Reader
+	// selfFiltered are the PIDs the kernel has been told to drop, so the
+	// health surface can report the exclusion instead of leaving an operator
+	// to infer it from missing events.
+	selfFiltered []uint32
+	linkByProg   map[uint32]link.Link
+	specByProg   map[uint32]tracepointAttachSpec
+	reader       *ringbuf.Reader
+	readers      []*ringbuf.Reader
 
 	rootCtx     context.Context
 	rootCancel  context.CancelFunc
@@ -270,7 +274,7 @@ func (d *EBPFDriver) TamperMetrics() map[string]any {
 	m := map[string]any{
 		"ebpf_program_missing_events": d.tamperEvents.Load(),
 		"program_reattach_attempts":   d.programReattachAttempts.Load(),
-		"program_reattach_failures":     d.programReattachFailures.Load(),
+		"program_reattach_failures":   d.programReattachFailures.Load(),
 	}
 	if ts := d.lastReattachUnix.Load(); ts > 0 {
 		m["last_reattach_unix"] = ts
@@ -816,6 +820,15 @@ func (d *EBPFDriver) syncPolicyToMaps() error {
 	p := d.policy
 	d.mu.RUnlock()
 
+	// The agent excludes itself first, before anything else in the policy is
+	// applied. It is its own highest-volume source — every telemetry batch is
+	// a write syscall and every evidence upload is a large transfer to the
+	// platform — and those events come back through the same hooks, which
+	// produces more of them. MutePIDs was previously honoured only on macOS.
+	if err := d.installSelfFilter(p.MutePIDs); err != nil {
+		return fmt.Errorf("installing self filter: %w", err)
+	}
+
 	if m, ok := d.coll.Maps["policy_config"]; ok {
 		var flags uint64
 		if p.ProcessEvents {
@@ -1186,19 +1199,19 @@ func (d *EBPFDriver) decodePrivilegeEvent(data []byte) error {
 		op = "setresgid"
 	}
 	env := map[string]interface{}{
-		"type":        events.EventPrivilege,
-		"timestamp":   time.Now().UTC(),
-		"agent_id":    d.agentID,
-		"pid":         se.Hdr.PID,
-		"ppid":        se.Hdr.PPID,
-		"caller_uid":  se.Hdr.UID,
-		"caller_gid":  se.Hdr.GID,
-		"comm":        nullTerminated(se.Hdr.Comm[:]),
-		"syscall_nr":  se.SysNr,
-		"operation":   op,
-		"new_id":      se.Arg0,
-		"effective":   se.Arg1,
-		"saved":       se.Arg2,
+		"type":       events.EventPrivilege,
+		"timestamp":  time.Now().UTC(),
+		"agent_id":   d.agentID,
+		"pid":        se.Hdr.PID,
+		"ppid":       se.Hdr.PPID,
+		"caller_uid": se.Hdr.UID,
+		"caller_gid": se.Hdr.GID,
+		"comm":       nullTerminated(se.Hdr.Comm[:]),
+		"syscall_nr": se.SysNr,
+		"operation":  op,
+		"new_id":     se.Arg0,
+		"effective":  se.Arg1,
+		"saved":      se.Arg2,
 	}
 	return d.writeJSONEvent(env)
 }
@@ -1363,15 +1376,15 @@ func (d *EBPFDriver) decodeSchedEvent(data []byte) error {
 		op = "sched_migrate_task"
 	}
 	env := map[string]interface{}{
-		"type":         "process",
-		"timestamp":    time.Now().UTC(),
-		"agent_id":     d.agentID,
-		"pid":          se.Hdr.PID,
-		"operation":    op,
-		"process_name": nullTerminated(se.Hdr.Comm[:]),
-		"sched_prev_pid": se.PrevPID,
-		"sched_next_pid": se.NextPID,
-		"sched_cpu":      se.CPU,
+		"type":             "process",
+		"timestamp":        time.Now().UTC(),
+		"agent_id":         d.agentID,
+		"pid":              se.Hdr.PID,
+		"operation":        op,
+		"process_name":     nullTerminated(se.Hdr.Comm[:]),
+		"sched_prev_pid":   se.PrevPID,
+		"sched_next_pid":   se.NextPID,
+		"sched_cpu":        se.CPU,
 		"sched_target_cpu": se.TargetCPU,
 		"sched_runtime_ns": se.RuntimeNs,
 	}
