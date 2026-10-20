@@ -8,7 +8,8 @@ author: Bhabesh Raj
 date: 2021-06-23
 modified: 2022-10-09
 tags:
-    - attack.command-and-control
+    - attack.command_and_control
+    - attack.t1071.001
     - attack.s0154
 logsource:
     product: zeek
