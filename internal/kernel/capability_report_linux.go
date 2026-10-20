@@ -5,12 +5,18 @@ package kernel
 // Linux capability report: which event categories the eBPF driver is actually
 // serving right now.
 //
-// Attach state comes from d.specByProg, which attachTracepoints and
-// attachLSMPrograms populate with one entry per successful link call. That is
-// real runtime evidence and not a static list: a program that failed to attach
-// because the tracepoint does not exist on this kernel, or because a hardened
-// kernel denied the perf link (see isOptionalTracepointAttachFailure), is
-// absent from that map and so reported unattached here.
+// Attach state comes from d.specByProg, which attachPrograms populates with
+// one entry per successful link call. That is real runtime evidence and not a
+// static list: a program that failed to attach because the tracepoint does not
+// exist on this kernel, or because a kprobe's symbol is absent from
+// /proc/kallsyms, or because a hardened kernel denied the perf link, is absent
+// from that map and so reported unattached here.
+//
+// The *reason* a category is dark comes from d.attachMisses, which the same
+// pass fills with the kernel's own error for each program it could not attach.
+// That is preferred over the static tables below, because an errno from the
+// kernel that refused the attach is worth more to an operator than a string
+// written by whoever last edited this file.
 //
 // Producing state comes from the per-category counters the event loop updates
 // in processRecord, which is the single point every ring buffer record passes
@@ -113,22 +119,21 @@ var ebpfHookCategories = map[string][]CapabilityCategory{
 	"kp_tls_tcp_sendmsg": {CapTLSMetadata},
 }
 
-// Reasons a program in ebpfHookCategories cannot attach in this build.
+// Reasons a program in ebpfHookCategories is not attached in this build.
 //
-// There are exactly three causes, so they are named once and shared rather
-// than restated per program. ebpfUnattachableHooks below assigns one to each
-// affected program, and TestLinuxUnattachableHooksMatchConsistencyAllowlist
-// asserts its key set is exactly the set the eBPF consistency tests
-// independently derive from the sources, so the two cannot drift apart.
-const (
-	ebpfReasonNoKprobeSupport = "program is a kprobe/kretprobe and the loader makes no link.Kprobe or link.Kretprobe call, so it loads into the kernel and never attaches"
-	ebpfReasonLSMPrefix       = "attachLSMPrograms only attaches LSM programs whose Go symbol starts with fim_, so this program is skipped"
-	ebpfReasonTracepointName  = "attachTracepoints matches on the Go symbol prefix tracepoint__<group>__<name>; this program's C function is named differently, so it is skipped even though its SEC() names an attachable tracepoint"
-)
+// There used to be three causes and twenty-three affected programs, all of
+// them loader defects: no link.Kprobe call existed, LSM attach keyed off the
+// fim_ symbol prefix, and tracepoint attach keyed off the
+// tracepoint__<group>__<name> symbol prefix. attachPrograms now plans from
+// each program's SEC() string, so all three causes are gone and the only
+// programs left out are left out on purpose.
+//
+// ebpfUnattachableHooks below assigns a reason to each, and
+// TestLinuxUnattachableHooksMatchConsistencyAllowlist asserts its key set is
+// exactly the set the eBPF consistency tests independently derive from the
+// sources, so the two cannot drift apart.
+const ebpfReasonLSMEnforcement = "LSM enforcement hook: the program returns -EPERM on a deny-list hit, so attaching it would let the agent block exec, open or connect host-wide with no policy surface to control it, and it only emits on a deny-list hit so with the deny-list maps unwritten it would produce nothing either"
 
-// ebpfUnattachableHooks records why each known-unattachable program cannot
-// attach, so the capability report can tell an operator the cause instead of
-// only that a category is dark.
 // ebpfAttachedHookCaveats records defects in programs that DO attach, so the
 // capability report does not present a category as healthy when the events it
 // produces are unusable. buildCapabilityReport carries these through on
@@ -143,32 +148,17 @@ var ebpfAttachedHookCaveats = map[string]string{
 // inet_sock_set_state path once kprobe attach exists.
 const ebpfReasonAcceptNoAddresses = "attached and producing, but the accept/accept4 programs in network_monitor.c submit the event immediately after memset and fill_header without parsing a sockaddr, so every inbound-connection event carries zeroed local and remote addresses and ports"
 
+// ebpfUnattachableHooks records why each program the loader deliberately does
+// not attach is left out, so the capability report can tell an operator the
+// cause instead of only that a category is dark.
+//
+// A program that attachPrograms *tries* to attach and fails is not listed
+// here: its reason comes from d.attachMisses at runtime, carrying the kernel's
+// own error.
 var ebpfUnattachableHooks = map[string]string{
-	"kprobe_mem_write":       ebpfReasonNoKprobeSupport,
-	"kp_tcp_v4_connect":      ebpfReasonNoKprobeSupport,
-	"kp_tcp_v6_connect":      ebpfReasonNoKprobeSupport,
-	"kp_udp_sendmsg":         ebpfReasonNoKprobeSupport,
-	"kp_udp_recvmsg":         ebpfReasonNoKprobeSupport,
-	"kretp_udp_recvmsg":      ebpfReasonNoKprobeSupport,
-	"kp_tcp_close":           ebpfReasonNoKprobeSupport,
-	"kp_inet_sock_set_state": ebpfReasonNoKprobeSupport,
-	"kp_tls_tcp_sendmsg":     ebpfReasonNoKprobeSupport,
-
-	"lsm_bprm_check":            ebpfReasonLSMPrefix,
-	"lsm_file_open":             ebpfReasonLSMPrefix,
-	"lsm_socket_connect":        ebpfReasonLSMPrefix,
-	"lsm_task_kill":             ebpfReasonLSMPrefix,
-	"lsm_kernel_module_request": ebpfReasonLSMPrefix,
-	"lsm_bpf_prog":              ebpfReasonLSMPrefix,
-	"lsm_bpf_map_prog":          ebpfReasonLSMPrefix,
-
-	"tp_dns_sendto":             ebpfReasonTracepointName,
-	"tp_cgroup_attach":          ebpfReasonTracepointName,
-	"tp_cgroup_mkdir":           ebpfReasonTracepointName,
-	"tp_seccomp":                ebpfReasonTracepointName,
-	"edr_tp_sched_switch":       ebpfReasonTracepointName,
-	"edr_tp_sched_wakeup":       ebpfReasonTracepointName,
-	"edr_tp_sched_migrate_task": ebpfReasonTracepointName,
+	"lsm_bprm_check":     ebpfReasonLSMEnforcement,
+	"lsm_file_open":      ebpfReasonLSMEnforcement,
+	"lsm_socket_connect": ebpfReasonLSMEnforcement,
 }
 
 // linuxCapabilityForEventType maps a raw eBPF event type to the category the
@@ -258,6 +248,13 @@ func (d *EBPFDriver) CapabilityReport() CapabilityReport {
 		reasons[k] = v
 	}
 	for k, v := range ebpfAttachedHookCaveats {
+		reasons[k] = v
+	}
+	// Runtime beats static. A program the kernel refused carries the
+	// kernel's error here, which tells an operator whether the fix is a
+	// kernel config, a missing capability or a symbol that does not exist
+	// on this kernel -- none of which a compile-time table can know.
+	for k, v := range d.attachMissReasons() {
 		reasons[k] = v
 	}
 	mechanisms := capabilityMechanismsFor("ebpf", ebpfHookCategories, reasons)
