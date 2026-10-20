@@ -91,9 +91,27 @@ func setServiceLaunchProtected(h windows.Handle, level uint32) error {
 }
 
 func setServiceObjectDACL(h windows.Handle) error {
-	// Deny SERVICE_STOP(SW) + DELETE(SD) to Everyone, keep full access for SYSTEM/Administrators.
-	// SDDL is applied only when explicitly enabled by config.
-	sddl := "D:(D;;SWSD;;;WD)(A;;KA;;;SY)(A;;KA;;;BA)(A;;CCLCSWLOCRRC;;;AU)"
+	// Allow-only DACL: full control for SYSTEM and Administrators, query and
+	// enumerate for everyone else. Omitting a right denies it, which is the
+	// Windows idiom; a deny ACE is not needed and is actively dangerous here.
+	//
+	// The previous descriptor was "D:(D;;SWSD;;;WD)(A;;KA;;;SY)(A;;KA;;;BA)…",
+	// and it bricked uninstall on every host that applied it. Two reasons:
+	//
+	//   - WD in the trustee position is Everyone, which includes SYSTEM and
+	//     Administrators, and Windows evaluates deny ACEs before allow ACEs. The
+	//     allows that followed could not give back a right the deny had taken.
+	//   - SD is DELETE. So `sc delete`, and the MSI's own uninstall custom
+	//     action, were refused for every principal on the machine, with no way
+	//     back short of editing the service's Security key by hand.
+	//
+	// The old comment also mislabelled SW as SERVICE_STOP. SW is
+	// SERVICE_ENUMERATE_DEPENDENTS; stop is WP. So the descriptor never denied
+	// stop to anyone, which is the one thing it was written to do.
+	//
+	// Administrators keep GA, and therefore WRITE_DAC, so this is always
+	// recoverable by an administrator without offline surgery.
+	sddl := "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;CCLCSWLORC;;;AU)"
 	sddlPtr, err := windows.UTF16PtrFromString(sddl)
 	if err != nil {
 		return err
