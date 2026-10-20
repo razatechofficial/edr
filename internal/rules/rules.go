@@ -20,7 +20,19 @@ type Rule struct {
 	Description string    `yaml:"description,omitempty"`
 	EventType   string    `yaml:"event_type,omitempty"`
 	When        Condition `yaml:"when"`
+	// Enabled retires a rule without deleting it. Absent means enabled, so
+	// every existing rule file keeps its behaviour.
+	//
+	// A rule whose condition cannot express what its name claims is worse than
+	// no rule: it fires constantly, and an analyst who learns to ignore one
+	// class of alert has been trained to ignore alerts. Setting this to false
+	// keeps the rule, its name and the reason it is off in one place, so
+	// re-enabling it is a one-line change once the condition can be written.
+	Enabled *bool `yaml:"enabled,omitempty"`
 }
+
+// Active reports whether the rule should be evaluated.
+func (r Rule) Active() bool { return r.Enabled == nil || *r.Enabled }
 
 type Condition struct {
 	// Process conditions

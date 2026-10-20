@@ -20,6 +20,9 @@ func NewEngine(rs rules.RuleSet) *Engine {
 func (e *Engine) EvaluateProcess(ev schema.ProcessEvent) []schema.Alert {
 	var out []schema.Alert
 	for _, r := range e.rules.Rules {
+		if !r.Active() {
+			continue
+		}
 		if r.EventType != "" && r.EventType != "process" {
 			continue
 		}
@@ -48,6 +51,9 @@ func (e *Engine) EvaluateProcess(ev schema.ProcessEvent) []schema.Alert {
 func (e *Engine) EvaluateFile(ev schema.FileEvent) []schema.Alert {
 	var out []schema.Alert
 	for _, r := range e.rules.Rules {
+		if !r.Active() {
+			continue
+		}
 		if r.EventType != "file" {
 			continue
 		}
@@ -75,6 +81,9 @@ func (e *Engine) EvaluateFile(ev schema.FileEvent) []schema.Alert {
 func (e *Engine) EvaluateNetwork(ev schema.NetworkEvent) []schema.Alert {
 	var out []schema.Alert
 	for _, r := range e.rules.Rules {
+		if !r.Active() {
+			continue
+		}
 		if r.EventType != "network" {
 			continue
 		}
@@ -104,6 +113,9 @@ func (e *Engine) EvaluateNetwork(ev schema.NetworkEvent) []schema.Alert {
 func (e *Engine) EvaluateAuth(ev schema.AuthEvent) []schema.Alert {
 	var out []schema.Alert
 	for _, r := range e.rules.Rules {
+		if !r.Active() {
+			continue
+		}
 		if r.EventType != "auth" {
 			continue
 		}
