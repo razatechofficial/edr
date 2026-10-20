@@ -69,27 +69,35 @@ var knownUnattachedPrograms = map[string]string{
 
 // knownGoMapsMissingFromC lists maps userspace writes that no .c file defines.
 //
-// The write sites are guarded by `if m, ok := d.coll.Maps[name]; ok`, so a
-// missing map is not an error at runtime — the guard is simply false and the
-// policy silently does not reach the kernel.
+// It is empty. It held policy_config and mute_pids: both were written in
+// syncPolicyToMaps behind `if m, ok := d.coll.Maps[name]; ok`, both guards
+// were false forever because no .c file declared either map, and so both
+// writes were skipped with no error and no log line. Each has been removed
+// along with the EventPolicy surface that fed it, and the comment left at the
+// removal site in driver_linux.go says what would have to be true to bring
+// kernel-side policy gating back — chiefly that the flags word must mean
+// *disable*, so a map that has not been written yet captures rather than
+// drops.
 //
-// TODO(monitoring): either define these maps in C and have the programs read
-// them, or delete the userspace write and the EventPolicy fields that feed it.
-// Leaving a write to a nonexistent map is worse than either, because the
-// policy surface claims a control that does nothing.
-var knownGoMapsMissingFromC = map[string]string{
-	"policy_config": "driver_linux.go syncPolicyToMaps packs seven EventPolicy booleans into a flags word and writes key 0, but no .c file defines policy_config. The per-category enable/disable policy never reaches the kernel; filtering happens only in processRecord in userspace, after the event has already cost a ringbuf slot",
-	"mute_pids":     "driver_linux.go syncPolicyToMaps writes EventPolicy.MutePIDs here, but no .c file defines mute_pids. PID muting is still effective because installSelfFilter writes the same PIDs into the four per-subsystem *_pid_filter maps that do exist and are read; this write is redundant rather than harmful, but it is dead",
-}
+// Keep it empty. A write to a map the kernel does not define is the quietest
+// possible failure: the policy appears to have been applied, and nothing
+// anywhere says it was not.
+var knownGoMapsMissingFromC = map[string]string{}
 
 // knownUnreadMaps lists maps defined in C that no C program reads.
 //
-// TODO(monitoring): have file_monitor.c's open/write/unlink/rename programs
-// consult path_filter before reserving a ringbuf slot, which is what the
-// userspace write site's comment already claims happens.
-var knownUnreadMaps = map[string]string{
-	"path_filter": "defined in file_monitor.c and read by no program. driver_linux.go syncPolicyToMaps clears and repopulates it from EventPolicy.FIMPaths on every policy sync, and its comment states the kernel drops file events outside those prefixes before they hit userspace. It does not: every file event is reserved, submitted, and filtered in userspace or not at all",
-}
+// It is empty. It held path_filter, a BPF_MAP_TYPE_HASH keyed by a 256-byte
+// path prefix that userspace repopulated on every policy sync and that no
+// program consulted. The fix was not to add the missing lookup: a hash map
+// answers "is this exact key present" and prefix matching needs "is any key a
+// prefix of this path", so no lookup against that map could have implemented
+// the filter its comment described. The map and its write are gone, and
+// file_monitor.c now carries the design an LPM-trie version would need.
+//
+// Keep it empty. Whatever userspace puts in an unread map has no effect on
+// what the kernel emits, so the map is a policy control that silently does
+// nothing.
+var knownUnreadMaps = map[string]string{}
 
 // knownRingbufsWithoutAttachedProducer lists ring buffers a Go reader opens
 // where the C programs that submit to them are never attached.
