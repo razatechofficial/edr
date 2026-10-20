@@ -125,6 +125,8 @@ func Validate(cfg *Config) error {
 
 	validateRange(&errs, "performance.max_cpu_percent", cfg.Performance.MaxCPUPercent, 1, 100)
 	validateMin(&errs, "performance.max_memory_mb", cfg.Performance.MaxMemoryMB, 1)
+	// 0 means unlimited, so the floor is 0 rather than 1.
+	validateMin(&errs, "performance.max_events_per_second", cfg.Performance.MaxEventsPerSecond, 0)
 	validateMin(&errs, "performance.event_buffer_size", cfg.Performance.EventBufferSize, 1)
 	validateMin(&errs, "performance.worker_count", cfg.Performance.WorkerCount, 1)
 	validateMin(&errs, "performance.batch_size", cfg.Performance.BatchSize, 1)

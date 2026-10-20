@@ -305,13 +305,26 @@ type Config struct {
 	} `yaml:"self_protect"`
 
 	Performance struct {
-		MaxCPUPercent   int    `yaml:"max_cpu_percent"`
-		MaxMemoryMB     int    `yaml:"max_memory_mb"`
-		EventBufferSize int    `yaml:"event_buffer_size"`
-		WorkerCount     int    `yaml:"worker_count"`
-		BatchSize       int    `yaml:"batch_size"`
-		BatchIntervalMs int    `yaml:"batch_interval_ms"`
-		Profile         string `yaml:"profile"` // low_resource|balanced|strict
+		MaxCPUPercent int `yaml:"max_cpu_percent"`
+		MaxMemoryMB   int `yaml:"max_memory_mb"`
+		// EventBufferSize is the capacity of the bounded queue between
+		// each kernel collector's reader goroutine and Collect(). It
+		// is a hard ceiling: once full, new events are dropped and
+		// counted rather than queued, so the agent's memory use does
+		// not track how long the last process cycle took.
+		EventBufferSize int `yaml:"event_buffer_size"`
+		// MaxEventsPerSecond caps the sustained rate a kernel
+		// collector admits into that queue. 0 (the default) means no
+		// rate limit: a default ceiling would silently discard kernel
+		// events on the busiest hosts, which is where an EDR can least
+		// afford to stop seeing things. EventBufferSize is the
+		// always-on bound; this is for operators who would rather cap
+		// the agent's work than let it keep up.
+		MaxEventsPerSecond int    `yaml:"max_events_per_second"`
+		WorkerCount        int    `yaml:"worker_count"`
+		BatchSize          int    `yaml:"batch_size"`
+		BatchIntervalMs    int    `yaml:"batch_interval_ms"`
+		Profile            string `yaml:"profile"` // low_resource|balanced|strict
 	} `yaml:"performance"`
 
 	Baseline struct {
