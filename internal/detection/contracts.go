@@ -79,6 +79,10 @@ type EngineStats struct {
 	RulesLoaded       RuleCount
 	ProcessingLatency time.Duration
 	DroppedEvents     uint64
+	// Governor reports the resource budget and what enforcing it cost.
+	// DroppedEvents counts events the governor shed, so the two move
+	// together.
+	Governor GovernorStats
 }
 
 type RuleCount struct {

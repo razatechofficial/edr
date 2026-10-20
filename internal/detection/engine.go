@@ -29,14 +29,21 @@ import (
 // EngineConfig controls which detection layers are active and where their
 // data files reside.
 type EngineConfig struct {
-	IOCEnabled              bool
-	SigmaEnabled            bool
-	YARAEnabled             bool
-	BehavioralEnabled       bool
-	MLEnabled               bool
-	LLMEnabled              bool
-	WorkerCount             int
-	PerformanceProfile      string
+	IOCEnabled         bool
+	SigmaEnabled       bool
+	YARAEnabled        bool
+	BehavioralEnabled  bool
+	MLEnabled          bool
+	LLMEnabled         bool
+	WorkerCount        int
+	PerformanceProfile string
+
+	// MaxCPUPercent and MaxMemoryMB are the agent's resource budget, from
+	// performance.max_cpu_percent and performance.max_memory_mb. Zero
+	// leaves DefaultGovernorConfig's values in place.
+	MaxCPUPercent float64
+	MaxMemoryMB   int
+
 	YARAMaxFileSizeMB       int
 	YARARescanCooldownSec   int
 	YARAMaxScansPerMinute   int
@@ -127,6 +134,18 @@ type Engine struct {
 	rateLimiter *RuleRateLimiter
 	yaraAsyncCh chan rules.YARAScanResult
 
+	// governor applies the agent's CPU, memory and queue-depth budget to
+	// every event before any detection layer runs. It is the only place
+	// performance.max_cpu_percent has an effect: before it was wired up
+	// here the key was validated, defaulted, written into every shipped
+	// config, and read by nothing.
+	//
+	// Evaluate is the right chokepoint because it is the one: the agent
+	// calls it from twelve places in processCycle, one per telemetry kind,
+	// and gating inside it covers all of them and every platform without
+	// twelve chances to forget.
+	governor *ResourceGovernor
+
 	cfg         EngineConfig
 	alertCh     chan *events.Alert
 	workerCount int
@@ -177,6 +196,29 @@ func NewEngine(cfg EngineConfig, logger *zap.Logger) (*Engine, error) {
 		deduper:     NewAlertDeduper(5*time.Minute, cfg.DataDir),
 		rateLimiter: NewRuleRateLimiter(ratePerMin, rateBurst, 4096),
 	}
+
+	// The queue the governor watches is alertCh: it is the engine's only
+	// unbounded-latency boundary, filling when whoever reads Alerts() is
+	// slower than the layers produce. Watermarks are derived from its
+	// capacity rather than configured separately so they cannot be set to
+	// values the channel can never reach — a high watermark above cap
+	// means shedding never starts, which is the failure that leaves the
+	// governor looking configured and doing nothing.
+	gcfg := DefaultGovernorConfig()
+	if cfg.MaxCPUPercent > 0 {
+		gcfg.MaxCPUPercent = cfg.MaxCPUPercent
+		// Burst tracks the sustained ceiling: a 5% budget with a 15%
+		// burst is the shipped shape, so keep the 3x relationship
+		// rather than leaving burst at a default an operator who
+		// lowered the ceiling never asked for.
+		gcfg.BurstCPUPercent = cfg.MaxCPUPercent * 3
+	}
+	if cfg.MaxMemoryMB > 0 {
+		gcfg.MaxMemoryBytes = uint64(cfg.MaxMemoryMB) * 1024 * 1024
+	}
+	gcfg.QueueHighWatermark = alertBuffer * 3 / 4
+	gcfg.QueueLowWatermark = alertBuffer / 2
+	e.governor = NewResourceGovernor(gcfg, logger)
 
 	if cfg.IOCEnabled {
 		m := ioc.NewMatcher(logger)
@@ -335,6 +377,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	if e.deduper != nil {
 		e.deduper.Start()
 	}
+	e.governor.Start()
 	if e.chain != nil {
 		e.chain.Start(ctx)
 	}
@@ -405,6 +448,7 @@ func (e *Engine) Stop() error {
 	if e.deduper != nil {
 		e.deduper.Stop()
 	}
+	e.governor.Stop()
 	close(e.alertCh)
 
 	var firstErr error
@@ -455,6 +499,21 @@ func (e *Engine) Evaluate(ctx context.Context, event interface{}) []*events.Aler
 		return nil
 	}
 	e.mu.RUnlock()
+
+	// Budget gate before any layer runs, and before eventsProcessed is
+	// incremented: a shed event was not processed, and counting it as
+	// processed would make the shed counter and the processed counter
+	// disagree about the same event.
+	//
+	// len() on a buffered channel is a single load of the channel's count
+	// field, so feeding the governor the live queue depth here costs
+	// nothing measurable and means shedding reacts to the real backlog
+	// rather than to a sample taken a second ago.
+	e.governor.SetQueueDepth(len(e.alertCh))
+	if !e.governor.Gate() {
+		e.droppedEvents.Add(1)
+		return nil
+	}
 	e.eventsProcessed.Add(1)
 
 	layerTimeout := e.cfg.LayerTimeout
@@ -676,7 +735,18 @@ func (e *Engine) Stats() EngineStats {
 		RulesLoaded:       rc,
 		ProcessingLatency: time.Duration(e.lastLatencyNanos.Load()),
 		DroppedEvents:     e.droppedEvents.Load(),
+		Governor:          e.governor.Stats(),
 	}
+}
+
+// Governor exposes the resource governor so the health surface can report the
+// budget and what it cost, rather than leaving an operator to infer shedding
+// from a drop in event volume.
+func (e *Engine) Governor() *ResourceGovernor {
+	if e == nil {
+		return nil
+	}
+	return e.governor
 }
 
 // IOCMatcher returns the IOC matcher used by layer 1, or nil if IOC
