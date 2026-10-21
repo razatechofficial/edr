@@ -39,16 +39,30 @@ var selfFilterMaps = []string{
 // Failure is reported but never fatal. Monitoring with self-noise beats no
 // monitoring, and a kernel that does not expose one of these maps is a kernel
 // where that subsystem is not running anyway.
+// selfFilterPIDs is the set the agent asks the kernel to drop: its own thread
+// group, plus whatever the policy muted.
+//
+// The first entry is the thread group id, which is what
+// bpf_get_current_pid_tgid() >> 32 returns — not the OS thread id. Go moves
+// goroutines between threads, so a per-thread id would filter some of the
+// agent's work and leave the rest reporting.
+//
+// Split out from installSelfFilter so the set can be asserted without an eBPF
+// collection. The installer needs a loaded collection and therefore a kernel;
+// which pids belong in the set is a decision that does not, and it is the part
+// that regressed before (MutePIDs was honoured only on macOS).
+func selfFilterPIDs(extraPIDs []uint32) []uint32 {
+	pids := make([]uint32, 0, len(extraPIDs)+1)
+	pids = append(pids, uint32(os.Getpid()))
+	return append(pids, extraPIDs...)
+}
+
 func (d *EBPFDriver) installSelfFilter(extraPIDs []uint32) error {
 	if d == nil || d.coll == nil {
 		return fmt.Errorf("self filter: no ebpf collection loaded")
 	}
 
-	// The thread group id, which is what bpf_get_current_pid_tgid() >> 32
-	// returns — not the OS thread id. Go moves goroutines between threads, so
-	// a per-thread id would filter some of the agent's work and not the rest.
-	pids := []uint32{uint32(os.Getpid())}
-	pids = append(pids, extraPIDs...)
+	pids := selfFilterPIDs(extraPIDs)
 
 	var val uint8 = 1
 	var failed []string

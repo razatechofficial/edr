@@ -68,30 +68,43 @@ func TestTheAgentFiltersItsOwnThreadGroup(t *testing.T) {
 	// bpf_get_current_pid_tgid() >> 32 is the thread group id, not the thread
 	// id. Go moves goroutines between OS threads, so filtering a thread id
 	// would exclude some of the agent's work and leave the rest reporting.
-	d := &EBPFDriver{}
-	_ = d.installSelfFilter(nil) // fails: no collection, but records the pids
-	got := d.SelfFilteredPIDs()
+	got := selfFilterPIDs(nil)
 	if len(got) == 0 {
-		t.Fatal("no pid was recorded for filtering")
+		t.Fatal("no pid was selected for filtering")
 	}
 	if got[0] != uint32(os.Getpid()) {
-		t.Fatalf("filtered pid %d, expected the process group id %d", got[0], os.Getpid())
+		t.Fatalf("filtered pid %d, expected the thread group id %d", got[0], os.Getpid())
 	}
 }
 
 func TestPolicyMutePIDsAreFilteredToo(t *testing.T) {
 	// MutePIDs existed but was honoured only on macOS, so a policy that muted
 	// a noisy process had no effect on Linux at all.
-	d := &EBPFDriver{}
-	_ = d.installSelfFilter([]uint32{4242, 9001})
-	got := d.SelfFilteredPIDs()
+	got := selfFilterPIDs([]uint32{4242, 9001})
 	found := map[uint32]bool{}
 	for _, p := range got {
 		found[p] = true
 	}
 	for _, want := range []uint32{uint32(os.Getpid()), 4242, 9001} {
 		if !found[want] {
-			t.Errorf("pid %d was not recorded for filtering; got %v", want, got)
+			t.Errorf("pid %d was not selected for filtering; got %v", want, got)
 		}
+	}
+}
+
+// Asserting the set does not prove it reached the kernel, and the health
+// surface must not imply that it did.
+//
+// SelfFilteredPIDs reports what the agent asked the kernel to drop. With no
+// collection loaded nothing was asked, so reporting the pids anyway would tell
+// an operator that the agent is excluding itself when it is not — which is
+// exactly the condition this file exists to make visible.
+func TestNoCollectionFiltersNothingAndSaysSo(t *testing.T) {
+	d := &EBPFDriver{}
+	if err := d.installSelfFilter([]uint32{4242}); err == nil {
+		t.Fatal("installSelfFilter with no collection returned nil, want an error")
+	}
+	if got := d.SelfFilteredPIDs(); len(got) != 0 {
+		t.Fatalf("SelfFilteredPIDs reported %v with no collection loaded; nothing was installed", got)
 	}
 }
