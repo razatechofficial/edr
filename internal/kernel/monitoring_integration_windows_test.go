@@ -586,17 +586,20 @@ func etwCategoryProofs() []etwCategoryProof {
 				base := strings.ToLower(filepath.Base(path))
 				m := p.tap.mark()
 				pid := runWindowsHelper(t, winActOpen, path)
-				ev := p.expect(t, m, fmt.Sprintf("Kernel-File Create for pid %d", pid), func(e etwEvent) bool {
+				// Create carries FileName in its own template, so
+				// the name is part of the match rather than
+				// something checked afterwards: a Go binary
+				// opens plenty of other files, and matching on
+				// the pid alone picks up whichever it opened
+				// first. A timeout here means the Create
+				// template's FileName offset is wrong, which is
+				// the defect that left every Kernel-File event
+				// but Name pathless.
+				p.expect(t, m, fmt.Sprintf("Kernel-File Create for pid %d naming %s", pid, base), func(e etwEvent) bool {
 					return e.fromProvider(etwProviderFile) &&
-						e.EventID == kernelFileEvtCreateID && e.PID == pid
+						e.EventID == kernelFileEvtCreateID && e.PID == pid &&
+						strings.Contains(strings.ToLower(e.FileName+e.Path), base)
 				})
-				// Create carries FileName in its own template. If
-				// this is empty the template offsets are wrong,
-				// which is exactly the defect that made every
-				// Kernel-File event but Name pathless.
-				if !strings.Contains(strings.ToLower(ev.FileName+ev.Path), base) {
-					t.Errorf("Kernel-File Create for our open names %q, not %q; the Create template's FileName offset is wrong", ev.FileName+ev.Path, base)
-				}
 			},
 		},
 		{

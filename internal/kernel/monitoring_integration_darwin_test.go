@@ -679,7 +679,9 @@ func TestDarwinMonitoringCategoryTableCoversEveryCategory(t *testing.T) {
 	// constructed directly rather than through NewESFDriver, which needs
 	// root: this check is about the tables, and requiring root would stop
 	// it running on the one platform lane that can run it.
-	drv := &ESFDriver{caps: newCapabilityTracker()}
+	// Zero value, not a literal with a caps field: the nosec build of
+	// ESFDriver has no such field and this file compiles under it.
+	drv := &ESFDriver{}
 	rep := drv.CapabilityReport()
 	if rep.Summary.Present == 0 {
 		t.Skipf("MISSING PREREQUISITE: this build has no Endpoint Security bridge (%s/%s), so there is no mechanism table to compare against", runtime.GOOS, runtime.GOARCH)
