@@ -458,7 +458,7 @@ func startMonitoringForTest(t *testing.T) (*EBPFDriver, *eventTap) {
 		t.Fatalf("SetPolicy: %v", err)
 	}
 
-	buf := NewRingBuffer(16 << 20)
+	buf := NewRingBuffer(64 << 20)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	if err := drv.Start(ctx, buf); err != nil {
@@ -664,33 +664,41 @@ func (tp *eventTap) mark() int {
 }
 
 // await polls for an event after mark that match accepts.
+//
+// Each pass examines only the events appended since the last one, and copies
+// them out before matching. Re-scanning the whole window every 10ms under the
+// mutex starved the draining goroutine once the window grew: the ring buffer
+// filled, Write started returning ErrBufferFull, and subtests late in the run
+// failed intermittently on events the kernel had produced and the buffer had
+// dropped.
 func (tp *eventTap) await(mark int, timeout time.Duration, match func(linuxEvent) bool) (linuxEvent, int, bool) {
 	deadline := time.Now().Add(timeout)
+	next := mark
+	seen := 0
+	var batch []linuxEvent
 	for {
 		tp.mu.Lock()
-		start := mark - tp.dropped
+		start := next - tp.dropped
 		if start < 0 {
 			start = 0
 		}
-		window := tp.evs
-		if start <= len(window) {
-			window = window[start:]
-		} else {
-			window = nil
+		batch = batch[:0]
+		if start < len(tp.evs) {
+			batch = append(batch, tp.evs[start:]...)
 		}
-		for _, ev := range window {
+		next = tp.dropped + len(tp.evs)
+		tp.mu.Unlock()
+
+		seen += len(batch)
+		for _, ev := range batch {
 			if match(ev) {
-				n := len(window)
-				tp.mu.Unlock()
-				return ev, n, true
+				return ev, seen, true
 			}
 		}
-		seen := len(window)
-		tp.mu.Unlock()
 		if time.Now().After(deadline) {
 			return linuxEvent{}, seen, false
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
