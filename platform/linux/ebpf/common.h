@@ -210,10 +210,9 @@ struct pid_meta {
  * when it needs the per-buffer total (for sizing) and to capability categories
  * when it needs the per-category total (for the report).
  *
- * The map and its helpers live in this header, not in one .c file, because
- * every program in every file needs them and libbpf's static linker merges
- * identically-declared maps by name — the same mechanism that already lets
- * file_monitor.c and lsm_fim.c share file_events.
+ * The helpers live in this header because every program in every file needs
+ * them. The maps themselves are defined in one file and externed in the rest,
+ * which is how file_monitor.c and lsm_fim.c already share file_events.
  *
  * Guarded on SEC because this header is also read by tooling that does not
  * include bpf_helpers.h; without the helper macros there is nothing to define.
@@ -251,6 +250,17 @@ enum edr_subsystem {
 
 #ifdef SEC
 
+/*
+ * Defined in exactly one translation unit and referenced as extern from the
+ * rest. libbpf's static linker takes one definition plus extern references;
+ * two definitions of one map name is a link error, not a merge. It is the same
+ * arrangement file_monitor.c and lsm_fim.c already use for file_events.
+ *
+ * process_monitor.c defines EDR_SHARED_MAPS_OWNER before including this
+ * header. Which file owns them does not matter, only that one does.
+ */
+#ifdef EDR_SHARED_MAPS_OWNER
+
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, EDR_EVENT_TYPE_MAX);
@@ -264,6 +274,24 @@ struct {
 	__type(key, __u32);
 	__type(value, __u64);
 } filter_stats SEC(".maps");
+
+#else
+
+extern struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, EDR_EVENT_TYPE_MAX);
+	__type(key, __u32);
+	__type(value, struct edr_event_stats);
+} event_stats;
+
+extern struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, EDR_SUBSYS_MAX);
+	__type(key, __u32);
+	__type(value, __u64);
+} filter_stats;
+
+#endif /* EDR_SHARED_MAPS_OWNER */
 
 static __always_inline struct edr_event_stats *edr_stats_slot(__u32 type)
 {

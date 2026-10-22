@@ -12,6 +12,13 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
+
+/*
+ * This file owns the definitions of the shared accounting maps common.h
+ * declares (event_stats, filter_stats); every other file externs them. See the
+ * comment on EDR_SHARED_MAPS_OWNER in common.h.
+ */
+#define EDR_SHARED_MAPS_OWNER
 #include "common.h"
 
 struct {
