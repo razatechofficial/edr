@@ -200,7 +200,7 @@ func TestDecodeNetworkUserData_IPv6(t *testing.T) {
 	binary.BigEndian.PutUint16(ud[42:44], 50000)
 
 	rec := &etwEventRecord{}
-	rec.EventHeader.EventDescriptor.Id = 26 // connect (IPv6)
+	rec.EventHeader.EventDescriptor.Id = 26 // IPv6 TCP block base
 	rec.UserDataLength = uint16(len(ud))
 	rec.UserData = uintptr(unsafe.Pointer(&ud[0]))
 
@@ -232,8 +232,10 @@ func TestShouldDropDuplicateKernelFileRW(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ud := make([]byte, 8)
-	binary.LittleEndian.PutUint64(ud, 0xAABBCCDD)
+	// Kernel-File Read/Write template: ByteOffset, Irp, FileObject, ...
+	// so the FileObject the deduplicator keys on is at offset 16.
+	ud := make([]byte, 48)
+	binary.LittleEndian.PutUint64(ud[16:24], 0xAABBCCDD)
 	rec := &etwEventRecord{}
 	rec.EventHeader.EventDescriptor.Id = kernelFileEvtReadID
 	rec.UserDataLength = uint16(len(ud))
