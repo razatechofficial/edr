@@ -126,17 +126,22 @@ var edrSubsystemNames = map[uint32]string{
 // ringForEventType names the ring buffer each event type is submitted to.
 //
 // This is the one place the mapping lives, and it has to track the .c files:
-// the ring a type goes to is decided by which file declares the program. Kept
-// as a switch rather than a map so an unmapped type is a compile-time
-// omission a reader can see, and TestLinuxEventTypeRingCoverage asserts every
-// bpfEvt* constant has one.
+// the ring a type goes to is decided by which file declares the program, and
+// each .c file submits to exactly one ring. Kept as a switch rather than a map
+// so an unmapped type is a compile-time omission a reader can see, and
+// TestLinuxEventTypeRingCoverage asserts every bpfEvt* constant has one.
+//
+// Six types are emitted from two different files and so from two different
+// rings: process_exec and file_open (their own ring plus lsm_events, on a
+// deny-list hit), process_fork and net_connect (plus sec_events, from
+// clone/clone3 and sendto), module_load (plus lsm_events) and signal. For
+// those, the ring named here is the one that carries the ordinary traffic, so
+// a per-ring total can attribute a loss to the wrong buffer when the loss was
+// on the rarer path. The per-event-type counters are exact and are what a
+// diagnosis should rest on; the per-ring sum is a convenience for sizing.
 func ringForEventType(typ uint32) string {
 	switch typ {
 	case bpfEvtProcExec, bpfEvtProcExit, bpfEvtProcFork:
-		// process_monitor.c submits to "events"; syscall_monitor.c also
-		// emits fork-shaped records into sec_events from clone/vfork,
-		// so a fork loss can be on either. "events" is the one whose
-		// size matters for the process stream.
 		return "events"
 	case bpfEvtFileOpen, bpfEvtFileWrite, bpfEvtFileDel, bpfEvtFileRen,
 		bpfEvtFileChmod, bpfEvtProcMemWrite,
