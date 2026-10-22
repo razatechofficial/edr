@@ -165,7 +165,10 @@ jobs:
   build-all:
     name: Cross-compile
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # No continue-on-error. It had one, which is how `make build-all`
+    # cross-compiling cmd/agentui stayed broken without anyone noticing: the
+    # job failed on every run and reported green. It passes now, so a future
+    # regression should be visible.
     needs: test
     steps:
       - uses: actions/checkout@v4
