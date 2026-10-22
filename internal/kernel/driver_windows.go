@@ -471,6 +471,15 @@ type ETWDriver struct {
 	fileObjFIFO []uint64
 	fileObjCap  int
 
+	// Kernel-Registry names a key only on CreateKey and OpenKey; every
+	// mutating event after that identifies the key by its KeyObject
+	// pointer alone, so without this the event that matters carries no
+	// path.
+	regKeyMu   sync.RWMutex
+	regKeyPath map[uint64]string
+	regKeyFIFO []uint64
+	regKeyCap  int
+
 	fileRWMu   sync.RWMutex
 	fileRWSeen map[uint64]uint8
 	fileRWFIFO []uint64
@@ -517,6 +526,8 @@ func NewETWDriver(agentID string) (*ETWDriver, error) {
 		policy:       DefaultPolicy(),
 		fileObjPath:  make(map[uint64]string),
 		fileObjCap:   65536,
+		regKeyPath:   make(map[uint64]string),
+		regKeyCap:    65536,
 		fileRWSeen:   make(map[uint64]uint8),
 		fileRWCap:    65536,
 		etwProcByPID: make(map[uint32]etwProcSnap),
