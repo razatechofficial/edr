@@ -46,6 +46,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -585,8 +586,8 @@ func startMonitoringForTestWithPolicy(t *testing.T, mutate func(*EventPolicy)) (
 		t.Fatalf("driver started but attached no programs; object=%s diagnostic=%s", objPath, drv.LastLoadDiagnostics())
 	}
 	misses := drv.attachMissReasons()
-	t.Logf("driver started: %d of %d programs attached, %d attach misses",
-		len(attached), len(attached)+len(misses), len(misses))
+	t.Logf("driver started on kernel %s: %d of %d programs attached, %d attach misses",
+		kernelRelease(), len(attached), len(attached)+len(misses), len(misses))
 	for prog, why := range misses {
 		t.Logf("  attach miss: %s: %s", prog, why)
 	}
@@ -834,6 +835,29 @@ type linuxProof struct {
 	dir string
 }
 
+// kernelRelease is the running kernel's version string, or a note saying why
+// it could not be read.
+//
+// Printed on every driver bring-up and in every failure message because this
+// suite's "flakiness" turned out to be a mixed runner fleet: GitHub serves the
+// ubuntu-24.04 image on more than one Azure kernel, and across seven
+// consecutive runs of this lane every failure was on 7.0.0-1017-azure and
+// every pass was on 6.17.0-1022-azure, with no exceptions either way. Nothing
+// in the test output said which kernel it had run on, so a hard failure on one
+// kernel read as an intermittent failure of the suite, and the subset of
+// categories that failed varied only because it depends on which of a rare
+// syscall's few calls happen to be missed.
+//
+// Any future "it fails about one run in three" should start by grouping the
+// runs by this string.
+func kernelRelease() string {
+	raw, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		return "unknown (" + err.Error() + ")"
+	}
+	return strings.TrimSpace(string(raw))
+}
+
 // kernelTrace is the one-line kernel-side state of a category, for a log line
 // after each failed attempt.
 //
@@ -942,6 +966,7 @@ func tracepointEnableState(drv *EBPFDriver, hooks []string) string {
 func (p *linuxProof) diagnostics(cat CapabilityCategory) string {
 	var b strings.Builder
 	st := p.drv.Stats()
+	fmt.Fprintf(&b, "kernel %s, %d CPUs\n", kernelRelease(), runtime.NumCPU())
 	fmt.Fprintf(&b, "driver stats: received=%d processed=%d dropped=%d errors=%d uptime=%.1fs",
 		st.EventsReceived, st.EventsProcessed, st.EventsDropped, st.ErrorCount, st.UptimeSeconds)
 	if p.tap.buf != nil {
