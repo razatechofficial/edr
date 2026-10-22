@@ -156,7 +156,17 @@ build-windows:
 	@echo "==> Building Windows amd64 binaries"
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-windows-amd64.exe ./cmd/agent
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-windows-amd64.exe ./cmd/cli
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o $(BIN_DIR)/edr-agent-ui-windows-amd64.exe ./cmd/agentui
+# As with darwin above, the UI is a cgo GUI build. Cross-compiling it from
+# Linux needs mingw-w64; with the default gcc it fails on "unrecognized
+# command-line option '-mthreads'". The agent build below already reaches for
+# x86_64-w64-mingw32-gcc when it is present, so the UI follows the same rule
+# rather than taking the whole cross-compile lane down when it is not.
+	@if [ "$$(uname -s)" = "MINGW64_NT" ] || command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
+		CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=$$(command -v x86_64-w64-mingw32-gcc || echo gcc) \
+			go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o $(BIN_DIR)/edr-agent-ui-windows-amd64.exe ./cmd/agentui; \
+	else \
+		echo "==> skipping edr-agent-ui (windows): cgo GUI build needs mingw-w64 (x86_64-w64-mingw32-gcc)"; \
+	fi
 	@mkdir -p dist/windows-amd64
 ifeq ($(WINDOWS_CGO),1)
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent

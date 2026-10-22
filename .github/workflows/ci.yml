@@ -143,7 +143,12 @@ jobs:
 
       - name: Generate coverage
         env:
-          CGO_ENABLED: "0"
+          # cmd/agentui is a cgo build and is part of ./..., so with cgo off
+          # the run ended in "cmd/agentui [setup failed]" and produced no
+          # coverage at all. The headers it needs are installed above, so the
+          # honest setting is cgo on — which also means the UI is finally
+          # included in the figure rather than silently missing from it.
+          CGO_ENABLED: "1"
         run: make test-coverage
 
       - name: Upload coverage artifact
