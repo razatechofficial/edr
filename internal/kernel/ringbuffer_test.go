@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestRingBufferWriteRead(t *testing.T) {
@@ -281,4 +283,99 @@ func TestRingBufferStats_BacklogPct(t *testing.T) {
 	if st.Capacity == 0 {
 		t.Fatal("capacity not set")
 	}
+}
+
+// TestRingBufferConcurrentWritersDoNotTearRecords is the regression test for
+// the interleaved-write corruption.
+//
+// The Linux eBPF driver runs one event loop per ring buffer map -- seven of
+// them -- and all of them write into one RingBuffer. Write used to read
+// writePos, copy, and store writePos+total without serialisation, so two
+// writers could reserve the same offset: one message overwrote part of
+// another and the surviving length prefix no longer matched its payload. The
+// reader then handed up a record stitched out of two, which looks like a
+// corrupt event rather than a lost one.
+//
+// Each writer here emits records whose every byte is its own writer id, so a
+// record containing two different bytes can only be two records spliced
+// together.
+func TestRingBufferConcurrentWritersDoNotTearRecords(t *testing.T) {
+	const (
+		writers        = 8
+		perWriter      = 2000
+		maxRecordBytes = 97
+	)
+	rb := NewRingBuffer(1 << 20)
+	defer rb.Close()
+
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < perWriter; i++ {
+				n := 1 + (i % maxRecordBytes)
+				rec := make([]byte, n)
+				for j := range rec {
+					rec[j] = byte('A' + id)
+				}
+				// A full buffer is a legitimate outcome and not
+				// what this test is about; retry briefly.
+				for attempt := 0; attempt < 10000; attempt++ {
+					if err := rb.Write(rec); err == nil {
+						break
+					}
+					runtime.Gosched()
+				}
+			}
+		}(w)
+	}
+
+	read := make(chan int, 1)
+	go func() {
+		seen := 0
+		// Bounded by time, not by the expected record count: without
+		// serialisation writePos can move backwards, after which the
+		// expected count is never reached and an unbounded loop would
+		// hang instead of reporting the corruption.
+		deadline := time.Now().Add(20 * time.Second)
+		for time.Now().Before(deadline) {
+			data, err := rb.TryRead()
+			if err != nil {
+				read <- seen
+				return
+			}
+			if data == nil {
+				if seen >= writers*perWriter {
+					read <- seen
+					return
+				}
+				runtime.Gosched()
+				continue
+			}
+			seen++
+			if len(data) == 0 || len(data) > maxRecordBytes {
+				t.Errorf("record %d has length %d, outside the 1..%d a writer ever emits: the length prefix did not describe the payload", seen, len(data), maxRecordBytes)
+				continue
+			}
+			for _, b := range data {
+				if b != data[0] {
+					t.Errorf("record %d mixes bytes %q and %q: two writers' payloads were spliced into one record", seen, data[0], b)
+					break
+				}
+			}
+			if data[0] < 'A' || data[0] >= 'A'+writers {
+				t.Errorf("record %d starts with %q, which no writer emits", seen, data[0])
+			}
+		}
+		read <- seen
+	}()
+
+	wg.Wait()
+	rb.Close()
+	got := <-read
+	if got == 0 {
+		t.Fatal("read no records at all")
+	}
+	t.Logf("read %d of %d records intact", got, writers*perWriter)
 }
