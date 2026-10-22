@@ -534,6 +534,17 @@ func startMonitoringForTestWithPolicy(t *testing.T, mutate func(*EventPolicy)) (
 		t.Skipf("MISSING PREREQUISITE: eBPF driver could not be constructed: %v", err)
 	}
 
+	// Per-program run counts, on for the whole suite. They answer the one
+	// question a silent category otherwise cannot: a hook the kernel has
+	// invoked zero times is a dead link, and a hook it has invoked
+	// thousands of times whose events do not arrive is a loss further
+	// down. The suite spent several runs unable to tell those apart. The
+	// counters cost two timestamp reads per program invocation, which is
+	// why they are opt-in in production and unconditional here.
+	if err := drv.EnableProgramRunStats(); err != nil {
+		t.Logf("per-program run counts unavailable on this kernel: %v", err)
+	}
+
 	// LSM-FIM events are off in DefaultPolicy; they are low volume and
 	// several file categories can be served by them, so turn them on for
 	// the whole run. Scheduler events stay off: with them on, the three
@@ -858,8 +869,15 @@ func (p *linuxProof) diagnostics(cat CapabilityCategory) string {
 	}
 	fmt.Fprintf(&b, "\n%s", p.drv.KernelEventLossReport().Summary())
 	for _, c := range p.drv.CapabilityReport().Categories {
-		if c.Category == cat {
-			fmt.Fprintf(&b, "\ncapability row: %+v", c)
+		if c.Category != cat {
+			continue
+		}
+		fmt.Fprintf(&b, "\ncapability row: %+v", c)
+		// The hooks this row names, and whether the kernel is calling
+		// them. "attached" is evidence the link call succeeded; a run
+		// count is evidence the program executes.
+		if s := p.drv.ProgramRunCountsFor(c.Attachments); s != "" {
+			fmt.Fprintf(&b, "\n%s", s)
 		}
 	}
 	return b.String()
