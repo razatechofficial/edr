@@ -96,8 +96,12 @@ var (
 
 	reEBPFMapType = regexp.MustCompile(`__uint\([ \t]*type[ \t]*,[ \t]*(BPF_MAP_TYPE_[A-Z0-9_]+)`)
 
-	reEBPFMapHelper   = regexp.MustCompile(`bpf_map_(?:lookup_elem|update_elem|delete_elem|lookup_and_delete_elem|push_elem|pop_elem|peek_elem)\([ \t]*&([A-Za-z_][A-Za-z0-9_]*)`)
-	reEBPFRingbufCall = regexp.MustCompile(`bpf_ringbuf_(?:reserve|output)\([ \t]*&([A-Za-z_][A-Za-z0-9_]*)`)
+	reEBPFMapHelper = regexp.MustCompile(`bpf_map_(?:lookup_elem|update_elem|delete_elem|lookup_and_delete_elem|push_elem|pop_elem|peek_elem)\([ \t]*&([A-Za-z_][A-Za-z0-9_]*)`)
+	// A ring buffer submission, through the raw helper or through
+	// edr_ringbuf_reserve, the counted wrapper in common.h that every
+	// program now goes through. Missing the wrapper would report every
+	// ring buffer as having no producer at all.
+	reEBPFRingbufCall = regexp.MustCompile(`(?:bpf|edr)_ringbuf_(?:reserve|output)\([ \t]*&([A-Za-z_][A-Za-z0-9_]*)`)
 
 	// Sections that are metadata, not programs.
 	reEBPFSECAny = regexp.MustCompile(`(?m)^[^\n]*SEC\("([^"]+)"\)`)
@@ -189,7 +193,7 @@ func ParseEBPFSources(dir string) (*EBPFSources, error) {
 			})
 		}
 
-		fileScope, bodies := splitProgramBodies(src)
+		fileScope, bodies := splitProgramBodies(blankComments(src))
 		fileProgs := make([]string, 0, len(bodies))
 		for _, b := range bodies {
 			fileProgs = append(fileProgs, b.prog)
@@ -224,6 +228,21 @@ func ParseEBPFSources(dir string) (*EBPFSources, error) {
 		}
 	}
 
+	// common.h is parsed last, as shared file scope.
+	//
+	// It is where the maps and helpers every program needs live: the
+	// event_stats and filter_stats accounting maps are declared there once
+	// rather than in each of the eight .c files, because libbpf's static
+	// linker merges identically-declared maps by name. Parsing only *.c
+	// made those maps invisible to every assertion in this file — neither
+	// counted as defined nor as read — which is a blind spot that grows
+	// with whatever else moves into the header. Header references are
+	// attributed to every program in the object, because a static
+	// __always_inline helper in common.h is reachable from all of them.
+	if err := parseSharedEBPFHeader(dir, out, refSeen, prodSeen); err != nil {
+		return nil, err
+	}
+
 	for k := range out.MapRefs {
 		sort.Strings(out.MapRefs[k])
 	}
@@ -233,6 +252,65 @@ func ParseEBPFSources(dir string) (*EBPFSources, error) {
 	sort.Slice(out.Programs, func(i, j int) bool { return out.Programs[i].Name < out.Programs[j].Name })
 	sort.Slice(out.Maps, func(i, j int) bool { return out.Maps[i].Name < out.Maps[j].Name })
 	return out, nil
+}
+
+// parseSharedEBPFHeader folds common.h into an EBPFSources built from the .c
+// files: its map definitions are definitions, and its map references belong to
+// every program in the object.
+func parseSharedEBPFHeader(dir string, out *EBPFSources,
+	refSeen, prodSeen map[string]map[string]bool) error {
+	const name = "common.h"
+	raw, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading %s: %w", name, err)
+	}
+	src := string(raw)
+
+	for _, m := range reEBPFMapDef.FindAllStringSubmatchIndex(src, -1) {
+		mapName := src[m[2]:m[3]]
+		start := structStartBefore(src, m[0])
+		decl := src[start:m[1]]
+		mapType := ""
+		if t := reEBPFMapType.FindStringSubmatch(decl); t != nil {
+			mapType = t[1]
+		}
+		out.Maps = append(out.Maps, EBPFMap{
+			Name: mapName,
+			Type: mapType,
+			File: name,
+			Line: lineOfOffset(src, m[0]),
+		})
+	}
+
+	allProgs := make([]string, 0, len(out.Programs))
+	for _, p := range out.Programs {
+		allProgs = append(allProgs, p.Name)
+	}
+
+	record := func(seen map[string]map[string]bool, dst map[string][]string, key string) {
+		if seen[key] == nil {
+			seen[key] = make(map[string]bool)
+		}
+		for _, prog := range allProgs {
+			if seen[key][prog] {
+				continue
+			}
+			seen[key][prog] = true
+			dst[key] = append(dst[key], prog)
+		}
+	}
+	refs := blankComments(src)
+	for _, m := range reEBPFMapHelper.FindAllStringSubmatch(refs, -1) {
+		record(refSeen, out.MapRefs, m[1])
+	}
+	for _, m := range reEBPFRingbufCall.FindAllStringSubmatch(refs, -1) {
+		record(refSeen, out.MapRefs, m[1])
+		record(prodSeen, out.RingbufProducers, m[1])
+	}
+	return nil
 }
 
 type programBody struct {
@@ -293,6 +371,71 @@ func splitProgramBodies(src string) (string, []programBody) {
 		bodies = append(bodies, programBody{prog: name, text: chunk})
 	}
 	return fileScope.String(), bodies
+}
+
+// blankComments replaces the body of every C comment with spaces, keeping the
+// source's length and line breaks so offsets and line numbers still hold.
+//
+// Reference scanning has to run on this rather than on the raw text. common.h
+// documents the pattern it replaced by quoting it:
+//
+//	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+//
+// and that quotation, in a header included by every file, credited the
+// "events" ring buffer with a producer in all 61 programs. A model that reads
+// comments as code can be made to assert anything by writing a comment.
+func blankComments(src string) string {
+	out := []byte(src)
+	const (
+		code = iota
+		line
+		block
+		str
+	)
+	state := code
+	for i := 0; i < len(out); i++ {
+		c := out[i]
+		switch state {
+		case code:
+			switch {
+			case c == '/' && i+1 < len(out) && out[i+1] == '/':
+				state = line
+				out[i], out[i+1] = ' ', ' '
+				i++
+			case c == '/' && i+1 < len(out) && out[i+1] == '*':
+				state = block
+				out[i], out[i+1] = ' ', ' '
+				i++
+			case c == '"':
+				state = str
+			}
+		case line:
+			if c == '\n' {
+				state = code
+				continue
+			}
+			out[i] = ' '
+		case block:
+			if c == '*' && i+1 < len(out) && out[i+1] == '/' {
+				out[i], out[i+1] = ' ', ' '
+				i++
+				state = code
+				continue
+			}
+			if c != '\n' {
+				out[i] = ' '
+			}
+		case str:
+			if c == '\\' {
+				i++
+				continue
+			}
+			if c == '"' {
+				state = code
+			}
+		}
+	}
+	return string(out)
 }
 
 // structStartBefore walks back from a map definition's closing brace to the
