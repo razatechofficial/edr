@@ -101,7 +101,7 @@ int kp_tls_tcp_sendmsg(struct pt_regs *ctx)
 	if (hdr[0] != 0x16 || hdr[5] != 0x01)
 		return 0;
 
-	struct network_event *evt = bpf_ringbuf_reserve(&tls_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&tls_events, sizeof(*evt), EVENT_TLS_CLIENT_HELLO);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
