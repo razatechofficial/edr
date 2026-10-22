@@ -245,35 +245,41 @@ enum edr_subsystem {
 	EDR_SUBSYS_NETWORK  = 2,
 	EDR_SUBSYS_SECURITY = 3,
 	EDR_SUBSYS_FIM      = 4,
+	/* 8, not 5: slack to add a subsystem without changing the map's
+	 * geometry, which the loader checks before trusting what it reads. */
 	EDR_SUBSYS_MAX      = 8,
 };
 
 #ifdef SEC
 
 /*
- * Defined in exactly one translation unit and referenced as extern from the
- * rest. libbpf's static linker takes one definition plus extern references;
- * two definitions of one map name is a link error, not a merge. It is the same
- * arrangement file_monitor.c and lsm_fim.c already use for file_events.
+ * Two things about these declarations are load-bearing, and both were learned
+ * from the linker refusing the object.
  *
- * process_monitor.c defines EDR_SHARED_MAPS_OWNER before including this
- * header. Which file owns them does not matter, only that one does.
- */
-/*
- * Declared with explicit key_size/value_size rather than __type().
+ * They are defined in exactly one translation unit and externed from the rest.
+ * libbpf's static linker takes one definition plus extern references; two
+ * definitions of one map name is an error, not a merge:
  *
- * __type(value, struct edr_event_stats) makes the map's value a BTF type
- * reference, and in a file that only externs the map that struct appears in
- * BTF as a forward declaration with no size, which libbpf rejects at link
- * time with
+ *	libbpf: conflicting non-weak symbol #32 (filter_stats) definition
+ *	        in 'platform/linux/ebpf/lsm_fim.o'
+ *
+ * It is the arrangement file_monitor.c and lsm_fim.c already use to share
+ * file_events. process_monitor.c defines EDR_SHARED_MAPS_OWNER before
+ * including this header; which file owns them does not matter, only that one
+ * does.
+ *
+ * And they state key_size/value_size rather than __type(). __type(value,
+ * struct edr_event_stats) makes the value a BTF type reference, and in a file
+ * that only externs the map that struct reaches BTF as a forward declaration
+ * with no size:
  *
  *	libbpf: map 'event_stats': can't determine value size for type [41]: -22
  *	libbpf: global 'event_stats': invalid map definition
  *
- * Sizes are not type references, so they survive in every translation unit
- * and the definition and the externs stay textually identical, which is what
- * the linker compares. The verifier bounds accesses by value_size either way;
- * all BTF would add here is a prettier bpftool map dump.
+ * Sizes are not type references, so they survive in every translation unit and
+ * the definition and the externs stay textually identical, which is what the
+ * linker compares. The verifier bounds accesses by value_size either way; all
+ * BTF would add here is a prettier bpftool map dump.
  */
 #ifdef EDR_SHARED_MAPS_OWNER
 
