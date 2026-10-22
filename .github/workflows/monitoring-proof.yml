@@ -264,7 +264,11 @@ jobs:
         run: |
           # Do not let go test's exit status end the step: the assertion
           # below is what matters, and a skip-only run exits zero anyway.
-          go test -tags=integration ./internal/kernel/ -count=1 -v -timeout 300s \
+          # Under sudo so NewESFDriver gets past its root check and the run
+          # reaches the real prerequisite — the entitlement — and prints each
+          # category's own skip reason instead of stopping at "not root".
+          sudo -E env "PATH=$PATH" "CGO_ENABLED=1" \
+            go test -tags=integration ./internal/kernel/ -count=1 -v -timeout 300s \
             -run 'TestDarwinMonitoring' 2>&1 | tee result.txt || true
           if grep -q -- "--- FAIL" result.txt; then
             echo "::error::macOS integration tests failed instead of skipping; the prerequisite gates are wrong"
