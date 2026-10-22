@@ -1,0 +1,51 @@
+name: zz Probe (temporary)
+
+# Temporary, workflow_dispatch only. Two questions this repo cannot answer
+# from a darwin laptop:
+#   1. which Intel macOS runner labels GitHub still serves;
+#   2. what (provider, event id, opcode, version) tuples a hosted
+#      windows-latest runner actually delivers over ETW.
+# Delete this file once both are answered.
+
+on:
+  workflow_dispatch:
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  mac-label-probe:
+    name: macOS label probe (${{ matrix.label }})
+    runs-on: ${{ matrix.label }}
+    timeout-minutes: 6
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        label: [macos-latest, macos-15-intel, macos-13, macos-15-large]
+    steps:
+      - name: Report arch and brew
+        run: |
+          echo "label=${{ matrix.label }}"
+          echo "uname -m: $(uname -m)"
+          sw_vers || true
+          echo "brew: $(command -v brew || echo none)"
+          brew --prefix || true
+
+  windows-etw-shape:
+    name: Windows ETW event shape
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+      - name: ETW shape diagnostic
+        env:
+          CGO_ENABLED: "0"
+        run: go test -tags=integration ./internal/kernel/ -count=1 -v -timeout 300s -run TestWindowsETWEventShapeDiagnostic

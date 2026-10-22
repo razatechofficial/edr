@@ -1057,6 +1057,11 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 		"event_id":    hdr.EventDescriptor.Id,
 		"opcode":      hdr.EventDescriptor.Opcode,
 		"event_level": hdr.EventDescriptor.Level,
+		// The template a payload follows is selected by (Id, Version),
+		// so a decoder that reads fixed offsets is only correct for the
+		// versions it was written against. Carry the version so a
+		// mis-decode is attributable from the event alone.
+		"event_version": hdr.EventDescriptor.Version,
 	}
 
 	switch hdr.ProviderId {
