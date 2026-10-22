@@ -267,7 +267,7 @@ int tracepoint__syscalls__sys_enter_delete_module(struct trace_event_raw_sys_ent
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header(&evt->hdr, EVENT_MODULE_LOAD);
+	fill_header(&evt->hdr, EVENT_MODULE_UNLOAD);
 	evt->arg0 = ctx->args[1];
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
@@ -282,7 +282,14 @@ int tracepoint__syscalls__sys_enter_capset(struct trace_event_raw_sys_enter *ctx
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header(&evt->hdr, EVENT_SIGNAL);
+	/*
+	 * capset(2) changes a process's capability sets, so this is a
+	 * credential change, not a signal. It kept emitting EVENT_SIGNAL after
+	 * the setuid family moved to EVENT_PRIVILEGE, which left the
+	 * credential_change row uncreditable from capset and put the event in
+	 * a type reserved for kill(2).
+	 */
+	fill_header(&evt->hdr, EVENT_PRIVILEGE);
 	evt->syscall_nr = 126;
 	evt->arg0 = ctx->args[0];
 	bpf_ringbuf_submit(evt, 0);
@@ -298,7 +305,8 @@ int tracepoint__syscalls__sys_enter_prctl(struct trace_event_raw_sys_enter *ctx)
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header(&evt->hdr, EVENT_SIGNAL);
+	/* prctl(2): same correction as capset above. */
+	fill_header(&evt->hdr, EVENT_PRIVILEGE);
 	evt->syscall_nr = 157;
 	evt->arg0 = ctx->args[0];
 	evt->arg1 = ctx->args[1];

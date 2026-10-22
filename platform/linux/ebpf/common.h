@@ -70,6 +70,17 @@ enum event_type {
 	 * in security_event.arg0 and the syscall number in syscall_nr.
 	 */
 	EVENT_PRIVILEGE       = 42,
+	/*
+	 * delete_module(2) used to emit EVENT_MODULE_LOAD, so the capability
+	 * report's module_unload row could never be credited however many
+	 * modules were removed. Its own type makes the two distinguishable.
+	 */
+	EVENT_MODULE_UNLOAD   = 43,
+	/*
+	 * tls_sni_monitor.c used to emit EVENT_NET_CONNECT, which credited
+	 * every ClientHello to network_connect and left tls_metadata dark.
+	 */
+	EVENT_TLS_CLIENT_HELLO = 44,
 };
 
 struct edr_event_hdr {

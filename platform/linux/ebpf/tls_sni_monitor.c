@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Lightweight TLS ClientHello/SNI monitor stub for Linux eBPF.
-// Emits EVENT_NET_CONNECT with dns_query carrying a best-effort SNI prefix.
+// Emits EVENT_TLS_CLIENT_HELLO with dns_query carrying a best-effort SNI prefix.
 
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
@@ -70,7 +70,7 @@ int kp_tls_tcp_sendmsg(struct pt_regs *ctx)
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header_tls(&evt->hdr, EVENT_NET_CONNECT);
+	fill_header_tls(&evt->hdr, EVENT_TLS_CLIENT_HELLO);
 	evt->direction = 0;
 
 	__u16 family = 0, sport = 0, dport = 0;
