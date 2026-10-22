@@ -9,6 +9,10 @@ name: zz Probe (temporary)
 
 on:
   workflow_dispatch:
+  # workflow_dispatch alone is unusable here: GitHub only offers it for
+  # workflows present on the default branch, and this file never will be.
+  push:
+    branches: [feature/ebpf-accept-addresses]
 
 env:
   GOTOOLCHAIN: local
