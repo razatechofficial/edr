@@ -316,6 +316,7 @@ func (e esfEvent) String() string {
 // large volume of open and mmap events; a buffer read only while a subtest
 // waits would overflow and drop the record it is looking for.
 type esfTap struct {
+	buf     *RingBuffer
 	mu      sync.Mutex
 	evs     []esfEvent
 	dropped int
@@ -328,6 +329,7 @@ const esfTapCap = 1 << 18
 
 func newESFTap(t *testing.T, buf *RingBuffer) *esfTap {
 	tp := &esfTap{
+		buf:    buf,
 		counts: map[string]int{},
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
@@ -442,12 +444,34 @@ type esfProof struct {
 
 func (p *esfProof) tempPath(name string) string { return filepath.Join(p.dir, name) }
 
+// diagnostics is what a failure needs in order to be attributable: where on
+// the path the event went missing. These proofs have never run anywhere, so
+// the first person to run them on a provisioned Mac is the one who will need
+// this.
+func (p *esfProof) diagnostics(cat CapabilityCategory) string {
+	// No DriverStats here: the nosec build of ESFDriver has no Stats
+	// method, and this file compiles under it. The ring buffer counters and
+	// the capability row are what both builds have.
+	var b strings.Builder
+	if p.tap.buf != nil {
+		rb := p.tap.buf.Stats()
+		fmt.Fprintf(&b, "ring buffer: produced=%d consumed=%d dropped=%d backlog=%.1f%%",
+			rb.Produced, rb.Consumed, rb.Dropped, rb.BacklogPct)
+	}
+	for _, c := range p.drv.CapabilityReport().Categories {
+		if c.Category == cat {
+			fmt.Fprintf(&b, "\ncapability row: %+v", c)
+		}
+	}
+	return b.String()
+}
+
 func (p *esfProof) expect(t *testing.T, mark int, what string, match func(esfEvent) bool) esfEvent {
 	t.Helper()
 	ev, seen, ok := p.tap.await(mark, 20*time.Second, match)
 	if !ok {
-		t.Fatalf("no %s arrived within 20s after generating the activity (%d events seen in this window).\n%s\nThe subscription for this category is live, so the gap is in the C bridge's event handling or the decode path.",
-			what, seen, p.tap.summary())
+		t.Fatalf("no %s arrived within 20s after generating the activity (%d events seen in this window).\n%s\n%s\nThe subscription for this category is live, so the gap is in the C bridge's event handling or the decode path.",
+			what, seen, p.tap.summary(), p.diagnostics(""))
 	}
 	t.Logf("%s: %s", what, ev)
 	return ev
