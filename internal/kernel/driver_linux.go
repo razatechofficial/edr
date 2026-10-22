@@ -1493,7 +1493,20 @@ func appendUint64(dst []byte, v uint64) []byte {
 
 func (d *EBPFDriver) openReaders() error {
 	readerMaps := []string{"events", "file_events", "net_events", "sec_events", "lsm_events", "sched_events", "tls_events"}
+	d.mu.RLock()
+	wantSched := d.policy.SchedEvents
+	d.mu.RUnlock()
 	for _, name := range readerMaps {
+		// Draining a ring buffer whose events the policy gate then
+		// discards is pure cost, and for sched_events it is not a
+		// small one: the scheduler tracepoints submit on every context
+		// switch, which measured a quarter of a million records a
+		// second on a two-core runner. Reading and decoding all of
+		// them to drop them starved the other subsystems' readers of
+		// CPU badly enough that file and module events went missing.
+		if name == "sched_events" && !wantSched {
+			continue
+		}
 		m, ok := d.coll.Maps[name]
 		if !ok {
 			continue

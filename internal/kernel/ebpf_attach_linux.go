@@ -75,6 +75,10 @@ func (d *EBPFDriver) attachPrograms() error {
 			misses[name] = why
 			continue
 		}
+		if why := d.policyGateFor(name); why != "" {
+			misses[name] = why
+			continue
+		}
 
 		l, err := d.attachOne(name, prog, target)
 		if err != nil {
@@ -136,6 +140,38 @@ func (d *EBPFDriver) recordSections(spec *ebpf.CollectionSpec) {
 // the capability report's reason specific — "kernel does not have BPF LSM
 // enabled" is actionable, and the errno the kernel returns for an LSM attach
 // on a kernel without CONFIG_BPF_LSM is not.
+// policyGateFor reports why the current policy does not want a program
+// attached at all, as opposed to wanting its events discarded in userspace.
+//
+// The distinction was not being made, and for the scheduler programs it was
+// expensive. EventPolicy.SchedEvents defaults to false "because of their
+// volume", but it only suppressed forwarding: the three sched tracepoints
+// stayed attached, ran on every context switch and submitted an event each
+// time, which measured about 250,000 records a second on a hosted two-core
+// runner. processRecord read and classified every one of them and returned
+// without forwarding — and the CPU that cost starved the other ring buffer
+// readers enough that file, module and mount events went missing from a test
+// that generated them deliberately.
+//
+// A category gated off here reports unattached with this reason, which is a
+// more useful thing for an operator to read than a silent category would be.
+func (d *EBPFDriver) policyGateFor(name string) string {
+	if d == nil {
+		return ""
+	}
+	d.mu.RLock()
+	sched := d.policy.SchedEvents
+	d.mu.RUnlock()
+
+	switch name {
+	case "edr_tp_sched_switch", "edr_tp_sched_wakeup", "edr_tp_sched_migrate_task":
+		if !sched {
+			return "monitoring.sched_events is false, so the scheduler tracepoints are not attached: they fire on every context switch and submitting an event each time costs around a quarter of a million records a second, which starves the other subsystems"
+		}
+	}
+	return ""
+}
+
 func (d *EBPFDriver) featureGateFor(t ebpfAttachTarget) string {
 	switch t.Kind {
 	case ebpfAttachLSM:
