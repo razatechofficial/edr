@@ -23,9 +23,15 @@ func (d *ETWDriver) decodeKernelRegistry(record *etwEventRecord, env map[string]
 	eventID := record.EventHeader.EventDescriptor.Id
 	env["operation"] = registryOperationName(eventID)
 
-	if len(ud) >= 24 {
-		// PID at offset 20 in the canonical x64 layout.
-		env["pid"] = uint32FromLE(ud[20:24])
+	// The PID comes from the event header, which every ETW record carries
+	// and which needs no knowledge of the payload template. This used to
+	// read a u32 at payload offset 20 -- the position of ProcessId in the
+	// NT Kernel Logger Registry_TypeGroup1 MOF layout, not in the
+	// Microsoft-Windows-Kernel-Registry manifest -- and produced values
+	// like 6029312 that are not pids at all, so every registry event was
+	// attributed to a process that does not exist.
+	if pid := record.EventHeader.ProcessId; pid != 0 {
+		env["pid"] = pid
 	}
 
 	// P2-2: SetValueKey (opcode 5) carries the value name and value
