@@ -39,7 +39,10 @@ static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 static __always_inline bool pid_is_filtered(void)
 {
 	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	return bpf_map_lookup_elem(&sec_pid_filter, &pid) != NULL;
+	if (!bpf_map_lookup_elem(&sec_pid_filter, &pid))
+		return false;
+	edr_stat_filtered(EDR_SUBSYS_SECURITY);
+	return true;
 }
 
 SEC("tracepoint/syscalls/sys_enter_ptrace")
@@ -49,7 +52,7 @@ int tracepoint__syscalls__sys_enter_ptrace(struct trace_event_raw_sys_enter *ctx
 		return 0;
 
 	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_PTRACE);
 	if (!evt)
 		return 0;
 
@@ -72,7 +75,7 @@ int tracepoint__syscalls__sys_enter_init_module(struct trace_event_raw_sys_enter
 		return 0;
 
 	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_MODULE_LOAD);
 	if (!evt)
 		return 0;
 
@@ -98,7 +101,7 @@ int tracepoint__syscalls__sys_enter_finit_module(struct trace_event_raw_sys_ente
 		return 0;
 
 	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_MODULE_LOAD);
 	if (!evt)
 		return 0;
 
@@ -127,8 +130,8 @@ int tracepoint__syscalls__sys_enter_finit_module(struct trace_event_raw_sys_ente
 	do {                                                                  \
 		if (pid_is_filtered())                                        \
 			return 0;                                             \
-		struct security_event *evt =                                  \
-			bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);    \
+		struct security_event *evt = edr_ringbuf_reserve(              \
+			&sec_events, sizeof(*evt), EVENT_PRIVILEGE);          \
 		if (!evt)                                                     \
 			return 0;                                             \
 		__builtin_memset(evt, 0, sizeof(*evt));                       \
@@ -184,7 +187,7 @@ int tracepoint__syscalls__sys_enter_mount(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 
 	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_MOUNT);
 	if (!evt)
 		return 0;
 
@@ -207,7 +210,7 @@ int tracepoint__syscalls__sys_enter_clone(struct trace_event_raw_sys_enter *ctx)
 {
 	if (pid_is_filtered())
 		return 0;
-	struct process_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct process_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_PROCESS_FORK);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -222,7 +225,7 @@ int tracepoint__syscalls__sys_enter_clone3(struct trace_event_raw_sys_enter *ctx
 {
 	if (pid_is_filtered())
 		return 0;
-	struct process_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct process_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_PROCESS_FORK);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -248,7 +251,7 @@ int tracepoint__syscalls__sys_enter_sendto(struct trace_event_raw_sys_enter *ctx
 {
 	if (pid_is_filtered())
 		return 0;
-	struct network_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_NET_CONNECT);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -263,7 +266,7 @@ int tracepoint__syscalls__sys_enter_delete_module(struct trace_event_raw_sys_ent
 {
 	if (pid_is_filtered())
 		return 0;
-	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct security_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_MODULE_UNLOAD);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -278,7 +281,7 @@ int tracepoint__syscalls__sys_enter_capset(struct trace_event_raw_sys_enter *ctx
 {
 	if (pid_is_filtered())
 		return 0;
-	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct security_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_PRIVILEGE);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -301,7 +304,7 @@ int tracepoint__syscalls__sys_enter_prctl(struct trace_event_raw_sys_enter *ctx)
 {
 	if (pid_is_filtered())
 		return 0;
-	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct security_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_PRIVILEGE);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -321,7 +324,7 @@ int tracepoint__syscalls__sys_enter_unshare(struct trace_event_raw_sys_enter *ct
 		return 0;
 
 	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_UNSHARE);
 	if (!evt)
 		return 0;
 
@@ -340,7 +343,7 @@ int tracepoint__syscalls__sys_enter_madvise(struct trace_event_raw_sys_enter *ct
 		return 0;
 
 	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_MADVISE);
 	if (!evt)
 		return 0;
 
@@ -359,7 +362,7 @@ int BPF_PROG(lsm_bpf_prog, int cmd, union bpf_attr *attr, unsigned int size)
 {
 	if (pid_is_filtered())
 		return 0;
-	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct security_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_BPF_LOAD);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -376,7 +379,7 @@ int BPF_PROG(lsm_bpf_map_prog, struct bpf_map *map, fmode_t fmode)
 {
 	if (pid_is_filtered())
 		return 0;
-	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct security_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_BPF_MAP_ACCESS);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -393,7 +396,7 @@ int tp_cgroup_attach(void *ctx)
 {
 	if (pid_is_filtered())
 		return 0;
-	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct security_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_CGROUP_ATTACH);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -408,7 +411,7 @@ int tp_cgroup_mkdir(void *ctx)
 {
 	if (pid_is_filtered())
 		return 0;
-	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct security_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_CGROUP_MKDIR);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -425,7 +428,7 @@ int tp_seccomp(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 	if ((__u64)ctx->args[0] != 1)
 		return 0;
-	struct security_event *evt = bpf_ringbuf_reserve(&sec_events, sizeof(*evt), 0);
+	struct security_event *evt = edr_ringbuf_reserve(&sec_events, sizeof(*evt), EVENT_SECCOMP);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));

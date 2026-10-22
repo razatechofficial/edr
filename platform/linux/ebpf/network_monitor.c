@@ -44,7 +44,10 @@ static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 static __always_inline bool pid_is_filtered(void)
 {
 	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	return bpf_map_lookup_elem(&net_pid_filter, &pid) != NULL;
+	if (!bpf_map_lookup_elem(&net_pid_filter, &pid))
+		return false;
+	edr_stat_filtered(EDR_SUBSYS_NETWORK);
+	return true;
 }
 
 static __always_inline int parse_sockaddr(struct network_event *evt,
@@ -87,7 +90,7 @@ int tracepoint__syscalls__sys_enter_connect(struct trace_event_raw_sys_enter *ct
 	const struct sockaddr *uaddr = (const struct sockaddr *)ctx->args[1];
 
 	struct network_event *evt;
-	evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), EVENT_NET_CONNECT);
 	if (!evt)
 		return 0;
 
@@ -152,7 +155,7 @@ int kretp_inet_csk_accept(struct pt_regs *ctx)
 	if (!sk)
 		return 0;
 
-	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), EVENT_NET_ACCEPT);
 	if (!evt)
 		return 0;
 
@@ -194,7 +197,7 @@ int tracepoint__syscalls__sys_enter_bind(struct trace_event_raw_sys_enter *ctx)
 	const struct sockaddr *uaddr = (const struct sockaddr *)ctx->args[1];
 
 	struct network_event *evt;
-	evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), EVENT_NET_BIND);
 	if (!evt)
 		return 0;
 
@@ -225,7 +228,7 @@ int tp_dns_sendto(struct trace_event_raw_sys_enter *ctx)
 	if (pid_is_filtered())
 		return 0;
 	const struct sockaddr *uaddr = (const struct sockaddr *)ctx->args[4];
-	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), EVENT_DNS_QUERY);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -291,7 +294,7 @@ int kp_tcp_v4_connect(struct pt_regs *ctx)
 	if (!sk)
 		return 0;
 
-	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), EVENT_NET_CONNECT);
 	if (!evt)
 		return 0;
 
@@ -336,7 +339,7 @@ int kp_tcp_v6_connect(struct pt_regs *ctx)
 	if (!sk)
 		return 0;
 
-	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), EVENT_NET_CONNECT);
 	if (!evt)
 		return 0;
 
@@ -397,7 +400,7 @@ int kp_udp_sendmsg(struct pt_regs *ctx)
 	if (dport != 53)
 		return 0;
 
-	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), EVENT_DNS_QUERY);
 	if (!evt)
 		return 0;
 
@@ -468,7 +471,7 @@ int kretp_udp_recvmsg(struct pt_regs *ctx)
 	if (sport != 53)
 		return 0;
 
-	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), EVENT_DNS_QUERY);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
@@ -500,7 +503,7 @@ int kp_tcp_close(struct pt_regs *ctx)
 	if (!sk)
 		return 0;
 
-	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), EVENT_NET_CLOSE);
 	if (!evt)
 		return 0;
 
@@ -545,11 +548,15 @@ int kp_inet_sock_set_state(struct pt_regs *ctx)
 	if (newstate != TCP_ESTABLISHED && newstate != TCP_CLOSE)
 		return 0;
 
-	struct network_event *evt = bpf_ringbuf_reserve(&net_events, sizeof(*evt), 0);
+	/* Decided before the reserve so a lost record is attributed to the
+	 * stream it belonged to rather than to whichever branch came first. */
+	__u32 etype = (newstate == TCP_CLOSE) ? EVENT_NET_CLOSE : EVENT_NET_CONNECT;
+
+	struct network_event *evt = edr_ringbuf_reserve(&net_events, sizeof(*evt), etype);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header(&evt->hdr, newstate == TCP_CLOSE ? EVENT_NET_CLOSE : EVENT_NET_CONNECT);
+	fill_header(&evt->hdr, etype);
 	evt->direction = 0;
 
 	__u16 family = 0;
