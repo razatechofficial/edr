@@ -1181,6 +1181,15 @@ func (d *EBPFDriver) decodeDNSQueryEvent(data []byte) error {
 	raw := ne.DNSQuery[:]
 	qname := decodeDNSQName(raw)
 	qtypeStr := decodeDNSQType(raw)
+	// The wire bytes are authoritative. The eBPF program no longer walks
+	// the label chain -- the bounded loop it needed was rejected by the
+	// verifier and failed the whole object load -- so it reports 0 and the
+	// code comes from the same bytes decodeDNSQType reads. A non-zero
+	// kernel value is still honoured, for objects built before that change.
+	qtypeCode, ok := dnsQTypeFromWire(raw)
+	if !ok || qtypeCode == 0 {
+		qtypeCode = ne.DNSQType
+	}
 	env := map[string]interface{}{
 		"type":      "dns",
 		"timestamp": time.Now().UTC(),
@@ -1190,7 +1199,7 @@ func (d *EBPFDriver) decodeDNSQueryEvent(data []byte) error {
 		"dns_type":  qtypeStr,
 		// dns_qtype_code retains the numeric type for downstream matchers
 		// that prefer the raw IANA-assigned QTYPE code over the label.
-		"dns_qtype_code": ne.DNSQType,
+		"dns_qtype_code": qtypeCode,
 	}
 	return d.writeJSONEvent(env)
 }
@@ -1227,19 +1236,10 @@ func decodeDNSQName(raw []byte) string {
 // follows the QNAME terminator in the raw wire bytes. Falls back to "A"
 // when the bytes are too short to contain a QTYPE field.
 func decodeDNSQType(raw []byte) string {
-	i := 0
-	for i < len(raw) && raw[i] != 0 {
-		if raw[i]&0xC0 == 0xC0 {
-			i += 2
-			break
-		}
-		i += int(raw[i]) + 1
-	}
-	i++ // skip root label
-	if i+2 > len(raw) {
+	qtype, ok := dnsQTypeFromWire(raw)
+	if !ok {
 		return "A"
 	}
-	qtype := binary.BigEndian.Uint16(raw[i : i+2])
 	switch qtype {
 	case 1:
 		return "A"
@@ -1264,6 +1264,26 @@ func decodeDNSQType(raw []byte) string {
 	default:
 		return fmt.Sprintf("TYPE%d", qtype)
 	}
+}
+
+// dnsQTypeFromWire walks the label chain in the captured Question section and
+// returns the QTYPE word that follows the root label. ok is false when the
+// capture is too short to contain one, which is the case for a name that
+// filled the buffer.
+func dnsQTypeFromWire(raw []byte) (uint16, bool) {
+	i := 0
+	for i < len(raw) && raw[i] != 0 {
+		if raw[i]&0xC0 == 0xC0 {
+			i += 2
+			break
+		}
+		i += int(raw[i]) + 1
+	}
+	i++ // skip root label
+	if i < 0 || i+2 > len(raw) {
+		return 0, false
+	}
+	return binary.BigEndian.Uint16(raw[i : i+2]), true
 }
 
 func (d *EBPFDriver) decodeSchedEvent(data []byte) error {
