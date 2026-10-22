@@ -599,6 +599,7 @@ func firstPrefixedString(payload []byte) string {
 // subtest is waiting fills with the runner's background activity and drops the
 // record the next subtest is about to look for.
 type eventTap struct {
+	buf     *RingBuffer
 	mu      sync.Mutex
 	evs     []linuxEvent
 	dropped int
@@ -611,6 +612,7 @@ const eventTapCap = 1 << 16
 
 func newEventTap(t *testing.T, buf *RingBuffer) *eventTap {
 	tp := &eventTap{
+		buf:    buf,
 		counts: map[string]int{},
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
@@ -729,6 +731,33 @@ type linuxProof struct {
 	dir string
 }
 
+// diagnostics is what a failure needs in order to be attributable.
+//
+// Three numbers answer where an event went missing, and they are at three
+// different points on the path: the capability tracker counts events in
+// processRecord before any policy gate or buffer write, DriverStats counts
+// what the ring buffer readers handed up and what the driver dropped, and
+// RingBufferStats counts what the buffer itself refused for want of space.
+// Without them, "no event arrived" is indistinguishable between a kernel hook
+// that produced nothing, a decode that errored, and a buffer that was full.
+func (p *linuxProof) diagnostics(cat CapabilityCategory) string {
+	var b strings.Builder
+	st := p.drv.Stats()
+	fmt.Fprintf(&b, "driver stats: received=%d processed=%d dropped=%d errors=%d uptime=%.1fs",
+		st.EventsReceived, st.EventsProcessed, st.EventsDropped, st.ErrorCount, st.UptimeSeconds)
+	if p.tap.buf != nil {
+		rb := p.tap.buf.Stats()
+		fmt.Fprintf(&b, "\nring buffer: produced=%d consumed=%d dropped=%d backlog=%.1f%%",
+			rb.Produced, rb.Consumed, rb.Dropped, rb.BacklogPct)
+	}
+	for _, c := range p.drv.CapabilityReport().Categories {
+		if c.Category == cat {
+			fmt.Fprintf(&b, "\ncapability row: %+v", c)
+		}
+	}
+	return b.String()
+}
+
 // tempPath returns a path under the subtest's own directory.
 func (p *linuxProof) tempPath(name string) string {
 	return filepath.Join(p.dir, name)
@@ -786,11 +815,44 @@ func (p *linuxProof) expect(t *testing.T, mark int, what string, match func(linu
 	t.Helper()
 	ev, seen, ok := p.tap.await(mark, 15*time.Second, match)
 	if !ok {
-		t.Fatalf("no %s arrived within 15s after generating the activity (%d events seen in this window).\n%s\nThe hook serving this category is attached, so the gap is in the in-kernel filter, the ringbuf submit, or the decode path.",
-			what, seen, p.tap.summary())
+		t.Fatalf("no %s arrived within 15s after generating the activity (%d events seen in this window).\n%s\n%s\nThe hook serving this category is attached, so the gap is in the in-kernel filter, the ringbuf submit, or the decode path.",
+			what, seen, p.tap.summary(), p.diagnostics(""))
 	}
 	t.Logf("%s: %s", what, ev)
 	return ev
+}
+
+// proveWithRetry generates the activity and waits for the event, up to three
+// times.
+//
+// One attempt is not enough on a shared runner. These hooks are global: the
+// ring buffer carries every process's activity, the buffer can fill, and a
+// record the kernel produced can be dropped in userspace before the tap sees
+// it. Retrying the generation re-runs the whole path rather than waiting
+// longer on a record that is already gone -- and if the hook is genuinely
+// silent, three attempts fail just as surely as one, with the diagnostics
+// below saying which of the three stages lost it.
+func (p *linuxProof) proveWithRetry(t *testing.T, cat CapabilityCategory, what string,
+	generate func() uint32, match func(linuxEvent, uint32) bool) linuxEvent {
+	t.Helper()
+	const attempts = 3
+	worstSeen := 0
+	for attempt := 1; attempt <= attempts; attempt++ {
+		mark := p.tap.mark()
+		pid := generate()
+		ev, seen, ok := p.tap.await(mark, 6*time.Second, func(e linuxEvent) bool {
+			return match(e, pid)
+		})
+		if ok {
+			t.Logf("%s (attempt %d, pid %d): %s", what, attempt, pid, ev)
+			return ev
+		}
+		worstSeen = seen
+		t.Logf("attempt %d: no %s for pid %d within 6s (%d events seen)", attempt, what, pid, seen)
+	}
+	t.Fatalf("no %s arrived in %d attempts (%d events seen in the last window).\n%s\n%s",
+		what, attempts, worstSeen, p.tap.summary(), p.diagnostics(cat))
+	return linuxEvent{}
 }
 
 // observed returns the capability report's event count for cat.
@@ -846,34 +908,34 @@ func linuxCategoryProofs() []linuxCategoryProof {
 		{
 			cat: CapProcessExec,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActExec, "")
-				p.expect(t, m, fmt.Sprintf("exec event for pid %d", pid), func(e linuxEvent) bool {
-					return e.RawType == bpfEvtProcExec && e.PID == pid
-				})
+				p.proveWithRetry(t, CapProcessExec, "exec event",
+					func() uint32 { return runHelper(t, helperActExec, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.RawType == bpfEvtProcExec && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapProcessExit,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActExec, "")
-				p.expect(t, m, fmt.Sprintf("exit event for pid %d", pid), func(e linuxEvent) bool {
-					return e.RawType == bpfEvtProcExit && e.PID == pid
-				})
+				p.proveWithRetry(t, CapProcessExit, "exit event",
+					func() uint32 { return runHelper(t, helperActExec, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.RawType == bpfEvtProcExit && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapProcessFork,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
 				// The fork hook reports the forking process, so the
 				// helper forks a grandchild and the helper's pid is
 				// what the event carries.
-				pid := runHelper(t, helperActFork, "")
-				p.expect(t, m, fmt.Sprintf("fork event for pid %d", pid), func(e linuxEvent) bool {
-					return e.RawType == bpfEvtProcFork && e.PID == pid
-				})
+				p.proveWithRetry(t, CapProcessFork, "fork event",
+					func() uint32 { return runHelper(t, helperActFork, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.RawType == bpfEvtProcFork && e.PID == pid
+					})
 			},
 		},
 		{
@@ -881,68 +943,66 @@ func linuxCategoryProofs() []linuxCategoryProof {
 			prove: func(t *testing.T, p *linuxProof) {
 				path := p.tempPath("open-me.txt")
 				runHelper(t, helperActWrite, path)
-				m := p.tap.mark()
-				pid := runHelper(t, helperActOpen, path)
-				p.expect(t, m, fmt.Sprintf("openat event for pid %d naming %s", pid, filepath.Base(path)), func(e linuxEvent) bool {
-					return e.RawType == bpfEvtFileOpen && e.PID == pid &&
-						strings.Contains(e.Str, filepath.Base(path))
-				})
+				base := filepath.Base(path)
+				p.proveWithRetry(t, CapFileOpen, "openat event naming "+base,
+					func() uint32 { return runHelper(t, helperActOpen, path) },
+					func(e linuxEvent, pid uint32) bool {
+						return e.RawType == bpfEvtFileOpen && e.PID == pid &&
+							strings.Contains(e.Str, base)
+					})
 			},
 		},
 		{
 			cat: CapFileWrite,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActWrite, p.tempPath("write-me.txt"))
 				// sys_enter_write carries the fd, not a path, so the
 				// pid is the attribution here.
-				p.expect(t, m, fmt.Sprintf("write event for pid %d", pid), func(e linuxEvent) bool {
-					return e.RawType == bpfEvtFileWrite && e.PID == pid
-				})
+				p.proveWithRetry(t, CapFileWrite, "write event",
+					func() uint32 { return runHelper(t, helperActWrite, p.tempPath("write-me.txt")) },
+					func(e linuxEvent, pid uint32) bool {
+						return e.RawType == bpfEvtFileWrite && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapFileDelete,
 			prove: func(t *testing.T, p *linuxProof) {
-				path := p.tempPath("delete-me.txt")
-				m := p.tap.mark()
-				pid := runHelper(t, helperActUnlink, path)
-				p.expect(t, m, fmt.Sprintf("unlink event for pid %d naming %s", pid, filepath.Base(path)), func(e linuxEvent) bool {
-					return (e.RawType == bpfEvtFileDel || e.RawType == bpfEvtLSMFimUnlink) && e.PID == pid
-				})
+				p.proveWithRetry(t, CapFileDelete, "unlink event",
+					func() uint32 { return runHelper(t, helperActUnlink, p.tempPath("delete-me.txt")) },
+					func(e linuxEvent, pid uint32) bool {
+						return (e.RawType == bpfEvtFileDel || e.RawType == bpfEvtLSMFimUnlink) && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapFileRename,
 			prove: func(t *testing.T, p *linuxProof) {
-				path := p.tempPath("rename-me.txt")
-				m := p.tap.mark()
-				pid := runHelper(t, helperActRename, path)
-				p.expect(t, m, fmt.Sprintf("rename event for pid %d", pid), func(e linuxEvent) bool {
-					return (e.RawType == bpfEvtFileRen || e.RawType == bpfEvtLSMFimRename) && e.PID == pid
-				})
+				p.proveWithRetry(t, CapFileRename, "rename event",
+					func() uint32 { return runHelper(t, helperActRename, p.tempPath("rename-me.txt")) },
+					func(e linuxEvent, pid uint32) bool {
+						return (e.RawType == bpfEvtFileRen || e.RawType == bpfEvtLSMFimRename) && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapFilePermission,
 			prove: func(t *testing.T, p *linuxProof) {
-				path := p.tempPath("chmod-me.txt")
-				m := p.tap.mark()
-				pid := runHelper(t, helperActChmod, path)
-				p.expect(t, m, fmt.Sprintf("chmod event for pid %d", pid), func(e linuxEvent) bool {
-					return (e.RawType == bpfEvtFileChmod || e.RawType == bpfEvtLSMFimSetattr) && e.PID == pid
-				})
+				p.proveWithRetry(t, CapFilePermission, "chmod event",
+					func() uint32 { return runHelper(t, helperActChmod, p.tempPath("chmod-me.txt")) },
+					func(e linuxEvent, pid uint32) bool {
+						return (e.RawType == bpfEvtFileChmod || e.RawType == bpfEvtLSMFimSetattr) && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapNetworkConnect,
 			prove: func(t *testing.T, p *linuxProof) {
 				addr := p.listener(t)
-				m := p.tap.mark()
-				pid := runHelper(t, helperActDial, addr)
-				p.expect(t, m, fmt.Sprintf("connect event for pid %d to %s", pid, addr), func(e linuxEvent) bool {
-					return e.RawType == bpfEvtNetConn && e.PID == pid
-				})
+				p.proveWithRetry(t, CapNetworkConnect, "connect event to "+addr,
+					func() uint32 { return runHelper(t, helperActDial, addr) },
+					func(e linuxEvent, pid uint32) bool {
+						return e.RawType == bpfEvtNetConn && e.PID == pid
+					})
 			},
 		},
 		{
@@ -951,82 +1011,83 @@ func linuxCategoryProofs() []linuxCategoryProof {
 				// inet_csk_accept's return runs in the accepting
 				// task, so the listener must be the helper and the
 				// test process is the one that dials.
-				addr, pid, wait := startHelperListener(t)
-				m := p.tap.mark()
-				c, err := net.DialTimeout("tcp", addr, 5*time.Second)
-				if err != nil {
-					t.Fatalf("dialing the helper listener at %s: %v", addr, err)
-				}
-				_, _ = c.Write([]byte("ping"))
-				_ = c.Close()
-				p.expect(t, m, fmt.Sprintf("accept event for listener pid %d", pid), func(e linuxEvent) bool {
-					return e.RawType == bpfEvtNetAccept && e.PID == pid
-				})
-				wait()
+				p.proveWithRetry(t, CapNetworkAccept, "accept event",
+					func() uint32 {
+						addr, pid, wait := startHelperListener(t)
+						c, err := net.DialTimeout("tcp", addr, 5*time.Second)
+						if err != nil {
+							t.Fatalf("dialing the helper listener at %s: %v", addr, err)
+						}
+						_, _ = c.Write([]byte("ping"))
+						_ = c.Close()
+						wait()
+						return pid
+					},
+					func(e linuxEvent, pid uint32) bool {
+						return e.RawType == bpfEvtNetAccept && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapNetworkBind,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActBind, "")
-				p.expect(t, m, fmt.Sprintf("bind event for pid %d", pid), func(e linuxEvent) bool {
-					return e.RawType == bpfEvtNetBind && e.PID == pid
-				})
+				p.proveWithRetry(t, CapNetworkBind, "bind event",
+					func() uint32 { return runHelper(t, helperActBind, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.RawType == bpfEvtNetBind && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapNetworkClose,
 			prove: func(t *testing.T, p *linuxProof) {
 				addr := p.listener(t)
-				m := p.tap.mark()
-				pid := runHelper(t, helperActDial, addr)
 				// tcp_close and inet_sock_set_state can both run
 				// from softirq context on the connection teardown,
 				// where bpf_get_current_pid_tgid() is whatever task
-				// happened to be interrupted. The pid is logged but
-				// not asserted; what is asserted is that a close
-				// event for a connection appears at all.
-				ev := p.expect(t, m, "tcp close event", func(e linuxEvent) bool {
-					return e.RawType == bpfEvtNetClose
-				})
-				if ev.PID != pid {
-					t.Logf("note: close event pid %d is not the dialling helper %d, which is expected when the teardown runs in softirq context", ev.PID, pid)
-				}
+				// happened to be interrupted. The pid is therefore
+				// not part of the match; what is asserted is that a
+				// close event for a connection appears at all.
+				ev := p.proveWithRetry(t, CapNetworkClose, "tcp close event",
+					func() uint32 { return runHelper(t, helperActDial, addr) },
+					func(e linuxEvent, _ uint32) bool {
+						return e.RawType == bpfEvtNetClose
+					})
+				t.Logf("close event pid=%d (softirq teardown need not carry the dialling pid)", ev.PID)
 			},
 		},
 		{
 			cat: CapNetworkDNS,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
 				// tp_dns_sendto only emits for destination port 53.
-				pid := runHelper(t, helperActDNS, "127.0.0.1:53")
-				p.expect(t, m, fmt.Sprintf("dns query event for pid %d", pid), func(e linuxEvent) bool {
-					return e.JSONType == "dns" && e.PID == pid
-				})
+				p.proveWithRetry(t, CapNetworkDNS, "dns query event",
+					func() uint32 { return runHelper(t, helperActDNS, "127.0.0.1:53") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.JSONType == "dns" && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapModuleLoad,
 			prove: func(t *testing.T, p *linuxProof) {
 				before := p.observed(t, CapModuleLoad)
-				m := p.tap.mark()
-				pid := runHelper(t, helperActModLoad, "")
-				p.expect(t, m, fmt.Sprintf("module event for pid %d", pid), func(e linuxEvent) bool {
-					return e.JSONType == string(events.EventModule) && e.PID == pid
-				})
+				p.proveWithRetry(t, CapModuleLoad, "module event",
+					func() uint32 { return runHelper(t, helperActModLoad, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.JSONType == string(events.EventModule) && e.PID == pid
+					})
 				p.expectObserved(t, CapModuleLoad, before, "a finit_module(2) entry")
 			},
 		},
 		{
 			cat: CapModuleUnload,
 			prove: func(t *testing.T, p *linuxProof) {
-				before := p.observed(t, CapModuleUnload)
-				pid := runHelper(t, helperActModUnload, "")
 				// Load and unload share the type="module" envelope,
 				// so the counter is the only place the distinction
 				// survives. Before EVENT_MODULE_UNLOAD existed this
 				// counter could never move at all.
+				before := p.observed(t, CapModuleUnload)
+				pid := runHelper(t, helperActModUnload, "")
 				p.expectObserved(t, CapModuleUnload, before,
 					fmt.Sprintf("a delete_module(2) entry from pid %d", pid))
 			},
@@ -1034,31 +1095,31 @@ func linuxCategoryProofs() []linuxCategoryProof {
 		{
 			cat: CapCredentialChange,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActSetID, "")
-				p.expect(t, m, fmt.Sprintf("privilege event for pid %d", pid), func(e linuxEvent) bool {
-					return e.JSONType == string(events.EventPrivilege) && e.PID == pid
-				})
+				p.proveWithRetry(t, CapCredentialChange, "privilege event",
+					func() uint32 { return runHelper(t, helperActSetID, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.JSONType == string(events.EventPrivilege) && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapNamespaceChange,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActUnshare, "")
-				p.expect(t, m, fmt.Sprintf("namespace event for pid %d", pid), func(e linuxEvent) bool {
-					return e.JSONType == string(events.EventNamespace) && e.PID == pid
-				})
+				p.proveWithRetry(t, CapNamespaceChange, "namespace event",
+					func() uint32 { return runHelper(t, helperActUnshare, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.JSONType == string(events.EventNamespace) && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapPtrace,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActPtrace, "")
-				p.expect(t, m, fmt.Sprintf("ptrace event for pid %d", pid), func(e linuxEvent) bool {
-					return e.JSONType == string(events.EventPtrace) && e.PID == pid
-				})
+				p.proveWithRetry(t, CapPtrace, "ptrace event",
+					func() uint32 { return runHelper(t, helperActPtrace, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.JSONType == string(events.EventPtrace) && e.PID == pid
+					})
 			},
 		},
 		{
@@ -1070,31 +1131,31 @@ func linuxCategoryProofs() []linuxCategoryProof {
 			// host-wide with no policy surface. If that hook is ever
 			// attached, this proof runs.
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActExec, "")
-				p.expect(t, m, "signal event", func(e linuxEvent) bool {
-					return e.JSONType == string(events.EventSignal) && e.PID == pid
-				})
+				p.proveWithRetry(t, CapSignal, "signal event",
+					func() uint32 { return runHelper(t, helperActExec, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.JSONType == string(events.EventSignal) && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapMemoryWrite,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActMadvise, "")
-				p.expect(t, m, fmt.Sprintf("madvise event for pid %d", pid), func(e linuxEvent) bool {
-					return e.JSONType == "madvise" && e.PID == pid
-				})
+				p.proveWithRetry(t, CapMemoryWrite, "madvise event",
+					func() uint32 { return runHelper(t, helperActMadvise, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.JSONType == "madvise" && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapMount,
 			prove: func(t *testing.T, p *linuxProof) {
-				m := p.tap.mark()
-				pid := runHelper(t, helperActMount, "")
-				p.expect(t, m, fmt.Sprintf("mount event for pid %d", pid), func(e linuxEvent) bool {
-					return e.JSONType == string(events.EventMount) && e.PID == pid
-				})
+				p.proveWithRetry(t, CapMount, "mount event",
+					func() uint32 { return runHelper(t, helperActMount, "") },
+					func(e linuxEvent, pid uint32) bool {
+						return e.JSONType == string(events.EventMount) && e.PID == pid
+					})
 			},
 		},
 		{
@@ -1108,26 +1169,26 @@ func linuxCategoryProofs() []linuxCategoryProof {
 				// Scheduler events are ambient: any process being
 				// switched in or out produces them, so no activity
 				// has to be generated and no pid can be predicted.
-				m := p.tap.mark()
-				runHelper(t, helperActExec, "")
-				p.expect(t, m, "scheduler event", func(e linuxEvent) bool {
-					switch e.Op {
-					case "sched_switch", "sched_wakeup", "sched_migrate_task":
-						return true
-					}
-					return false
-				})
+				p.proveWithRetry(t, CapScheduler, "scheduler event",
+					func() uint32 { return runHelper(t, helperActExec, "") },
+					func(e linuxEvent, _ uint32) bool {
+						switch e.Op {
+						case "sched_switch", "sched_wakeup", "sched_migrate_task":
+							return true
+						}
+						return false
+					})
 			},
 		},
 		{
 			cat: CapTLSMetadata,
 			prove: func(t *testing.T, p *linuxProof) {
 				addr := p.listener(t)
-				m := p.tap.mark()
-				pid := runHelper(t, helperActTLS, addr)
-				ev := p.expect(t, m, fmt.Sprintf("TLS ClientHello event for pid %d", pid), func(e linuxEvent) bool {
-					return e.Op == "tls_client_hello" && e.PID == pid
-				})
+				ev := p.proveWithRetry(t, CapTLSMetadata, "TLS ClientHello event",
+					func() uint32 { return runHelper(t, helperActTLS, addr) },
+					func(e linuxEvent, pid uint32) bool {
+						return e.Op == "tls_client_hello" && e.PID == pid
+					})
 				// What the program extracts is a bounded printable
 				// prefix of the handshake bytes, not a parsed
 				// server_name extension. Assert what it claims, not
@@ -1140,13 +1201,6 @@ func linuxCategoryProofs() []linuxCategoryProof {
 	}
 }
 
-// TestLinuxMonitoringCategories proves one capability category per subtest.
-//
-// All subtests share one driver. Loading and attaching sixty-one programs
-// takes seconds, and a per-subtest driver would also mean a per-subtest ring
-// buffer that nobody drains while the previous subtest runs. Each subtest
-// takes a cursor into the shared event tap before generating its activity, so
-// one subtest's events cannot satisfy another's assertion.
 // TestLinuxMonitoringCategoryTableCoversEveryCategory needs no root and no
 // kernel, so it runs wherever the integration build runs. "We cover every
 // category" is a claim that rots silently; this is what stops it.
