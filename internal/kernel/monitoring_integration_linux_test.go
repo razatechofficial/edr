@@ -445,12 +445,14 @@ func startMonitoringForTest(t *testing.T) (*EBPFDriver, *eventTap) {
 		t.Skipf("MISSING PREREQUISITE: eBPF driver could not be constructed: %v", err)
 	}
 
-	// Scheduler and LSM-FIM events are off in DefaultPolicy because of
-	// their volume. Both are operator-switchable, and a category whose
-	// only proof is a policy nobody turns on is not proven, so turn them
-	// on here.
+	// LSM-FIM events are off in DefaultPolicy; they are low volume and
+	// several file categories can be served by them, so turn them on for
+	// the whole run. Scheduler events are NOT turned on here: they are
+	// emitted for every context switch and they drowned every other
+	// category -- 91,885 of 93,021 records in one run -- which filled the
+	// shared ring buffer and dropped the file events the next subtest was
+	// waiting for. The scheduler subtest turns them on for itself.
 	pol := DefaultPolicy()
-	pol.SchedEvents = true
 	pol.LSMFimEvents = true
 	if err := drv.SetPolicy(pol); err != nil {
 		t.Fatalf("SetPolicy: %v", err)
@@ -605,7 +607,7 @@ type eventTap struct {
 	done    chan struct{}
 }
 
-const eventTapCap = 1 << 17
+const eventTapCap = 1 << 16
 
 func newEventTap(t *testing.T, buf *RingBuffer) *eventTap {
 	tp := &eventTap{
@@ -748,6 +750,27 @@ func (p *linuxProof) listener(t *testing.T) string {
 		}
 	}()
 	return ln.Addr().String()
+}
+
+// enableForThisSubtest turns a policy flag on for the duration of one subtest
+// and restores the previous policy afterwards.
+//
+// The high-volume categories are gated in DefaultPolicy for a reason, and
+// leaving them on for the whole run starves the others out of the shared ring
+// buffer. A category whose only proof is a policy nobody turns on is not
+// proven either, so it is turned on here, narrowly.
+func (p *linuxProof) enableForThisSubtest(t *testing.T, mutate func(*EventPolicy)) {
+	t.Helper()
+	p.drv.mu.RLock()
+	prev := p.drv.policy
+	p.drv.mu.RUnlock()
+
+	next := prev
+	mutate(&next)
+	if err := p.drv.SetPolicy(next); err != nil {
+		t.Fatalf("SetPolicy: %v", err)
+	}
+	t.Cleanup(func() { _ = p.drv.SetPolicy(prev) })
 }
 
 // expect waits for an event and fails with what did arrive when it does not.
@@ -1073,6 +1096,7 @@ func linuxCategoryProofs() []linuxCategoryProof {
 		{
 			cat: CapScheduler,
 			prove: func(t *testing.T, p *linuxProof) {
+				p.enableForThisSubtest(t, func(pol *EventPolicy) { pol.SchedEvents = true })
 				// Scheduler events are ambient: any process being
 				// switched in or out produces them, so no activity
 				// has to be generated and no pid can be predicted.
