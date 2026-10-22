@@ -379,11 +379,23 @@ int tracepoint__syscalls__sys_enter_fchmodat(struct trace_event_raw_sys_enter *c
 	__builtin_memset(evt, 0, sizeof(*evt));
 	fill_header(&evt->hdr, EVENT_FILE_CHMOD);
 
-	/* fchmodat(2): args[0]=dfd, args[1]=pathname, args[2]=mode, args[3]=flag */
+	/*
+	 * fchmodat(2): args[0]=dfd, args[1]=pathname, args[2]=mode. There is
+	 * no fourth argument -- glibc's fchmodat takes a flags parameter and
+	 * emulates it, and the syscall that really has one is fchmodat2(2),
+	 * added in 6.6 with its own tracepoint.
+	 *
+	 * This read args[3] as a flags field, which is one field past what the
+	 * sys_enter_fchmodat format publishes, and the kernel refuses to
+	 * attach a program whose max_ctx_offset exceeds the tracepoint's
+	 * offsets (-EACCES, surfaced by the loader as "cannot create bpf perf
+	 * link: permission denied"). So this program never attached on any
+	 * kernel and file_permission had no chmod source at all: the category
+	 * was served only by fim_inode_setattr, which needs BPF LSM.
+	 */
 	const char *pathname = (const char *)ctx->args[1];
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), pathname);
 	evt->mode = (__u32)ctx->args[2];
-	evt->flags = (__u32)ctx->args[3];
 	mark_sensitive(evt);
 
 	bpf_ringbuf_submit(evt, 0);
