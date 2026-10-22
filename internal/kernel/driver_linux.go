@@ -231,6 +231,11 @@ type EBPFDriver struct {
 	// actually arrived. It is what makes CapabilityReport able to say
 	// "attached but producing nothing" instead of only "attached".
 	caps *capabilityTracker
+
+	// kernelStats caches the last read of the in-kernel event_stats and
+	// filter_stats maps. Stats() is polled, and a read is 72 per-CPU map
+	// lookups, so it is bounded by kernelStatsCacheTTL.
+	kernelStats kernelStatsCache
 }
 
 // tracepointAttachSpec is what the loader recorded about one successful
@@ -568,12 +573,26 @@ func (d *EBPFDriver) Stats() DriverStats {
 	if !d.startTime.IsZero() {
 		uptime = time.Since(d.startTime).Seconds()
 	}
+	// The kernel-side counters belong here because this is the surface an
+	// operator and a health check already read. A ring buffer that filled
+	// is the one loss on the path that EventsDropped cannot see: that
+	// counter is incremented when a record userspace received could not be
+	// decoded, and a record lost to a full ring buffer was never received.
+	loss := d.kernelEventLossCached()
+	var filtered uint64
+	for _, n := range loss.FilterDrops {
+		filtered += n
+	}
 	return DriverStats{
-		EventsReceived:  d.received.Load(),
-		EventsDropped:   d.dropped.Load(),
-		EventsProcessed: d.processed.Load(),
-		UptimeSeconds:   uptime,
-		ErrorCount:      d.errors.Load(),
+		EventsReceived:        d.received.Load(),
+		EventsDropped:         d.dropped.Load(),
+		EventsProcessed:       d.processed.Load(),
+		UptimeSeconds:         uptime,
+		ErrorCount:            d.errors.Load(),
+		KernelReserveFailures: loss.TotalReserveFailed,
+		KernelSubmitted:       loss.TotalSubmitted,
+		KernelFilterDrops:     filtered,
+		KernelLossByRing:      loss.ByRing,
 	}
 }
 

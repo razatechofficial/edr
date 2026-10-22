@@ -139,6 +139,32 @@ type DriverStats struct {
 	// LostEvents / RealtimeBuffersLost are populated on Windows ETW (ControlTrace QUERY); zero elsewhere.
 	LostEvents              uint32 `json:"lost_events,omitempty"`
 	RealtimeBuffersLost     uint32 `json:"realtime_buffers_lost,omitempty"`
+
+	// KernelReserveFailures counts events the kernel threw away because
+	// the BPF ring buffer they were destined for was full. Linux eBPF
+	// only; zero elsewhere.
+	//
+	// It is separate from EventsDropped because the two are losses at
+	// different points and only one of them userspace can otherwise see.
+	// EventsDropped counts records that reached the driver and failed to
+	// decode. A record lost to a full ring buffer never reached the
+	// driver, never reached the userspace RingBuffer, and never credited
+	// the capability report -- so before this field every surface the
+	// agent exposes read exactly as it reads on an idle host.
+	KernelReserveFailures uint64 `json:"kernel_reserve_failures,omitempty"`
+
+	// KernelSubmitted counts events the kernel reserved and filled, which
+	// is the denominator KernelReserveFailures needs to be read against.
+	KernelSubmitted uint64 `json:"kernel_submitted,omitempty"`
+
+	// KernelFilterDrops counts events an in-kernel pid filter dropped
+	// before a reserve was attempted. A non-zero value is normal: the
+	// agent always filters its own pid.
+	KernelFilterDrops uint64 `json:"kernel_filter_drops,omitempty"`
+
+	// KernelLossByRing attributes KernelReserveFailures to the ring buffer
+	// that was full, which is the thing to resize or drain faster.
+	KernelLossByRing map[string]uint64 `json:"kernel_loss_by_ring,omitempty"`
 }
 
 // ETWProviderHealth records per-provider subscribe status (Windows ETW).
