@@ -63,6 +63,7 @@ type Agent struct {
 	forwarder    forwarder.Forwarder
 	forwardDrain forwarder.Drainer
 	killAllow    map[string]struct{}
+	killBudget   *killBudget
 	zapLogger    *zap.Logger
 
 	baselineEngine  *baseline.BaselineEngine
@@ -173,6 +174,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		responder:          response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:             alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
 		killAllow:          makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		killBudget:         newKillBudget(cfg.LegacyResponse.MaxKillsPerHour),
 		zapLogger:          zapLogger,
 		userLookup:         users,
 		fileDedup:          collector.NewFileDeduper(0),
@@ -636,6 +638,7 @@ func NewForTestingWithCollectors(cfg config.Config, rs rules.RuleSet, collectors
 		responder:          response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:             alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),
 		killAllow:          makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		killBudget:         newKillBudget(cfg.LegacyResponse.MaxKillsPerHour),
 		fileDedup:          collector.NewFileDeduper(0),
 		fileHashPool:       newFileHashPool(),
 		noisyAlertLastSeen: make(map[string]time.Time),
@@ -1436,15 +1439,68 @@ func (a *Agent) executeAutoResponse(al schema.Alert) {
 	if correlationID == "" {
 		correlationID = uuid.NewString()
 	}
+	target := firstNonEmpty(al.ProcessPath, al.FilePath, al.ProcessName)
+
 	if !a.shouldAutoKill(al) {
 		a.logger.Debug("response decision",
 			"event_type", "response_decision",
 			"rule", al.RuleID,
-			"target", firstNonEmpty(al.ProcessPath, al.FilePath, al.ProcessName),
+			"target", target,
 			"action", "none",
 			"result", "skipped",
 			"reason", "auto-kill policy did not match",
 			"correlation_id", correlationID)
+		return
+	}
+
+	// Observe mode: the policy matched and the agent is telling you what it
+	// would have done. Logged at warn, not debug, because this is the line an
+	// operator reads to decide whether enforcing is safe, and a line nobody
+	// reads is not evidence.
+	if !a.cfg.AutoKillEnforcing() {
+		a.logger.Warn("response decision",
+			"event_type", "response_decision",
+			"rule", al.RuleID,
+			"target", target,
+			"pid", al.ProcessPID,
+			"score", al.Score,
+			"action", "kill_process",
+			"result", "observed",
+			"reason", "kill_mode is observe; no process was terminated",
+			"correlation_id", correlationID)
+		_ = a.writer.WriteAudit(schema.AuditRecord{
+			SchemaVersion: schema.SchemaVersionV1,
+			RecordID:      uuid.NewString(),
+			Action:        "kill_process",
+			Outcome:       "observed",
+			Message:       fmt.Sprintf("rule %s would have terminated pid %d (%s); kill_mode is observe", al.RuleID, al.ProcessPID, target),
+			Timestamp:     time.Now().UTC(),
+		})
+		return
+	}
+
+	// Blast radius. A rule that matches broadly, or an indicator feed that
+	// goes wrong, otherwise keeps terminating for as long as it matches.
+	if !a.killBudget.allow() {
+		used, limit := a.killBudget.used()
+		a.logger.Error("response decision",
+			"event_type", "response_decision",
+			"rule", al.RuleID,
+			"target", target,
+			"action", "kill_process",
+			"result", "refused",
+			"reason", "hourly automated termination limit reached; detection continues, termination does not",
+			"kills_this_hour", used,
+			"limit", limit,
+			"correlation_id", correlationID)
+		_ = a.writer.WriteAudit(schema.AuditRecord{
+			SchemaVersion: schema.SchemaVersionV1,
+			RecordID:      uuid.NewString(),
+			Action:        "kill_process",
+			Outcome:       "refused",
+			Message:       fmt.Sprintf("rule %s matched pid %d (%s) but the hourly termination limit of %d was reached", al.RuleID, al.ProcessPID, target, limit),
+			Timestamp:     time.Now().UTC(),
+		})
 		return
 	}
 
@@ -1555,8 +1611,12 @@ func (a *Agent) shouldAutoKill(al schema.Alert) bool {
 	if al.Score < a.cfg.LegacyResponse.MinKillScore {
 		return false
 	}
+	// Fail closed. This used to return true, so an unset kill_rule_allowlist —
+	// which is what the default configuration shipped — authorised every rule
+	// that scored above the threshold to terminate processes. An operator who
+	// has not named the rules they trust has not authorised any of them.
 	if len(a.killAllow) == 0 {
-		return true
+		return false
 	}
 	_, ok := a.killAllow[al.RuleID]
 	return ok
