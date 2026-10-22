@@ -438,6 +438,16 @@ func (d *EBPFDriver) bootstrapLoadedCollection() error {
 	// fix that works regardless of kernel age.
 	d.setBPFFDsCloexec()
 
+	// The accounting maps are read by field offset, so a geometry mismatch
+	// would decode garbage or silently read fewer slots than exist. The
+	// version gate already refuses a stale object; this names the specific
+	// mismatch, and it is a warning rather than a failure because losing
+	// the loss counters is worse than no monitoring only if it goes
+	// unnoticed.
+	if err := assertKernelStatsGeometry(coll); err != nil {
+		fmt.Fprintf(os.Stderr, "WARN ebpf: kernel loss accounting unavailable: %v\n", err)
+	}
+
 	// Capture every SEC() string before the spec goes out of scope:
 	// attachPrograms plans from the section, and ebpf.Collection does not
 	// carry section names.

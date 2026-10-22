@@ -273,15 +273,23 @@ func (d *EBPFDriver) kernelEventLossCached() KernelLossReport {
 }
 
 // kernelLossForCategory totals the records the kernel threw away for one
-// capability category, plus what it submitted, so a report row can say which.
-func (r KernelLossReport) kernelLossForCategory(cat CapabilityCategory) (submitted, lost uint64) {
+// capability category, plus what it submitted and the ring buffer the loss
+// happened on, so a report row can name all three.
+func (r KernelLossReport) kernelLossForCategory(cat CapabilityCategory) (submitted, lost uint64, ring string) {
 	for _, row := range r.ByType {
-		if row.Category == string(cat) {
-			submitted += row.Submitted
-			lost += row.ReserveFailed
+		if row.Category != string(cat) {
+			continue
+		}
+		submitted += row.Submitted
+		lost += row.ReserveFailed
+		if row.ReserveFailed > 0 && ring == "" {
+			ring = row.Ring
 		}
 	}
-	return submitted, lost
+	if ring == "" {
+		ring = "ring buffer"
+	}
+	return submitted, lost, ring
 }
 
 // Summary is a one-paragraph rendering for a log line or a test failure.
