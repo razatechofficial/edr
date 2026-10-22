@@ -306,3 +306,42 @@ func (d *EBPFDriver) reattachBySpec(spec tracepointAttachSpec, prog *ebpf.Progra
 	t := ebpfAttachTarget{Kind: kind, Group: spec.group, Name: spec.tp, Symbol: spec.symbol}
 	return d.attachOne(spec.progName, prog, t)
 }
+
+// AttachTargetsFor returns, for each named program the driver attached, the
+// attach target it used: "syscalls/sys_enter_execve" for a tracepoint,
+// "kprobe:tcp_close" for a kprobe, "lsm" for an LSM hook.
+//
+// Exported for the integration suite. A program the report calls attached,
+// whose kernel run count is zero, is either hooked to something that does not
+// fire or not really hooked at all, and the two are told apart by looking at
+// the target itself -- tracefs publishes an "enable" file per tracepoint. The
+// loader is the only thing that knows which target a program ended up on,
+// because the choice comes from the object's SEC() string rather than a table.
+func (d *EBPFDriver) AttachTargetsFor(programs []string) map[string]string {
+	if d == nil || len(programs) == 0 {
+		return nil
+	}
+	want := make(map[string]bool, len(programs))
+	for _, p := range programs {
+		want[p] = true
+	}
+	out := make(map[string]string, len(programs))
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	for _, spec := range d.specByProg {
+		if !want[spec.progName] {
+			continue
+		}
+		switch {
+		case spec.lsm || spec.kind == ebpfAttachLSM:
+			out[spec.progName] = "lsm"
+		case spec.symbol != "":
+			out[spec.progName] = string(spec.kind) + ":" + spec.symbol
+		case spec.group != "":
+			out[spec.progName] = spec.group + "/" + spec.tp
+		default:
+			out[spec.progName] = spec.tp
+		}
+	}
+	return out
+}

@@ -26,6 +26,7 @@ package kernel
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -164,9 +165,39 @@ func (d *EBPFDriver) ProgramRunCounts() []ProgramRunStat {
 	return out
 }
 
+// ProgramRunTotalFor sums the run counts of the named programs.
+//
+// counted is false when the statistics were never enabled, so a caller can
+// print "not measured" instead of a zero that looks like a measurement.
+func (d *EBPFDriver) ProgramRunTotalFor(programs []string) (total uint64, counted bool) {
+	if d == nil || len(programs) == 0 || !d.ProgramRunStatsEnabled() {
+		return 0, false
+	}
+	want := make(map[string]bool, len(programs))
+	for _, p := range programs {
+		want[p] = true
+	}
+	for _, st := range d.ProgramRunCounts() {
+		if want[st.Program] {
+			total += st.RunCount
+		}
+	}
+	return total, true
+}
+
+// ebpfRunCountControlRows is how many of the busiest programs
+// ProgramRunCountsFor prints as a control.
+const ebpfRunCountControlRows = 8
+
 // ProgramRunCountsFor renders the run counts of the named programs, which is
 // what a dark capability category needs: the report row already lists the
 // hooks that serve it, and this says whether the kernel is calling them.
+//
+// It always prints the busiest programs underneath, as a control. "runs=0" on
+// its own does not distinguish a hook the kernel never reached from statistics
+// that were not actually being collected, and reading the first as the second
+// would send the next person looking in the wrong place. If the control rows
+// are also zero, nothing was measured and nothing here means anything.
 func (d *EBPFDriver) ProgramRunCountsFor(programs []string) string {
 	if d == nil || len(programs) == 0 {
 		return ""
@@ -178,10 +209,12 @@ func (d *EBPFDriver) ProgramRunCountsFor(programs []string) string {
 	for _, p := range programs {
 		want[p] = true
 	}
+	all := d.ProgramRunCounts()
+
 	var b strings.Builder
 	b.WriteString("per-program run counts:")
 	found := false
-	for _, st := range d.ProgramRunCounts() {
+	for _, st := range all {
 		if !want[st.Program] {
 			continue
 		}
@@ -193,6 +226,22 @@ func (d *EBPFDriver) ProgramRunCountsFor(programs []string) string {
 	}
 	if !found {
 		b.WriteString(" none of the named programs is in the loaded collection")
+	}
+
+	fmt.Fprintf(&b, "\n  busiest programs, as a control on the counts above (%d CPUs):", runtime.NumCPU())
+	if len(all) == 0 {
+		b.WriteString(" none; the collection has no programs")
+		return b.String()
+	}
+	n := ebpfRunCountControlRows
+	if len(all) < n {
+		n = len(all)
+	}
+	for _, st := range all[:n] {
+		fmt.Fprintf(&b, "\n    %s: runs=%d", st.Program, st.RunCount)
+	}
+	if all[0].RunCount == 0 {
+		b.WriteString("\n    every program reads zero, so the statistics are not being collected and no count above is evidence of anything")
 	}
 	return b.String()
 }
