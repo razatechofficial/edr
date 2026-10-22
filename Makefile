@@ -174,7 +174,15 @@ else
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
 endif
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edrctl.exe ./cmd/cli
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui
+# The dist copy of the UI, guarded exactly as the bin/ copy above is. Two
+# separate lines build this binary and only guarding one of them left the
+# cross-compile lane failing on the other.
+	@if [ "$$(uname -s)" = "MINGW64_NT" ] || command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
+		CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=$$(command -v x86_64-w64-mingw32-gcc || echo gcc) \
+			go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui; \
+	else \
+		echo "==> skipping dist edr-agent-ui (windows): cgo GUI build needs mingw-w64"; \
+	fi
 
 build-darwin-production:
 	@bash scripts/ci/build_macos_production.sh
