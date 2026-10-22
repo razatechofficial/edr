@@ -14,7 +14,11 @@ logging:
 response:
   allow_kill: true
   auto_kill_enabled: false
-  min_kill_score: 90
+  # Observe records what would have been terminated without terminating it.
+  # Promote to "enforce" only after reading what it recorded.
+  kill_mode: "observe"
+  min_kill_score: 95
+  max_kills_per_hour: 10
   kill_rule_allowlist:
     - "PROC-003"
     - "PROC-004"
