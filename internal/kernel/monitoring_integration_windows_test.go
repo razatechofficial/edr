@@ -716,16 +716,22 @@ func etwCategoryProofs() []etwCategoryProof {
 						e.EventID == kernelRegistryEvtSetValue
 				})
 				// operation and value_name only appear when the
-				// decoder switched on the event id; keyed on the
+				// decoder switches on the event id; keyed on the
 				// opcode, as it was, the SetValue branch never ran.
 				if ev.Operation != "set_value" {
 					t.Errorf("SetValue event reports operation %q, want set_value", ev.Operation)
 				}
+				// Exactly "itest_value": reading the value name two
+				// bytes late, which the old offset did, yields
+				// "test_value" and would pass a Contains check.
 				if ev.ValueName != "itest_value" {
 					t.Errorf("SetValue event reports value_name %q, want itest_value", ev.ValueName)
 				}
+				// SetValueKey carries no key path of its own; this
+				// comes from the KeyObject the CreateKey event
+				// seeded, so it also exercises that cache.
 				if !strings.Contains(ev.KeyPath, "EDRMonitoringIntegrationTest") {
-					t.Errorf("SetValue event reports key_path %q, which does not name the key the helper wrote", ev.KeyPath)
+					t.Errorf("SetValue event reports key_path %q, which does not name the key the helper wrote; the KeyObject cache did not resolve it", ev.KeyPath)
 				}
 			},
 		},
