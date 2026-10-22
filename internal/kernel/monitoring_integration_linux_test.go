@@ -834,6 +834,88 @@ type linuxProof struct {
 	dir string
 }
 
+// kernelTrace is the one-line kernel-side state of a category, for a log line
+// after each failed attempt.
+//
+// Per attempt rather than only at the end, because the totals after six failed
+// attempts cannot say whether the hook ran during any of them. With this, a
+// failed attempt whose hook run count went up lost the record somewhere after
+// the handler decided to emit it; one whose run count did not move never
+// reached the handler at all. The flake this was written for turned out to be
+// all-or-nothing per generated process, which is only visible per attempt.
+func (p *linuxProof) kernelTrace(cat CapabilityCategory) string {
+	loss := p.drv.KernelEventLossReport()
+	sub, lost, ring := loss.kernelLossForCategory(cat)
+	out := fmt.Sprintf("kernel: submitted=%d reserve_failed=%d on %s", sub, lost, ring)
+
+	hooks := findCapabilityHooks(p.drv.CapabilityReport(), cat)
+	if runs, counted := p.drv.ProgramRunTotalFor(hooks); counted {
+		out += fmt.Sprintf("; hook invocations=%d", runs)
+	} else {
+		out += "; hook invocations=not measured"
+	}
+	if len(loss.FilterDrops) > 0 {
+		out += fmt.Sprintf("; in-kernel filter drops=%v", loss.FilterDrops)
+	}
+	return out
+}
+
+// findCapabilityHooks returns the program names a category's row lists.
+func findCapabilityHooks(rep CapabilityReport, cat CapabilityCategory) []string {
+	for _, c := range rep.Categories {
+		if c.Category == cat {
+			return c.Attachments
+		}
+	}
+	return nil
+}
+
+// tracepointEnableState reports what tracefs says about each of a category's
+// attach targets.
+//
+// A tracepoint with an attached BPF program reads 1 in its "enable" file. If a
+// program's run count is zero and its tracepoint reads 1, the hook is armed
+// and the syscall under test is not reaching it; if it reads 0, the attach did
+// not take effect however successfully the link call returned. Those are
+// different bugs and the file is the cheapest way to tell them apart.
+func tracepointEnableState(drv *EBPFDriver, hooks []string) string {
+	targets := drv.AttachTargetsFor(hooks)
+	if len(targets) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(targets))
+	for name := range targets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	b.WriteString("attach targets, and what tracefs says about them:")
+	for _, name := range names {
+		target := targets[name]
+		fmt.Fprintf(&b, "\n    %s -> %s", name, target)
+		group, tp, ok := strings.Cut(target, "/")
+		if !ok {
+			continue
+		}
+		for _, root := range []string{"/sys/kernel/tracing", "/sys/kernel/debug/tracing"} {
+			path := filepath.Join(root, "events", group, tp, "enable")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			state := strings.TrimSpace(string(raw))
+			fmt.Fprintf(&b, " (enable=%s", state)
+			if state == "0" {
+				b.WriteString(", so the kernel is not running anything on this tracepoint")
+			}
+			b.WriteString(")")
+			break
+		}
+	}
+	return b.String()
+}
+
 // diagnostics is what a failure needs in order to be attributable.
 //
 // Four numbers answer where an event went missing, and they are at four
@@ -875,8 +957,12 @@ func (p *linuxProof) diagnostics(cat CapabilityCategory) string {
 		fmt.Fprintf(&b, "\ncapability row: %+v", c)
 		// The hooks this row names, and whether the kernel is calling
 		// them. "attached" is evidence the link call succeeded; a run
-		// count is evidence the program executes.
+		// count is evidence the program executes; the tracepoint's own
+		// enable file is evidence the kernel has it armed.
 		if s := p.drv.ProgramRunCountsFor(c.Attachments); s != "" {
+			fmt.Fprintf(&b, "\n%s", s)
+		}
+		if s := tracepointEnableState(p.drv, c.Attachments); s != "" {
 			fmt.Fprintf(&b, "\n%s", s)
 		}
 	}
@@ -952,12 +1038,8 @@ func (p *linuxProof) proveWithRetry(t *testing.T, cat CapabilityCategory, what s
 			return ev
 		}
 		worstSeen = seen
-		// The kernel counters for this category, per attempt, so a
-		// failure says which attempt lost records rather than only
-		// what the totals were once every attempt had failed.
-		sub, lost, ring := p.drv.KernelEventLossReport().kernelLossForCategory(cat)
-		t.Logf("attempt %d: no %s for pid %d within 4s (%d events seen; kernel: submitted=%d reserve_failed=%d on %s)",
-			attempt, what, pid, seen, sub, lost, ring)
+		t.Logf("attempt %d: no %s for pid %d within 4s (%d events seen; %s)",
+			attempt, what, pid, seen, p.kernelTrace(cat))
 	}
 	t.Fatalf("no %s arrived in %d attempts (%d events seen in the last window).\n%s\n%s",
 		what, attempts, worstSeen, p.tap.summary(), p.diagnostics(cat))
