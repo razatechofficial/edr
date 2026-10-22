@@ -825,13 +825,27 @@ type linuxProof struct {
 
 // diagnostics is what a failure needs in order to be attributable.
 //
-// Three numbers answer where an event went missing, and they are at three
-// different points on the path: the capability tracker counts events in
-// processRecord before any policy gate or buffer write, DriverStats counts
-// what the ring buffer readers handed up and what the driver dropped, and
-// RingBufferStats counts what the buffer itself refused for want of space.
-// Without them, "no event arrived" is indistinguishable between a kernel hook
-// that produced nothing, a decode that errored, and a buffer that was full.
+// Four numbers answer where an event went missing, and they are at four
+// different points on the path. In kernel-to-userspace order:
+//
+//   - the in-kernel event_stats and filter_stats maps count, per event type,
+//     the records a handler wrote, the records it threw away because the BPF
+//     ring buffer was full, and the records a pid filter dropped before any
+//     of that;
+//   - the capability tracker counts events in processRecord, before any
+//     policy gate or buffer write;
+//   - DriverStats counts what the ring buffer readers handed up and what the
+//     driver failed to decode;
+//   - RingBufferStats counts what the userspace buffer refused for want of
+//     space.
+//
+// The kernel-side pair is the one that was missing, and it is the one that
+// decides the question. A category with nothing submitted, nothing lost and
+// nothing filtered has a hook that did not run, however healthy the attach
+// looked; a category with a non-zero reserve_failed has a hook that ran fine
+// and a buffer that could not take the record. Those have different fixes and
+// before these counters existed they produced identical output: zero
+// everywhere, which reads exactly like an idle host.
 func (p *linuxProof) diagnostics(cat CapabilityCategory) string {
 	var b strings.Builder
 	st := p.drv.Stats()
@@ -842,6 +856,7 @@ func (p *linuxProof) diagnostics(cat CapabilityCategory) string {
 		fmt.Fprintf(&b, "\nring buffer: produced=%d consumed=%d dropped=%d backlog=%.1f%%",
 			rb.Produced, rb.Consumed, rb.Dropped, rb.BacklogPct)
 	}
+	fmt.Fprintf(&b, "\n%s", p.drv.KernelEventLossReport().Summary())
 	for _, c := range p.drv.CapabilityReport().Categories {
 		if c.Category == cat {
 			fmt.Fprintf(&b, "\ncapability row: %+v", c)
@@ -886,7 +901,7 @@ func (p *linuxProof) expect(t *testing.T, mark int, what string, match func(linu
 	t.Helper()
 	ev, seen, ok := p.tap.await(mark, 15*time.Second, match)
 	if !ok {
-		t.Fatalf("no %s arrived within 15s after generating the activity (%d events seen in this window).\n%s\n%s\nThe hook serving this category is attached, so the gap is in the in-kernel filter, the ringbuf submit, or the decode path.",
+		t.Fatalf("no %s arrived within 15s after generating the activity (%d events seen in this window).\n%s\n%s\nThe hook serving this category is attached, so the gap is in the in-kernel filter, the ringbuf reserve, or the decode path -- and the kernel accounting above says which.",
 			what, seen, p.tap.summary(), p.diagnostics(""))
 	}
 	t.Logf("%s: %s", what, ev)
@@ -919,7 +934,12 @@ func (p *linuxProof) proveWithRetry(t *testing.T, cat CapabilityCategory, what s
 			return ev
 		}
 		worstSeen = seen
-		t.Logf("attempt %d: no %s for pid %d within 4s (%d events seen)", attempt, what, pid, seen)
+		// The kernel counters for this category, per attempt, so a
+		// failure says which attempt lost records rather than only
+		// what the totals were once every attempt had failed.
+		sub, lost, ring := p.drv.KernelEventLossReport().kernelLossForCategory(cat)
+		t.Logf("attempt %d: no %s for pid %d within 4s (%d events seen; kernel: submitted=%d reserve_failed=%d on %s)",
+			attempt, what, pid, seen, sub, lost, ring)
 	}
 	t.Fatalf("no %s arrived in %d attempts (%d events seen in the last window).\n%s\n%s",
 		what, attempts, worstSeen, p.tap.summary(), p.diagnostics(cat))
