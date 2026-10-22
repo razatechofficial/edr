@@ -136,8 +136,18 @@ build-darwin:
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-installer-darwin-arm64 ./cmd/installer
 	GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-amd64 ./cmd/cli
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-arm64 ./cmd/cli
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-amd64 ./cmd/agentui
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-arm64 ./cmd/agentui
+# The agent UI is a cgo build against macOS frameworks, so it can only be
+# produced on a mac. Cross-compiling it from Linux fails in clang with
+# "unsupported option '-arch' for target 'x86_64-pc-linux-gnu'", which is what
+# made `make build-all` fail on every CI run — masked, because the job carried
+# continue-on-error. Everything else in this target is pure Go and does cross
+# compile, so the UI is skipped with a note rather than taking the lane down.
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-amd64 ./cmd/agentui; \
+		GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-arm64 ./cmd/agentui; \
+	else \
+		echo "==> skipping edr-agent-ui (darwin): cgo against macOS frameworks needs a mac host"; \
+	fi
 	@mkdir -p dist/darwin-amd64 dist/darwin-arm64
 	CGO_ENABLED=$(DARWIN_DIST_CGO) GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-amd64/edr-agent ./cmd/agent
 	CGO_ENABLED=$(DARWIN_DIST_CGO) GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-arm64/edr-agent ./cmd/agent

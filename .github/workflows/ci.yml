@@ -131,6 +131,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Coverage walks ./..., which includes cmd/agentui, so it needs the same
+      # X11/GL and yara headers the Test and Lint jobs install. Without them
+      # the run ended in "cmd/agentui [setup failed]" and reported no coverage
+      # at all — invisible, because this job carries continue-on-error.
+      - name: Install Linux cgo build dependencies
+        run: bash scripts/ci/setup_linux_cgo_deps.sh
+
       - name: Download dependencies
         run: go mod download
 
