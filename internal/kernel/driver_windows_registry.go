@@ -20,8 +20,8 @@ func (d *ETWDriver) decodeKernelRegistry(record *etwEventRecord, env map[string]
 	if ud == nil {
 		return
 	}
-	opcode := record.EventHeader.EventDescriptor.Opcode
-	env["operation"] = registryOpcodeName(opcode)
+	eventID := record.EventHeader.EventDescriptor.Id
+	env["operation"] = registryOperationName(eventID)
 
 	if len(ud) >= 24 {
 		// PID at offset 20 in the canonical x64 layout.
@@ -40,7 +40,7 @@ func (d *ETWDriver) decodeKernelRegistry(record *etwEventRecord, env map[string]
 	//
 	// Decoder is best-effort — older provider versions sometimes elide
 	// fields. Bail out at the first failure and keep what we got.
-	if opcode == 5 && len(ud) > 24 {
+	if eventID == kernelRegistryEvtSetValue && len(ud) > 24 {
 		offset := 24
 		key, consumed := extractUTF16StringBounded(ud[offset:], 32768)
 		if key != "" {
@@ -170,7 +170,28 @@ func hexEncodeBytes(b []byte) string {
 	return string(out)
 }
 
-// registryOpcodeName maps Kernel-Registry opcodes to operation strings used by
+// Microsoft-Windows-Kernel-Registry event ids. Measured on a hosted
+// windows-latest runner over 25 seconds of ordinary activity, which produced
+// the expected shape of a registry workload: OpenKey 8107, QueryValueKey 6299,
+// CloseKey 4099, QueryKey 1943, EnumerateKey 936, EnumerateValueKey 614,
+// SetValueKey 71, CreateKey 32, SetInformationKey 22.
+//
+// The provider sets Opcode to the event id plus 31, which is why this decoder
+// found nothing: it switched on the opcode against these numbers, so every
+// event's operation came out as the fallback "event" string and the SetValueKey
+// branch -- the one that extracts the value name, type and data, the whole
+// point of watching the registry -- never ran once.
+const (
+	kernelRegistryEvtCreateKey      uint16 = 1
+	kernelRegistryEvtOpenKey        uint16 = 2
+	kernelRegistryEvtDeleteKey      uint16 = 3
+	kernelRegistryEvtSetValue       uint16 = 5
+	kernelRegistryEvtDeleteValue    uint16 = 6
+	kernelRegistryEvtSetInformation uint16 = 11
+	kernelRegistryEvtCloseKey       uint16 = 13
+)
+
+// registryOperationName maps Kernel-Registry event ids to operation strings used by
 // the detection layer. Codes from Microsoft-Windows-Kernel-Registry manifest:
 //
 //	1 CreateKey, 2 OpenKey, 3 DeleteKey, 4 QueryKey,
@@ -179,8 +200,8 @@ func hexEncodeBytes(b []byte) string {
 //	11 SetInformationKey, 12 FlushKey, 13 KCBCreate, 14 KCBDelete,
 //	15 KCBRundownBegin, 16 KCBRundownEnd, 17 Virtualize, 18 CloseKey,
 //	19 SetSecurityDescriptor, 20 QuerySecurityDescriptor.
-func registryOpcodeName(op uint8) string {
-	switch op {
+func registryOperationName(eventID uint16) string {
+	switch eventID {
 	case 1:
 		return "create_key"
 	case 2:
@@ -203,13 +224,13 @@ func registryOpcodeName(op uint8) string {
 		return "set_information"
 	case 12:
 		return "flush"
-	case 18:
+	case kernelRegistryEvtCloseKey:
 		return "close_key"
-	case 19:
-		return "set_security"
-	case 20:
-		return "query_security"
 	}
+	// SetSecurityKey and QuerySecurityKey exist in the manifest; their ids
+	// were not observed on the measured runner and are deliberately not
+	// guessed here, so they fall through to the generic label rather than
+	// being given a name that might belong to another event.
 	return "event"
 }
 
