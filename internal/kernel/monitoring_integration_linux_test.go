@@ -256,10 +256,12 @@ func runHelperAction(action, arg string) error {
 			return err
 		}
 		defer c.Close()
+		// Write errors are ignored on purpose: nothing is listening on
+		// port 53, so the first datagram draws an ICMP port
+		// unreachable and the next write fails with ECONNREFUSED. The
+		// event this proves fires on sendto entry, before any of that.
 		for i := 0; i < helperRepeat; i++ {
-			if _, err := c.Write(dnsQueryWire("edr-monitoring-itest.example.com")); err != nil {
-				return err
-			}
+			_, _ = c.Write(dnsQueryWire("edr-monitoring-itest.example.com"))
 		}
 		return nil
 
@@ -362,10 +364,11 @@ func runHelperAction(action, arg string) error {
 		defer c.Close()
 		hello := []byte{0x16, 0x03, 0x01, 0x00, 0x30, 0x01}
 		hello = append(hello, []byte("edr-monitoring-itest.example.com")...)
+		// Write errors are ignored on purpose: the listener closes
+		// after the first read, so later writes fail with EPIPE. The
+		// kprobe fires on tcp_sendmsg entry, before that matters.
 		for i := 0; i < helperRepeat; i++ {
-			if _, err := c.Write(hello); err != nil {
-				return err
-			}
+			_, _ = c.Write(hello)
 		}
 		return nil
 	}
