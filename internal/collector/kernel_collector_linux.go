@@ -156,6 +156,22 @@ func (kc *KernelCollector) ExportMonitoringHealth() map[string]any {
 	if pd := kc.priorityDrop.Load(); pd > 0 {
 		extras["priority_sampling_kernel_drops"] = pd
 	}
+	// The kernel's own accounting, per event type. DriverStats already
+	// carries the totals; the breakdown goes here because it is what makes
+	// the number actionable: a health check can see one category losing
+	// records on one ring buffer rather than a single figure that could
+	// belong to any of seven streams.
+	//
+	// Reported even when it is unavailable, with the reason. A loss
+	// counter that is absent and a loss counter that is zero are different
+	// states, and silently publishing the second for the first is how the
+	// loss this accounting was built for stayed invisible.
+	loss := kc.driver.KernelEventLossReport()
+	if loss.Available {
+		extras["kernel_event_loss"] = loss
+	} else {
+		extras["kernel_event_loss_unavailable"] = loss.Reason
+	}
 	tamperSignals := map[string]any{}
 	for k, v := range kc.driver.TamperMetrics() {
 		extras[k] = v
