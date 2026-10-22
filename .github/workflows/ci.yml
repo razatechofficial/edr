@@ -185,26 +185,46 @@ jobs:
           path: bin/
 
   macos-production-build:
-    name: macOS production build (${{ matrix.arch }})
-    # macos-latest is Apple Silicon, so the amd64 slice needs a native Intel
-    # runner. It used to run on macos-latest under Rosetta and install an
-    # x86_64 Homebrew into /usr/local; Homebrew's installer now refuses that
-    # outright ("Homebrew on macOS is only supported on Apple Silicon
-    # processors!"), so that lane could not work again as written. The agent
-    # links against x86_64 yara and openssl, so cross-compiling from the arm64
-    # runner is not an option either.
+    name: macOS ${{ matrix.macos }} production build (${{ matrix.arch }})
+    # Both macOS versions GitHub currently serves, on both architectures.
     #
-    # macos-15-intel is the last Intel image GitHub serves, and it is on the
-    # way out: actions/runner-images stopped publishing macos-15 (x64) builds
-    # in August 2026. When that label goes, Intel macOS cannot be built on a
-    # GitHub-hosted runner at all and this target needs either a self-hosted
-    # Intel mac or a decision to drop it — which is why amd64 stays
-    # continue-on-error rather than being deleted here.
-    runs-on: ${{ matrix.arch == 'amd64' && 'macos-15-intel' || 'macos-latest' }}
+    # The runner is named per combination rather than derived from the arch,
+    # because the mapping is not a rule: macos-latest is Apple Silicon, and the
+    # Intel images carry an explicit -intel suffix. Spelling each one out means
+    # a label that disappears fails here as a missing runner rather than
+    # silently building the wrong slice somewhere else.
+    #
+    # Why native Intel runners and not Rosetta: this used to run the amd64
+    # slice on macos-latest and install an x86_64 Homebrew into /usr/local.
+    # Homebrew's installer now refuses that outright ("Homebrew on macOS is
+    # only supported on Apple Silicon processors!"), and the agent links
+    # against x86_64 yara and openssl, so cross-compiling from an arm64 runner
+    # is not an option either.
+    #
+    # Intel on macOS is a managed decline rather than a cliff: macos-13 is
+    # already gone, and both remaining Intel images are explicitly labelled.
+    # The amd64 lanes stay continue-on-error so the loss of a label is a
+    # visible warning on an otherwise green run, not a blocked merge — and the
+    # timeout turns an unservable label into a fast failure rather than a job
+    # that sits waiting for a runner that is never coming.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, amd64]
+        include:
+          - macos: "15"
+            arch: arm64
+            runner: macos-15
+          - macos: "15"
+            arch: amd64
+            runner: macos-15-intel
+          - macos: "26"
+            arch: arm64
+            runner: macos-26
+          - macos: "26"
+            arch: amd64
+            runner: macos-26-intel
     continue-on-error: ${{ matrix.arch == 'amd64' }}
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer

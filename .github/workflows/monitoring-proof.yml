@@ -40,7 +40,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Both macOS versions GitHub serves, not just the newest. macos-15
+        # and macos-26 ship different SDKs, and the darwin build is the one
+        # that compiles against EndpointSecurity headers — an SDK difference
+        # shows up here or not at all. macos-latest is deliberately not used:
+        # it moves between versions, so a lane named after it proves whichever
+        # one GitHub happened to point at that day.
+        os: [ubuntu-latest, windows-latest, macos-15, macos-26]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -84,7 +90,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Both macOS versions GitHub serves, not just the newest. macos-15
+        # and macos-26 ship different SDKs, and the darwin build is the one
+        # that compiles against EndpointSecurity headers — an SDK difference
+        # shows up here or not at all. macos-latest is deliberately not used:
+        # it moves between versions, so a lane named after it proves whichever
+        # one GitHub happened to point at that day.
+        os: [ubuntu-latest, windows-latest, macos-15, macos-26]
     steps:
       - uses: actions/checkout@v4
         with:
