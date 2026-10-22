@@ -989,8 +989,12 @@ func (p *linuxProof) expectObserved(t *testing.T, cat CapabilityCategory, before
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("capability report events_observed for %q stayed at %d for 15s after %s.\n%s",
-				cat, before, what, p.tap.summary())
+			// This is the assertion most in need of the kernel
+			// counters: it fails on a number that stayed at zero,
+			// and zero is what both a hook that never ran and a
+			// ring buffer that refused every record look like.
+			t.Fatalf("capability report events_observed for %q stayed at %d for 15s after %s.\n%s\n%s",
+				cat, before, what, p.tap.summary(), p.diagnostics(cat))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
