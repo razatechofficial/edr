@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 type diagKey struct {
@@ -73,12 +74,14 @@ func (c *diagCollector) record(hdr etwEventHeader, ud []byte) {
 	}
 	w[k]++
 
-	// ProcessStart arrives as version 4 on windows-latest while
-	// decodeProcessUserData reads the version 0 offsets. Dump the payload
-	// so the real field layout can be read off it.
-	if name == etwProviderProcess && k.EventID == 1 && len(c.procHex) < 6 && len(ud) > 0 {
-		c.procHex = append(c.procHex, fmt.Sprintf("ver=%d len=%d hdr.pid=%d\n%s",
-			k.Version, len(ud), hdr.ProcessId, hex.Dump(ud)))
+	// Dump payloads whose field layout the decoders guess at, so the real
+	// one can be read off a real record instead of recalled.
+	dump := (name == etwProviderProcess && k.EventID == 1) ||
+		(name == etwProviderRegistry && (k.EventID == 1 || k.EventID == 5)) ||
+		(name == etwProviderFile && (k.EventID == 12 || k.EventID == 16))
+	if dump && len(c.procHex) < 24 && len(ud) > 0 {
+		c.procHex = append(c.procHex, fmt.Sprintf("%s id=%d ver=%d len=%d hdr.pid=%d\n%s",
+			name, k.EventID, k.Version, len(ud), hdr.ProcessId, hex.Dump(ud)))
 	}
 }
 
@@ -211,6 +214,17 @@ func TestWindowsETWEventShapeDiagnostic(t *testing.T) {
 				_ = c.Close()
 			}
 		}},
+		{"registry_write", func() {
+			k, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\EDRShapeDiag`, registry.ALL_ACCESS)
+			if err != nil {
+				return
+			}
+			for i := 0; i < burst; i++ {
+				_ = k.SetStringValue(fmt.Sprintf("v%03d", i), "edr shape diagnostic")
+			}
+			k.Close()
+			_ = registry.DeleteKey(registry.CURRENT_USER, `Software\EDRShapeDiag`)
+		}},
 		{"dns", func() {
 			for i := 0; i < 10; i++ {
 				_, _ = net.LookupHost(fmt.Sprintf("edr-diag-%d.example.com", i))
@@ -252,6 +266,6 @@ func TestWindowsETWEventShapeDiagnostic(t *testing.T) {
 		}
 	}
 	for i, h := range col.procHex {
-		t.Logf("=== ProcessStart payload %d\n%s", i, h)
+		t.Logf("=== payload %d\n%s", i, h)
 	}
 }
