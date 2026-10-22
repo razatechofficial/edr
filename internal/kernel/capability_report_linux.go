@@ -295,10 +295,22 @@ func (d *EBPFDriver) CapabilityReport() CapabilityReport {
 			submitted, dropped, ring := loss.kernelLossForCategory(rep.Categories[i].Category)
 			rep.Categories[i].KernelSubmitted = submitted
 			rep.Categories[i].KernelDropped = dropped
-			if dropped > 0 && rep.Categories[i].Reason == "" {
-				rep.Categories[i].Reason = fmt.Sprintf(
-					"the kernel discarded %d event(s) of this category because the %s ring buffer was full; the hook is attached and firing",
-					dropped, ring)
+			if dropped == 0 {
+				continue
+			}
+			// Prepended, not written only into an empty Reason.
+			// Most rows already carry a caveat about some hook
+			// they list -- process_exec, for instance, carries the
+			// note about lsm_bprm_check being unattached by design
+			// while its two tracepoints are attached and fine --
+			// and an active loss is the more urgent of the two.
+			lost := fmt.Sprintf(
+				"the kernel discarded %d event(s) of this category because the %s ring buffer was full; the hook is attached and firing",
+				dropped, ring)
+			if rep.Categories[i].Reason == "" {
+				rep.Categories[i].Reason = lost
+			} else {
+				rep.Categories[i].Reason = lost + ". Also: " + rep.Categories[i].Reason
 			}
 		}
 	}
