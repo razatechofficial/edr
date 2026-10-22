@@ -1032,10 +1032,18 @@ func etwEventRecordCallback(eventRecord uintptr) uintptr {
 	return 0
 }
 
+// etwRawRecordHook is a TEMPORARY in-package diagnostic tap. Non-nil only
+// while an integration diagnostic is running; delete with
+// etw_shape_diag_windows_test.go.
+var etwRawRecordHook func(hdr etwEventHeader, ud []byte)
+
 func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 	d.received.Add(1)
 
 	hdr := &record.EventHeader
+	if h := etwRawRecordHook; h != nil {
+		h(*hdr, userDataSlice(record))
+	}
 
 	// Credit the capability tracker before the decode and the drop paths
 	// below, so a category reads as "provider delivering" even when a

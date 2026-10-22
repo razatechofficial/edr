@@ -12,6 +12,7 @@ package kernel
 // complete verifier log for every one the kernel refuses.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -57,8 +58,16 @@ func TestLinuxEBPFPerProgramLoadDiagnostic(t *testing.T) {
 			continue
 		}
 		bad = append(bad, name)
+		// %+v on the wrapping error does not reach the VerifierError
+		// inside it, and VerifierError.Error() omits the instruction
+		// trace. Unwrap first.
+		detail := err.Error()
+		var ve *ebpf.VerifierError
+		if errors.As(err, &ve) {
+			detail = fmt.Sprintf("%+v", ve)
+		}
 		t.Logf("=== REJECTED %s (SEC %q)\n%s\n=== END %s",
-			name, spec.Programs[name].SectionName, fmt.Sprintf("%+v", err), name)
+			name, spec.Programs[name].SectionName, detail, name)
 	}
 	t.Logf("=== %d of %d programs rejected: %s", len(bad), len(names), strings.Join(bad, ", "))
 }
