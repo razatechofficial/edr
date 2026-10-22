@@ -138,7 +138,17 @@ func TestWindowsCapabilityForETWEvent(t *testing.T) {
 		{etwProviderNetwork, kernelNetEvtSend4, 10, ""},
 		{etwProviderNetwork, 0, 17, ""},
 		{etwProviderDNS, 0, 0, CapNetworkDNS},
-		{etwProviderRegistry, 0, 0, CapRegistryWrite},
+		{etwProviderProcess, 5, 0, CapModuleLoad},
+		{etwProviderProcess, 6, 0, CapModuleUnload},
+		// Only mutating registry operations count as registry_write;
+		// an OpenKey or a QueryValueKey is not a write, and crediting
+		// them made an idle host look like one under constant change.
+		{etwProviderRegistry, kernelRegistryEvtSetValue, 0, CapRegistryWrite},
+		{etwProviderRegistry, kernelRegistryEvtCreateKey, 0, CapRegistryWrite},
+		{etwProviderRegistry, kernelRegistryEvtDeleteValue, 0, CapRegistryWrite},
+		{etwProviderRegistry, kernelRegistryEvtOpenKey, 0, ""},
+		{etwProviderRegistry, kernelRegistryEvtCloseKey, 0, ""},
+		{etwProviderRegistry, 7, 0, ""},
 		{"NotAProvider", 1, 0, ""},
 	}
 	for _, tc := range cases {

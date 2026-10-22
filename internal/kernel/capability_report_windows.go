@@ -39,7 +39,10 @@ const (
 // scheduler or TLS-metadata telemetry that this driver subscribes to, and
 // kernel module load/unload is not among the enabled providers either.
 var etwHookCategories = map[string][]CapabilityCategory{
-	etwProviderProcess: {CapProcessExec, CapProcessExit},
+	// ImageLoad / ImageUnload come from the Process provider too, and the
+	// decoder already labels them events.EventModule, so module load and
+	// unload are real Windows coverage rather than an absent row.
+	etwProviderProcess: {CapProcessExec, CapProcessExit, CapModuleLoad, CapModuleUnload},
 	etwProviderFile:    {CapFileOpen, CapFileWrite, CapFileDelete, CapFileRename},
 	etwProviderNetwork: {CapNetworkConnect, CapNetworkAccept, CapNetworkClose},
 	etwProviderDNS:     {CapNetworkDNS},
@@ -170,6 +173,10 @@ func windowsCapabilityForETWEvent(provider string, eventID uint16, opcode uint8)
 			return CapProcessExec
 		case 2:
 			return CapProcessExit
+		case 5:
+			return CapModuleLoad
+		case 6:
+			return CapModuleUnload
 		}
 	case etwProviderFile:
 		switch eventID {
@@ -200,7 +207,18 @@ func windowsCapabilityForETWEvent(provider string, eventID uint16, opcode uint8)
 	case etwProviderDNS:
 		return CapNetworkDNS
 	case etwProviderRegistry:
-		return CapRegistryWrite
+		// Only the operations that change the registry. This used to
+		// credit every Kernel-Registry event, so an idle Windows host
+		// reported registry_write producing tens of thousands of
+		// events a minute while every one of them was an OpenKey or a
+		// QueryValueKey — a read-only host read as one being written
+		// to constantly.
+		switch eventID {
+		case kernelRegistryEvtCreateKey, kernelRegistryEvtDeleteKey,
+			kernelRegistryEvtSetValue, kernelRegistryEvtDeleteValue,
+			kernelRegistryEvtSetInformation:
+			return CapRegistryWrite
+		}
 	}
 	return ""
 }
