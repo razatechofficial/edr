@@ -40,12 +40,21 @@ const (
 // kernel module load/unload is not among the enabled providers either.
 var etwHookCategories = map[string][]CapabilityCategory{
 	etwProviderProcess: {CapProcessExec, CapProcessExit},
-	etwProviderFile:    {CapFileOpen, CapFileWrite, CapFileDelete},
+	etwProviderFile:    {CapFileOpen, CapFileWrite, CapFileDelete, CapFileRename},
 	etwProviderNetwork: {CapNetworkConnect, CapNetworkAccept, CapNetworkClose},
 	etwProviderDNS:     {CapNetworkDNS},
 	// Registry is the one category that exists only on Windows.
 	etwProviderRegistry: {CapRegistryWrite},
 }
+
+// file_permission is deliberately absent even though Kernel-File does emit
+// security-descriptor events. On windows-latest an icacls grant/remove pair
+// produces exactly one event id 31 and one id 34 per operation, and from the
+// event ids alone there is no way to tell the set from the query — crediting a
+// security-descriptor *read* to file_permission would be a wrong row, which
+// this report treats as worse than a blank one. Telling them apart needs
+// TdhGetEventInformation to resolve the template by name, which this driver
+// does not do yet.
 
 // etwCoarseProviders notes where one provider backs several categories, so the
 // report can say that attach state is shared rather than per category.
@@ -131,13 +140,27 @@ func (d *ETWDriver) CapabilityReport() CapabilityReport {
 // windowsCapabilityForETWEvent maps an ETW provider and event ID to the
 // capability category the tracker should credit.
 //
-// The event-ID tables are the documented Microsoft-Windows-Kernel-* templates
-// and are the same ones the decoders in driver_windows.go already switch on,
-// so the two cannot disagree about what an ID means. An unrecognised ID
-// returns an empty category and is credited to nothing: a provider is reported
-// attached-but-not-producing rather than having an event counted against the
-// wrong row, because a wrong row is worse than a blank one.
+// The event ids are the ones a hosted windows-latest runner actually delivers,
+// measured by generating a labelled burst of one kind of activity at a time
+// and reading off which id moved. That matters, because the table this
+// replaced was written from the NT Kernel Logger MOF opcode numbering
+// (FileIo opcode 67 read / 68 write, TcpIp opcode 17 connect / 16 accept)
+// while the driver enables the Microsoft-Windows-Kernel-* manifest providers,
+// which number the same operations differently. The consequence was not a
+// subtle one: file_write, file_delete, network_connect and network_accept
+// could never be credited at all, and Kernel-Network's Accept (id/opcode 15)
+// was credited to network_close, which is the wrong-row case the comment
+// below says is worse than a blank one.
+//
+// opcode is still accepted so the signature does not change for callers;
+// Kernel-Network sets it equal to the event id and the other providers leave
+// it at a value that carries no routing information.
+//
+// An unrecognised ID returns an empty category and is credited to nothing: a
+// provider is reported attached-but-not-producing rather than having an event
+// counted against the wrong row.
 func windowsCapabilityForETWEvent(provider string, eventID uint16, opcode uint8) CapabilityCategory {
+	_ = opcode
 	switch provider {
 	case etwProviderProcess:
 		// Kernel-Process: 1 ProcessStart, 2 ProcessStop
@@ -149,35 +172,29 @@ func windowsCapabilityForETWEvent(provider string, eventID uint16, opcode uint8)
 			return CapProcessExit
 		}
 	case etwProviderFile:
-		// Kernel-File: 12 Create, 67 Read, 68 Write (the latter two are
-		// kernelFileEvtReadID / kernelFileEvtWriteID), 70 Delete.
 		switch eventID {
-		case 12, kernelFileEvtReadID:
+		case kernelFileEvtCreateID, kernelFileEvtCreateNewID:
 			return CapFileOpen
 		case kernelFileEvtWriteID:
 			return CapFileWrite
-		case 70:
+		case kernelFileEvtSetDeleteID, kernelFileEvtDeletePathID:
 			return CapFileDelete
+		case kernelFileEvtRenameID, kernelFileEvtRenamePathID:
+			return CapFileRename
 		}
 	case etwProviderNetwork:
-		// Kernel-Network IPv6 templates are identified by event ID
-		// (26 connect, 27 disconnect, 29 accept); IPv4 by opcode
-		// (16 accept, 17 connect, 14/15 disconnect). Both tables are
-		// documented in decodeNetworkUserData and networkOpcodeName.
+		// Kernel-Network numbers its TCP templates in blocks of 16:
+		// IPv4 at 10, IPv6 at 26, with the same order in each
+		// (datasent, datareceived, connectionattempted,
+		// disconnectissued, retransmit, accept, reconnect, copy), and
+		// UDP IPv4 at 42. Opcode carries the same number as the event
+		// id on this provider, so only the id is consulted.
 		switch eventID {
-		case 26:
+		case kernelNetEvtConnect4, kernelNetEvtConnect6:
 			return CapNetworkConnect
-		case 29:
+		case kernelNetEvtAccept4, kernelNetEvtAccept6:
 			return CapNetworkAccept
-		case 27:
-			return CapNetworkClose
-		}
-		switch opcode {
-		case 17:
-			return CapNetworkConnect
-		case 16:
-			return CapNetworkAccept
-		case 14, 15:
+		case kernelNetEvtDisconnect4, kernelNetEvtDisconnect6:
 			return CapNetworkClose
 		}
 	case etwProviderDNS:

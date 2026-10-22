@@ -113,12 +113,30 @@ func TestWindowsCapabilityForETWEvent(t *testing.T) {
 		{etwProviderProcess, 1, 0, CapProcessExec},
 		{etwProviderProcess, 2, 0, CapProcessExit},
 		{etwProviderProcess, 999, 0, ""},
+		// Kernel-File event ids, measured on windows-latest: 12 Create,
+		// 16 Write, 18/26 delete, 19/27 rename. 67/68 are the legacy
+		// NT Kernel Logger FileIo read/write opcodes and mean nothing
+		// to this provider.
 		{etwProviderFile, kernelFileEvtWriteID, 0, CapFileWrite},
-		{etwProviderFile, 12, 0, CapFileOpen},
-		{etwProviderNetwork, 26, 0, CapNetworkConnect},
-		{etwProviderNetwork, 29, 0, CapNetworkAccept},
-		{etwProviderNetwork, 0, 17, CapNetworkConnect},
-		{etwProviderNetwork, 0, 16, CapNetworkAccept},
+		{etwProviderFile, kernelFileEvtCreateID, 0, CapFileOpen},
+		{etwProviderFile, kernelFileEvtSetDeleteID, 0, CapFileDelete},
+		{etwProviderFile, kernelFileEvtDeletePathID, 0, CapFileDelete},
+		{etwProviderFile, kernelFileEvtRenameID, 0, CapFileRename},
+		{etwProviderFile, kernelFileEvtRenamePathID, 0, CapFileRename},
+		{etwProviderFile, 67, 0, ""},
+		{etwProviderFile, 68, 0, ""},
+		// Kernel-Network: IPv4 TCP block at 10, IPv6 at 26, and the
+		// opcode carries the same number as the event id. An Accept
+		// (15) used to be credited to network_close by the legacy
+		// opcode table.
+		{etwProviderNetwork, kernelNetEvtConnect4, 12, CapNetworkConnect},
+		{etwProviderNetwork, kernelNetEvtAccept4, 15, CapNetworkAccept},
+		{etwProviderNetwork, kernelNetEvtDisconnect4, 13, CapNetworkClose},
+		{etwProviderNetwork, kernelNetEvtConnect6, 28, CapNetworkConnect},
+		{etwProviderNetwork, kernelNetEvtAccept6, 31, CapNetworkAccept},
+		{etwProviderNetwork, kernelNetEvtDisconnect6, 29, CapNetworkClose},
+		{etwProviderNetwork, kernelNetEvtSend4, 10, ""},
+		{etwProviderNetwork, 0, 17, ""},
 		{etwProviderDNS, 0, 0, CapNetworkDNS},
 		{etwProviderRegistry, 0, 0, CapRegistryWrite},
 		{"NotAProvider", 1, 0, ""},
