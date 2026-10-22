@@ -64,6 +64,8 @@ const (
 	bpfEvtUnshare        = 26
 	bpfEvtMadvise        = 27
 	bpfEvtPrivilege      = 42
+	bpfEvtModuleUnload   = 43
+	bpfEvtTLSHello       = 44
 )
 
 // bpfBytecode holds embedded eBPF bytecode when compiled with `make ebpf-link`
@@ -866,7 +868,7 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeDNSQueryEvent(raw)
-	case bpfEvtModule:
+	case bpfEvtModule, bpfEvtModuleUnload:
 		if !p.ModuleEvents {
 			return nil
 		}
@@ -909,6 +911,11 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeSchedEvent(raw)
+	case bpfEvtTLSHello:
+		if !p.NetworkEvents {
+			return nil
+		}
+		return d.decodeTLSClientHelloEvent(raw)
 	default:
 		return fmt.Errorf("unknown bpf event type %d", typ)
 	}
@@ -1284,6 +1291,41 @@ func dnsQTypeFromWire(raw []byte) (uint16, bool) {
 		return 0, false
 	}
 	return binary.BigEndian.Uint16(raw[i : i+2]), true
+}
+
+// decodeTLSClientHelloEvent surfaces a TLS ClientHello seen by
+// tls_sni_monitor.c. The program reuses struct network_event and puts a
+// bounded printable prefix of the handshake bytes in dns_query; that is a
+// surrogate for the SNI, not a parsed server_name extension, and the envelope
+// labels it as such rather than claiming an SNI it did not parse.
+//
+// It used to emit EVENT_NET_CONNECT, which made every ClientHello a duplicate
+// connect event and left the capability report's tls_metadata row permanently
+// dark while the kprobe was attached and working.
+func (d *EBPFDriver) decodeTLSClientHelloEvent(data []byte) error {
+	const sz = unsafe.Sizeof(bpfNetworkEvent{})
+	if uintptr(len(data)) < sz {
+		return fmt.Errorf("tls client hello event truncated: got %d, want >= %d", len(data), sz)
+	}
+	ne := (*bpfNetworkEvent)(unsafe.Pointer(&data[0]))
+	env := map[string]interface{}{
+		"type":                 "network",
+		"operation":            "tls_client_hello",
+		"timestamp":            time.Now().UTC(),
+		"agent_id":             d.agentID,
+		"pid":                  ne.PID,
+		"dest_port":            int(ne.DstPort),
+		"src_port":             int(ne.SrcPort),
+		"tls_printable_prefix": nullTerminated(ne.DNSQuery[:]),
+	}
+	if ne.IsIPv6 != 0 {
+		env["ip_version"] = "6"
+	} else {
+		env["ip_version"] = "4"
+		env["src"] = net.IP(ipv4Bytes(ne.SrcAddr)).String()
+		env["dst"] = net.IP(ipv4Bytes(ne.DstAddr)).String()
+	}
+	return d.writeJSONEvent(env)
 }
 
 func (d *EBPFDriver) decodeSchedEvent(data []byte) error {

@@ -201,6 +201,10 @@ func linuxCapabilityForEventType(typ uint32) CapabilityCategory {
 		return CapNetworkDNS
 	case bpfEvtModule, bpfEvtBPFLoad, bpfEvtBPFMapAccess:
 		return CapModuleLoad
+	case bpfEvtModuleUnload:
+		return CapModuleUnload
+	case bpfEvtTLSHello:
+		return CapTLSMetadata
 	case bpfEvtMount:
 		return CapMount
 	case bpfEvtPtrace:
