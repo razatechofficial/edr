@@ -96,20 +96,43 @@ func TestUnprotectedProcessIsNotCovered(t *testing.T) {
 	}
 }
 
-// Case folding of paths must follow the filesystem: on Linux two paths
-// differing in case are two different files, and folding them would protect a
-// binary the operator never named.
-func TestPathCaseFollowsTheFilesystem(t *testing.T) {
-	set := newProtectedSet([]string{"/opt/Acme/acmed"})
-	_, ok := set.covers("", "/opt/ACME/acmed")
+// Path comparison must follow the filesystem: on Linux two paths differing in
+// case are two different files, and folding them would protect a binary the
+// operator never named.
+//
+// Asserted on normalisePath directly rather than through covers, because a
+// path entry also registers its base name (see the next test) and that
+// backstop would mask the path comparison entirely.
+func TestPathNormalisationFollowsTheFilesystem(t *testing.T) {
+	a := normalisePath("/opt/Acme/acmed")
+	b := normalisePath("/opt/ACME/acmed")
 	switch runtime.GOOS {
 	case "linux":
-		if ok {
+		if a == b {
 			t.Error("linux paths were folded; /opt/ACME/acmed is a different file from /opt/Acme/acmed")
 		}
 	default:
-		if !ok {
-			t.Error("path matching on a case-insensitive filesystem missed a case variant")
+		if a != b {
+			t.Error("paths were not folded on a case-insensitive filesystem")
 		}
+	}
+}
+
+// A path entry also protects anything sharing its base name, on purpose.
+//
+// It is the coarse half of the check and it only ever refuses more
+// terminations, never permits one: a process that renames itself to acmed to
+// dodge termination has made itself conspicuous rather than safe. The precise
+// half is the path comparison above; this is what still answers when the path
+// is unknown, which on a dead or exited process it often is.
+func TestNameBackstopCoversASameNamedBinaryElsewhere(t *testing.T) {
+	set := newProtectedSet([]string{filepath.Join(string(filepath.Separator), "opt", "Acme", "acmed")})
+
+	why, ok := set.covers("", filepath.Join(string(filepath.Separator), "usr", "local", "bin", "acmed"))
+	if !ok {
+		t.Fatal("a binary sharing a protected entry's base name was not covered")
+	}
+	if !strings.Contains(why, "name") {
+		t.Errorf("reason = %q, want it to attribute the match to the name", why)
 	}
 }
