@@ -110,7 +110,10 @@ static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 static __always_inline bool pid_is_filtered(void)
 {
 	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	return bpf_map_lookup_elem(&file_pid_filter, &pid) != NULL;
+	if (!bpf_map_lookup_elem(&file_pid_filter, &pid))
+		return false;
+	edr_stat_filtered(EDR_SUBSYS_FILE);
+	return true;
 }
 
 static __always_inline int starts_with(const char *s, const char *pfx)
@@ -155,7 +158,7 @@ int tracepoint__syscalls__sys_enter_openat(struct trace_event_raw_sys_enter *ctx
 	bpf_map_update_elem(&pending_open_paths, &pid_tgid, &pending, BPF_ANY);
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_OPEN);
 	if (!evt)
 		return 0;
 
@@ -212,7 +215,7 @@ int tracepoint__syscalls__sys_enter_close(struct trace_event_raw_sys_enter *ctx)
 static __always_inline void emit_write_event(__u32 fd, __u64 count)
 {
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_WRITE);
 	if (!evt)
 		return;
 
@@ -261,7 +264,7 @@ int tracepoint__syscalls__sys_enter_unlinkat(struct trace_event_raw_sys_enter *c
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_DELETE);
 	if (!evt)
 		return 0;
 
@@ -285,7 +288,7 @@ int tracepoint__syscalls__sys_enter_renameat2(struct trace_event_raw_sys_enter *
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_RENAME);
 	if (!evt)
 		return 0;
 
@@ -319,7 +322,7 @@ int tracepoint__syscalls__sys_enter_rename(struct trace_event_raw_sys_enter *ctx
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_RENAME);
 	if (!evt)
 		return 0;
 
@@ -344,7 +347,7 @@ int tracepoint__syscalls__sys_enter_renameat(struct trace_event_raw_sys_enter *c
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_RENAME);
 	if (!evt)
 		return 0;
 
@@ -369,7 +372,7 @@ int tracepoint__syscalls__sys_enter_fchmodat(struct trace_event_raw_sys_enter *c
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_CHMOD);
 	if (!evt)
 		return 0;
 
@@ -392,7 +395,7 @@ int kprobe_mem_write(struct pt_regs *ctx)
 {
 	if (pid_is_filtered())
 		return 0;
-	struct file_event *evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	struct file_event *evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_PROC_MEM_WRITE);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));

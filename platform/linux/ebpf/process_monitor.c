@@ -78,13 +78,17 @@ static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 static __always_inline bool is_filtered(void)
 {
 	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	if (bpf_map_lookup_elem(&pid_filter, &pid))
+	if (bpf_map_lookup_elem(&pid_filter, &pid)) {
+		edr_stat_filtered(EDR_SUBSYS_PROCESS);
 		return true;
+	}
 
 	char comm[TASK_COMM_LEN] = {};
 	bpf_get_current_comm(comm, sizeof(comm));
-	if (bpf_map_lookup_elem(&comm_filter, comm))
+	if (bpf_map_lookup_elem(&comm_filter, comm)) {
+		edr_stat_filtered(EDR_SUBSYS_PROCESS);
 		return true;
+	}
 
 	return false;
 }
@@ -164,7 +168,7 @@ int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter *ctx
 		return 0;
 
 	struct process_event *evt;
-	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&events, sizeof(*evt), EVENT_PROCESS_EXEC);
 	if (!evt)
 		return 0;
 
@@ -189,7 +193,7 @@ int tracepoint__syscalls__sys_enter_execveat(struct trace_event_raw_sys_enter *c
 		return 0;
 
 	struct process_event *evt;
-	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&events, sizeof(*evt), EVENT_PROCESS_EXEC);
 	if (!evt)
 		return 0;
 
@@ -211,11 +215,13 @@ SEC("tracepoint/sched/sched_process_fork")
 int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_fork *ctx)
 {
 	__u32 parent_pid = ctx->parent_pid;
-	if (bpf_map_lookup_elem(&pid_filter, &parent_pid))
+	if (bpf_map_lookup_elem(&pid_filter, &parent_pid)) {
+		edr_stat_filtered(EDR_SUBSYS_PROCESS);
 		return 0;
+	}
 
 	struct process_event *evt;
-	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&events, sizeof(*evt), EVENT_PROCESS_FORK);
 	if (!evt)
 		return 0;
 
@@ -234,7 +240,7 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_t
 		return 0;
 
 	struct process_event *evt;
-	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&events, sizeof(*evt), EVENT_PROCESS_EXIT);
 	if (!evt)
 		return 0;
 
