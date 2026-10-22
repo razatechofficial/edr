@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -236,6 +237,11 @@ type EBPFDriver struct {
 	// filter_stats maps. Stats() is polled, and a read is 72 per-CPU map
 	// lookups, so it is bounded by kernelStatsCacheTTL.
 	kernelStats kernelStatsCache
+
+	// progRunStats holds the kernel's system-wide BPF statistics enable
+	// while this driver wants per-program run counts. Non-nil means the
+	// counts in ProgramRunCounts are measurements rather than zeroes.
+	progRunStats io.Closer
 }
 
 // tracepointAttachSpec is what the loader recorded about one successful
@@ -359,6 +365,11 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 
 	d.buf = buf
 	d.features = probeLinuxFeatures()
+
+	// Before the collection is loaded: the kernel counts a program's runs
+	// from the moment statistics are on, so enabling after the attach
+	// would under-count the window an operator is asking about.
+	d.enableProgramRunStatsIfRequested()
 
 	rootCtx, rootCancel := context.WithCancel(ctx)
 	d.rootCtx = rootCtx
@@ -485,6 +496,10 @@ func (d *EBPFDriver) Stop() error {
 	}
 	d.wg.Wait()
 	d.cleanup()
+	// The kernel reference-counts the statistics enable on the fd, so
+	// leaking it would leave BPF_STATS_RUN_TIME on host-wide after the
+	// agent stopped, which is a cost nobody asked for and nobody can see.
+	d.disableProgramRunStats()
 	d.rootCtx = nil
 	d.rootCancel = nil
 	d.eventCtx = nil
