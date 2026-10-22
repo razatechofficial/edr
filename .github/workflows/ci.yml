@@ -186,12 +186,25 @@ jobs:
 
   macos-production-build:
     name: macOS production build (${{ matrix.arch }})
-    runs-on: macos-latest
+    # macos-latest is Apple Silicon, so the amd64 slice needs a native Intel
+    # runner. It used to run on macos-latest under Rosetta and install an
+    # x86_64 Homebrew into /usr/local; Homebrew's installer now refuses that
+    # outright ("Homebrew on macOS is only supported on Apple Silicon
+    # processors!"), so that lane could not work again as written. The agent
+    # links against x86_64 yara and openssl, so cross-compiling from the arm64
+    # runner is not an option either.
+    #
+    # macos-15-intel is the last Intel image GitHub serves, and it is on the
+    # way out: actions/runner-images stopped publishing macos-15 (x64) builds
+    # in August 2026. When that label goes, Intel macOS cannot be built on a
+    # GitHub-hosted runner at all and this target needs either a self-hosted
+    # Intel mac or a decision to drop it — which is why amd64 stays
+    # continue-on-error rather than being deleted here.
+    runs-on: ${{ matrix.arch == 'amd64' && 'macos-15-intel' || 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
         arch: [arm64, amd64]
-    # Intel slice on Apple Silicon runners needs Rosetta + x86 Homebrew; don't fail the whole CI.
     continue-on-error: ${{ matrix.arch == 'amd64' }}
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer

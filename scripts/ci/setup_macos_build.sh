@@ -35,9 +35,18 @@ fi
 
 BREW=(brew)
 if [[ "${USE_ROSETTA}" == "1" ]]; then
+	# Rosetta path: only reachable on an Apple Silicon host, and it needs an
+	# x86_64 Homebrew in /usr/local. Homebrew's installer refuses to create
+	# one on Apple Silicon ("Homebrew on macOS is only supported on Apple
+	# Silicon processors!"), so this cannot bootstrap itself any more — it
+	# works only where /usr/local/bin/brew already exists. CI builds amd64
+	# on a native Intel runner (macos-15-intel) instead, where USE_ROSETTA
+	# is 0 and this branch is not taken.
 	if [[ ! -x /usr/local/bin/brew ]]; then
-		echo "Installing x86_64 Homebrew for Intel macOS builds on Apple Silicon runner..."
-		arch -x86_64 /bin/bash -c 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+		echo "ERROR: amd64 macOS build needs an x86_64 Homebrew at /usr/local/bin/brew." >&2
+		echo "       Homebrew will not install one on an Apple Silicon host; build this slice" >&2
+		echo "       on a native Intel macOS machine or runner (e.g. macos-15-intel)." >&2
+		exit 1
 	fi
 	eval "$(/usr/local/bin/brew shellenv)"
 	BREW=(arch -x86_64 /usr/local/bin/brew)
