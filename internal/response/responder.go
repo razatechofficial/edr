@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/razatechofficial/edr/internal/schema"
@@ -14,15 +15,14 @@ import (
 
 type Responder struct {
 	allowKill bool
-	protected map[string]struct{}
+	protected protectedSet
 }
 
+// NewResponder builds a responder. The operator's protected list is added to
+// the built-in floor rather than replacing it, so an empty list still leaves
+// the critical processes of the platform untouchable.
 func NewResponder(allowKill bool, protected []string) *Responder {
-	p := make(map[string]struct{}, len(protected))
-	for _, name := range protected {
-		p[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
-	}
-	return &Responder{allowKill: allowKill, protected: p}
+	return &Responder{allowKill: allowKill, protected: newProtectedSet(protected)}
 }
 
 func (r *Responder) Execute(cmd schema.ResponseCommand) schema.ResponseResult {
@@ -45,18 +45,30 @@ func (r *Responder) killProcess(cmd schema.ResponseCommand) schema.ResponseResul
 	if cmd.ProcessPID <= 0 {
 		return fail(cmd, "invalid process pid")
 	}
-	nameKey := strings.ToLower(strings.TrimSpace(filepath.Base(cmd.ProcessName)))
-	if nameKey == "" {
-		nameKey = strings.ToLower(strings.TrimSpace(filepath.Base(cmd.FilePath)))
+	// pid 1 is init on every unix: terminating it panics the kernel. It is
+	// checked before anything else because no name or path lookup is needed to
+	// know the answer.
+	if runtime.GOOS != "windows" && cmd.ProcessPID == 1 {
+		return fail(cmd, "refusing to terminate pid 1")
 	}
-	if nameKey == "" {
-		nameKey = strings.ToLower(strings.TrimSpace(filepath.Base(cmd.Reason)))
+
+	// cmd.Reason is deliberately no longer consulted for the target's
+	// identity. It is free text written by whatever produced the detection, so
+	// treating it as a name meant an unrelated phrase could satisfy — or
+	// silently fail — the protection check.
+	if why, ok := r.protected.covers(cmd.ProcessName, cmd.FilePath); ok {
+		return fail(cmd, "target process is protected: "+why)
 	}
-	if _, ok := r.protected[nameKey]; ok {
-		return fail(cmd, "target process is protected")
-	}
+
+	// Self-protection covers the whole agent, not just this process. Killing
+	// the service that supervises this one, or a sibling component, disables
+	// the endpoint as surely as killing this pid would — and a detection
+	// firing on the agent's own activity is exactly the case that produces it.
 	if cmd.ProcessPID == os.Getpid() {
 		return fail(cmd, "refusing self-termination")
+	}
+	if cmd.ProcessPID == os.Getppid() {
+		return fail(cmd, "refusing to terminate the agent's parent process")
 	}
 
 	proc, err := os.FindProcess(cmd.ProcessPID)
