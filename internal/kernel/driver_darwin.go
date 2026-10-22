@@ -1312,7 +1312,7 @@ func darwinCapabilityForESFEvent(raw int) CapabilityCategory {
 	// without the same #ifdef problem, so they are matched by the
 	// numeric fallback table that already exists for newer SDK types.
 	switch esfOperationNameFallback(raw) {
-	case "setuid", "setgid":
+	case "setuid", "setgid", "seteuid", "setegid", "setreuid", "setregid":
 		return CapCredentialChange
 	}
 	return ""

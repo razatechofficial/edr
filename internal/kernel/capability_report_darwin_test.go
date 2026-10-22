@@ -88,7 +88,10 @@ func TestDarwinCapabilityReportUnsubscribedDriver(t *testing.T) {
 	// Categories ESF genuinely cannot serve must be absent rather than
 	// merely unattached, so the console does not show a macOS fleet as
 	// having broken DNS or registry monitoring that was never possible.
-	for _, cat := range []CapabilityCategory{CapNetworkDNS, CapRegistryWrite, CapScheduler, CapTLSMetadata, CapNetworkAccept, CapNetworkClose, CapModuleUnload, CapNamespaceChange, CapFilePermission} {
+	// network_connect and network_bind belong on this list: ESF defines no
+	// such event types, and claiming them made every macOS agent report
+	// network monitoring it did not have.
+	for _, cat := range []CapabilityCategory{CapNetworkDNS, CapRegistryWrite, CapScheduler, CapTLSMetadata, CapNetworkConnect, CapNetworkAccept, CapNetworkBind, CapNetworkClose, CapModuleUnload, CapNamespaceChange, CapFilePermission} {
 		c := findCapability(t, rep, cat)
 		if c.Present {
 			t.Errorf("category %q should be absent on the ESF driver", cat)

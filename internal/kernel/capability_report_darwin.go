@@ -24,34 +24,32 @@ package kernel
 // ESF event-name constants used as attachment names in the report. These are
 // the Apple event type names, which is what a macOS engineer will search for.
 const (
-	esfAuthExec      = "ES_EVENT_TYPE_AUTH_EXEC"
-	esfNotifyExec    = "ES_EVENT_TYPE_NOTIFY_EXEC"
-	esfNotifyFork    = "ES_EVENT_TYPE_NOTIFY_FORK"
-	esfNotifyExit    = "ES_EVENT_TYPE_NOTIFY_EXIT"
-	esfAuthOpen      = "ES_EVENT_TYPE_AUTH_OPEN"
-	esfAuthCreate    = "ES_EVENT_TYPE_AUTH_CREATE"
-	esfNotifyWrite   = "ES_EVENT_TYPE_NOTIFY_WRITE"
-	esfNotifyTrunc   = "ES_EVENT_TYPE_NOTIFY_TRUNCATE"
-	esfNotifyExch    = "ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA"
-	esfNotifyFcntl   = "ES_EVENT_TYPE_NOTIFY_FCNTL"
-	esfAuthUnlink    = "ES_EVENT_TYPE_AUTH_UNLINK"
-	esfNotifyUnlink  = "ES_EVENT_TYPE_NOTIFY_UNLINK"
-	esfAuthRename    = "ES_EVENT_TYPE_AUTH_RENAME"
-	esfNotifyRename  = "ES_EVENT_TYPE_NOTIFY_RENAME"
-	esfAuthCopyfile  = "ES_EVENT_TYPE_AUTH_COPYFILE"
-	esfAuthMmap      = "ES_EVENT_TYPE_AUTH_MMAP"
-	esfNotifyMmap    = "ES_EVENT_TYPE_NOTIFY_MMAP"
-	esfAuthKextload  = "ES_EVENT_TYPE_AUTH_KEXTLOAD"
-	esfAuthMount     = "ES_EVENT_TYPE_AUTH_MOUNT"
-	esfAuthSignal    = "ES_EVENT_TYPE_AUTH_SIGNAL"
-	esfNotifySignal  = "ES_EVENT_TYPE_NOTIFY_SIGNAL"
-	esfAuthGetTask   = "ES_EVENT_TYPE_AUTH_GET_TASK"
-	esfNotifyMprot   = "ES_EVENT_TYPE_NOTIFY_MPROTECT"
-	esfNotifyRemote  = "ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE"
-	esfNotifyConnect = "ES_EVENT_TYPE_NOTIFY_CONNECT"
-	esfNotifyBind    = "ES_EVENT_TYPE_NOTIFY_BIND"
-	esfNotifySetuid  = "ES_EVENT_TYPE_NOTIFY_SETUID"
-	esfNotifySetgid  = "ES_EVENT_TYPE_NOTIFY_SETGID"
+	esfAuthExec     = "ES_EVENT_TYPE_AUTH_EXEC"
+	esfNotifyExec   = "ES_EVENT_TYPE_NOTIFY_EXEC"
+	esfNotifyFork   = "ES_EVENT_TYPE_NOTIFY_FORK"
+	esfNotifyExit   = "ES_EVENT_TYPE_NOTIFY_EXIT"
+	esfAuthOpen     = "ES_EVENT_TYPE_AUTH_OPEN"
+	esfAuthCreate   = "ES_EVENT_TYPE_AUTH_CREATE"
+	esfNotifyWrite  = "ES_EVENT_TYPE_NOTIFY_WRITE"
+	esfNotifyTrunc  = "ES_EVENT_TYPE_NOTIFY_TRUNCATE"
+	esfNotifyExch   = "ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA"
+	esfNotifyFcntl  = "ES_EVENT_TYPE_NOTIFY_FCNTL"
+	esfAuthUnlink   = "ES_EVENT_TYPE_AUTH_UNLINK"
+	esfNotifyUnlink = "ES_EVENT_TYPE_NOTIFY_UNLINK"
+	esfAuthRename   = "ES_EVENT_TYPE_AUTH_RENAME"
+	esfNotifyRename = "ES_EVENT_TYPE_NOTIFY_RENAME"
+	esfAuthCopyfile = "ES_EVENT_TYPE_AUTH_COPYFILE"
+	esfAuthMmap     = "ES_EVENT_TYPE_AUTH_MMAP"
+	esfNotifyMmap   = "ES_EVENT_TYPE_NOTIFY_MMAP"
+	esfAuthKextload = "ES_EVENT_TYPE_AUTH_KEXTLOAD"
+	esfAuthMount    = "ES_EVENT_TYPE_AUTH_MOUNT"
+	esfAuthSignal   = "ES_EVENT_TYPE_AUTH_SIGNAL"
+	esfNotifySignal = "ES_EVENT_TYPE_NOTIFY_SIGNAL"
+	esfAuthGetTask  = "ES_EVENT_TYPE_AUTH_GET_TASK"
+	esfNotifyMprot  = "ES_EVENT_TYPE_NOTIFY_MPROTECT"
+	esfNotifyRemote = "ES_EVENT_TYPE_NOTIFY_REMOTE_THREAD_CREATE"
+	esfNotifySetuid = "ES_EVENT_TYPE_NOTIFY_SETUID"
+	esfNotifySetgid = "ES_EVENT_TYPE_NOTIFY_SETGID"
 )
 
 // esfSDKConditional is the reason attached to categories whose only ESF event
@@ -65,6 +63,17 @@ const esfSDKConditional = "this category's ESF event types are #ifdef-guarded in
 // inspection, no DNS event (DNS on macOS comes from a userspace log-stream
 // collector, not from this driver), no module-unload event, no inbound-accept
 // event, and no connection-close event.
+//
+// It has no outbound-connect or bind event either, which this table used to
+// claim. esfNotifyConnect and esfNotifyBind named
+// ES_EVENT_TYPE_NOTIFY_CONNECT and ES_EVENT_TYPE_NOTIFY_BIND; neither
+// identifier exists in the EndpointSecurity enum -- the only connect- and
+// bind-shaped events Apple defines are UIPC (unix-domain socket) and
+// XPC_CONNECT. esf_subscribe_all guards both with #ifdef, so they compiled to
+// nothing under every SDK, and the report advertised network_connect and
+// network_bind as present on every macOS agent while no event could ever
+// arrive for them. Socket-level network telemetry on macOS comes from the
+// NetworkExtension provider (internal/kernel/networkext), not from ESF.
 var esfHookCategories = map[string][]CapabilityCategory{
 	esfAuthExec:   {CapProcessExec},
 	esfNotifyExec: {CapProcessExec},
@@ -95,17 +104,13 @@ var esfHookCategories = map[string][]CapabilityCategory{
 	esfNotifyRemote: {CapMemoryWrite},
 
 	// SDK-conditional below.
-	esfNotifyConnect: {CapNetworkConnect},
-	esfNotifyBind:    {CapNetworkBind},
-	esfNotifySetuid:  {CapCredentialChange},
-	esfNotifySetgid:  {CapCredentialChange},
+	esfNotifySetuid: {CapCredentialChange},
+	esfNotifySetgid: {CapCredentialChange},
 }
 
 var esfConditionalHooks = map[string]string{
-	esfNotifyConnect: esfSDKConditional,
-	esfNotifyBind:    esfSDKConditional,
-	esfNotifySetuid:  esfSDKConditional,
-	esfNotifySetgid:  esfSDKConditional,
+	esfNotifySetuid: esfSDKConditional,
+	esfNotifySetgid: esfSDKConditional,
 }
 
 // CapabilityReport reports what the ESF driver has subscribed and what it has
