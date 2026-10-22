@@ -352,6 +352,7 @@ func (e etwEvent) fromProvider(name string) bool {
 // waiting, the runner's background activity fills it and the next subtest's
 // record is dropped before it is read.
 type etwTap struct {
+	buf     *RingBuffer
 	mu      sync.Mutex
 	evs     []etwEvent
 	dropped int
@@ -364,6 +365,7 @@ const etwTapCap = 1 << 18
 
 func newETWTap(t *testing.T, buf *RingBuffer) *etwTap {
 	tp := &etwTap{
+		buf:    buf,
 		counts: map[string]int{},
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
@@ -502,15 +504,67 @@ func (p *etwProof) listener(t *testing.T) string {
 	return ln.Addr().String()
 }
 
+// diagnostics is what a failure needs in order to be attributable: the
+// capability tracker counts events in handleEventRecord before any decode or
+// drop, DriverStats counts what the session handed up and what the driver
+// dropped, and RingBufferStats counts what the buffer refused for want of
+// space. Without them "no event arrived" could be a provider that sent
+// nothing, an event-id table that credited nothing, or a full buffer.
+func (p *etwProof) diagnostics(cat CapabilityCategory) string {
+	var b strings.Builder
+	st := p.drv.Stats()
+	fmt.Fprintf(&b, "driver stats: received=%d processed=%d dropped=%d errors=%d uptime=%.1fs",
+		st.EventsReceived, st.EventsProcessed, st.EventsDropped, st.ErrorCount, st.UptimeSeconds)
+	if p.tap.buf != nil {
+		rb := p.tap.buf.Stats()
+		fmt.Fprintf(&b, "\nring buffer: produced=%d consumed=%d dropped=%d backlog=%.1f%%",
+			rb.Produced, rb.Consumed, rb.Dropped, rb.BacklogPct)
+	}
+	for _, c := range p.drv.CapabilityReport().Categories {
+		if c.Category == cat {
+			fmt.Fprintf(&b, "\ncapability row: %+v", c)
+		}
+	}
+	return b.String()
+}
+
 func (p *etwProof) expect(t *testing.T, mark int, what string, match func(etwEvent) bool) etwEvent {
 	t.Helper()
 	ev, seen, ok := p.tap.await(mark, 25*time.Second, match)
 	if !ok {
-		t.Fatalf("no %s arrived within 25s after generating the activity (%d events seen in this window).\n%s\nThe provider serving this category is enabled, so the gap is in the event-id table or the decode path.",
-			what, seen, p.tap.summary())
+		t.Fatalf("no %s arrived within 25s after generating the activity (%d events seen in this window).\n%s\n%s\nThe provider serving this category is enabled, so the gap is in the event-id table or the decode path.",
+			what, seen, p.tap.summary(), p.diagnostics(""))
 	}
 	t.Logf("%s: %s", what, ev)
 	return ev
+}
+
+// proveWithRetry generates the activity and waits for the event, up to three
+// times. A hosted windows runner delivers thousands of ETW events a second
+// from its own background work, and a record the provider sent can be dropped
+// before the tap reads it; retrying re-runs the whole path rather than waiting
+// longer on a record that is already gone.
+func (p *etwProof) proveWithRetry(t *testing.T, cat CapabilityCategory, what string,
+	generate func() uint32, match func(etwEvent, uint32) bool) etwEvent {
+	t.Helper()
+	const attempts = 3
+	worstSeen := 0
+	for attempt := 1; attempt <= attempts; attempt++ {
+		mark := p.tap.mark()
+		pid := generate()
+		ev, seen, ok := p.tap.await(mark, 8*time.Second, func(e etwEvent) bool {
+			return match(e, pid)
+		})
+		if ok {
+			t.Logf("%s (attempt %d, pid %d): %s", what, attempt, pid, ev)
+			return ev
+		}
+		worstSeen = seen
+		t.Logf("attempt %d: no %s for pid %d within 8s (%d events seen)", attempt, what, pid, seen)
+	}
+	t.Fatalf("no %s arrived in %d attempts (%d events seen in the last window).\n%s\n%s",
+		what, attempts, worstSeen, p.tap.summary(), p.diagnostics(cat))
+	return etwEvent{}
 }
 
 func (p *etwProof) observed(t *testing.T, cat CapabilityCategory) uint64 {
@@ -536,13 +590,13 @@ func etwCategoryProofs() []etwCategoryProof {
 					t.Fatalf("locating test binary: %v", err)
 				}
 				base := strings.ToLower(filepath.Base(self))
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActExec, "")
 				// ProcessStart is attributed to the *parent* in the
 				// event header; the new process is child_pid.
-				ev := p.expect(t, m, fmt.Sprintf("ProcessStart for child pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderProcess) && e.EventID == 1 && e.ChildPID == pid
-				})
+				ev := p.proveWithRetry(t, CapProcessExec, "ProcessStart for the child",
+					func() uint32 { return runWindowsHelper(t, winActExec, "") },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderProcess) && e.EventID == 1 && e.ChildPID == pid
+					})
 				// The image name is the point of the version-aware
 				// decode: reading a version 4 payload at the
 				// version 0 offsets produced a plausible-looking
@@ -556,12 +610,12 @@ func etwCategoryProofs() []etwCategoryProof {
 		{
 			cat: CapProcessExit,
 			prove: func(t *testing.T, p *etwProof) {
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActExec, "")
-				p.expect(t, m, fmt.Sprintf("ProcessStop for pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderProcess) && e.EventID == 2 &&
-						(e.ExitPID == pid || e.PID == pid)
-				})
+				p.proveWithRetry(t, CapProcessExit, "ProcessStop",
+					func() uint32 { return runWindowsHelper(t, winActExec, "") },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderProcess) && e.EventID == 2 &&
+							(e.ExitPID == pid || e.PID == pid)
+					})
 			},
 		},
 		{
@@ -570,21 +624,21 @@ func etwCategoryProofs() []etwCategoryProof {
 				// A process start maps its own images; those are
 				// the ImageLoad events, attributed to the loading
 				// process.
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActExec, "")
-				p.expect(t, m, fmt.Sprintf("ImageLoad for pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderProcess) && e.EventID == 5 && e.PID == pid
-				})
+				p.proveWithRetry(t, CapModuleLoad, "ImageLoad",
+					func() uint32 { return runWindowsHelper(t, winActExec, "") },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderProcess) && e.EventID == 5 && e.PID == pid
+					})
 			},
 		},
 		{
 			cat: CapModuleUnload,
 			prove: func(t *testing.T, p *etwProof) {
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActExec, "")
-				p.expect(t, m, fmt.Sprintf("ImageUnload for pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderProcess) && e.EventID == 6 && e.PID == pid
-				})
+				p.proveWithRetry(t, CapModuleUnload, "ImageUnload",
+					func() uint32 { return runWindowsHelper(t, winActExec, "") },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderProcess) && e.EventID == 6 && e.PID == pid
+					})
 			},
 		},
 		{
@@ -593,8 +647,6 @@ func etwCategoryProofs() []etwCategoryProof {
 				path := p.tempPath("open-me.txt")
 				runWindowsHelper(t, winActWrite, path)
 				base := strings.ToLower(filepath.Base(path))
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActOpen, path)
 				// Create carries FileName in its own template, so
 				// the name is part of the match rather than
 				// something checked afterwards: a Go binary
@@ -604,48 +656,50 @@ func etwCategoryProofs() []etwCategoryProof {
 				// template's FileName offset is wrong, which is
 				// the defect that left every Kernel-File event
 				// but Name pathless.
-				p.expect(t, m, fmt.Sprintf("Kernel-File Create for pid %d naming %s", pid, base), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderFile) &&
-						e.EventID == kernelFileEvtCreateID && e.PID == pid &&
-						strings.Contains(strings.ToLower(e.FileName+e.Path), base)
-				})
+				p.proveWithRetry(t, CapFileOpen, "Kernel-File Create naming "+base,
+					func() uint32 { return runWindowsHelper(t, winActOpen, path) },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderFile) &&
+							e.EventID == kernelFileEvtCreateID && e.PID == pid &&
+							strings.Contains(strings.ToLower(e.FileName+e.Path), base)
+					})
 			},
 		},
 		{
 			cat: CapFileWrite,
 			prove: func(t *testing.T, p *etwProof) {
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActWrite, p.tempPath("write-me.txt"))
 				// Write carries no file name of its own, only a
 				// FileObject and a FileKey; the path, when there
 				// is one, comes from the Name-event cache.
-				ev := p.expect(t, m, fmt.Sprintf("Kernel-File Write for pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderFile) &&
-						e.EventID == kernelFileEvtWriteID && e.PID == pid
-				})
+				ev := p.proveWithRetry(t, CapFileWrite, "Kernel-File Write",
+					func() uint32 { return runWindowsHelper(t, winActWrite, p.tempPath("write-me.txt")) },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderFile) &&
+							e.EventID == kernelFileEvtWriteID && e.PID == pid
+					})
 				t.Logf("write event resolved path: %q", ev.FileName+ev.Path)
 			},
 		},
 		{
 			cat: CapFileDelete,
 			prove: func(t *testing.T, p *etwProof) {
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActDelete, p.tempPath("delete-me.txt"))
-				p.expect(t, m, fmt.Sprintf("Kernel-File delete for pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderFile) && e.PID == pid &&
-						(e.EventID == kernelFileEvtSetDeleteID || e.EventID == kernelFileEvtDeletePathID)
-				})
+				p.proveWithRetry(t, CapFileDelete, "Kernel-File delete",
+					func() uint32 { return runWindowsHelper(t, winActDelete, p.tempPath("delete-me.txt")) },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderFile) && e.PID == pid &&
+							(e.EventID == kernelFileEvtSetDeleteID || e.EventID == kernelFileEvtDeletePathID)
+					})
 			},
 		},
 		{
 			cat: CapFileRename,
 			prove: func(t *testing.T, p *etwProof) {
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActRename, p.tempPath("rename-me.txt"))
-				p.expect(t, m, fmt.Sprintf("Kernel-File rename for pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderFile) && e.PID == pid &&
-						(e.EventID == kernelFileEvtRenameID || e.EventID == kernelFileEvtRenamePathID)
-				})
+				p.proveWithRetry(t, CapFileRename, "Kernel-File rename",
+					func() uint32 { return runWindowsHelper(t, winActRename, p.tempPath("rename-me.txt")) },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderFile) && e.PID == pid &&
+							(e.EventID == kernelFileEvtRenameID || e.EventID == kernelFileEvtRenamePathID)
+					})
 			},
 		},
 		{
@@ -656,30 +710,33 @@ func etwCategoryProofs() []etwCategoryProof {
 			cat: CapNetworkConnect,
 			prove: func(t *testing.T, p *etwProof) {
 				addr := p.listener(t)
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActDial, addr)
-				p.expect(t, m, fmt.Sprintf("Kernel-Network connect for pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderNetwork) && e.PID == pid &&
-						(e.EventID == kernelNetEvtConnect4 || e.EventID == kernelNetEvtConnect6)
-				})
+				p.proveWithRetry(t, CapNetworkConnect, "Kernel-Network connect",
+					func() uint32 { return runWindowsHelper(t, winActDial, addr) },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderNetwork) && e.PID == pid &&
+							(e.EventID == kernelNetEvtConnect4 || e.EventID == kernelNetEvtConnect6)
+					})
 			},
 		},
 		{
 			cat: CapNetworkAccept,
 			prove: func(t *testing.T, p *etwProof) {
-				addr, pid, wait := startWindowsHelperListener(t)
-				m := p.tap.mark()
-				c, err := net.DialTimeout("tcp", addr, 5*time.Second)
-				if err != nil {
-					t.Fatalf("dialing the helper listener at %s: %v", addr, err)
-				}
-				_, _ = c.Write([]byte("ping"))
-				_ = c.Close()
-				p.expect(t, m, fmt.Sprintf("Kernel-Network accept for listener pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderNetwork) && e.PID == pid &&
-						(e.EventID == kernelNetEvtAccept4 || e.EventID == kernelNetEvtAccept6)
-				})
-				wait()
+				p.proveWithRetry(t, CapNetworkAccept, "Kernel-Network accept",
+					func() uint32 {
+						addr, pid, wait := startWindowsHelperListener(t)
+						c, err := net.DialTimeout("tcp", addr, 5*time.Second)
+						if err != nil {
+							t.Fatalf("dialing the helper listener at %s: %v", addr, err)
+						}
+						_, _ = c.Write([]byte("ping"))
+						_ = c.Close()
+						wait()
+						return pid
+					},
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderNetwork) && e.PID == pid &&
+							(e.EventID == kernelNetEvtAccept4 || e.EventID == kernelNetEvtAccept6)
+					})
 			},
 		},
 		{
@@ -690,40 +747,40 @@ func etwCategoryProofs() []etwCategoryProof {
 			cat: CapNetworkClose,
 			prove: func(t *testing.T, p *etwProof) {
 				addr := p.listener(t)
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActDial, addr)
-				p.expect(t, m, fmt.Sprintf("Kernel-Network disconnect for pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderNetwork) && e.PID == pid &&
-						(e.EventID == kernelNetEvtDisconnect4 || e.EventID == kernelNetEvtDisconnect6)
-				})
+				p.proveWithRetry(t, CapNetworkClose, "Kernel-Network disconnect",
+					func() uint32 { return runWindowsHelper(t, winActDial, addr) },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderNetwork) && e.PID == pid &&
+							(e.EventID == kernelNetEvtDisconnect4 || e.EventID == kernelNetEvtDisconnect6)
+					})
 			},
 		},
 		{
 			cat: CapNetworkDNS,
 			prove: func(t *testing.T, p *etwProof) {
 				name := fmt.Sprintf("edr-itest-%d.example.com", time.Now().UnixNano())
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActDNS, name)
 				// DnsClient events are emitted by whichever
 				// component resolves, which is not always the
 				// querying process, so the name is the attribution
 				// here and the pid is only logged.
-				ev := p.expect(t, m, fmt.Sprintf("DnsClient event naming %s (queried by pid %d)", name, pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderDNS) &&
-						strings.Contains(strings.ToLower(e.Query), strings.ToLower(name))
-				})
-				t.Logf("dns event pid=%d (querying helper was %d)", ev.PID, pid)
+				ev := p.proveWithRetry(t, CapNetworkDNS, "DnsClient event naming "+name,
+					func() uint32 { return runWindowsHelper(t, winActDNS, name) },
+					func(e etwEvent, _ uint32) bool {
+						return e.fromProvider(etwProviderDNS) &&
+							strings.Contains(strings.ToLower(e.Query), strings.ToLower(name))
+					})
+				t.Logf("dns event pid=%d", ev.PID)
 			},
 		},
 		{
 			cat: CapRegistryWrite,
 			prove: func(t *testing.T, p *etwProof) {
-				m := p.tap.mark()
-				pid := runWindowsHelper(t, winActRegWrite, "edr-itest")
-				ev := p.expect(t, m, fmt.Sprintf("Kernel-Registry SetValue for pid %d", pid), func(e etwEvent) bool {
-					return e.fromProvider(etwProviderRegistry) && e.PID == pid &&
-						e.EventID == kernelRegistryEvtSetValue
-				})
+				ev := p.proveWithRetry(t, CapRegistryWrite, "Kernel-Registry SetValue",
+					func() uint32 { return runWindowsHelper(t, winActRegWrite, "edr-itest") },
+					func(e etwEvent, pid uint32) bool {
+						return e.fromProvider(etwProviderRegistry) && e.PID == pid &&
+							e.EventID == kernelRegistryEvtSetValue
+					})
 				// operation and value_name only appear when the
 				// decoder switches on the event id; keyed on the
 				// opcode, as it was, the SetValue branch never ran.
