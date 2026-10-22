@@ -1115,28 +1115,33 @@ func linuxCategoryProofs() []linuxCategoryProof {
 // buffer that nobody drains while the previous subtest runs. Each subtest
 // takes a cursor into the shared event tap before generating its activity, so
 // one subtest's events cannot satisfy another's assertion.
-func TestLinuxMonitoringCategories(t *testing.T) {
-	drv, tap := startMonitoringForTest(t)
-
+// TestLinuxMonitoringCategoryTableCoversEveryCategory needs no root and no
+// kernel, so it runs wherever the integration build runs. "We cover every
+// category" is a claim that rots silently; this is what stops it.
+func TestLinuxMonitoringCategoryTableCoversEveryCategory(t *testing.T) {
 	proofs := linuxCategoryProofs()
-
-	// A new canonical category must get a case here or this fails. That is
-	// the point of the list: "we cover every category" is a claim that
-	// rots silently otherwise.
 	covered := make(map[CapabilityCategory]bool, len(proofs))
 	for _, pr := range proofs {
 		if covered[pr.cat] {
 			t.Errorf("category %q has more than one proof case", pr.cat)
 		}
 		covered[pr.cat] = true
+		if pr.unsupported == "" && pr.prove == nil {
+			t.Errorf("category %q has neither a proof nor an unsupported reason", pr.cat)
+		}
 	}
 	for _, cat := range CanonicalCapabilityCategories {
 		if !covered[cat] {
 			t.Errorf("capability category %q has no proof case in linuxCategoryProofs; add one, or add it with an unsupported reason if Linux genuinely cannot serve it", cat)
 		}
 	}
+	t.Logf("%d proof cases for %d canonical categories", len(proofs), len(CanonicalCapabilityCategories))
+}
 
-	for _, pr := range proofs {
+func TestLinuxMonitoringCategories(t *testing.T) {
+	drv, tap := startMonitoringForTest(t)
+
+	for _, pr := range linuxCategoryProofs() {
 		pr := pr
 		t.Run(string(pr.cat), func(t *testing.T) {
 			rep := drv.CapabilityReport()

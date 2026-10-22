@@ -770,25 +770,32 @@ func etwCategoryProofs() []etwCategoryProof {
 // All subtests share one driver and one draining reader. A realtime ETW
 // session takes a second or two to come up per provider, and only one ETW
 // driver instance can be active at a time anyway.
-func TestWindowsMonitoringCategories(t *testing.T) {
-	drv, tap := startETWForTest(t)
-
+// TestWindowsMonitoringCategoryTableCoversEveryCategory needs no ETW session,
+// so it runs even where one cannot be started.
+func TestWindowsMonitoringCategoryTableCoversEveryCategory(t *testing.T) {
 	proofs := etwCategoryProofs()
-
 	covered := make(map[CapabilityCategory]bool, len(proofs))
 	for _, pr := range proofs {
 		if covered[pr.cat] {
 			t.Errorf("category %q has more than one proof case", pr.cat)
 		}
 		covered[pr.cat] = true
+		if pr.unsupported == "" && pr.prove == nil {
+			t.Errorf("category %q has neither a proof nor an unsupported reason", pr.cat)
+		}
 	}
 	for _, cat := range CanonicalCapabilityCategories {
 		if !covered[cat] {
 			t.Errorf("capability category %q has no proof case in etwCategoryProofs; add one, or add it with an unsupported reason if the enabled ETW provider set genuinely cannot serve it", cat)
 		}
 	}
+	t.Logf("%d proof cases for %d canonical categories", len(proofs), len(CanonicalCapabilityCategories))
+}
 
-	for _, pr := range proofs {
+func TestWindowsMonitoringCategories(t *testing.T) {
+	drv, tap := startETWForTest(t)
+
+	for _, pr := range etwCategoryProofs() {
 		pr := pr
 		t.Run(string(pr.cat), func(t *testing.T) {
 			c := findCapability(t, drv.CapabilityReport(), pr.cat)
