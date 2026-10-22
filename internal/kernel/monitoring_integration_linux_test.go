@@ -895,14 +895,26 @@ func findCapabilityHooks(rep CapabilityReport, cat CapabilityCategory) []string 
 }
 
 // tracepointEnableState reports what tracefs says about each of a category's
-// attach targets.
+// attach targets, and about a known-busy target as a control.
 //
-// A tracepoint with an attached BPF program reads 1 in its "enable" file. If a
-// program's run count is zero and its tracepoint reads 1, the hook is armed
-// and the syscall under test is not reaching it; if it reads 0, the attach did
-// not take effect however successfully the link call returned. Those are
-// different bugs and the file is the cheapest way to tell them apart.
+// Read the control first. /sys/kernel/tracing/events/<g>/<e>/enable is
+// ftrace's own toggle, and a BPF program attached through perf_event_open does
+// not necessarily flip it, so a bare "enable=0" on a silent hook proves
+// nothing on its own -- the busiest tracepoint in the object may read 0 while
+// running thousands of times a second. It is only evidence when the control
+// reads 1 and the silent hook reads 0.
+//
+// This is the same trap as a run count printed without a control, and it is
+// worth the extra lines: the first version of this function asserted "the
+// kernel is not running anything on this tracepoint" from a number that may
+// simply not mean that.
 func tracepointEnableState(drv *EBPFDriver, hooks []string) string {
+	all := drv.ProgramRunCounts()
+	control := ""
+	if len(all) > 0 && all[0].RunCount > 0 {
+		control = all[0].Program
+		hooks = append(append([]string(nil), hooks...), control)
+	}
 	targets := drv.AttachTargetsFor(hooks)
 	if len(targets) == 0 {
 		return ""
@@ -918,6 +930,9 @@ func tracepointEnableState(drv *EBPFDriver, hooks []string) string {
 	for _, name := range names {
 		target := targets[name]
 		fmt.Fprintf(&b, "\n    %s -> %s", name, target)
+		if name == control {
+			b.WriteString(" [CONTROL: this program is the busiest in the object, so whatever its enable reads is what a working hook looks like]")
+		}
 		group, tp, ok := strings.Cut(target, "/")
 		if !ok {
 			continue
@@ -928,12 +943,7 @@ func tracepointEnableState(drv *EBPFDriver, hooks []string) string {
 			if err != nil {
 				continue
 			}
-			state := strings.TrimSpace(string(raw))
-			fmt.Fprintf(&b, " (enable=%s", state)
-			if state == "0" {
-				b.WriteString(", so the kernel is not running anything on this tracepoint")
-			}
-			b.WriteString(")")
+			fmt.Fprintf(&b, " (enable=%s)", strings.TrimSpace(string(raw)))
 			break
 		}
 	}
