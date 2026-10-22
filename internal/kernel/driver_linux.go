@@ -607,7 +607,12 @@ func (d *EBPFDriver) captureVerifierDiag(err error) {
 	}
 	var ve *ebpf.VerifierError
 	if errors.As(err, &ve) {
-		d.setLoadDiag(ve.Error())
+		// %+v, not Error(): VerifierError.Error() keeps the first and
+		// last few lines and prints "N line(s) omitted" for the rest,
+		// which drops exactly the instruction trace and register
+		// bounds needed to find the rejected access. The full log is
+		// the whole value of this field.
+		d.setLoadDiag(fmt.Sprintf("%+v", ve))
 		return
 	}
 	d.setLoadDiag(err.Error())
