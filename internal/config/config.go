@@ -572,11 +572,53 @@ type Config struct {
 	} `yaml:"logging"`
 
 	LegacyResponse struct {
-		AllowKill          bool     `yaml:"allow_kill"`
-		AutoKillEnabled    bool     `yaml:"auto_kill_enabled"`
-		MinKillScore       int      `yaml:"min_kill_score"`
-		KillRuleAllowlist  []string `yaml:"kill_rule_allowlist"`
+		AllowKill       bool `yaml:"allow_kill"`
+		AutoKillEnabled bool `yaml:"auto_kill_enabled"`
+
+		// KillMode is "observe" or "enforce".
+		//
+		// Observe is the default and the only safe way to introduce automated
+		// termination: the agent evaluates every rule, records the process it
+		// would have killed and why, and kills nothing. It is the audit mode
+		// that endpoint vendors run a detector through before letting it act —
+		// Microsoft validates attack-disruption detectors in audit mode before
+		// broad release for the same reason — and it is what turns "we think
+		// these rules are safe" into evidence.
+		//
+		// Promote a deployment to enforce only after reading what observe
+		// recorded. A rule that would have killed a developer's shell shows up
+		// there as a line in the audit log rather than as an outage.
+		KillMode string `yaml:"kill_mode"`
+
+		// MinKillScore is the detection score below which nothing is killed.
+		//
+		// It is a detection score, not a calibrated probability, so it is a
+		// coarse gate rather than a confidence level. Vendors who publish a
+		// figure for automatic containment quote confidence at or above 99%;
+		// this knob cannot express that, which is why the rule allowlist below
+		// and not this number is the real control.
+		MinKillScore int `yaml:"min_kill_score"`
+
+		// KillRuleAllowlist names the rules permitted to terminate a process.
+		//
+		// Empty means none. It used to mean all: an unset allowlist was read
+		// as "no restriction", so every rule that scored above the threshold
+		// could kill, and the default configuration shipped that way. Fail
+		// closed — an operator who has not named the rules they trust has not
+		// authorised any of them.
+		KillRuleAllowlist []string `yaml:"kill_rule_allowlist"`
+
+		// ProtectedProcesses is added to the agent's built-in floor of
+		// critical processes, never replaces it. Prefer absolute paths: a
+		// process name is chosen by the process.
 		ProtectedProcesses []string `yaml:"protected_processes"`
+
+		// MaxKillsPerHour bounds the blast radius. A detection that matches
+		// broadly — a bad rule, a bad indicator feed, or an attacker who has
+		// worked out what the rules match — otherwise terminates processes for
+		// as long as it keeps matching. On reaching the limit the agent stops
+		// killing and says so; it keeps detecting and reporting.
+		MaxKillsPerHour int `yaml:"max_kills_per_hour"`
 	} `yaml:"response_legacy"`
 
 	Forwarder struct {
@@ -768,7 +810,11 @@ func Defaults() Config {
 	cfg.Monitoring.MacosNotarizationIntervalSec = 3600
 
 	cfg.Service.TickInterval = time.Second
-	cfg.LegacyResponse.MinKillScore = 90
+	// Observe, not enforce, and a threshold above the score at which the
+	// response engine escalates a kill to the whole process tree.
+	cfg.LegacyResponse.KillMode = KillModeObserve
+	cfg.LegacyResponse.MinKillScore = 95
+	cfg.LegacyResponse.MaxKillsPerHour = 10
 	cfg.RulesFile = "rules/baseline.yaml"
 
 	cfg.SelfProtect.Enabled = true
@@ -777,4 +823,20 @@ func Defaults() Config {
 	cfg.SelfProtect.AntiDebug = true
 
 	return cfg
+}
+
+// Kill modes for LegacyResponse.KillMode.
+const (
+	// KillModeObserve records the decision and terminates nothing.
+	KillModeObserve = "observe"
+	// KillModeEnforce actually terminates.
+	KillModeEnforce = "enforce"
+)
+
+// AutoKillEnforcing reports whether automated termination may actually run.
+//
+// Anything other than an explicit "enforce" observes, so a typo in this field
+// cannot silently arm the agent.
+func (c *Config) AutoKillEnforcing() bool {
+	return strings.EqualFold(strings.TrimSpace(c.LegacyResponse.KillMode), KillModeEnforce)
 }

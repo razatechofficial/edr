@@ -148,8 +148,20 @@ func TestDefaults(t *testing.T) {
 	if cfg.Service.TickInterval != time.Second {
 		t.Errorf("Service.TickInterval = %v, want %v", cfg.Service.TickInterval, time.Second)
 	}
-	if cfg.LegacyResponse.MinKillScore != 90 {
-		t.Errorf("LegacyResponse.MinKillScore = %d, want %d", cfg.LegacyResponse.MinKillScore, 90)
+	if cfg.LegacyResponse.MinKillScore != 95 {
+		t.Errorf("LegacyResponse.MinKillScore = %d, want %d", cfg.LegacyResponse.MinKillScore, 95)
+	}
+	// The safety defaults are pinned, not incidental. Shipping enforce, or an
+	// unbounded hourly limit, is how the agent came to terminate hundreds of
+	// ordinary processes in a single run.
+	if cfg.LegacyResponse.KillMode != KillModeObserve {
+		t.Errorf("LegacyResponse.KillMode = %q, want %q", cfg.LegacyResponse.KillMode, KillModeObserve)
+	}
+	if cfg.AutoKillEnforcing() {
+		t.Error("a default configuration must not enforce automated termination")
+	}
+	if cfg.LegacyResponse.MaxKillsPerHour <= 0 {
+		t.Errorf("LegacyResponse.MaxKillsPerHour = %d, want a positive bound", cfg.LegacyResponse.MaxKillsPerHour)
 	}
 	if !strings.Contains(cfg.RulesFile, "baseline.yaml") {
 		t.Errorf("RulesFile = %q, should reference baseline.yaml", cfg.RulesFile)
@@ -289,8 +301,20 @@ func TestLoadYAML(t *testing.T) {
 	if !cfg.LegacyResponse.AllowKill {
 		t.Error("LegacyResponse.AllowKill should be true from YAML")
 	}
-	if cfg.LegacyResponse.MinKillScore != 90 {
-		t.Errorf("LegacyResponse.MinKillScore = %d, want %d", cfg.LegacyResponse.MinKillScore, 90)
+	if cfg.LegacyResponse.MinKillScore != 95 {
+		t.Errorf("LegacyResponse.MinKillScore = %d, want %d", cfg.LegacyResponse.MinKillScore, 95)
+	}
+	// The safety defaults are pinned, not incidental. Shipping enforce, or an
+	// unbounded hourly limit, is how the agent came to terminate hundreds of
+	// ordinary processes in a single run.
+	if cfg.LegacyResponse.KillMode != KillModeObserve {
+		t.Errorf("LegacyResponse.KillMode = %q, want %q", cfg.LegacyResponse.KillMode, KillModeObserve)
+	}
+	if cfg.AutoKillEnforcing() {
+		t.Error("a default configuration must not enforce automated termination")
+	}
+	if cfg.LegacyResponse.MaxKillsPerHour <= 0 {
+		t.Errorf("LegacyResponse.MaxKillsPerHour = %d, want a positive bound", cfg.LegacyResponse.MaxKillsPerHour)
 	}
 	if cfg.Forwarder.Mode != "http" {
 		t.Errorf("Forwarder.Mode = %q, want %q", cfg.Forwarder.Mode, "http")
