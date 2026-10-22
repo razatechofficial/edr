@@ -250,34 +250,27 @@ int tp_dns_sendto(struct trace_event_raw_sys_enter *ctx)
 	 */
 	bpf_probe_read_user(evt->dns_query, sizeof(evt->dns_query), buf + 12);
 	/*
-	 * Best-effort kernel-side QTYPE extraction: walk the label chain in
-	 * a bounded loop until we hit the root NUL or a compression pointer.
-	 * Userspace re-derives QTYPE from the raw bytes and treats this as
-	 * an authoritative hint; this saves a re-walk for the common case.
+	 * QTYPE is derived in userspace from the wire bytes above, not here.
+	 *
+	 * This used to walk the label chain in-kernel as a "hint". The walk
+	 * indexed dns_query with a label-length-derived offset, and clang
+	 * compiled the bound check and the index into two different
+	 * registers, so the verifier's bound on the compared register never
+	 * reached the one forming the address:
+	 *
+	 *   160: if r3 > 0xfd goto ...   ; r3 bounded to 253
+	 *   161: r4 = r1                 ; r1 still 0..512
+	 *   165: r3 += r4
+	 *   166: r3 = *(u8 *)(r3 +100)
+	 *   invalid access to memory, mem_size=360 off=612 size=1
+	 *
+	 * That rejection failed the whole collection load, so NO eBPF program
+	 * attached on kernels that enforce it (6.17 among them) and the agent
+	 * had no Linux telemetry at all. The hint also saved nothing:
+	 * decodeDNSQueryEvent re-walks the same bytes unconditionally. Zero
+	 * here means "not set in kernel"; userspace fills it.
 	 */
-	__u16 qtype = 0;
-	int off = 0;
-	for (int step = 0; step < 32; step++) {
-		if (off >= (int)sizeof(evt->dns_query))
-			break;
-		unsigned char b = evt->dns_query[off];
-		if (b == 0) {
-			if (off + 2 < (int)sizeof(evt->dns_query))
-				qtype = ((__u16)evt->dns_query[off + 1] << 8) |
-				        (__u16)evt->dns_query[off + 2];
-			break;
-		}
-		if ((b & 0xC0) == 0xC0) {
-			/* Compression pointer: 2 bytes total; treat as end. */
-			off += 2;
-			if (off + 1 < (int)sizeof(evt->dns_query))
-				qtype = ((__u16)evt->dns_query[off] << 8) |
-				        (__u16)evt->dns_query[off + 1];
-			break;
-		}
-		off += (int)b + 1;
-	}
-	evt->dns_qtype = qtype != 0 ? qtype : 1;
+	evt->dns_qtype = 0;
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
 }
