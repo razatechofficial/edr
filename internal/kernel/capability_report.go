@@ -168,6 +168,22 @@ type CapabilityStatus struct {
 	// GeneratedAt to decide whether "attached but not producing" is stale.
 	LastEventUnix int64 `json:"last_event_unix"`
 
+	// KernelDropped counts events of this category the kernel produced and
+	// then threw away because the ring buffer carrying them was full.
+	// Linux eBPF only; zero elsewhere.
+	//
+	// It is the answer to the most misleading row this report can show:
+	// attached true, producing false, events_observed zero. That row used
+	// to mean "the hook is not firing" and nothing else, because a record
+	// lost in the kernel left no trace in userspace. A non-zero value here
+	// says the hook is firing fine and the agent cannot keep up.
+	KernelDropped uint64 `json:"kernel_dropped,omitempty"`
+
+	// KernelSubmitted counts events of this category the kernel wrote into
+	// a ring buffer. Read against EventsObserved it separates a loss in
+	// the kernel from a loss in the userspace decode or policy gate.
+	KernelSubmitted uint64 `json:"kernel_submitted,omitempty"`
+
 	// Derivation states what evidence backs Attached. One of the
 	// Derivation* constants.
 	Derivation string `json:"derivation"`

@@ -137,8 +137,8 @@ type DriverStats struct {
 	CollectionMode string `json:"collection_mode,omitempty"`
 
 	// LostEvents / RealtimeBuffersLost are populated on Windows ETW (ControlTrace QUERY); zero elsewhere.
-	LostEvents              uint32 `json:"lost_events,omitempty"`
-	RealtimeBuffersLost     uint32 `json:"realtime_buffers_lost,omitempty"`
+	LostEvents          uint32 `json:"lost_events,omitempty"`
+	RealtimeBuffersLost uint32 `json:"realtime_buffers_lost,omitempty"`
 
 	// KernelReserveFailures counts events the kernel threw away because
 	// the BPF ring buffer they were destined for was full. Linux eBPF

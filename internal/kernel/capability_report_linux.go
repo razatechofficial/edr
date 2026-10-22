@@ -23,6 +23,7 @@ package kernel
 // through.
 
 import (
+	"fmt"
 	"sort"
 )
 
@@ -274,7 +275,7 @@ func (d *EBPFDriver) CapabilityReport() CapabilityReport {
 		notBuilt = "eBPF driver is running but recorded no attachments; the object may have loaded without any link succeeding"
 	}
 
-	return buildCapabilityReport(
+	rep := buildCapabilityReport(
 		"ebpf",
 		running,
 		d.Stats().UptimeSeconds,
@@ -284,6 +285,24 @@ func (d *EBPFDriver) CapabilityReport() CapabilityReport {
 		d.caps,
 		notBuilt,
 	)
+
+	// Credit each row with what the kernel counted for it. Done as a pass
+	// over the finished report rather than inside buildCapabilityReport
+	// because the counters are Linux-only: Windows ETW and macOS ESF have
+	// their own loss surfaces and no BPF ring buffer to fill.
+	if loss := d.kernelEventLossCached(); loss.Available {
+		for i := range rep.Categories {
+			submitted, dropped, ring := loss.kernelLossForCategory(rep.Categories[i].Category)
+			rep.Categories[i].KernelSubmitted = submitted
+			rep.Categories[i].KernelDropped = dropped
+			if dropped > 0 && rep.Categories[i].Reason == "" {
+				rep.Categories[i].Reason = fmt.Sprintf(
+					"the kernel discarded %d event(s) of this category because the %s ring buffer was full; the hook is attached and firing",
+					dropped, ring)
+			}
+		}
+	}
+	return rep
 }
 
 // AttachedProgramNames returns the sorted names of attached eBPF programs.
