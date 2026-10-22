@@ -259,20 +259,36 @@ enum edr_subsystem {
  * process_monitor.c defines EDR_SHARED_MAPS_OWNER before including this
  * header. Which file owns them does not matter, only that one does.
  */
+/*
+ * Declared with explicit key_size/value_size rather than __type().
+ *
+ * __type(value, struct edr_event_stats) makes the map's value a BTF type
+ * reference, and in a file that only externs the map that struct appears in
+ * BTF as a forward declaration with no size, which libbpf rejects at link
+ * time with
+ *
+ *	libbpf: map 'event_stats': can't determine value size for type [41]: -22
+ *	libbpf: global 'event_stats': invalid map definition
+ *
+ * Sizes are not type references, so they survive in every translation unit
+ * and the definition and the externs stay textually identical, which is what
+ * the linker compares. The verifier bounds accesses by value_size either way;
+ * all BTF would add here is a prettier bpftool map dump.
+ */
 #ifdef EDR_SHARED_MAPS_OWNER
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, EDR_EVENT_TYPE_MAX);
-	__type(key, __u32);
-	__type(value, struct edr_event_stats);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(struct edr_event_stats));
 } event_stats SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, EDR_SUBSYS_MAX);
-	__type(key, __u32);
-	__type(value, __u64);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(__u64));
 } filter_stats SEC(".maps");
 
 #else
@@ -280,15 +296,15 @@ struct {
 extern struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, EDR_EVENT_TYPE_MAX);
-	__type(key, __u32);
-	__type(value, struct edr_event_stats);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(struct edr_event_stats));
 } event_stats;
 
 extern struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, EDR_SUBSYS_MAX);
-	__type(key, __u32);
-	__type(value, __u64);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(__u64));
 } filter_stats;
 
 #endif /* EDR_SHARED_MAPS_OWNER */
@@ -297,7 +313,7 @@ static __always_inline struct edr_event_stats *edr_stats_slot(__u32 type)
 {
 	if (type >= EDR_EVENT_TYPE_MAX)
 		return NULL;
-	return bpf_map_lookup_elem(&event_stats, &type);
+	return (struct edr_event_stats *)bpf_map_lookup_elem(&event_stats, &type);
 }
 
 /*
@@ -313,7 +329,7 @@ static __always_inline void edr_stat_filtered(__u32 subsys)
 
 	if (subsys >= EDR_SUBSYS_MAX)
 		return;
-	n = bpf_map_lookup_elem(&filter_stats, &subsys);
+	n = (__u64 *)bpf_map_lookup_elem(&filter_stats, &subsys);
 	if (n)
 		(*n)++;
 }
