@@ -426,6 +426,18 @@ func ebpfRequired() bool {
 // started driver plus a tap on its ring buffer.
 func startMonitoringForTest(t *testing.T) (*EBPFDriver, *eventTap) {
 	t.Helper()
+	return startMonitoringForTestWithPolicy(t, nil)
+}
+
+// startMonitoringForTestWithPolicy is startMonitoringForTest with a chance to
+// change the policy before Start.
+//
+// It exists because some flags decide what gets attached, not just what gets
+// forwarded: with monitoring.sched_events false the scheduler tracepoints are
+// not attached at all, so a subtest that wants to prove them needs a driver
+// started with the flag on rather than a flag flipped afterwards.
+func startMonitoringForTestWithPolicy(t *testing.T, mutate func(*EventPolicy)) (*EBPFDriver, *eventTap) {
+	t.Helper()
 
 	if euid := os.Geteuid(); euid != 0 {
 		t.Skipf("MISSING PREREQUISITE: root. eBPF program loading needs CAP_BPF and CAP_PERFMON; this process has euid=%d. Re-run with: sudo -E go test -tags=integration ./internal/kernel/ -run %s", euid, t.Name())
@@ -447,13 +459,16 @@ func startMonitoringForTest(t *testing.T) (*EBPFDriver, *eventTap) {
 
 	// LSM-FIM events are off in DefaultPolicy; they are low volume and
 	// several file categories can be served by them, so turn them on for
-	// the whole run. Scheduler events are NOT turned on here: they are
-	// emitted for every context switch and they drowned every other
-	// category -- 91,885 of 93,021 records in one run -- which filled the
-	// shared ring buffer and dropped the file events the next subtest was
-	// waiting for. The scheduler subtest turns them on for itself.
+	// the whole run. Scheduler events stay off: with them on, the three
+	// sched tracepoints attach and submit on every context switch, which
+	// was about 250,000 records a second on this runner and starved every
+	// other category. TestLinuxMonitoringScheduler proves that category on
+	// a driver of its own.
 	pol := DefaultPolicy()
 	pol.LSMFimEvents = true
+	if mutate != nil {
+		mutate(&pol)
+	}
 	if err := drv.SetPolicy(pol); err != nil {
 		t.Fatalf("SetPolicy: %v", err)
 	}
@@ -789,27 +804,6 @@ func (p *linuxProof) listener(t *testing.T) string {
 	return ln.Addr().String()
 }
 
-// enableForThisSubtest turns a policy flag on for the duration of one subtest
-// and restores the previous policy afterwards.
-//
-// The high-volume categories are gated in DefaultPolicy for a reason, and
-// leaving them on for the whole run starves the others out of the shared ring
-// buffer. A category whose only proof is a policy nobody turns on is not
-// proven either, so it is turned on here, narrowly.
-func (p *linuxProof) enableForThisSubtest(t *testing.T, mutate func(*EventPolicy)) {
-	t.Helper()
-	p.drv.mu.RLock()
-	prev := p.drv.policy
-	p.drv.mu.RUnlock()
-
-	next := prev
-	mutate(&next)
-	if err := p.drv.SetPolicy(next); err != nil {
-		t.Fatalf("SetPolicy: %v", err)
-	}
-	t.Cleanup(func() { _ = p.drv.SetPolicy(prev) })
-}
-
 // expect waits for an event and fails with what did arrive when it does not.
 func (p *linuxProof) expect(t *testing.T, mark int, what string, match func(linuxEvent) bool) linuxEvent {
 	t.Helper()
@@ -896,6 +890,12 @@ type linuxCategoryProof struct {
 	// says the same thing and stops; it does not generate activity and it
 	// does not pretend to have proved anything.
 	unsupported string
+
+	// separateTest, when non-empty, names the test that proves this
+	// category instead. A category whose programs are only attached under
+	// a different policy cannot share the table's driver, and saying so
+	// here is better than a case that silently skips.
+	separateTest string
 
 	// prove generates the activity and asserts the event arrives. It runs
 	// only after requireCategory has confirmed the report says the
@@ -1163,22 +1163,8 @@ func linuxCategoryProofs() []linuxCategoryProof {
 			unsupported: "Linux has no registry. The category exists so a mixed fleet produces a comparable matrix; on this OS it is reported present=false and there is nothing to generate.",
 		},
 		{
-			cat: CapScheduler,
-			prove: func(t *testing.T, p *linuxProof) {
-				p.enableForThisSubtest(t, func(pol *EventPolicy) { pol.SchedEvents = true })
-				// Scheduler events are ambient: any process being
-				// switched in or out produces them, so no activity
-				// has to be generated and no pid can be predicted.
-				p.proveWithRetry(t, CapScheduler, "scheduler event",
-					func() uint32 { return runHelper(t, helperActExec, "") },
-					func(e linuxEvent, _ uint32) bool {
-						switch e.Op {
-						case "sched_switch", "sched_wakeup", "sched_migrate_task":
-							return true
-						}
-						return false
-					})
-			},
+			cat:          CapScheduler,
+			separateTest: "TestLinuxMonitoringScheduler",
 		},
 		{
 			cat: CapTLSMetadata,
@@ -1212,8 +1198,8 @@ func TestLinuxMonitoringCategoryTableCoversEveryCategory(t *testing.T) {
 			t.Errorf("category %q has more than one proof case", pr.cat)
 		}
 		covered[pr.cat] = true
-		if pr.unsupported == "" && pr.prove == nil {
-			t.Errorf("category %q has neither a proof nor an unsupported reason", pr.cat)
+		if pr.unsupported == "" && pr.separateTest == "" && pr.prove == nil {
+			t.Errorf("category %q has neither a proof, a separate test, nor an unsupported reason", pr.cat)
 		}
 	}
 	for _, cat := range CanonicalCapabilityCategories {
@@ -1243,6 +1229,10 @@ func TestLinuxMonitoringCategories(t *testing.T) {
 				t.Skipf("NOT SUPPORTED ON THIS OS: %s", pr.unsupported)
 			}
 
+			if pr.separateTest != "" {
+				t.Skipf("PROVED ELSEWHERE: %s runs this category on a driver of its own, because its programs are only attached under a policy this driver does not use", pr.separateTest)
+			}
+
 			requireCategory(t, drv, pr.cat)
 
 			p := &linuxProof{drv: drv, tap: tap, dir: t.TempDir()}
@@ -1258,6 +1248,37 @@ func TestLinuxMonitoringCategories(t *testing.T) {
 	}
 
 	t.Logf("final capability summary on this kernel: %+v", drv.CapabilityReport().Summary)
+}
+
+// TestLinuxMonitoringScheduler proves the scheduler category on its own
+// driver.
+//
+// It cannot share TestLinuxMonitoringCategories' driver: the scheduler
+// tracepoints are attached only when monitoring.sched_events is true, and with
+// them attached they submit on every context switch, which is enough traffic
+// to starve every other category's events out of the shared run.
+func TestLinuxMonitoringScheduler(t *testing.T) {
+	drv, tap := startMonitoringForTestWithPolicy(t, func(pol *EventPolicy) {
+		pol.SchedEvents = true
+	})
+	requireCategory(t, drv, CapScheduler)
+
+	p := &linuxProof{drv: drv, tap: tap, dir: t.TempDir()}
+	// Scheduler events are ambient: any process being switched in or out
+	// produces them, so no particular pid can be predicted.
+	p.proveWithRetry(t, CapScheduler, "scheduler event",
+		func() uint32 { return runHelper(t, helperActExec, "") },
+		func(e linuxEvent, _ uint32) bool {
+			switch e.Op {
+			case "sched_switch", "sched_wakeup", "sched_migrate_task":
+				return true
+			}
+			return false
+		})
+
+	if c := findCapability(t, drv.CapabilityReport(), CapScheduler); !c.Producing {
+		t.Errorf("a scheduler event arrived but CapabilityReport says scheduler is not producing: %+v", c)
+	}
 }
 
 // TestLinuxMonitoringCapabilityReportMatchesAttachments asserts the report an
