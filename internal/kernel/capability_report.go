@@ -46,7 +46,12 @@ import (
 //
 // v1: initial shape — schema_version, generated_at, os, arch, driver,
 // driver_running, uptime_seconds, categories[], summary{}.
-const CapabilityReportSchemaVersion = 1
+// v2: adds categories[].live, categories[].live_evidence and summary.live.
+// Additive — every v1 key keeps its meaning, so a v1 consumer still parses a
+// v2 report. The version moves anyway because a consumer has to be able to
+// tell "this agent reports liveness and the hook is not confirmed" from "this
+// agent predates the field", and those look identical if live is just absent.
+const CapabilityReportSchemaVersion = 2
 
 // CapabilityCategory names one class of monitored activity.
 //
@@ -135,6 +140,22 @@ const (
 )
 
 // CapabilityStatus is one row of the report: the state of one event category.
+// Evidence that a category's hooks are doing work, strongest first. An event
+// reaching userspace proves the whole path; a kernel submission proves the
+// hook fired and leaves the loss downstream; an invocation count proves only
+// that the kernel entered the program, which is still the difference between
+// "armed" and "not yet armed".
+// reasonAttachedNotConfirmed is written on an attached row with no liveness
+// evidence yet. Held as a constant so the later passes can recognise and
+// retract exactly this note without touching a more specific one.
+const reasonAttachedNotConfirmed = "the attach call succeeded; no hook for this category has been observed to run yet, so it is not confirmed working"
+
+const (
+	LiveEvidenceEvent           = "event_observed"
+	LiveEvidenceKernelSubmitted = "kernel_submitted"
+	LiveEvidenceProgramInvoked  = "program_invoked"
+)
+
 type CapabilityStatus struct {
 	Category CapabilityCategory `json:"category"`
 
@@ -142,9 +163,34 @@ type CapabilityStatus struct {
 	// OS. Says nothing about whether it is hooked up.
 	Present bool `json:"present"`
 
-	// Attached: the mechanism is hooked into the kernel right now, per
-	// Derivation. Always false when Present is false.
+	// Attached: the attach call for this category's hooks returned
+	// success, per Derivation. Always false when Present is false.
+	//
+	// This is weaker than it reads, which is why Live exists. On some
+	// kernels a hook arms a short time after the attach call returns: the
+	// link is recorded, the programs are loaded, and the kernel does not
+	// invoke them for syscalls made in the meantime. Measured on GitHub's
+	// 7.0.0-1017-azure image, where a program the kernel had invoked zero
+	// times sat alongside a sibling in the same object invoked 5863 times,
+	// and every category eventually came alive. Attached answers "did the
+	// attach succeed"; it does not answer "is this hook doing work".
 	Attached bool `json:"attached"`
+
+	// Live: this category's hooks have been observed to do work, per
+	// LiveEvidence. Always false when Attached is false.
+	//
+	// This is the field to show an operator. Attached-but-not-Live is the
+	// arming window above, or a hook that is genuinely never invoked;
+	// either way the honest reading is "not confirmed working yet", not
+	// "working, and the host is quiet". The distinction matters most for a
+	// short-lived agent — a container, a diagnostic run, a crash-restart
+	// loop — which could otherwise report itself healthy for the whole of
+	// its life while seeing nothing.
+	Live bool `json:"live"`
+
+	// LiveEvidence names what established Live, so the claim can be
+	// audited rather than trusted. Empty when Live is false.
+	LiveEvidence string `json:"live_evidence,omitempty"`
 
 	// Producing: at least one event of this category has been observed
 	// since the driver started. Always false when Attached is false.
@@ -199,7 +245,10 @@ type CapabilitySummary struct {
 	Categories int `json:"categories"`
 	Present    int `json:"present"`
 	Attached   int `json:"attached"`
-	Producing  int `json:"producing"`
+	// Live is the count an operator should read: hooks confirmed to be
+	// doing work, as opposed to hooks whose attach call returned success.
+	Live      int `json:"live"`
+	Producing int `json:"producing"`
 }
 
 // CapabilityReport is the whole self-report, and the stable JSON contract the
@@ -402,6 +451,15 @@ func buildCapabilityReport(
 		st.EventsObserved = count
 		st.LastEventUnix = last
 		st.Producing = st.Attached && count > 0
+		if st.Producing {
+			st.Live = true
+			st.LiveEvidence = LiveEvidenceEvent
+		} else if st.Attached && st.Reason == "" {
+			// Said here rather than left for the reader to infer from
+			// three booleans. A partial-attach reason from the table is
+			// more specific, so it is not overwritten.
+			st.Reason = reasonAttachedNotConfirmed
+		}
 
 		rep.Categories = append(rep.Categories, st)
 	}
@@ -421,6 +479,9 @@ func summarizeCapabilities(in []CapabilityStatus) CapabilitySummary {
 		}
 		if c.Producing {
 			s.Producing++
+		}
+		if c.Live {
+			s.Live++
 		}
 	}
 	return s
@@ -467,4 +528,17 @@ func capabilityMechanismsFor(mechanism string, hookCategories map[string][]Capab
 		}
 	}
 	return out
+}
+
+// clearUnconfirmedReason drops the "not confirmed working" note once something
+// has established that the hooks are live.
+//
+// The note is written while the report is being built, before the Linux passes
+// that can upgrade a row on kernel-submission or invocation evidence. Leaving
+// it in place would contradict the Live field in the same row, and a row that
+// argues with itself is worse than either answer alone.
+func clearUnconfirmedReason(st *CapabilityStatus) {
+	if st != nil && st.Reason == reasonAttachedNotConfirmed {
+		st.Reason = ""
+	}
 }
