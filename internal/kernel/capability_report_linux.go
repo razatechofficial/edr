@@ -295,6 +295,17 @@ func (d *EBPFDriver) CapabilityReport() CapabilityReport {
 			submitted, dropped, ring := loss.kernelLossForCategory(rep.Categories[i].Category)
 			rep.Categories[i].KernelSubmitted = submitted
 			rep.Categories[i].KernelDropped = dropped
+
+			// A kernel submission proves the hook fired even when no
+			// event reached userspace, which is the case the three
+			// original booleans could not express: a row could read
+			// attached and not producing whether the hook was dead,
+			// still arming, or firing into a decode that dropped it.
+			if submitted > 0 && !rep.Categories[i].Live && rep.Categories[i].Attached {
+				rep.Categories[i].Live = true
+				rep.Categories[i].LiveEvidence = LiveEvidenceKernelSubmitted
+				clearUnconfirmedReason(&rep.Categories[i])
+			}
 			if dropped == 0 {
 				continue
 			}
@@ -314,6 +325,29 @@ func (d *EBPFDriver) CapabilityReport() CapabilityReport {
 			}
 		}
 	}
+
+	// Weakest evidence last: the kernel entered the program at least once.
+	// It proves nothing about whether a record survived, but it does
+	// separate "armed" from "not yet armed", which is the whole of the
+	// attach-latency problem. Only consulted when run statistics are
+	// enabled, because collecting them costs and they are opt-in; without
+	// them a quiet hook simply stays unconfirmed rather than being
+	// credited on no evidence.
+	if d.ProgramRunStatsEnabled() {
+		for i := range rep.Categories {
+			row := &rep.Categories[i]
+			if row.Live || !row.Attached || len(row.Attachments) == 0 {
+				continue
+			}
+			if total, counted := d.ProgramRunTotalFor(row.Attachments); counted && total > 0 {
+				row.Live = true
+				row.LiveEvidence = LiveEvidenceProgramInvoked
+				clearUnconfirmedReason(row)
+			}
+		}
+	}
+
+	rep.Summary = summarizeCapabilities(rep.Categories)
 	return rep
 }
 
