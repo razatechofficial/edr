@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/razatechofficial/edr/internal/alert"
+	"github.com/razatechofficial/edr/internal/localapi"
 	"github.com/razatechofficial/edr/internal/platform"
 )
 
@@ -121,7 +122,7 @@ func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show agent health and runtime status",
-		Long:  "Connects to the agent's local control interface when available. If the API is not enabled, prints config path, agent id, and PID file status from the on-disk config.",
+		Long:  "Connects to the agent's local control socket. The socket is root:edr, so an unprivileged caller falls back to the world-readable status file and the PID file; the command then fails only if the agent is not running.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := agentRequest("GET", "/api/v1/status", nil)
 			if err != nil {
@@ -208,9 +209,23 @@ func printOfflineStatus(apiErr error) error {
 		pidPath = filepath.Join(peek.Agent.DataDir, "agent.pid")
 	}
 
+	statusPath := localapi.DefaultStatusFile()
+	public, availability, _ := localapi.ReadStatusFile(statusPath, 0)
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "Control API:\tunavailable (%v)\n", apiErr)
-	fmt.Fprintln(w, "Note:\tThe agent may not expose the local HTTP/socket API in this build; showing on-disk status.")
+	fmt.Fprintf(w, "Control API:\tunreachable (%v)\n", apiErr)
+	fmt.Fprintln(w, "Note:\tThe control socket is root:edr; an unprivileged caller cannot open it. Re-run with sudo for live counters.")
+	fmt.Fprintf(w, "Status file:\t%s (%s)\n", statusPath, availability)
+	if availability == localapi.StatusOK || availability == localapi.StatusStale {
+		fmt.Fprintf(w, "Version:\t%s\n", public.Version)
+		fmt.Fprintf(w, "Uptime:\t%s\n", public.Uptime)
+		fmt.Fprintf(w, "Detections:\t%d\n", public.Detections)
+		if public.Isolated {
+			fmt.Fprintln(w, "Network:\tISOLATED")
+		} else {
+			fmt.Fprintln(w, "Network:\tnormal")
+		}
+	}
 	fmt.Fprintf(w, "Config:\t%s\n", configFile)
 	fmt.Fprintf(w, "Service:\t%s\n", serviceRuntimeStatus())
 	enrolled, agentID, ingest := enrollmentSnapshot()
@@ -256,7 +271,20 @@ func printOfflineStatus(apiErr error) error {
 	if runtime.GOOS == "darwin" {
 		fmt.Println("Tip (macOS): sudo launchctl print system/com.razatech.edr-agent")
 	}
-	return nil
+	// Exit non-zero when the agent is not running. This used to return nil
+	// whatever it found, so `edrctl status` succeeded against a dead agent and
+	// no monitor could tell the difference. An unreachable socket on its own is
+	// not a failure: the socket is root:edr and most callers are not root. A
+	// status file that is missing or stale is.
+	switch availability {
+	case localapi.StatusOK:
+		return nil
+	case localapi.StatusStale:
+		return fmt.Errorf("agent is not reporting: status file %s last updated %s",
+			statusPath, public.UpdatedAt.Format(time.RFC3339))
+	default:
+		return fmt.Errorf("agent is not running: status file %s is %s", statusPath, availability)
+	}
 }
 
 // ---------- alerts ----------
@@ -512,8 +540,8 @@ func newRulesCmd() *cobra.Command {
 
 	updateCmd := &cobra.Command{
 		Use:   "update",
-		Short: "Force a rule update from upstream sources",
-		Long:  "Instructs the agent to immediately pull the latest detection rules from configured upstream sources (Sigma repositories, YARA rule feeds, IOC databases).",
+		Short: "Reload detection rules from disk",
+		Long:  "Instructs the agent to reload Sigma, YARA and behavioural rules from its rules tree and reports what is loaded afterwards. Fetching new content is the control plane's policy sync, which the server drives; this command picks up whatever is already on disk.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := agentRequest("POST", "/api/v1/rules/update", nil)
 			if err != nil {

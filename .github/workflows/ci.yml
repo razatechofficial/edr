@@ -30,6 +30,16 @@ jobs:
       - name: Prepare Linux eBPF toolchain
         run: bash scripts/ci/setup_linux_ebpf.sh
 
+      # cmd/agentui is a Fyne desktop app: Fyne -> GLFW -> go-gl/gl, which is
+      # cgo-only and needs X11 and GL headers at compile time. Without these
+      # the package fails to build and `make test-ci` (which runs `go test`
+      # over every package) fails with "X11/Xlib.h: No such file or
+      # directory" — not a test failure, a missing toolchain. The headers are
+      # compile-time only; no display is needed, and no test in cmd/agentui
+      # opens a window.
+      - name: Install cgo build dependencies
+        run: bash scripts/ci/setup_linux_cgo_deps.sh
+
       - name: Build eBPF objects
         run: make ebpf
 
@@ -109,7 +119,10 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # No continue-on-error. It carried one for long enough to hide the job
+    # ending in "cmd/agentui [setup failed]" and reporting no coverage at
+    # all; a job allowed to fail quietly is a job nobody reads. It passes
+    # now, so a future regression should be visible.
     needs: test
     steps:
       - uses: actions/checkout@v4
@@ -121,12 +134,24 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Coverage walks ./..., which includes cmd/agentui, so it needs the same
+      # X11/GL and yara headers the Test and Lint jobs install. Without them
+      # the run ended in "cmd/agentui [setup failed]" and reported no coverage
+      # at all — invisible, because this job carries continue-on-error.
+      - name: Install Linux cgo build dependencies
+        run: bash scripts/ci/setup_linux_cgo_deps.sh
+
       - name: Download dependencies
         run: go mod download
 
       - name: Generate coverage
         env:
-          CGO_ENABLED: "0"
+          # cmd/agentui is a cgo build and is part of ./..., so with cgo off
+          # the run ended in "cmd/agentui [setup failed]" and produced no
+          # coverage at all. The headers it needs are installed above, so the
+          # honest setting is cgo on — which also means the UI is finally
+          # included in the figure rather than silently missing from it.
+          CGO_ENABLED: "1"
         run: make test-coverage
 
       - name: Upload coverage artifact
@@ -140,7 +165,10 @@ jobs:
   build-all:
     name: Cross-compile
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # No continue-on-error. It had one, which is how `make build-all`
+    # cross-compiling cmd/agentui stayed broken without anyone noticing: the
+    # job failed on every run and reported green. It passes now, so a future
+    # regression should be visible.
     needs: test
     steps:
       - uses: actions/checkout@v4
@@ -155,13 +183,31 @@ jobs:
       - name: Build all platforms
         run: make build-all
 
+      # cmd/agentui and ./tests/... are excluded, for two different reasons
+      # that both only show up here.
+      #
+      # cmd/agentui is a cgo GUI build (fyne -> glfw -> go-gl). It cannot be
+      # built for darwin from a Linux runner either way round: cgo is off by
+      # default when cross-compiling, and with cgo off go-gl has no buildable
+      # files at all ("build constraints exclude all Go files in
+      # go-gl/gl/v2.1/gl"), while with cgo on there is no macOS SDK here.
+      # make build-all skips it on the same grounds, and the macOS production
+      # build lanes compile it on a real mac, which is the only place the
+      # result means anything.
+      #
+      # ./tests/benchmark and ./tests/integration sit behind the integration
+      # build tag and so contribute no files to this build. Passing them as
+      # explicit package arguments is an error ("build constraints exclude all
+      # Go files"), where the ./... pattern form would have ignored them.
       - name: Build darwin amd64 (nosec)
         run: |
-          GOOS=darwin GOARCH=amd64 go build -tags nosec ./...
+          GOOS=darwin GOARCH=amd64 go build -tags nosec \
+            $(go list ./... | grep -vE '/(cmd/agentui|tests)(/|$)')
 
       - name: Build darwin arm64 (nosec)
         run: |
-          GOOS=darwin GOARCH=arm64 go build -tags nosec ./...
+          GOOS=darwin GOARCH=arm64 go build -tags nosec \
+            $(go list ./... | grep -vE '/(cmd/agentui|tests)(/|$)')
 
       # Full ESF/cgo linkage is exercised on a macOS runner (see darwin-esf-matrix).
       # Cross-compiling linux→darwin cannot validate CGO=ON kernel builds reliably.
@@ -175,13 +221,46 @@ jobs:
           path: bin/
 
   macos-production-build:
-    name: macOS production build (${{ matrix.arch }})
-    runs-on: macos-latest
+    name: macOS ${{ matrix.macos }} production build (${{ matrix.arch }})
+    # Both macOS versions GitHub currently serves, on both architectures.
+    #
+    # The runner is named per combination rather than derived from the arch,
+    # because the mapping is not a rule: macos-latest is Apple Silicon, and the
+    # Intel images carry an explicit -intel suffix. Spelling each one out means
+    # a label that disappears fails here as a missing runner rather than
+    # silently building the wrong slice somewhere else.
+    #
+    # Why native Intel runners and not Rosetta: this used to run the amd64
+    # slice on macos-latest and install an x86_64 Homebrew into /usr/local.
+    # Homebrew's installer now refuses that outright ("Homebrew on macOS is
+    # only supported on Apple Silicon processors!"), and the agent links
+    # against x86_64 yara and openssl, so cross-compiling from an arm64 runner
+    # is not an option either.
+    #
+    # Intel on macOS is a managed decline rather than a cliff: macos-13 is
+    # already gone, and both remaining Intel images are explicitly labelled.
+    # The amd64 lanes stay continue-on-error so the loss of a label is a
+    # visible warning on an otherwise green run, not a blocked merge — and the
+    # timeout turns an unservable label into a fast failure rather than a job
+    # that sits waiting for a runner that is never coming.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, amd64]
-    # Intel slice on Apple Silicon runners needs Rosetta + x86 Homebrew; don't fail the whole CI.
+        include:
+          - macos: "15"
+            arch: arm64
+            runner: macos-15
+          - macos: "15"
+            arch: amd64
+            runner: macos-15-intel
+          - macos: "26"
+            arch: arm64
+            runner: macos-26
+          - macos: "26"
+            arch: amd64
+            runner: macos-26-intel
     continue-on-error: ${{ matrix.arch == 'amd64' }}
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
@@ -774,9 +853,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # See the Test job: cmd/agentui needs cgo and the X11/GL headers, and
+      # with cgo on, go-yara needs libyara's pkg-config metadata too. This job
+      # used to run with CGO_ENABLED=0, which made `go vet ./...` fail on
+      # go-gl/gl with "build constraints exclude all Go files" — so the agent
+      # UI, the one component with a recent history of real defects, was the
+      # only package in the tree that vet never looked at. The first run with
+      # it enabled found that cmd/agentui did not compile on Linux at all.
+      - name: Install cgo build dependencies
+        run: bash scripts/ci/setup_linux_cgo_deps.sh
+
       - name: go vet
         env:
-          CGO_ENABLED: "0"
+          CGO_ENABLED: "1"
         run: go vet ./...
 
   vulncheck:

@@ -3,6 +3,7 @@ package kernel
 import (
 	"encoding/binary"
 	"errors"
+	"sync"
 	"sync/atomic"
 )
 
@@ -31,13 +32,30 @@ type RingBufferStats struct {
 	BacklogPct  float64 `json:"backlog_pct"` // 0–100 utilization of byte capacity (wp-rp)/capacity
 }
 
-// RingBuffer is a lock-free single-producer multi-consumer byte ring buffer
-// designed for high-throughput kernel event transport. Messages are stored
-// with a 4-byte little-endian length prefix followed by the payload.
+// RingBuffer is a multi-producer multi-consumer byte ring buffer designed for
+// high-throughput kernel event transport. Messages are stored with a 4-byte
+// little-endian length prefix followed by the payload.
+//
+// Writes are serialised by writeMu. They were not, and the comment here used
+// to say "single-producer" — which was not true of the one caller that matters:
+// the Linux eBPF driver runs an event loop per ring buffer map (seven of them)
+// and every loop writes into one RingBuffer. Two concurrent writers both read
+// writePos, both copied their payload to the same offset and both stored
+// wp+total, so one message landed on top of another and the length prefix of
+// the second no longer described what followed it. The reader then returned a
+// record stitched out of two, which downstream appears as an undecodable
+// envelope rather than as a dropped event. It showed up as about 1.3% of
+// records on a busy host, and only on a busy host.
+//
+// A mutex rather than a reservation protocol: a CAS on writePos would let the
+// reader see a reserved-but-unwritten region, which needs a second cursor to
+// mark committed bytes, and that is a larger change than the write rate here
+// justifies.
 type RingBuffer struct {
 	buf      []byte
 	mask     uint64
 	capacity uint64
+	writeMu  sync.Mutex
 	writePos atomic.Uint64
 	readPos  atomic.Uint64
 	produced atomic.Uint64
@@ -100,7 +118,7 @@ func (rb *RingBuffer) readFrom(pos uint64, dst []byte) {
 }
 
 // Write appends a message to the ring buffer. Returns ErrBufferFull if there
-// is insufficient space. This method is safe for a single producer goroutine.
+// is insufficient space. It is safe to call from any number of goroutines.
 func (rb *RingBuffer) Write(data []byte) error {
 	if rb.closed.Load() {
 		return ErrBufferClosed
@@ -110,6 +128,9 @@ func (rb *RingBuffer) Write(data []byte) error {
 	if total > rb.capacity {
 		return ErrMessageTooBig
 	}
+
+	rb.writeMu.Lock()
+	defer rb.writeMu.Unlock()
 
 	wp := rb.writePos.Load()
 	rp := rb.readPos.Load()

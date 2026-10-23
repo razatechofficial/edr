@@ -302,9 +302,65 @@ type etwProcSnap struct {
 	exe  string
 }
 
+// Microsoft-Windows-Kernel-File event ids, as measured on a hosted
+// windows-latest runner by generating one kind of file activity at a time and
+// reading off which id moved (40 creates+writes, then 40 renames, then 40
+// deletes):
+//
+//	10 Name, 11 NameDelete, 12 Create, 13 Cleanup, 14 Close, 15 Read,
+//	16 Write, 17 SetInformation, 18 SetDelete, 19 Rename,
+//	20 DirEnum, 22 QueryInformation, 23 FSCTL, 24 OperationEnd,
+//	26 DeletePath, 27 RenamePath, 32 CreateNewFile
+//
+// The two constants below used to be 67 and 68. Those are the NT Kernel Logger
+// FileIo_ReadWrite *opcodes*, not this provider's event ids, so nothing ever
+// matched them: read/write dedup never fired and file_write was never credited
+// in the capability report.
 const (
-	kernelFileEvtReadID  uint16 = 67
-	kernelFileEvtWriteID uint16 = 68
+	kernelFileEvtNameID       uint16 = 10
+	kernelFileEvtNameDeleteID uint16 = 11
+	kernelFileEvtCreateID     uint16 = 12
+	kernelFileEvtCleanupID    uint16 = 13
+	kernelFileEvtCloseID      uint16 = 14
+	kernelFileEvtReadID       uint16 = 15
+	kernelFileEvtWriteID      uint16 = 16
+	kernelFileEvtSetDeleteID  uint16 = 18
+	kernelFileEvtRenameID     uint16 = 19
+	kernelFileEvtDeletePathID uint16 = 26
+	kernelFileEvtRenamePathID uint16 = 27
+	kernelFileEvtCreateNewID  uint16 = 32
+)
+
+// Microsoft-Windows-Kernel-Network event ids. The TCP templates are numbered
+// in blocks of 16 — IPv4 at 10, IPv6 at 26 — with the same order within each
+// block, and UDP IPv4 starts at 42. The IPv4 values below were measured on a
+// hosted windows-latest runner (40 loopback connect/accept/close rounds and 40
+// UDP sends); the IPv6 values follow from the +16 block offset, which the
+// IPv4 and UDP-IPv4 bases both confirm.
+//
+// Opcode carries the same number as the event id on this provider. The table
+// this replaced read the opcode against the legacy TcpIp MOF numbering
+// (17 connect, 16 accept, 14/15 disconnect), under which an Accept was
+// credited to network_close and connect and accept were never credited.
+const (
+	kernelNetEvtSend4       uint16 = 10
+	kernelNetEvtRecv4       uint16 = 11
+	kernelNetEvtConnect4    uint16 = 12
+	kernelNetEvtDisconnect4 uint16 = 13
+	kernelNetEvtRetransmit4 uint16 = 14
+	kernelNetEvtAccept4     uint16 = 15
+	kernelNetEvtReconnect4  uint16 = 16
+
+	kernelNetEvtSend6       uint16 = 26
+	kernelNetEvtRecv6       uint16 = 27
+	kernelNetEvtConnect6    uint16 = 28
+	kernelNetEvtDisconnect6 uint16 = 29
+	kernelNetEvtRetransmit6 uint16 = 30
+	kernelNetEvtAccept6     uint16 = 31
+	kernelNetEvtReconnect6  uint16 = 32
+
+	kernelNetEvtUDPSend4 uint16 = 42
+	kernelNetEvtUDPRecv4 uint16 = 43
 )
 
 var etwCoreProviders = []providerConfig{
@@ -313,6 +369,19 @@ var etwCoreProviders = []providerConfig{
 	{"Network", kernelNetworkGUID, events.EventNetwork},
 	{"DNS", dnsClientGUID, events.EventDNS},
 	{"Registry", kernelRegistryGUID, events.EventRegistry},
+}
+
+// etwProviderNameForGUID resolves a provider GUID back to the name used in
+// etwCoreProviders, which is the key the capability report and the provider
+// health records share. An unknown GUID returns "", which the capability
+// mapper treats as no category.
+func etwProviderNameForGUID(guid windows.GUID) string {
+	for _, pc := range etwCoreProviders {
+		if pc.guid == guid {
+			return pc.name
+		}
+	}
+	return ""
 }
 
 func (d *ETWDriver) providersToStart() []providerConfig {
@@ -402,6 +471,15 @@ type ETWDriver struct {
 	fileObjFIFO []uint64
 	fileObjCap  int
 
+	// Kernel-Registry names a key only on CreateKey and OpenKey; every
+	// mutating event after that identifies the key by its KeyObject
+	// pointer alone, so without this the event that matters carries no
+	// path.
+	regKeyMu   sync.RWMutex
+	regKeyPath map[uint64]string
+	regKeyFIFO []uint64
+	regKeyCap  int
+
 	fileRWMu   sync.RWMutex
 	fileRWSeen map[uint64]uint8
 	fileRWFIFO []uint64
@@ -420,6 +498,11 @@ type ETWDriver struct {
 	ingestDropped atomic.Uint64
 
 	secureTrace atomic.Bool
+
+	// caps records, per event category, that an event of that category
+	// actually arrived, so CapabilityReport can distinguish a provider that
+	// enabled from one that is also delivering.
+	caps *capabilityTracker
 
 	sessionRecoverAttempts atomic.Uint64
 	etwRecoverState        atomic.Pointer[string] // active | reopening | degraded
@@ -443,10 +526,13 @@ func NewETWDriver(agentID string) (*ETWDriver, error) {
 		policy:       DefaultPolicy(),
 		fileObjPath:  make(map[uint64]string),
 		fileObjCap:   65536,
+		regKeyPath:   make(map[uint64]string),
+		regKeyCap:    65536,
 		fileRWSeen:   make(map[uint64]uint8),
 		fileRWCap:    65536,
 		etwProcByPID: make(map[uint32]etwProcSnap),
 		etwProcCap:   16384,
+		caps:         newCapabilityTracker(),
 	}
 	s := "active"
 	d.etwRecoverState.Store(&s)
@@ -1017,6 +1103,16 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 	d.received.Add(1)
 
 	hdr := &record.EventHeader
+
+	// Credit the capability tracker before the decode and the drop paths
+	// below, so a category reads as "provider delivering" even when a
+	// particular record is deduplicated or fails to decode. The question
+	// the report answers is whether the ETW provider is live.
+	d.caps.observe(windowsCapabilityForETWEvent(
+		etwProviderNameForGUID(hdr.ProviderId),
+		hdr.EventDescriptor.Id,
+		hdr.EventDescriptor.Opcode,
+	))
 	ts := filetimeToGoTime(hdr.TimeStamp)
 
 	envelope := map[string]interface{}{
@@ -1028,6 +1124,11 @@ func (d *ETWDriver) handleEventRecord(record *etwEventRecord) {
 		"event_id":    hdr.EventDescriptor.Id,
 		"opcode":      hdr.EventDescriptor.Opcode,
 		"event_level": hdr.EventDescriptor.Level,
+		// The template a payload follows is selected by (Id, Version),
+		// so a decoder that reads fixed offsets is only correct for the
+		// versions it was written against. Carry the version so a
+		// mis-decode is attributable from the event alone.
+		"event_version": hdr.EventDescriptor.Version,
 	}
 
 	switch hdr.ProviderId {
@@ -1100,39 +1201,19 @@ func (d *ETWDriver) decodeProcessUserData(record *etwEventRecord, env map[string
 
 	switch record.EventHeader.EventDescriptor.Id {
 	case 1: // ProcessStart
-		// Kernel-Process v3+ ProcessStart payload (x64):
-		//   ProcessId (u32)        @0
-		//   reserved/CreateTime    @4..12
-		//   ParentProcessId (u32)  @12
-		//   SessionId (u32)        @16
-		//   reserved/Flags         @20..24
-		//   ImageName (UTF16LE, NUL-terminated) @24
-		//   CommandLine (UTF16LE, NUL-terminated) follows ImageName
-		var img, cmdline string
-		if len(ud) >= 20 {
-			env["child_pid"] = binary.LittleEndian.Uint32(ud[0:4])
-			env["parent_pid"] = binary.LittleEndian.Uint32(ud[12:16])
-			env["session_id"] = binary.LittleEndian.Uint32(ud[16:20])
+		f, ok := decodeKernelProcessStart(ud, record.EventHeader.EventDescriptor.Version)
+		if !ok {
+			break
 		}
-		if len(ud) > 24 {
-			var consumed int
-			img, consumed = extractUTF16StringBounded(ud[24:], 32768)
-			env["image_name"] = img
-			cmdOffset := 24 + consumed
-			if consumed > 0 && cmdOffset < len(ud) {
-				cmdline, _ = extractUTF16StringBounded(ud[cmdOffset:], 32768)
-				if cmdline != "" {
-					env["cmdline"] = cmdline
-					env["command_line"] = cmdline
-				}
-			}
+		env["child_pid"] = f.ChildPID
+		env["parent_pid"] = f.ParentPID
+		env["session_id"] = f.SessionID
+		env["process_start_version"] = record.EventHeader.EventDescriptor.Version
+		if f.ImageName != "" {
+			env["image_name"] = f.ImageName
 		}
-		if len(ud) >= 20 {
-			child := binary.LittleEndian.Uint32(ud[0:4])
-			if child != 0 {
-				parent := binary.LittleEndian.Uint32(ud[12:16])
-				d.etwProcRemember(child, parent, img)
-			}
+		if f.ChildPID != 0 {
+			d.etwProcRemember(f.ChildPID, f.ParentPID, f.ImageName)
 		}
 	case 2: // ProcessStop
 		if len(ud) >= 4 {
@@ -1182,6 +1263,85 @@ func (d *ETWDriver) decodeProcessUserData(record *etwEventRecord, env map[string
 		env["type"] = events.EventModule
 		env["op"] = "image_unload"
 	}
+}
+
+// kernelProcessStartFields is what a Kernel-Process ProcessStart payload
+// carries that this driver uses.
+type kernelProcessStartFields struct {
+	ChildPID  uint32
+	ParentPID uint32
+	SessionID uint32
+	ImageName string
+}
+
+// decodeKernelProcessStart decodes a Microsoft-Windows-Kernel-Process
+// ProcessStart (event id 1) payload.
+//
+// There are two layouts, and this code read the wrong one. windows-latest
+// emits version 4, whose payload is (offsets from a hex dump of a real record
+// on a hosted runner, packed, no alignment padding):
+//
+//	@0  u32 ProcessID
+//	@4  u64 ProcessSequenceNumber
+//	@12 u64 CreateTime (FILETIME)
+//	@20 u32 ParentProcessID
+//	@24 u64 ParentProcessSequenceNumber
+//	@32 u32 SessionID
+//	@36 u32 Flags
+//	@40 u32 ProcessTokenElevationType
+//	@44 u32 ProcessTokenIsElevated
+//	@48 SID MandatoryLabel   (8 + 4*SubAuthorityCount bytes)
+//	    UTF16 ImageName, then PackageFullName, PackageRelativeAppId
+//
+// Version 0 has no sequence numbers, no token fields and no SID, and puts
+// ImageName at 24 — which is what this decoder used to assume unconditionally.
+// On a version 4 record offset 24 is the middle of
+// ParentProcessSequenceNumber, so image_name came out as garbage, parent_pid
+// and session_id were read from the wrong words, and the file-event who-data
+// cache (etwProcRemember) was seeded with that garbage. It also read a second
+// string after ImageName as the command line; ProcessStart has no CommandLine
+// field in either layout, so that was PackageFullName at best.
+//
+// A version this function does not know returns the PID it can read at offset
+// 0 and no image name: a plausible-looking wrong path is worse than an absent
+// one, because nothing downstream can tell it was invented.
+func decodeKernelProcessStart(ud []byte, version uint8) (kernelProcessStartFields, bool) {
+	var f kernelProcessStartFields
+	if len(ud) < 4 {
+		return f, false
+	}
+	f.ChildPID = binary.LittleEndian.Uint32(ud[0:4])
+
+	switch {
+	case version == 0:
+		if len(ud) < 24 {
+			return f, true
+		}
+		f.ParentPID = binary.LittleEndian.Uint32(ud[12:16])
+		f.SessionID = binary.LittleEndian.Uint32(ud[16:20])
+		f.ImageName, _ = extractUTF16StringBounded(ud[24:], 32768)
+		return f, true
+
+	case version >= 3:
+		if len(ud) < 50 {
+			return f, true
+		}
+		f.ParentPID = binary.LittleEndian.Uint32(ud[20:24])
+		f.SessionID = binary.LittleEndian.Uint32(ud[32:36])
+		// MandatoryLabel is a SID: revision, SubAuthorityCount,
+		// 6-byte IdentifierAuthority, then that many u32
+		// sub-authorities.
+		sidLen := 8 + 4*int(ud[49])
+		nameOff := 48 + sidLen
+		if nameOff >= len(ud) {
+			return f, true
+		}
+		f.ImageName, _ = extractUTF16StringBounded(ud[nameOff:], 32768)
+		return f, true
+	}
+	// Versions 1 and 2 are intermediate shapes this code has not seen a
+	// record of. Report the PID and nothing else.
+	return f, true
 }
 
 // scanSigningLevelTrailing probes the tail of an ImageLoad payload for
@@ -1349,28 +1509,102 @@ func (d *ETWDriver) RefreshVolumeMap() {
 	d.volumes.Refresh()
 }
 
+// kernelFileFields locates the file identifiers and the in-template file name
+// in a Microsoft-Windows-Kernel-File payload.
+//
+// Kernel-File does not use one template for every event. This decoder used to
+// read FileObject from offset 0 and a file name from offset 8 for all of them,
+// which is the Name template only. On a Read or a Write, offset 0 is
+// ByteOffset and offset 8 is the Irp pointer, so the "FileObject" the
+// read/write deduplicator keyed on was a byte offset and the "file name" was
+// pointer bytes reinterpreted as UTF-16 — which is why only the Name events
+// ever yielded a usable path and why a path never attached to a write.
+//
+// Offsets are from the provider's manifest; all fields are packed pointers
+// (8 bytes on amd64) and u32s with no alignment padding.
+func kernelFileFields(eventID uint16, ud []byte) (fileObject, fileKey uint64, name string) {
+	u64 := func(off int) uint64 {
+		if off+8 > len(ud) {
+			return 0
+		}
+		return binary.LittleEndian.Uint64(ud[off : off+8])
+	}
+	str := func(off int) string {
+		if off >= len(ud) {
+			return ""
+		}
+		return extractUTF16String(ud[off:])
+	}
+
+	switch eventID {
+	case kernelFileEvtNameID, kernelFileEvtNameDeleteID,
+		kernelFileEvtDeletePathID, kernelFileEvtRenamePathID:
+		// FileKey, FileName
+		return 0, u64(0), str(8)
+
+	case kernelFileEvtCreateID, kernelFileEvtCreateNewID:
+		// Irp, FileObject, IssuingThreadId, CreateOptions,
+		// CreateAttributes, ShareAccess, FileName
+		return u64(8), 0, str(32)
+
+	case kernelFileEvtReadID, kernelFileEvtWriteID:
+		// ByteOffset, Irp, FileObject, FileKey, IssuingThreadId,
+		// IOSize, IOFlags, ExtraFlags
+		return u64(16), u64(24), ""
+
+	case kernelFileEvtCleanupID, kernelFileEvtCloseID:
+		// Irp, FileObject, FileKey, IssuingThreadId
+		return u64(8), u64(16), ""
+
+	case kernelFileEvtSetDeleteID, kernelFileEvtRenameID:
+		// Irp, FileObject, FileKey, ExtraInformation,
+		// IssuingThreadId, InfoClass
+		return u64(8), u64(16), ""
+	}
+	return 0, 0, ""
+}
+
 func (d *ETWDriver) decodeFileUserData(record *etwEventRecord, env map[string]interface{}) {
 	ud := userDataSlice(record)
 	if len(ud) < 8 {
 		return
 	}
-	env["file_object"] = binary.LittleEndian.Uint64(ud[0:8])
+	fo, fk, rawName := kernelFileFields(record.EventHeader.EventDescriptor.Id, ud)
+	if fo != 0 {
+		env["file_object"] = fo
+	}
+	if fk != 0 {
+		env["file_key"] = fk
+	}
 	fn := ""
-	if len(ud) > 8 {
-		fn = extractUTF16String(ud[8:])
-		fn = d.normalizeFilePath(fn)
+	if rawName != "" {
+		fn = d.normalizeFilePath(rawName)
 		env["file_name"] = fn
 	}
 	d.mu.RLock()
 	cache := d.policy.KernelFileObjectCache
 	d.mu.RUnlock()
 	if cache {
-		fo := binary.LittleEndian.Uint64(ud[0:8])
+		// A Name event carries FileKey plus the path; a Create carries
+		// FileObject plus the path. Remember whichever identifier came
+		// with the name, and look up by either on the events that
+		// carry no name of their own.
 		if fn != "" {
-			d.kernelFileRemember(fo, fn)
-		} else if fo != 0 {
-			if lp := d.kernelFileLookup(fo); lp != "" {
-				env["file_name"] = d.normalizeFilePath(lp)
+			if fk != 0 {
+				d.kernelFileRemember(fk, fn)
+			}
+			if fo != 0 {
+				d.kernelFileRemember(fo, fn)
+			}
+		} else {
+			for _, id := range [2]uint64{fk, fo} {
+				if id == 0 {
+					continue
+				}
+				if lp := d.kernelFileLookup(id); lp != "" {
+					env["file_name"] = d.normalizeFilePath(lp)
+					break
+				}
 			}
 		}
 	}
@@ -1402,10 +1636,7 @@ func (d *ETWDriver) shouldDropDuplicateKernelFileRW(record *etwEventRecord) bool
 		return false
 	}
 	ud := userDataSlice(record)
-	if len(ud) < 8 {
-		return false
-	}
-	fo := binary.LittleEndian.Uint64(ud[:8])
+	fo, _, _ := kernelFileFields(evID, ud)
 	if fo == 0 {
 		return false
 	}
@@ -1449,9 +1680,9 @@ func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string
 	eventID := record.EventHeader.EventDescriptor.Id
 
 	// Microsoft-Windows-Kernel-Network IPv6 layout (TcpIp_V6_Header).
-	// Event IDs in this range identify the IPv6 templates:
-	//   26 connect / 27 disconnect / 28 retransmit / 29 accept /
-	//   30 reconnect / 31 send / 32 recv.
+	// Event IDs 26..32 are the IPv6 TCP block: the same eight templates as
+	// the IPv4 block at 10, shifted by 16 (send, recv, connect, disconnect,
+	// retransmit, accept, reconnect). See the kernelNetEvt* constants.
 	//   uint32 PID         @0
 	//   uint32 size        @4
 	//   ipv6  daddr (16)   @8
@@ -1474,7 +1705,7 @@ func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string
 		env["src_port"] = int(sport)
 		env["dest_port"] = int(dport)
 		env["ip_version"] = "6"
-		env["protocol"] = networkOpcodeName(record.EventHeader.EventDescriptor.Opcode)
+		env["protocol"] = networkOperationName(eventID)
 		return
 	}
 
@@ -1497,8 +1728,9 @@ func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string
 		env["src_port"] = int(sport)
 		env["dest_port"] = int(dport)
 		env["ip_version"] = "4"
-		// Map opcode → connect|accept|send|recv|disconnect for downstream rules.
-		env["protocol"] = networkOpcodeName(record.EventHeader.EventDescriptor.Opcode)
+		// Map the event id → connect|accept|send|recv|disconnect for
+		// downstream rules.
+		env["protocol"] = networkOperationName(eventID)
 		return
 	}
 	// Fallback for shorter records: still try to surface a PID so the
@@ -1508,27 +1740,34 @@ func (d *ETWDriver) decodeNetworkUserData(record *etwEventRecord, env map[string
 	}
 }
 
-// networkOpcodeName maps Kernel-Network ETW opcodes to a textual operation
-// name. The opcode table is documented in MSDN under TcpIp_V4_Header:
+// networkOperationName maps a Microsoft-Windows-Kernel-Network event id to a
+// textual operation name for downstream rules.
 //
-//	10/11 send, 12/13 recv, 14/15 disconnect/retransmit,
-//	16 accept, 17 connect, 26 fail.
-func networkOpcodeName(op uint8) string {
-	switch op {
-	case 10, 11:
+// It replaces networkOpcodeName, which read the legacy NT Kernel Logger TcpIp
+// opcode table (12/13 recv, 16 accept, 17 connect). Those numbers mean
+// something else on this provider: a loopback connect burst on
+// windows-latest moves id 12, an accept moves 15 and a close moves 13, so
+// every connect was labelled "tcp:recv" and every accept "tcp:disconnect".
+func networkOperationName(eventID uint16) string {
+	switch eventID {
+	case kernelNetEvtSend4, kernelNetEvtSend6:
 		return "tcp:send"
-	case 12, 13:
+	case kernelNetEvtRecv4, kernelNetEvtRecv6:
 		return "tcp:recv"
-	case 14, 15:
-		return "tcp:disconnect"
-	case 16:
-		return "tcp:accept"
-	case 17:
+	case kernelNetEvtConnect4, kernelNetEvtConnect6:
 		return "tcp:connect"
-	case 18, 19:
+	case kernelNetEvtDisconnect4, kernelNetEvtDisconnect6:
+		return "tcp:disconnect"
+	case kernelNetEvtRetransmit4, kernelNetEvtRetransmit6:
+		return "tcp:retransmit"
+	case kernelNetEvtAccept4, kernelNetEvtAccept6:
+		return "tcp:accept"
+	case kernelNetEvtReconnect4, kernelNetEvtReconnect6:
 		return "tcp:reconnect"
-	case 26:
-		return "tcp:fail"
+	case kernelNetEvtUDPSend4:
+		return "udp:send"
+	case kernelNetEvtUDPRecv4:
+		return "udp:recv"
 	}
 	return "tcp"
 }

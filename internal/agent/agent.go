@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,6 +63,7 @@ type Agent struct {
 	forwarder    forwarder.Forwarder
 	forwardDrain forwarder.Drainer
 	killAllow    map[string]struct{}
+	killBudget   *killBudget
 	zapLogger    *zap.Logger
 
 	baselineEngine  *baseline.BaselineEngine
@@ -108,6 +110,12 @@ type Agent struct {
 
 	controlPlane      *comms.ControlPlane
 	controlPlaneQueue *comms.AlertQueue
+
+	// localAlerts counts the detections this agent has raised since start.
+	// The control-plane heartbeat keeps the same tally, but only when a
+	// control plane is configured, and the local control API has to be able
+	// to report a detection count on every agent.
+	localAlerts atomic.Uint64
 }
 
 // SetValidationSink registers a callback invoked for each detection surfaced by the agent.
@@ -166,6 +174,7 @@ func NewWithFiles(configPath string) (*Agent, error) {
 		responder:          response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:             alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 5*1024*1024),
 		killAllow:          makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		killBudget:         newKillBudget(cfg.LegacyResponse.MaxKillsPerHour),
 		zapLogger:          zapLogger,
 		userLookup:         users,
 		fileDedup:          collector.NewFileDeduper(0),
@@ -629,6 +638,7 @@ func NewForTestingWithCollectors(cfg config.Config, rs rules.RuleSet, collectors
 		responder:          response.NewResponder(cfg.LegacyResponse.AllowKill, cfg.LegacyResponse.ProtectedProcesses),
 		writer:             alert.NewWriter(cfg.Logging.AlertFile, cfg.Logging.AuditFile, 1024*1024),
 		killAllow:          makeRuleAllowlist(cfg.LegacyResponse.KillRuleAllowlist),
+		killBudget:         newKillBudget(cfg.LegacyResponse.MaxKillsPerHour),
 		fileDedup:          collector.NewFileDeduper(0),
 		fileHashPool:       newFileHashPool(),
 		noisyAlertLastSeen: make(map[string]time.Time),
@@ -775,6 +785,17 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 		}()
 		a.logger.Info("compliance sca runner started")
+	}
+
+	// Serve the local control API. edrctl has always issued these six
+	// requests and nothing answered them, so isolate, release, scan,
+	// forensics collect and rules update were all inert. It also publishes
+	// the world-readable status file the native UI reads, which is the only
+	// way an unprivileged console sees an enrolled agent as enrolled.
+	if localSrv, err := a.startLocalControl(ctx); err != nil {
+		a.logger.Error("local control api unavailable", "error", err)
+	} else {
+		defer func() { _ = localSrv.Close() }()
 	}
 
 	a.logger.Info("agent started")
@@ -1340,6 +1361,7 @@ func (a *Agent) handleAlerts(alerts []schema.Alert) error {
 			"reason", al.Title,
 			"correlation_id", correlationID)
 		a.alertSpool.Push(*al)
+		a.localAlerts.Add(1)
 		a.recordControlPlaneAlert()
 		if data, err := marshalAlertOCSF(*al, productVersion); err == nil {
 			if a.durableSpool != nil {
@@ -1417,15 +1439,68 @@ func (a *Agent) executeAutoResponse(al schema.Alert) {
 	if correlationID == "" {
 		correlationID = uuid.NewString()
 	}
+	target := firstNonEmpty(al.ProcessPath, al.FilePath, al.ProcessName)
+
 	if !a.shouldAutoKill(al) {
 		a.logger.Debug("response decision",
 			"event_type", "response_decision",
 			"rule", al.RuleID,
-			"target", firstNonEmpty(al.ProcessPath, al.FilePath, al.ProcessName),
+			"target", target,
 			"action", "none",
 			"result", "skipped",
 			"reason", "auto-kill policy did not match",
 			"correlation_id", correlationID)
+		return
+	}
+
+	// Observe mode: the policy matched and the agent is telling you what it
+	// would have done. Logged at warn, not debug, because this is the line an
+	// operator reads to decide whether enforcing is safe, and a line nobody
+	// reads is not evidence.
+	if !a.cfg.AutoKillEnforcing() {
+		a.logger.Warn("response decision",
+			"event_type", "response_decision",
+			"rule", al.RuleID,
+			"target", target,
+			"pid", al.ProcessPID,
+			"score", al.Score,
+			"action", "kill_process",
+			"result", "observed",
+			"reason", "kill_mode is observe; no process was terminated",
+			"correlation_id", correlationID)
+		_ = a.writer.WriteAudit(schema.AuditRecord{
+			SchemaVersion: schema.SchemaVersionV1,
+			RecordID:      uuid.NewString(),
+			Action:        "kill_process",
+			Outcome:       "observed",
+			Message:       fmt.Sprintf("rule %s would have terminated pid %d (%s); kill_mode is observe", al.RuleID, al.ProcessPID, target),
+			Timestamp:     time.Now().UTC(),
+		})
+		return
+	}
+
+	// Blast radius. A rule that matches broadly, or an indicator feed that
+	// goes wrong, otherwise keeps terminating for as long as it matches.
+	if !a.killBudget.allow() {
+		used, limit := a.killBudget.used()
+		a.logger.Error("response decision",
+			"event_type", "response_decision",
+			"rule", al.RuleID,
+			"target", target,
+			"action", "kill_process",
+			"result", "refused",
+			"reason", "hourly automated termination limit reached; detection continues, termination does not",
+			"kills_this_hour", used,
+			"limit", limit,
+			"correlation_id", correlationID)
+		_ = a.writer.WriteAudit(schema.AuditRecord{
+			SchemaVersion: schema.SchemaVersionV1,
+			RecordID:      uuid.NewString(),
+			Action:        "kill_process",
+			Outcome:       "refused",
+			Message:       fmt.Sprintf("rule %s matched pid %d (%s) but the hourly termination limit of %d was reached", al.RuleID, al.ProcessPID, target, limit),
+			Timestamp:     time.Now().UTC(),
+		})
 		return
 	}
 
@@ -1536,8 +1611,12 @@ func (a *Agent) shouldAutoKill(al schema.Alert) bool {
 	if al.Score < a.cfg.LegacyResponse.MinKillScore {
 		return false
 	}
+	// Fail closed. This used to return true, so an unset kill_rule_allowlist —
+	// which is what the default configuration shipped — authorised every rule
+	// that scored above the threshold to terminate processes. An operator who
+	// has not named the rules they trust has not authorised any of them.
 	if len(a.killAllow) == 0 {
-		return true
+		return false
 	}
 	_, ok := a.killAllow[al.RuleID]
 	return ok

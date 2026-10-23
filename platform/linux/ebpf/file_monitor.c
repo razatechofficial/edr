@@ -20,13 +20,39 @@ struct {
 	__type(value, __u8);
 } file_pid_filter SEC(".maps");
 
-/* Prefix match on monitored directories. Key is a null-terminated path prefix. */
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 256);
-	__type(key, char[MAX_PATH_LEN]);
-	__type(value, __u8);
-} path_filter SEC(".maps");
+/*
+ * There is deliberately no path_filter map here.
+ *
+ * One used to be defined at this point: a BPF_MAP_TYPE_HASH keyed by a
+ * 256-byte path prefix, which userspace cleared and repopulated from
+ * EventPolicy.FIMPaths on every policy sync, and whose comment claimed the
+ * kernel dropped file events outside those prefixes before they reached
+ * userspace. No program ever looked at it, and no program could have: a hash
+ * map answers "is this exact 256-byte key present", and prefix matching needs
+ * "is any key a prefix of this path". There is no sequence of hash lookups
+ * that answers the second question, so the map was not an unfinished feature,
+ * it was an impossible one.
+ *
+ * In-kernel path filtering is still the right thing — it is the difference
+ * between filtering before and after a ringbuf slot, a userspace decode and a
+ * JSON encode. The data structure for it is BPF_MAP_TYPE_LPM_TRIE, which does
+ * longest-prefix match natively: key is {__u32 prefixlen; char path[256]},
+ * userspace inserts each prefix with prefixlen = 8*len(prefix), and each
+ * program does one lookup with prefixlen = 8*256 against evt->filename.
+ *
+ * Two details decide whether that is safe to ship, and both have to be got
+ * right before anyone writes it:
+ *
+ *   - It must fail open. An empty trie matches nothing, so a program that
+ *     drops on a lookup miss would drop every file event on the host the
+ *     moment the map write failed or ran late. Insert a prefixlen=0 entry
+ *     (which matches everything) whenever the policy lists no prefixes, and
+ *     treat a miss as "capture" rather than "drop" until that entry is
+ *     confirmed present.
+ *   - Write filtering can only apply after fd_path_map has resolved the fd to
+ *     a path. emit_write_event gets an fd, not a filename, and a write whose
+ *     fd has no binding has no path to match, so it must be captured.
+ */
 
 /*
  * P1-6: fd -> path tracking.
@@ -84,7 +110,10 @@ static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 static __always_inline bool pid_is_filtered(void)
 {
 	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	return bpf_map_lookup_elem(&file_pid_filter, &pid) != NULL;
+	if (!bpf_map_lookup_elem(&file_pid_filter, &pid))
+		return false;
+	edr_stat_filtered(EDR_SUBSYS_FILE);
+	return true;
 }
 
 static __always_inline int starts_with(const char *s, const char *pfx)
@@ -129,7 +158,7 @@ int tracepoint__syscalls__sys_enter_openat(struct trace_event_raw_sys_enter *ctx
 	bpf_map_update_elem(&pending_open_paths, &pid_tgid, &pending, BPF_ANY);
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_OPEN);
 	if (!evt)
 		return 0;
 
@@ -186,7 +215,7 @@ int tracepoint__syscalls__sys_enter_close(struct trace_event_raw_sys_enter *ctx)
 static __always_inline void emit_write_event(__u32 fd, __u64 count)
 {
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_WRITE);
 	if (!evt)
 		return;
 
@@ -235,7 +264,7 @@ int tracepoint__syscalls__sys_enter_unlinkat(struct trace_event_raw_sys_enter *c
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_DELETE);
 	if (!evt)
 		return 0;
 
@@ -259,7 +288,7 @@ int tracepoint__syscalls__sys_enter_renameat2(struct trace_event_raw_sys_enter *
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_RENAME);
 	if (!evt)
 		return 0;
 
@@ -293,7 +322,7 @@ int tracepoint__syscalls__sys_enter_rename(struct trace_event_raw_sys_enter *ctx
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_RENAME);
 	if (!evt)
 		return 0;
 
@@ -318,7 +347,7 @@ int tracepoint__syscalls__sys_enter_renameat(struct trace_event_raw_sys_enter *c
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_RENAME);
 	if (!evt)
 		return 0;
 
@@ -343,18 +372,30 @@ int tracepoint__syscalls__sys_enter_fchmodat(struct trace_event_raw_sys_enter *c
 		return 0;
 
 	struct file_event *evt;
-	evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_FILE_CHMOD);
 	if (!evt)
 		return 0;
 
 	__builtin_memset(evt, 0, sizeof(*evt));
 	fill_header(&evt->hdr, EVENT_FILE_CHMOD);
 
-	/* fchmodat(2): args[0]=dfd, args[1]=pathname, args[2]=mode, args[3]=flag */
+	/*
+	 * fchmodat(2): args[0]=dfd, args[1]=pathname, args[2]=mode. There is
+	 * no fourth argument -- glibc's fchmodat takes a flags parameter and
+	 * emulates it, and the syscall that really has one is fchmodat2(2),
+	 * added in 6.6 with its own tracepoint.
+	 *
+	 * This read args[3] as a flags field, which is one field past what the
+	 * sys_enter_fchmodat format publishes, and the kernel refuses to
+	 * attach a program whose max_ctx_offset exceeds the tracepoint's
+	 * offsets (-EACCES, surfaced by the loader as "cannot create bpf perf
+	 * link: permission denied"). So this program never attached on any
+	 * kernel and file_permission had no chmod source at all: the category
+	 * was served only by fim_inode_setattr, which needs BPF LSM.
+	 */
 	const char *pathname = (const char *)ctx->args[1];
 	bpf_probe_read_user_str(evt->filename, sizeof(evt->filename), pathname);
 	evt->mode = (__u32)ctx->args[2];
-	evt->flags = (__u32)ctx->args[3];
 	mark_sensitive(evt);
 
 	bpf_ringbuf_submit(evt, 0);
@@ -366,7 +407,7 @@ int kprobe_mem_write(struct pt_regs *ctx)
 {
 	if (pid_is_filtered())
 		return 0;
-	struct file_event *evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	struct file_event *evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_PROC_MEM_WRITE);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));

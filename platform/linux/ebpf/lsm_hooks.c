@@ -69,7 +69,7 @@ int BPF_PROG(lsm_bprm_check, struct linux_binprm *bprm)
 
 	if (bpf_map_lookup_elem(&exec_deny_list, path)) {
 		struct security_event *evt;
-		evt = bpf_ringbuf_reserve(&lsm_events, sizeof(*evt), 0);
+		evt = edr_ringbuf_reserve(&lsm_events, sizeof(*evt), EVENT_PROCESS_EXEC);
 		if (evt) {
 			__builtin_memset(evt, 0, sizeof(*evt));
 			fill_header(&evt->hdr, EVENT_PROCESS_EXEC);
@@ -95,7 +95,7 @@ int BPF_PROG(lsm_file_open, struct file *file)
 
 	if (bpf_map_lookup_elem(&file_deny_list, path)) {
 		struct security_event *evt;
-		evt = bpf_ringbuf_reserve(&lsm_events, sizeof(*evt), 0);
+		evt = edr_ringbuf_reserve(&lsm_events, sizeof(*evt), EVENT_FILE_OPEN);
 		if (evt) {
 			__builtin_memset(evt, 0, sizeof(*evt));
 			fill_header(&evt->hdr, EVENT_FILE_OPEN);
@@ -122,7 +122,7 @@ int BPF_PROG(lsm_socket_connect, struct socket *sock,
 
 	if (bpf_map_lookup_elem(&connect_deny_list, &addr)) {
 		struct network_event *evt;
-		evt = bpf_ringbuf_reserve(&lsm_events, sizeof(*evt), 0);
+		evt = edr_ringbuf_reserve(&lsm_events, sizeof(*evt), EVENT_NET_CONNECT);
 		if (evt) {
 			__builtin_memset(evt, 0, sizeof(*evt));
 			fill_header(&evt->hdr, EVENT_NET_CONNECT);
@@ -142,7 +142,7 @@ int BPF_PROG(lsm_task_kill, struct task_struct *p, struct kernel_siginfo *info,
 	     int sig, const struct cred *cred)
 {
 	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&lsm_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&lsm_events, sizeof(*evt), EVENT_SIGNAL);
 	if (!evt)
 		return 0;
 
@@ -161,7 +161,7 @@ SEC("lsm/kernel_module_request")
 int BPF_PROG(lsm_kernel_module_request, char *kmod_name)
 {
 	struct security_event *evt;
-	evt = bpf_ringbuf_reserve(&lsm_events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&lsm_events, sizeof(*evt), EVENT_MODULE_LOAD);
 	if (!evt)
 		return 0;
 

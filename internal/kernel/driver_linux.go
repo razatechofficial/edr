@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -64,6 +65,8 @@ const (
 	bpfEvtUnshare        = 26
 	bpfEvtMadvise        = 27
 	bpfEvtPrivilege      = 42
+	bpfEvtModuleUnload   = 43
+	bpfEvtTLSHello       = 44
 )
 
 // bpfBytecode holds embedded eBPF bytecode when compiled with `make ebpf-link`
@@ -183,6 +186,16 @@ type EBPFDriver struct {
 	selfFiltered []uint32
 	linkByProg   map[uint32]link.Link
 	specByProg   map[uint32]tracepointAttachSpec
+	// secByProg is every program's SEC() string, captured from the
+	// CollectionSpec at load time because ebpf.Collection does not keep
+	// them. It is what attachPrograms plans from, so a program's attach
+	// type comes from the object that was loaded rather than from its Go
+	// symbol name.
+	secByProg map[string]string
+	// attachMisses records, per program name, why it is not attached.
+	// Written once per attach pass and read by the capability report so an
+	// operator sees the kernel's own reason instead of a static guess.
+	attachMisses map[string]string
 	reader       *ringbuf.Reader
 	readers      []*ringbuf.Reader
 
@@ -214,13 +227,38 @@ type EBPFDriver struct {
 
 	tamperByProgMu sync.Mutex
 	tamperByProg   map[uint32]uint64 // per-program missing detections
+
+	// caps records, per event category, that an event of that category
+	// actually arrived. It is what makes CapabilityReport able to say
+	// "attached but producing nothing" instead of only "attached".
+	caps *capabilityTracker
+
+	// kernelStats caches the last read of the in-kernel event_stats and
+	// filter_stats maps. Stats() is polled, and a read is 72 per-CPU map
+	// lookups, so it is bounded by kernelStatsCacheTTL.
+	kernelStats kernelStatsCache
+
+	// progRunStats holds the kernel's system-wide BPF statistics enable
+	// while this driver wants per-program run counts. Non-nil means the
+	// counts in ProgramRunCounts are measurements rather than zeroes.
+	progRunStats io.Closer
 }
 
+// tracepointAttachSpec is what the loader recorded about one successful
+// attach, keyed by kernel program ID, so the watchdog can re-create the exact
+// same link after a program disappears.
+//
+// kind and symbol were added when attach moved to SEC(): lsm plus
+// group/tp could only describe a tracepoint or an LSM hook, and re-attaching
+// kp_tcp_close as a tracepoint would fail forever. lsm is kept because the
+// watchdog's existing branch and its tests read it.
 type tracepointAttachSpec struct {
 	progName string
 	group    string
 	tp       string
 	lsm      bool
+	kind     ebpfAttachKind
+	symbol   string
 }
 
 type linuxFeatureSet struct {
@@ -243,6 +281,8 @@ func NewEBPFDriver(agentID string, objectPathOverride string) (*EBPFDriver, erro
 		bpfObjectPath: objectPathOverride,
 		linkByProg:    make(map[uint32]link.Link),
 		specByProg:    make(map[uint32]tracepointAttachSpec),
+		secByProg:     make(map[string]string),
+		caps:          newCapabilityTracker(),
 	}, nil
 }
 
@@ -326,6 +366,11 @@ func (d *EBPFDriver) Start(ctx context.Context, buf *RingBuffer) error {
 	d.buf = buf
 	d.features = probeLinuxFeatures()
 
+	// Before the collection is loaded: the kernel counts a program's runs
+	// from the moment statistics are on, so enabling after the attach
+	// would under-count the window an operator is asking about.
+	d.enableProgramRunStatsIfRequested()
+
 	rootCtx, rootCancel := context.WithCancel(ctx)
 	d.rootCtx = rootCtx
 	d.rootCancel = rootCancel
@@ -404,11 +449,25 @@ func (d *EBPFDriver) bootstrapLoadedCollection() error {
 	// fix that works regardless of kernel age.
 	d.setBPFFDsCloexec()
 
-	if err := d.attachTracepoints(); err != nil {
-		d.cleanup()
-		return fmt.Errorf("attaching tracepoints: %w", err)
+	// The accounting maps are read by field offset, so a geometry mismatch
+	// would decode garbage or silently read fewer slots than exist. The
+	// version gate already refuses a stale object; this names the specific
+	// mismatch, and it is a warning rather than a failure because losing
+	// the loss counters is worse than no monitoring only if it goes
+	// unnoticed.
+	if err := assertKernelStatsGeometry(coll); err != nil {
+		fmt.Fprintf(os.Stderr, "WARN ebpf: kernel loss accounting unavailable: %v\n", err)
 	}
-	d.attachLSMPrograms()
+
+	// Capture every SEC() string before the spec goes out of scope:
+	// attachPrograms plans from the section, and ebpf.Collection does not
+	// carry section names.
+	d.recordSections(spec)
+
+	if err := d.attachPrograms(); err != nil {
+		d.cleanup()
+		return fmt.Errorf("attaching ebpf programs: %w", err)
+	}
 
 	if err := d.openReaders(); err != nil {
 		d.cleanup()
@@ -437,6 +496,10 @@ func (d *EBPFDriver) Stop() error {
 	}
 	d.wg.Wait()
 	d.cleanup()
+	// The kernel reference-counts the statistics enable on the fd, so
+	// leaking it would leave BPF_STATS_RUN_TIME on host-wide after the
+	// agent stopped, which is a cost nobody asked for and nobody can see.
+	d.disableProgramRunStats()
 	d.rootCtx = nil
 	d.rootCancel = nil
 	d.eventCtx = nil
@@ -535,12 +598,26 @@ func (d *EBPFDriver) Stats() DriverStats {
 	if !d.startTime.IsZero() {
 		uptime = time.Since(d.startTime).Seconds()
 	}
+	// The kernel-side counters belong here because this is the surface an
+	// operator and a health check already read. A ring buffer that filled
+	// is the one loss on the path that EventsDropped cannot see: that
+	// counter is incremented when a record userspace received could not be
+	// decoded, and a record lost to a full ring buffer was never received.
+	loss := d.kernelEventLossCached()
+	var filtered uint64
+	for _, n := range loss.FilterDrops {
+		filtered += n
+	}
 	return DriverStats{
-		EventsReceived:  d.received.Load(),
-		EventsDropped:   d.dropped.Load(),
-		EventsProcessed: d.processed.Load(),
-		UptimeSeconds:   uptime,
-		ErrorCount:      d.errors.Load(),
+		EventsReceived:        d.received.Load(),
+		EventsDropped:         d.dropped.Load(),
+		EventsProcessed:       d.processed.Load(),
+		UptimeSeconds:         uptime,
+		ErrorCount:            d.errors.Load(),
+		KernelReserveFailures: loss.TotalReserveFailed,
+		KernelSubmitted:       loss.TotalSubmitted,
+		KernelFilterDrops:     filtered,
+		KernelLossByRing:      loss.ByRing,
 	}
 }
 
@@ -554,6 +631,8 @@ func (d *EBPFDriver) cleanup() {
 	d.links = nil
 	d.linkByProg = make(map[uint32]link.Link)
 	d.specByProg = make(map[uint32]tracepointAttachSpec)
+	d.secByProg = make(map[string]string)
+	d.attachMisses = nil
 	if d.reader != nil {
 		d.reader.Close()
 		d.reader = nil
@@ -574,7 +653,12 @@ func (d *EBPFDriver) captureVerifierDiag(err error) {
 	}
 	var ve *ebpf.VerifierError
 	if errors.As(err, &ve) {
-		d.setLoadDiag(ve.Error())
+		// %+v, not Error(): VerifierError.Error() keeps the first and
+		// last few lines and prints "N line(s) omitted" for the rest,
+		// which drops exactly the instruction trace and register
+		// bounds needed to find the rejected access. The full log is
+		// the whole value of this field.
+		d.setLoadDiag(fmt.Sprintf("%+v", ve))
 		return
 	}
 	d.setLoadDiag(err.Error())
@@ -683,103 +767,6 @@ func ebpfPinnedTraceLinkPath(base, progName string) string {
 	return filepath.Join(base, "link_"+safe)
 }
 
-func (d *EBPFDriver) attachTracepoints() error {
-	for name, prog := range d.coll.Programs {
-		if prog == nil {
-			continue
-		}
-		const prefix = "tracepoint__"
-		if len(name) <= len(prefix) || name[:len(prefix)] != prefix {
-			continue
-		}
-		rest := name[len(prefix):]
-		sep := -1
-		for i := 0; i+1 < len(rest); i++ {
-			if rest[i] == '_' && rest[i+1] == '_' {
-				sep = i
-				break
-			}
-		}
-		if sep <= 0 || sep+2 >= len(rest) {
-			continue
-		}
-		group := rest[:sep]
-		tp := rest[sep+2:]
-		if !d.features.HasCgroupBPF && group == "cgroup" {
-			continue
-		}
-		pinBase := strings.TrimSpace(d.bpfPinPath)
-		if pinBase != "" {
-			pp := ebpfPinnedTraceLinkPath(pinBase, name)
-			if pl, err := linkLoadPinnedFn(pp); err == nil && pl != nil {
-				d.links = append(d.links, pl)
-				if info, ierr := prog.Info(); ierr == nil {
-					if id, ok := info.ID(); ok {
-						pid := uint32(id)
-						d.linkByProg[pid] = pl
-						d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp, lsm: false}
-					}
-				}
-				continue
-			}
-		}
-		l, err := link.Tracepoint(group, tp, prog, nil)
-		if err != nil {
-			if isOptionalTracepointAttachFailure(group, tp, err) {
-				fmt.Fprintf(os.Stderr, "WARN ebpf: skipping optional tracepoint %s/%s: %v\n", group, tp, err)
-				continue
-			}
-			return fmt.Errorf("attaching %s (%s/%s): %w", name, group, tp, err)
-		}
-		d.links = append(d.links, l)
-		if info, ierr := prog.Info(); ierr == nil {
-			if id, ok := info.ID(); ok {
-				pid := uint32(id)
-				d.linkByProg[pid] = l
-				d.specByProg[pid] = tracepointAttachSpec{progName: name, group: group, tp: tp, lsm: false}
-				d.tryPinTraceLink(name, l)
-			}
-		}
-	}
-	if len(d.links) == 0 {
-		return fmt.Errorf("no tracepoints attached; verify ebpf programs are present")
-	}
-	return nil
-}
-
-// attachLSMPrograms links observe-only FIM programs (name prefix fim_). Other LSM
-// programs in the object (e.g. enforcement hooks) are intentionally skipped.
-func (d *EBPFDriver) attachLSMPrograms() {
-	if d == nil || d.coll == nil || !d.features.HasBPFLSM {
-		return
-	}
-	for name, prog := range d.coll.Programs {
-		if prog == nil {
-			continue
-		}
-		if prog.Type() != ebpf.LSM {
-			continue
-		}
-		if !strings.HasPrefix(name, "fim_") {
-			continue
-		}
-		l, err := link.AttachLSM(link.LSMOptions{Program: prog})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARN ebpf: skipping LSM attach %s: %v\n", name, err)
-			continue
-		}
-		d.links = append(d.links, l)
-		if info, ierr := prog.Info(); ierr == nil {
-			if id, ok := info.ID(); ok {
-				pid := uint32(id)
-				d.linkByProg[pid] = l
-				d.specByProg[pid] = tracepointAttachSpec{progName: name, lsm: true}
-			}
-		}
-		d.tryPinTraceLink(name, l)
-	}
-}
-
 func (d *EBPFDriver) tryPinTraceLink(progName string, l link.Link) {
 	if d == nil || l == nil {
 		return
@@ -829,73 +816,29 @@ func (d *EBPFDriver) syncPolicyToMaps() error {
 		return fmt.Errorf("installing self filter: %w", err)
 	}
 
-	if m, ok := d.coll.Maps["policy_config"]; ok {
-		var flags uint64
-		if p.ProcessEvents {
-			flags |= 1 << 0
-		}
-		if p.FileEvents {
-			flags |= 1 << 1
-		}
-		if p.NetworkEvents {
-			flags |= 1 << 2
-		}
-		if p.MemoryEvents {
-			flags |= 1 << 3
-		}
-		if p.ModuleEvents {
-			flags |= 1 << 4
-		}
-		if p.MountEvents {
-			flags |= 1 << 5
-		}
-		if p.SignalEvents {
-			flags |= 1 << 6
-		}
-		if err := m.Put(uint32(0), flags); err != nil {
-			return fmt.Errorf("updating policy_config map: %w", err)
-		}
-	}
-
-	if m, ok := d.coll.Maps["mute_pids"]; ok {
-		for _, pid := range p.MutePIDs {
-			if err := m.Put(pid, uint8(1)); err != nil {
-				return fmt.Errorf("muting pid %d: %w", pid, err)
-			}
-		}
-	}
-
-	// P1-4: push FIM path prefixes into the eBPF path_filter map so the
-	// kernel side drops file events outside those prefixes before they
-	// hit userspace. The map is keyed by a fixed-size [256]byte buffer
-	// (matches the eBPF struct) holding the prefix bytes; value is a
-	// uint8 sentinel (1 = allowed). Clear-then-insert keeps the map in
-	// sync with whatever the policy currently lists.
-	if m, ok := d.coll.Maps["path_filter"]; ok {
-		var key [256]byte
-		var val uint8
-		iter := m.Iterate()
-		var keysToDelete [][256]byte
-		for iter.Next(&key, &val) {
-			keysToDelete = append(keysToDelete, key)
-		}
-		for _, k := range keysToDelete {
-			_ = m.Delete(k)
-		}
-		for _, prefix := range p.FIMPaths {
-			if prefix == "" {
-				continue
-			}
-			var k [256]byte
-			n := copy(k[:255], prefix)
-			// Null-terminate so the eBPF side can find the prefix length.
-			k[n] = 0
-			if err := m.Put(k, uint8(1)); err != nil {
-				return fmt.Errorf("adding FIM prefix %q: %w", prefix, err)
-			}
-		}
-	}
-
+	// There is no policy_config, mute_pids or path_filter write here any
+	// more. All three were guarded by `if m, ok := d.coll.Maps[name]; ok`
+	// against maps the kernel side does not define, so all three were
+	// silent no-ops that made the policy surface look wider than it was.
+	//
+	// policy_config packed seven EventPolicy booleans into a flags word
+	// and wrote key 0. No .c file declared the map, so nothing read it.
+	// Gating in the kernel is worth doing — it saves a ringbuf slot, a
+	// userspace decode and a JSON encode per suppressed event — but it has
+	// to be built to fail open: the flags word has to mean *disable*, so
+	// that a zero-initialised array map, or a write that has not landed
+	// yet, captures everything instead of dropping everything. Until then
+	// processRecord does the gating in userspace, which works.
+	//
+	// mute_pids duplicated installSelfFilter above. That call already
+	// writes the agent's own tgid and every EventPolicy.MutePIDs entry
+	// into the four *_pid_filter maps the programs actually consult, so a
+	// second mute mechanism would have been a second thing to keep in
+	// sync and nothing more.
+	//
+	// path_filter is documented at the point in file_monitor.c where it
+	// used to be defined: a hash map cannot answer a prefix query, so it
+	// could never have done what its comment claimed.
 	return nil
 }
 
@@ -932,6 +875,13 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 	}
 	typ := binary.LittleEndian.Uint32(raw[:4])
 
+	// Credit the capability tracker before the policy gate below. The
+	// report's "producing" flag answers whether the kernel mechanism works,
+	// which is a separate question from whether the current policy wants the
+	// event forwarded; crediting after the gate would make a disabled
+	// category look like a broken hook.
+	d.caps.observe(linuxCapabilityForEventType(typ))
+
 	d.mu.RLock()
 	p := d.policy
 	d.mu.RUnlock()
@@ -962,7 +912,7 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeDNSQueryEvent(raw)
-	case bpfEvtModule:
+	case bpfEvtModule, bpfEvtModuleUnload:
 		if !p.ModuleEvents {
 			return nil
 		}
@@ -1005,6 +955,11 @@ func (d *EBPFDriver) processRecord(raw []byte) error {
 			return nil
 		}
 		return d.decodeSchedEvent(raw)
+	case bpfEvtTLSHello:
+		if !p.NetworkEvents {
+			return nil
+		}
+		return d.decodeTLSClientHelloEvent(raw)
 	default:
 		return fmt.Errorf("unknown bpf event type %d", typ)
 	}
@@ -1277,6 +1232,15 @@ func (d *EBPFDriver) decodeDNSQueryEvent(data []byte) error {
 	raw := ne.DNSQuery[:]
 	qname := decodeDNSQName(raw)
 	qtypeStr := decodeDNSQType(raw)
+	// The wire bytes are authoritative. The eBPF program no longer walks
+	// the label chain -- the bounded loop it needed was rejected by the
+	// verifier and failed the whole object load -- so it reports 0 and the
+	// code comes from the same bytes decodeDNSQType reads. A non-zero
+	// kernel value is still honoured, for objects built before that change.
+	qtypeCode, ok := dnsQTypeFromWire(raw)
+	if !ok || qtypeCode == 0 {
+		qtypeCode = ne.DNSQType
+	}
 	env := map[string]interface{}{
 		"type":      "dns",
 		"timestamp": time.Now().UTC(),
@@ -1286,7 +1250,7 @@ func (d *EBPFDriver) decodeDNSQueryEvent(data []byte) error {
 		"dns_type":  qtypeStr,
 		// dns_qtype_code retains the numeric type for downstream matchers
 		// that prefer the raw IANA-assigned QTYPE code over the label.
-		"dns_qtype_code": ne.DNSQType,
+		"dns_qtype_code": qtypeCode,
 	}
 	return d.writeJSONEvent(env)
 }
@@ -1323,19 +1287,10 @@ func decodeDNSQName(raw []byte) string {
 // follows the QNAME terminator in the raw wire bytes. Falls back to "A"
 // when the bytes are too short to contain a QTYPE field.
 func decodeDNSQType(raw []byte) string {
-	i := 0
-	for i < len(raw) && raw[i] != 0 {
-		if raw[i]&0xC0 == 0xC0 {
-			i += 2
-			break
-		}
-		i += int(raw[i]) + 1
-	}
-	i++ // skip root label
-	if i+2 > len(raw) {
+	qtype, ok := dnsQTypeFromWire(raw)
+	if !ok {
 		return "A"
 	}
-	qtype := binary.BigEndian.Uint16(raw[i : i+2])
 	switch qtype {
 	case 1:
 		return "A"
@@ -1360,6 +1315,61 @@ func decodeDNSQType(raw []byte) string {
 	default:
 		return fmt.Sprintf("TYPE%d", qtype)
 	}
+}
+
+// dnsQTypeFromWire walks the label chain in the captured Question section and
+// returns the QTYPE word that follows the root label. ok is false when the
+// capture is too short to contain one, which is the case for a name that
+// filled the buffer.
+func dnsQTypeFromWire(raw []byte) (uint16, bool) {
+	i := 0
+	for i < len(raw) && raw[i] != 0 {
+		if raw[i]&0xC0 == 0xC0 {
+			i += 2
+			break
+		}
+		i += int(raw[i]) + 1
+	}
+	i++ // skip root label
+	if i < 0 || i+2 > len(raw) {
+		return 0, false
+	}
+	return binary.BigEndian.Uint16(raw[i : i+2]), true
+}
+
+// decodeTLSClientHelloEvent surfaces a TLS ClientHello seen by
+// tls_sni_monitor.c. The program reuses struct network_event and puts a
+// bounded printable prefix of the handshake bytes in dns_query; that is a
+// surrogate for the SNI, not a parsed server_name extension, and the envelope
+// labels it as such rather than claiming an SNI it did not parse.
+//
+// It used to emit EVENT_NET_CONNECT, which made every ClientHello a duplicate
+// connect event and left the capability report's tls_metadata row permanently
+// dark while the kprobe was attached and working.
+func (d *EBPFDriver) decodeTLSClientHelloEvent(data []byte) error {
+	const sz = unsafe.Sizeof(bpfNetworkEvent{})
+	if uintptr(len(data)) < sz {
+		return fmt.Errorf("tls client hello event truncated: got %d, want >= %d", len(data), sz)
+	}
+	ne := (*bpfNetworkEvent)(unsafe.Pointer(&data[0]))
+	env := map[string]interface{}{
+		"type":                 "network",
+		"operation":            "tls_client_hello",
+		"timestamp":            time.Now().UTC(),
+		"agent_id":             d.agentID,
+		"pid":                  ne.PID,
+		"dest_port":            int(ne.DstPort),
+		"src_port":             int(ne.SrcPort),
+		"tls_printable_prefix": nullTerminated(ne.DNSQuery[:]),
+	}
+	if ne.IsIPv6 != 0 {
+		env["ip_version"] = "6"
+	} else {
+		env["ip_version"] = "4"
+		env["src"] = net.IP(ipv4Bytes(ne.SrcAddr)).String()
+		env["dst"] = net.IP(ipv4Bytes(ne.DstAddr)).String()
+	}
+	return d.writeJSONEvent(env)
 }
 
 func (d *EBPFDriver) decodeSchedEvent(data []byte) error {
@@ -1527,7 +1537,20 @@ func appendUint64(dst []byte, v uint64) []byte {
 
 func (d *EBPFDriver) openReaders() error {
 	readerMaps := []string{"events", "file_events", "net_events", "sec_events", "lsm_events", "sched_events", "tls_events"}
+	d.mu.RLock()
+	wantSched := d.policy.SchedEvents
+	d.mu.RUnlock()
 	for _, name := range readerMaps {
+		// Draining a ring buffer whose events the policy gate then
+		// discards is pure cost, and for sched_events it is not a
+		// small one: the scheduler tracepoints submit on every context
+		// switch, which measured a quarter of a million records a
+		// second on a two-core runner. Reading and decoding all of
+		// them to drop them starved the other subsystems' readers of
+		// CPU badly enough that file and module events went missing.
+		if name == "sched_events" && !wantSched {
+			continue
+		}
 		m, ok := d.coll.Maps[name]
 		if !ok {
 			continue

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Lightweight TLS ClientHello/SNI monitor stub for Linux eBPF.
-// Emits EVENT_NET_CONNECT with dns_query carrying a best-effort SNI prefix.
+// Emits EVENT_TLS_CLIENT_HELLO with dns_query carrying a best-effort SNI prefix.
 
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
@@ -43,19 +43,54 @@ int kp_tls_tcp_sendmsg(struct pt_regs *ctx)
 	if (!sk || !msg)
 		return 0;
 
-	struct iov_iter iter = {};
-	BPF_CORE_READ_INTO(&iter, msg, msg_iter);
-	if (iter.count < 6)
+	/*
+	 * Locate the user buffer behind this sendmsg.
+	 *
+	 * This used to go straight to msg_iter.__iov and treat it as an
+	 * iovec array. That is only valid for ITER_IOVEC. Since Linux 6.0 a
+	 * single-segment user write -- which is what every write(2) and
+	 * send(2) on a socket is, and therefore what every TLS ClientHello
+	 * is -- arrives as ITER_UBUF, where the same union member holds the
+	 * buffer pointer directly and is not an iovec at all. Dereferencing
+	 * it as one yielded a bad pointer, bpf_probe_read_user failed, and
+	 * the program returned without emitting: tls_metadata was attached
+	 * and permanently silent on any kernel new enough to have ITER_UBUF.
+	 *
+	 * The iterator kind is read with bpf_core_enum_value so the ordinals
+	 * come from the running kernel's BTF; enum iter_type has been
+	 * reordered across versions and hardcoding 0 and 1 would be the same
+	 * class of mistake again.
+	 */
+	__u8 iter_type = 0;
+	BPF_CORE_READ_INTO(&iter_type, msg, msg_iter.iter_type);
+
+	__u64 count = 0;
+	BPF_CORE_READ_INTO(&count, msg, msg_iter.count);
+	if (count < 6)
 		return 0;
 
-	const struct iovec *iov = NULL;
-	BPF_CORE_READ_INTO(&iov, msg, msg_iter.__iov);
-	if (!iov)
-		return 0;
 	void *base = NULL;
-	BPF_CORE_READ_INTO(&base, iov, iov_base);
 	__u64 iov_len = 0;
-	BPF_CORE_READ_INTO(&iov_len, iov, iov_len);
+
+	if (bpf_core_enum_value_exists(enum iter_type, ITER_UBUF) &&
+	    iter_type == bpf_core_enum_value(enum iter_type, ITER_UBUF)) {
+		/* __ubuf_iovec.iov_base aliases the ubuf union member, and
+		 * iov_len aliases count. */
+		BPF_CORE_READ_INTO(&base, msg, msg_iter.__ubuf_iovec.iov_base);
+		iov_len = count;
+	} else if (bpf_core_enum_value_exists(enum iter_type, ITER_IOVEC) &&
+	           iter_type == bpf_core_enum_value(enum iter_type, ITER_IOVEC)) {
+		const struct iovec *iov = NULL;
+		BPF_CORE_READ_INTO(&iov, msg, msg_iter.__iov);
+		if (!iov)
+			return 0;
+		BPF_CORE_READ_INTO(&base, iov, iov_base);
+		BPF_CORE_READ_INTO(&iov_len, iov, iov_len);
+	} else {
+		/* Kernel-internal kvec/bvec/xarray iterators carry no user
+		 * buffer to read; there is nothing to parse. */
+		return 0;
+	}
 	if (!base || iov_len < 6)
 		return 0;
 
@@ -66,11 +101,11 @@ int kp_tls_tcp_sendmsg(struct pt_regs *ctx)
 	if (hdr[0] != 0x16 || hdr[5] != 0x01)
 		return 0;
 
-	struct network_event *evt = bpf_ringbuf_reserve(&tls_events, sizeof(*evt), 0);
+	struct network_event *evt = edr_ringbuf_reserve(&tls_events, sizeof(*evt), EVENT_TLS_CLIENT_HELLO);
 	if (!evt)
 		return 0;
 	__builtin_memset(evt, 0, sizeof(*evt));
-	fill_header_tls(&evt->hdr, EVENT_NET_CONNECT);
+	fill_header_tls(&evt->hdr, EVENT_TLS_CLIENT_HELLO);
 	evt->direction = 0;
 
 	__u16 family = 0, sport = 0, dport = 0;

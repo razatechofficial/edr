@@ -474,11 +474,27 @@ logging:
   alert_file: ""
   audit_file: ""
 
-# Auto-kill: only enable on lab/VM test hosts unless policy requires it.
+# Automated termination.
+#
+# Ships in observe mode: every rule is evaluated and the process that would
+# have been terminated is recorded, but nothing is killed. Read what observe
+# records before setting kill_mode to enforce — that audit trail is the
+# evidence that the rules you trust are safe to act on, and it is how endpoint
+# vendors qualify a detector before letting it take action.
+#
+# kill_rule_allowlist fails closed: empty means no rule may terminate anything.
+# It previously meant the opposite, so every rule scoring above the threshold
+# could kill, and that is what this default used to ship.
+#
+# protected_processes is added to the agent's built-in floor of critical
+# operating-system processes, it does not replace it. Prefer absolute paths; a
+# process name is chosen by the process.
 response_legacy:
   allow_kill: true
   auto_kill_enabled: true
-  min_kill_score: 90
+  kill_mode: "observe"
+  min_kill_score: 95
+  max_kills_per_hour: 10
   kill_rule_allowlist: []
   protected_processes: []
 

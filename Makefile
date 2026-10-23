@@ -136,8 +136,18 @@ build-darwin:
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-installer-darwin-arm64 ./cmd/installer
 	GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-amd64 ./cmd/cli
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-darwin-arm64 ./cmd/cli
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-amd64 ./cmd/agentui
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-arm64 ./cmd/agentui
+# The agent UI is a cgo build against macOS frameworks, so it can only be
+# produced on a mac. Cross-compiling it from Linux fails in clang with
+# "unsupported option '-arch' for target 'x86_64-pc-linux-gnu'", which is what
+# made `make build-all` fail on every CI run — masked, because the job carried
+# continue-on-error. Everything else in this target is pure Go and does cross
+# compile, so the UI is skipped with a note rather than taking the lane down.
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-amd64 ./cmd/agentui; \
+		GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-ui-darwin-arm64 ./cmd/agentui; \
+	else \
+		echo "==> skipping edr-agent-ui (darwin): cgo against macOS frameworks needs a mac host"; \
+	fi
 	@mkdir -p dist/darwin-amd64 dist/darwin-arm64
 	CGO_ENABLED=$(DARWIN_DIST_CGO) GOOS=darwin GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-amd64/edr-agent ./cmd/agent
 	CGO_ENABLED=$(DARWIN_DIST_CGO) GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/darwin-arm64/edr-agent ./cmd/agent
@@ -146,7 +156,17 @@ build-windows:
 	@echo "==> Building Windows amd64 binaries"
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edr-agent-windows-amd64.exe ./cmd/agent
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/edrctl-windows-amd64.exe ./cmd/cli
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o $(BIN_DIR)/edr-agent-ui-windows-amd64.exe ./cmd/agentui
+# As with darwin above, the UI is a cgo GUI build. Cross-compiling it from
+# Linux needs mingw-w64; with the default gcc it fails on "unrecognized
+# command-line option '-mthreads'". The agent build below already reaches for
+# x86_64-w64-mingw32-gcc when it is present, so the UI follows the same rule
+# rather than taking the whole cross-compile lane down when it is not.
+	@if [ "$$(uname -s)" = "MINGW64_NT" ] || command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
+		CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=$$(command -v x86_64-w64-mingw32-gcc || echo gcc) \
+			go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o $(BIN_DIR)/edr-agent-ui-windows-amd64.exe ./cmd/agentui; \
+	else \
+		echo "==> skipping edr-agent-ui (windows): cgo GUI build needs mingw-w64 (x86_64-w64-mingw32-gcc)"; \
+	fi
 	@mkdir -p dist/windows-amd64
 ifeq ($(WINDOWS_CGO),1)
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
@@ -154,7 +174,15 @@ else
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edr-agent.exe ./cmd/agent
 endif
 	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o dist/windows-amd64/edrctl.exe ./cmd/cli
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui
+# The dist copy of the UI, guarded exactly as the bin/ copy above is. Two
+# separate lines build this binary and only guarding one of them left the
+# cross-compile lane failing on the other.
+	@if [ "$$(uname -s)" = "MINGW64_NT" ] || command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
+		CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=$$(command -v x86_64-w64-mingw32-gcc || echo gcc) \
+			go build $(GOFLAGS) -ldflags "$(LDFLAGS) -H windowsgui" -o dist/windows-amd64/edr-agent-ui.exe ./cmd/agentui; \
+	else \
+		echo "==> skipping dist edr-agent-ui (windows): cgo GUI build needs mingw-w64"; \
+	fi
 
 build-darwin-production:
 	@bash scripts/ci/build_macos_production.sh

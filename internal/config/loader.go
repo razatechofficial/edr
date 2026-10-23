@@ -233,6 +233,15 @@ func migrateLegacy(cfg *Config, v *viper.Viper) {
 	if v.IsSet("response.protected_processes") {
 		cfg.LegacyResponse.ProtectedProcesses = v.GetStringSlice("response.protected_processes")
 	}
+	// Mapped like the rest, so a pre-v2 file can also be moved to observe mode
+	// and given a blast-radius limit without being rewritten first. Absent,
+	// these keep the defaults, which are observe and a bounded hourly limit.
+	if v.IsSet("response.kill_mode") {
+		cfg.LegacyResponse.KillMode = v.GetString("response.kill_mode")
+	}
+	if v.IsSet("response.max_kills_per_hour") {
+		cfg.LegacyResponse.MaxKillsPerHour = v.GetInt("response.max_kills_per_hour")
+	}
 
 	if cfg.Logging.Level != "" && !v.IsSet("agent.log_level") {
 		cfg.Agent.LogLevel = cfg.Logging.Level

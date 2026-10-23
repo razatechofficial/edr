@@ -128,11 +128,17 @@ func TestDecodeAMSIETW_setsSubprovider(t *testing.T) {
 	}
 }
 
-// TestDecodeProcessUserData_CommandLine crafts a Kernel-Process v3+
-// ProcessStart payload with both ImageName and CommandLine and asserts the
-// decoder surfaces both as separate fields. ImageName / CommandLine are
-// adjacent UTF-16LE NUL-terminated strings following the fixed-size header.
-func TestDecodeProcessUserData_CommandLine(t *testing.T) {
+// TestDecodeProcessUserDataProcessStartLayouts crafts a ProcessStart payload
+// in each of the two layouts Microsoft-Windows-Kernel-Process emits and
+// asserts the decoder reads the right words out of each.
+//
+// This replaces a test that asserted a CommandLine field. ProcessStart has no
+// CommandLine in either layout — the old decoder read whatever string followed
+// ImageName, which on a real version 4 record is PackageFullName — and the old
+// test passed only because its crafted payload put a command line there. A
+// Windows process command line has to come from Security-Auditing 4688 or
+// userspace enrichment, not from this event.
+func TestDecodeProcessUserDataProcessStartLayouts(t *testing.T) {
 	d, err := NewETWDriver("agent-test-12345678")
 	if err != nil {
 		t.Fatal(err)
@@ -147,35 +153,77 @@ func TestDecodeProcessUserData_CommandLine(t *testing.T) {
 		out = append(out, 0, 0)
 		return out
 	}
+	const image = `C:\Windows\System32\notepad.exe`
 
-	var ud []byte
-	ud = append(ud, make([]byte, 24)...)
-	binary.LittleEndian.PutUint32(ud[0:4], 4321)   // child_pid
-	binary.LittleEndian.PutUint32(ud[12:16], 1234) // parent_pid
-	binary.LittleEndian.PutUint32(ud[16:20], 1)    // session_id
-	ud = append(ud, encodeUTF16NUL(`C:\Windows\System32\notepad.exe`)...)
-	ud = append(ud, encodeUTF16NUL(`"C:\Windows\System32\notepad.exe" foo.txt`)...)
+	t.Run("version0", func(t *testing.T) {
+		ud := make([]byte, 24)
+		binary.LittleEndian.PutUint32(ud[0:4], 4321)   // ProcessId
+		binary.LittleEndian.PutUint32(ud[12:16], 1234) // ParentProcessId
+		binary.LittleEndian.PutUint32(ud[16:20], 1)    // SessionId
+		ud = append(ud, encodeUTF16NUL(image)...)
 
-	rec := &etwEventRecord{}
-	rec.EventHeader.EventDescriptor.Id = 1 // ProcessStart
-	rec.UserDataLength = uint16(len(ud))
-	rec.UserData = uintptr(unsafe.Pointer(&ud[0]))
+		rec := &etwEventRecord{}
+		rec.EventHeader.EventDescriptor.Id = 1
+		rec.EventHeader.EventDescriptor.Version = 0
+		rec.UserDataLength = uint16(len(ud))
+		rec.UserData = uintptr(unsafe.Pointer(&ud[0]))
 
-	env := map[string]interface{}{}
-	d.decodeProcessUserData(rec, env)
+		env := map[string]interface{}{}
+		d.decodeProcessUserData(rec, env)
+		if got := env["child_pid"]; got != uint32(4321) {
+			t.Errorf("child_pid: %v", got)
+		}
+		if got := env["parent_pid"]; got != uint32(1234) {
+			t.Errorf("parent_pid: %v", got)
+		}
+		if got := env["session_id"]; got != uint32(1) {
+			t.Errorf("session_id: %v", got)
+		}
+		if got := env["image_name"]; got != image {
+			t.Errorf("image_name: %q", got)
+		}
+	})
 
-	if got := env["child_pid"]; got != uint32(4321) {
-		t.Fatalf("child_pid: %v", got)
-	}
-	if got := env["parent_pid"]; got != uint32(1234) {
-		t.Fatalf("parent_pid: %v", got)
-	}
-	if got := env["image_name"]; got != `C:\Windows\System32\notepad.exe` {
-		t.Fatalf("image_name: %q", got)
-	}
-	if got := env["cmdline"]; got != `"C:\Windows\System32\notepad.exe" foo.txt` {
-		t.Fatalf("cmdline: %q", got)
-	}
+	// Version 4 is what windows-latest emits. The fixed prefix is 48
+	// bytes, then a SID whose length depends on its sub-authority count,
+	// then ImageName. These field offsets come from a hex dump of a real
+	// record taken on a hosted runner.
+	t.Run("version4", func(t *testing.T) {
+		ud := make([]byte, 48)
+		binary.LittleEndian.PutUint32(ud[0:4], 4321)   // ProcessId
+		binary.LittleEndian.PutUint32(ud[20:24], 1234) // ParentProcessId
+		binary.LittleEndian.PutUint32(ud[32:36], 2)    // SessionId
+		// MandatoryLabel: S-1-16-12288, one sub-authority.
+		sid := []byte{1, 1, 0, 0, 0, 0, 0, 16, 0x00, 0x30, 0x00, 0x00}
+		ud = append(ud, sid...)
+		ud = append(ud, encodeUTF16NUL(image)...)
+		ud = append(ud, encodeUTF16NUL("")...) // PackageFullName
+		ud = append(ud, encodeUTF16NUL("")...) // PackageRelativeAppId
+
+		rec := &etwEventRecord{}
+		rec.EventHeader.EventDescriptor.Id = 1
+		rec.EventHeader.EventDescriptor.Version = 4
+		rec.UserDataLength = uint16(len(ud))
+		rec.UserData = uintptr(unsafe.Pointer(&ud[0]))
+
+		env := map[string]interface{}{}
+		d.decodeProcessUserData(rec, env)
+		if got := env["child_pid"]; got != uint32(4321) {
+			t.Errorf("child_pid: %v", got)
+		}
+		if got := env["parent_pid"]; got != uint32(1234) {
+			t.Errorf("parent_pid: %v", got)
+		}
+		if got := env["session_id"]; got != uint32(2) {
+			t.Errorf("session_id: %v", got)
+		}
+		if got := env["image_name"]; got != image {
+			t.Errorf("image_name: %q (v0 offsets would read the middle of ParentProcessSequenceNumber here)", got)
+		}
+		if _, ok := env["cmdline"]; ok {
+			t.Error("cmdline is set: ProcessStart carries no command line, and inventing one is what this decoder used to do")
+		}
+	})
 }
 
 // TestDecodeNetworkUserData_IPv6 builds a crafted TcpIp_V6_Header payload and
@@ -200,7 +248,7 @@ func TestDecodeNetworkUserData_IPv6(t *testing.T) {
 	binary.BigEndian.PutUint16(ud[42:44], 50000)
 
 	rec := &etwEventRecord{}
-	rec.EventHeader.EventDescriptor.Id = 26 // connect (IPv6)
+	rec.EventHeader.EventDescriptor.Id = 26 // IPv6 TCP block base
 	rec.UserDataLength = uint16(len(ud))
 	rec.UserData = uintptr(unsafe.Pointer(&ud[0]))
 
@@ -232,8 +280,10 @@ func TestShouldDropDuplicateKernelFileRW(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ud := make([]byte, 8)
-	binary.LittleEndian.PutUint64(ud, 0xAABBCCDD)
+	// Kernel-File Read/Write template: ByteOffset, Irp, FileObject, ...
+	// so the FileObject the deduplicator keys on is at offset 16.
+	ud := make([]byte, 48)
+	binary.LittleEndian.PutUint64(ud[16:24], 0xAABBCCDD)
 	rec := &etwEventRecord{}
 	rec.EventHeader.EventDescriptor.Id = kernelFileEvtReadID
 	rec.UserDataLength = uint16(len(ud))

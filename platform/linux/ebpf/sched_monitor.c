@@ -31,7 +31,7 @@ int edr_tp_sched_switch(struct trace_event_raw_sched_switch *ctx)
 {
 	struct sched_event *e;
 
-	e = bpf_ringbuf_reserve(&sched_events, sizeof(*e), 0);
+	e = edr_ringbuf_reserve(&sched_events, sizeof(*e), EVENT_SCHED_SWITCH);
 	if (!e)
 		return 0;
 	__builtin_memset(e, 0, sizeof(*e));
@@ -55,7 +55,7 @@ int edr_tp_sched_wakeup(void *ctx)
 	__u32 pid = 0;
 	__u32 target_cpu = 0;
 
-	e = bpf_ringbuf_reserve(&sched_events, sizeof(*e), 0);
+	e = edr_ringbuf_reserve(&sched_events, sizeof(*e), EVENT_SCHED_WAKEUP);
 	if (!e)
 		return 0;
 	__builtin_memset(e, 0, sizeof(*e));
@@ -76,7 +76,7 @@ int edr_tp_sched_migrate_task(struct trace_event_raw_sched_migrate_task *ctx)
 {
 	struct sched_event *e;
 
-	e = bpf_ringbuf_reserve(&sched_events, sizeof(*e), 0);
+	e = edr_ringbuf_reserve(&sched_events, sizeof(*e), EVENT_SCHED_MIGRATE);
 	if (!e)
 		return 0;
 	__builtin_memset(e, 0, sizeof(*e));

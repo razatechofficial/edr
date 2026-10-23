@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/razatechofficial/edr/internal/localapi"
 	"github.com/razatechofficial/edr/internal/xdrclient"
 )
 
@@ -74,27 +75,41 @@ type operatorHostProbe struct {
 }
 
 type operatorStatus struct {
-	Config      string               `json:"config"`
-	Service     string               `json:"service"`
-	Enrolled    bool                 `json:"enrolled"`
-	AgentID     string               `json:"agent_id,omitempty"`
-	Ingest      string               `json:"ingest,omitempty"`
-	Runtime     string               `json:"runtime,omitempty"`
-	Version     string               `json:"version,omitempty"`
-	Uptime      string               `json:"uptime,omitempty"`
-	Detections  uint64               `json:"detections"`
-	Isolated    bool                 `json:"isolated"`
-	ControlAPI  string               `json:"control_api"`
-	Hosts       []operatorHostProbe  `json:"hosts,omitempty"`
-	UpdatedAt   string               `json:"updated_at"`
+	Config     string `json:"config"`
+	Service    string `json:"service"`
+	Enrolled   bool   `json:"enrolled"`
+	AgentID    string `json:"agent_id,omitempty"`
+	Ingest     string `json:"ingest,omitempty"`
+	Runtime    string `json:"runtime,omitempty"`
+	Version    string `json:"version,omitempty"`
+	Uptime     string `json:"uptime,omitempty"`
+	Detections uint64 `json:"detections"`
+	Isolated   bool   `json:"isolated"`
+	ControlAPI string `json:"control_api"`
+	// StatusFile and StatusState report where the world-readable status file
+	// is and how far it can be trusted, so an operator can tell a stopped
+	// agent from an unenrolled one.
+	StatusFile  string              `json:"status_file,omitempty"`
+	StatusState string              `json:"status_state,omitempty"`
+	Hosts       []operatorHostProbe `json:"hosts,omitempty"`
+	UpdatedAt   string              `json:"updated_at"`
 }
 
 func collectOperatorStatus() operatorStatus {
 	st := operatorStatus{
 		Config:     configFile,
-		Service:    serviceRuntimeStatus(),
+		Service:    serviceRuntimeStatus().String(),
 		ControlAPI: "unavailable",
+		StatusFile: localapi.DefaultStatusFile(),
 		UpdatedAt:  time.Now().Format(time.RFC3339),
+	}
+	public, availability, _ := localapi.ReadStatusFile(st.StatusFile, 0)
+	st.StatusState = string(availability)
+	if availability == localapi.StatusOK || availability == localapi.StatusStale {
+		st.Version = public.Version
+		st.Uptime = public.Uptime
+		st.Detections = public.Detections
+		st.Isolated = public.Isolated
 	}
 	st.Enrolled, st.AgentID, st.Ingest = enrollmentSnapshot()
 
@@ -200,7 +215,31 @@ type enrollMeta struct {
 	IngestHosts []string `json:"ingest_hosts"`
 }
 
+// enrollmentSnapshot reports enrollment without requiring privilege.
+//
+// The agent config is 0640 in a 0750 directory and the enrollment state is
+// 0600 in a 0700 one, so every unprivileged caller used to get
+// (false, "", "") and an enrolled machine reported itself unenrolled with a
+// blank agent id. The agent now publishes the same three fields in a
+// world-readable status file; the on-disk fallback below is for a privileged
+// caller on an agent that has not started yet.
 func enrollmentSnapshot() (enrolled bool, agentID, ingest string) {
+	return enrollmentSnapshotFrom(localapi.DefaultStatusFile())
+}
+
+// enrollmentSnapshotFrom prefers the published status file and falls back to
+// the root-owned files on disk.
+func enrollmentSnapshotFrom(statusPath string) (enrolled bool, agentID, ingest string) {
+	if public, availability, err := localapi.ReadStatusFile(statusPath, 0); err == nil &&
+		(availability == localapi.StatusOK || availability == localapi.StatusStale) {
+		return public.Enrolled, public.AgentID, public.IngestHost
+	}
+	return enrollmentSnapshotFromDisk()
+}
+
+// enrollmentSnapshotFromDisk reads the root-owned config and enrollment
+// state. It returns nothing useful unless the caller is root.
+func enrollmentSnapshotFromDisk() (enrolled bool, agentID, ingest string) {
 	data, err := os.ReadFile(configFile)
 	if err != nil {
 		return false, "", ""

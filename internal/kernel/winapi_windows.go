@@ -3,6 +3,8 @@
 package kernel
 
 import (
+	"errors"
+	"os"
 	"syscall"
 	"unsafe"
 
@@ -10,23 +12,21 @@ import (
 )
 
 const (
-	EvtRenderEventXML         = 1
-	EvtQueryChannelPath       = 0x1
-	EvtQueryReverseDirection  = 0x200
+	EvtRenderEventXML          = 1
+	EvtQueryChannelPath        = 0x1
+	EvtQueryReverseDirection   = 0x200
 	EvtSubscribeToFutureEvents = 1
 )
 
 var (
-	wevtapiProc               = windows.NewLazySystemDLL("wevtapi.dll")
-	procEvtQuery              = wevtapiProc.NewProc("EvtQuery")
-	procEvtNext               = wevtapiProc.NewProc("EvtNext")
-	procEvtRender             = wevtapiProc.NewProc("EvtRender")
-	procEvtClose              = wevtapiProc.NewProc("EvtClose")
-	procEvtCreateBookmark     = wevtapiProc.NewProc("EvtCreateBookmark")
-	procEvtUpdateBookmark     = wevtapiProc.NewProc("EvtUpdateBookmark")
-	procEvtSaveBookmark       = wevtapiProc.NewProc("EvtSaveBookmark")
-	procEvtLoadBookmark       = wevtapiProc.NewProc("EvtLoadBookmark")
-	procEvtSubscribe          = wevtapiProc.NewProc("EvtSubscribe")
+	wevtapiProc           = windows.NewLazySystemDLL("wevtapi.dll")
+	procEvtQuery          = wevtapiProc.NewProc("EvtQuery")
+	procEvtNext           = wevtapiProc.NewProc("EvtNext")
+	procEvtRender         = wevtapiProc.NewProc("EvtRender")
+	procEvtClose          = wevtapiProc.NewProc("EvtClose")
+	procEvtCreateBookmark = wevtapiProc.NewProc("EvtCreateBookmark")
+	procEvtUpdateBookmark = wevtapiProc.NewProc("EvtUpdateBookmark")
+	procEvtSubscribe      = wevtapiProc.NewProc("EvtSubscribe")
 )
 
 func EvtQuery(session, path, query *uint16, flags uint32) (windows.Handle, error) {
@@ -112,26 +112,68 @@ func EvtUpdateBookmark(bookmark, event windows.Handle) error {
 	return nil
 }
 
+// EvtRenderBookmark serialises a bookmark handle to its XML form.
+// https://learn.microsoft.com/windows/win32/api/winevt/ne-winevt-evt_render_flags
+const EvtRenderBookmark = 2
+
+// EvtSaveBookmark persists a bookmark to filePath.
+//
+// There is no EvtSaveBookmark export in wevtapi.dll — the Windows Event Log API
+// has no save call at all. A bookmark is persisted by rendering it to XML with
+// EvtRender(EvtRenderBookmark) and writing that text; it is restored by passing
+// the same text to EvtCreateBookmark. This package previously declared
+// EvtSaveBookmark and EvtLoadBookmark as exports, so the first call to either
+// panicked in LazyProc.mustFind with "The specified procedure could not be
+// found", taking down the EVTX collectors that checkpoint with them.
+//
+// The signature is kept so callers keep their own temp-file and atomic-rename
+// handling.
 func EvtSaveBookmark(bookmark windows.Handle, filePath *uint16) error {
-	r0, _, e1 := procEvtSaveBookmark.Call(uintptr(bookmark), uintptr(unsafe.Pointer(filePath)))
-	if r0 == 0 {
-		if e1 == windows.ERROR_SUCCESS {
-			return syscall.EINVAL
-		}
-		return error(e1)
+	if bookmark == 0 {
+		return syscall.EINVAL
 	}
-	return nil
+	// Bookmark XML for a handful of channels is small; this sizes the common
+	// case in one call and grows only when the API says it must.
+	buf := make([]uint16, 2048)
+	used, _, err := EvtRender(0, bookmark, EvtRenderBookmark, buf)
+	if err != nil {
+		if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
+			return err
+		}
+		// used is the required size in bytes, so round up to whole uint16s.
+		buf = make([]uint16, int(used)/2+2)
+		if used, _, err = EvtRender(0, bookmark, EvtRenderBookmark, buf); err != nil {
+			return err
+		}
+	}
+	n := int(used) / 2
+	if n > len(buf) {
+		n = len(buf)
+	}
+	path := windows.UTF16PtrToString(filePath)
+	if path == "" {
+		return syscall.EINVAL
+	}
+	// 0600: a bookmark records which security events this host has already
+	// shipped, so it is operational state, not world-readable information.
+	return os.WriteFile(path, []byte(windows.UTF16ToString(buf[:n])), 0o600)
 }
 
+// EvtLoadBookmark restores a bookmark previously written by EvtSaveBookmark.
 func EvtLoadBookmark(filePath *uint16) (windows.Handle, error) {
-	r0, _, e1 := procEvtLoadBookmark.Call(uintptr(unsafe.Pointer(filePath)))
-	if r0 == 0 {
-		if e1 == windows.ERROR_SUCCESS {
-			return 0, syscall.EINVAL
-		}
-		return 0, error(e1)
+	path := windows.UTF16PtrToString(filePath)
+	if path == "" {
+		return 0, syscall.EINVAL
 	}
-	return windows.Handle(r0), nil
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	xml, err := windows.UTF16PtrFromString(string(data))
+	if err != nil {
+		return 0, err
+	}
+	return EvtCreateBookmark(xml)
 }
 
 func EvtSubscribe(session, signalEvent windows.Handle, channel, query *uint16, bookmark windows.Handle, context uintptr, callback uintptr, flags uint32) (windows.Handle, error) {

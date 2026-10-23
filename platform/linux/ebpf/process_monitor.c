@@ -12,6 +12,13 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
+
+/*
+ * This file owns the definitions of the shared accounting maps common.h
+ * declares (event_stats, filter_stats); every other file externs them. See the
+ * comment on EDR_SHARED_MAPS_OWNER in common.h.
+ */
+#define EDR_SHARED_MAPS_OWNER
 #include "common.h"
 
 struct {
@@ -78,13 +85,17 @@ static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 static __always_inline bool is_filtered(void)
 {
 	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	if (bpf_map_lookup_elem(&pid_filter, &pid))
+	if (bpf_map_lookup_elem(&pid_filter, &pid)) {
+		edr_stat_filtered(EDR_SUBSYS_PROCESS);
 		return true;
+	}
 
 	char comm[TASK_COMM_LEN] = {};
 	bpf_get_current_comm(comm, sizeof(comm));
-	if (bpf_map_lookup_elem(&comm_filter, comm))
+	if (bpf_map_lookup_elem(&comm_filter, comm)) {
+		edr_stat_filtered(EDR_SUBSYS_PROCESS);
 		return true;
+	}
 
 	return false;
 }
@@ -96,6 +107,23 @@ static __always_inline bool is_filtered(void)
  * capture_argv reads up to EXEC_ARGV_SLOTS argv strings into evt->args,
  * separated by single spaces. Each token is read in fixed-size chunks so
  * the verifier can prove the destination stays inside evt->args.
+ *
+ * Every index into evt->args is masked to the buffer size immediately before
+ * it is used, and the bound check is on the masked value with no arithmetic
+ * between the check and the use. That is not belt-and-braces: the previous
+ * version checked `off` at the top of the loop and let the rest of the body
+ * advance it, and clang kept the checked value and the value used to form the
+ * address in two different registers, so the bound did not transfer:
+ *
+ *   537: r8 += 1                  ; r8 = off, 386..510
+ *   538: if r1 > 0x1be goto ...   ; bounds r1, a *copy*, to 446
+ *   552: r1 += r2                 ; address formed from r8, still 510
+ *   555: call bpf_probe_read_user_str
+ *   invalid access to memory, mem_size=840 off=818 size=64
+ *
+ * Kernels that enforce this (6.17 among them) rejected the program, which
+ * failed the whole collection load and left the agent with no eBPF telemetry
+ * at all on that host -- not just no argv.
  */
 static __always_inline void capture_argv(struct process_event *evt,
                                          const char *const *argv)
@@ -109,31 +137,34 @@ static __always_inline void capture_argv(struct process_event *evt,
 	for (int i = 0; i < EXEC_ARGV_SLOTS; i++) {
 		const char *argp = NULL;
 
-		if (off > MAX_ARGS_LEN - 1 - EXEC_ARGV_CHUNK)
-			break;
 		if (bpf_probe_read_user(&argp, sizeof(argp), &argv[i]) < 0)
 			break;
 		if (!argp)
 			break;
 
-		int written = bpf_probe_read_user_str(&evt->args[off],
+		/* Masked to 0..MAX_ARGS_LEN-1, then bounded so the whole
+		 * chunk fits. The address below is formed from this value. */
+		__u32 pos = off & (MAX_ARGS_LEN - 1);
+		if (pos + EXEC_ARGV_CHUNK > MAX_ARGS_LEN)
+			break;
+
+		int written = bpf_probe_read_user_str(&evt->args[pos],
 		                                      EXEC_ARGV_CHUNK, argp);
 		if (written <= 0)
 			break;
 
 		__u32 len = (__u32)written - 1;
-		if (len >= EXEC_ARGV_CHUNK)
+		if (len > EXEC_ARGV_CHUNK - 1)
 			len = EXEC_ARGV_CHUNK - 1;
 
-		off += len;
-		if (off >= MAX_ARGS_LEN - 1)
-			break;
-		evt->args[off] = ' ';
-		off++;
+		__u32 sep = (pos + len) & (MAX_ARGS_LEN - 1);
+		evt->args[sep] = ' ';
+		off = sep + 1;
 	}
 	if (off > 0) {
-		evt->args[off - 1] = '\0';
-		evt->args_size = off - 1;
+		__u32 end = (off - 1) & (MAX_ARGS_LEN - 1);
+		evt->args[end] = '\0';
+		evt->args_size = end;
 	}
 }
 
@@ -144,7 +175,7 @@ int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter *ctx
 		return 0;
 
 	struct process_event *evt;
-	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&events, sizeof(*evt), EVENT_PROCESS_EXEC);
 	if (!evt)
 		return 0;
 
@@ -169,7 +200,7 @@ int tracepoint__syscalls__sys_enter_execveat(struct trace_event_raw_sys_enter *c
 		return 0;
 
 	struct process_event *evt;
-	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&events, sizeof(*evt), EVENT_PROCESS_EXEC);
 	if (!evt)
 		return 0;
 
@@ -191,11 +222,13 @@ SEC("tracepoint/sched/sched_process_fork")
 int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_fork *ctx)
 {
 	__u32 parent_pid = ctx->parent_pid;
-	if (bpf_map_lookup_elem(&pid_filter, &parent_pid))
+	if (bpf_map_lookup_elem(&pid_filter, &parent_pid)) {
+		edr_stat_filtered(EDR_SUBSYS_PROCESS);
 		return 0;
+	}
 
 	struct process_event *evt;
-	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&events, sizeof(*evt), EVENT_PROCESS_FORK);
 	if (!evt)
 		return 0;
 
@@ -214,7 +247,7 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_t
 		return 0;
 
 	struct process_event *evt;
-	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+	evt = edr_ringbuf_reserve(&events, sizeof(*evt), EVENT_PROCESS_EXIT);
 	if (!evt)
 		return 0;
 

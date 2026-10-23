@@ -40,7 +40,10 @@ static __always_inline void fill_header(struct edr_event_hdr *hdr, __u32 type)
 static __always_inline bool pid_is_filtered(void)
 {
 	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	return bpf_map_lookup_elem(&file_pid_filter, &pid) != NULL;
+	if (!bpf_map_lookup_elem(&file_pid_filter, &pid))
+		return false;
+	edr_stat_filtered(EDR_SUBSYS_FIM);
+	return true;
 }
 
 SEC("lsm/path_unlink")
@@ -50,7 +53,7 @@ int BPF_PROG(fim_path_unlink, struct path *dir, struct dentry *dentry)
 	if (pid_is_filtered())
 		return 0;
 
-	struct file_event *evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	struct file_event *evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_LSM_FIM_UNLINK);
 	if (!evt)
 		return 0;
 
@@ -75,7 +78,7 @@ int BPF_PROG(fim_path_rename, struct path *old_dir, struct dentry *old_dentry,
 	if (pid_is_filtered())
 		return 0;
 
-	struct file_event *evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	struct file_event *evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_LSM_FIM_RENAME);
 	if (!evt)
 		return 0;
 
@@ -103,7 +106,7 @@ int BPF_PROG(fim_inode_setattr, struct dentry *dentry, struct iattr *attr)
 	if (pid_is_filtered())
 		return 0;
 
-	struct file_event *evt = bpf_ringbuf_reserve(&file_events, sizeof(*evt), 0);
+	struct file_event *evt = edr_ringbuf_reserve(&file_events, sizeof(*evt), EVENT_LSM_FIM_SETATTR);
 	if (!evt)
 		return 0;
 

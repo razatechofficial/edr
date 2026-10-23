@@ -15,8 +15,12 @@ import (
 func runDashboard() error {
 	a := app.NewWithID("com.razatech.edr.console")
 	w := a.NewWindow("EDR Agent")
-	w.Resize(fyne.NewSize(760, 620))
+	w.Resize(fyne.NewSize(760, 660))
 	w.SetMaster()
+
+	stateVal := widget.NewLabelWithStyle("…", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	stateDetail := widget.NewLabel("…")
+	diagVal := widget.NewLabel("…")
 
 	serviceVal := widget.NewLabel("…")
 	enrollVal := widget.NewLabel("…")
@@ -25,7 +29,7 @@ func runDashboard() error {
 	runtimeVal := widget.NewLabel("…")
 	detectVal := widget.NewLabel("…")
 	updatedVal := widget.NewLabel("…")
-	for _, l := range []*widget.Label{serviceVal, enrollVal, agentVal, ingestVal, runtimeVal, detectVal, updatedVal} {
+	for _, l := range []*widget.Label{stateDetail, diagVal, serviceVal, enrollVal, agentVal, ingestVal, runtimeVal, detectVal, updatedVal} {
 		l.Wrapping = fyne.TextWrapWord
 	}
 
@@ -55,8 +59,32 @@ func runDashboard() error {
 		activity.SetText(line)
 	}
 
-	applyStatus := func(st operatorStatus) {
-		svc := dash(st.Service)
+	grid := container.NewGridWithColumns(2,
+		labeled("Service", serviceVal),
+		labeled("Enrollment", enrollVal),
+		labeled("Agent ID", agentVal),
+		labeled("Runtime", runtimeVal),
+		labeled("Ingest", ingestVal),
+		labeled("Detections", detectVal),
+	)
+	enrollBtn := widget.NewButtonWithIcon("Enroll device", theme.ConfirmIcon(), nil)
+	enrollBtn.Importance = widget.HighImportance
+	enrollRow := container.NewBorder(nil, nil, nil, enrollBtn, token)
+
+	// The two views. Only one is ever visible, and which one is decided by
+	// uiState alone — never by whether a subprocess exited non-zero.
+	dashPane := container.NewVBox(grid, updatedVal)
+	setupPane := container.NewVBox(
+		widget.NewLabelWithStyle("Enrollment token", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		enrollRow,
+	)
+
+	applyStatus := func(st uiStatus) {
+		stateVal.SetText(st.State.headline())
+		stateDetail.SetText(st.State.detail())
+		diagVal.SetText(describeSources(st))
+
+		svc := dash(st.Service.String())
 		if serviceHealthy(st.Service) {
 			serviceVal.SetText("●  " + svc)
 		} else {
@@ -75,7 +103,15 @@ func runDashboard() error {
 		}
 		runtimeVal.SetText(rt)
 		detectVal.SetText(fmt.Sprintf("%d", st.Detections))
-		updatedVal.SetText(dash(st.UpdatedAt))
+		updatedVal.SetText("Status published " + dash(formatStamp(st.UpdatedAt)))
+
+		if st.State.screen() == screenDashboard {
+			setupPane.Hide()
+			dashPane.Show()
+		} else {
+			dashPane.Hide()
+			setupPane.Show()
+		}
 		if st.Error != "" {
 			appendActivity("Status", st.Error, nil)
 		}
@@ -89,14 +125,9 @@ func runDashboard() error {
 		}
 	}
 
-	// refresh never runs loadStatus on the UI goroutine.
-	//
-	// loadStatus forks edrctl, which TCP-dials every enrollment and ingest
-	// host with a four-second timeout each. Calling it inline froze the window
-	// for as long as those dials took — which is why the UI was unresponsive
-	// intermittently rather than always: it only stalls when a configured host
-	// is slow or unreachable. On launch it also meant the window did not
-	// appear at all until the probes finished.
+	// refresh never runs loadStatus on the UI goroutine. It reads a local
+	// file and may dial the control socket, and neither belongs on the
+	// thread that draws the window.
 	refresh := func() {
 		setBusy(true)
 		go func() {
@@ -117,6 +148,9 @@ func runDashboard() error {
 				out, err = runEdrctlPrivileged(args...)
 			} else {
 				out, err = runEdrctl(args...)
+			}
+			if err != nil && strings.TrimSpace(out) == "" {
+				out = friendlyExecError(err)
 			}
 			// The status re-read stays on this goroutine. Inside fyne.Do it
 			// would be back on the UI thread, so every Start, Stop, Enroll and
@@ -144,38 +178,29 @@ func runDashboard() error {
 	stopBtn := widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), func() {
 		runAction("Stop", true, "stop")
 	})
-	enrollBtn := widget.NewButtonWithIcon("Enroll device", theme.ConfirmIcon(), func() {
+	enrollBtn.OnTapped = func() {
 		tok := strings.TrimSpace(token.Text)
 		if tok == "" {
 			appendActivity("Enroll", "Paste an enrollment token first.", nil)
 			return
 		}
 		runAction("Enroll", true, "enroll", "--token", tok)
-	})
-	enrollBtn.Importance = widget.HighImportance
+	}
 	refreshBtn.Importance = widget.MediumImportance
 
 	header := widget.NewRichTextFromMarkdown("## EDR Agent\nLive endpoint status, enrollment, and service control.")
-	grid := container.NewGridWithColumns(2,
-		labeled("Service", serviceVal),
-		labeled("Enrollment", enrollVal),
-		labeled("Agent ID", agentVal),
-		labeled("Runtime", runtimeVal),
-		labeled("Ingest", ingestVal),
-		labeled("Detections", detectVal),
-	)
 	actions := container.NewGridWithColumns(4, refreshBtn, testBtn, startBtn, stopBtn)
-	enrollRow := container.NewBorder(nil, nil, nil, enrollBtn, token)
 
 	content := container.NewPadded(container.NewVBox(
 		header,
-		grid,
-		updatedVal,
+		stateVal,
+		stateDetail,
+		dashPane,
+		setupPane,
+		diagVal,
 		widget.NewSeparator(),
 		widget.NewLabelWithStyle("Actions", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		actions,
-		widget.NewLabelWithStyle("Enrollment token", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		enrollRow,
 		widget.NewLabelWithStyle("Activity", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		activity,
 	))
@@ -193,6 +218,32 @@ func runDashboard() error {
 
 	w.ShowAndRun()
 	return nil
+}
+
+// describeSources says where the view's data came from, so an operator can
+// tell a stale status file from a socket this account may not open.
+func describeSources(st uiStatus) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Status file: %s (%s)", st.StatusFile, st.Availability)
+	switch st.Control {
+	case controlOK:
+		b.WriteString("  ·  Control socket: connected")
+	case controlDenied:
+		b.WriteString("  ·  Control socket: present but not readable by this account (run edrctl with sudo for live counters)")
+	default:
+		b.WriteString("  ·  Control socket: unreachable")
+	}
+	if st.ControlDetail != "" && st.Control != controlOK {
+		fmt.Fprintf(&b, " — %s", st.ControlDetail)
+	}
+	return b.String()
+}
+
+func formatStamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format("2006-01-02 15:04:05")
 }
 
 func labeled(title string, value *widget.Label) fyne.CanvasObject {

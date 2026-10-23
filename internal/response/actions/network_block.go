@@ -50,8 +50,22 @@ func (a *NetworkBlockAction) Validate() error {
 }
 
 // applyArgv returns the command that adds the rule, as program and arguments.
-// A nil result means this platform has no implementation.
+// A nil result means there is nothing safe to run: either this platform has no
+// implementation, or the action did not validate.
+//
+// The validation check is deliberately repeated here rather than left to the
+// caller. Every field in this action comes from event data a playbook
+// substituted verbatim — {{detection.event.dst_ip}} and friends — so it is
+// attacker-influenced, and an argv is one refactor away from being handed to a
+// shell again. Refusing to build the command at all means an invalid value can
+// never reach exec, whatever the caller forgot.
+//
+// Without it the darwin branch returned nil and so looked safe, while linux and
+// windows embedded the raw value in an argument.
 func (a *NetworkBlockAction) applyArgv() []string {
+	if err := a.Validate(); err != nil {
+		return nil
+	}
 	switch runtime.GOOS {
 	case "windows":
 		return []string{
@@ -84,6 +98,12 @@ func (a *NetworkBlockAction) applyArgv() []string {
 func (a *NetworkBlockAction) RollbackArgv() []string { return a.rollbackArgv() }
 
 func (a *NetworkBlockAction) rollbackArgv() []string {
+	// Guarded for the same reason as applyArgv: these fields are
+	// attacker-influenced, and a rollback that was never a valid block has
+	// nothing to lift.
+	if err := a.Validate(); err != nil {
+		return nil
+	}
 	switch runtime.GOOS {
 	case "windows":
 		return []string{

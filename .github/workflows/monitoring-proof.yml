@@ -1,0 +1,291 @@
+name: Monitoring Proof
+
+# Proves the monitoring layer works, as opposed to compiling.
+#
+# Three tiers, in increasing cost and decreasing portability:
+#
+#   1. static-consistency — parses platform/linux/ebpf/*.c and the Linux
+#      loader and asserts no program, map or ring buffer is inert. Pure Go, no
+#      root, no kernel, no compiled BPF object, so it runs on all three OSes
+#      and catches the silent no-ops that a Linux-only test would not run often
+#      enough to notice.
+#   2. unit — the kernel and collector unit suites per OS, including the
+#      capability-report contract tests.
+#   3. integration — generates real kernel activity and asserts the event
+#      arrives, one subtest per capability category, on each OS. Only possible
+#      where the OS lets a CI runner attach to the kernel; see the per-job
+#      comments for exactly where that is and is not. On the runners these
+#      jobs use that currently comes to 21 of 24 categories proved on Linux
+#      and 13 of 24 on Windows, with every remaining category skipping with
+#      the specific prerequisite it is missing. macOS can prove none of them
+#      on a hosted runner and says so.
+#
+# This workflow is additive. ci.yml is unchanged and still owns builds,
+# packaging, lint and the existing validation gates.
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  static-consistency:
+    name: eBPF consistency (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both macOS versions GitHub serves, not just the newest. macos-15
+        # and macos-26 ship different SDKs, and the darwin build is the one
+        # that compiles against EndpointSecurity headers — an SDK difference
+        # shows up here or not at all. macos-latest is deliberately not used:
+        # it moves between versions, so a lane named after it proves whichever
+        # one GitHub happened to point at that day.
+        os: [ubuntu-latest, windows-latest, macos-15, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      # macOS needs the nosec tag so the package builds without the
+      # EndpointSecurity SDK and cgo bridge, matching ci.yml's
+      # macos-test-nosec lane. The consistency tests themselves are pure Go
+      # and identical on every OS.
+      - name: eBPF static consistency
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          TAGS=""
+          if [ "$RUNNER_OS" = "macOS" ]; then TAGS="-tags nosec"; fi
+          go test $TAGS ./internal/kernel/ -count=1 -v \
+            -run 'TestEBPFEveryProgramIsAttachedOrAllowlisted|TestEBPFEveryGoWrittenMapIsDeclaredInC|TestEBPFEveryDeclaredMapIsReadByAProgram|TestEBPFEveryReaderRingbufHasAnAttachedProducer|TestEBPFLoaderAttachMechanismsUnchanged|TestEBPFConsistencyAllowlistsAreDocumented'
+
+      - name: Capability report contract
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          TAGS=""
+          if [ "$RUNNER_OS" = "macOS" ]; then TAGS="-tags nosec"; fi
+          go test $TAGS ./internal/kernel/ -count=1 -v \
+            -run 'TestCanonicalCapabilityCategoriesAreUniqueAndNonEmpty|TestCapabilityReport.*|TestCapabilitySummaryCountsMatchCategories|TestCapabilityTrackerIgnoresUnknownCategories|TestNilCapabilityTrackerIsSafe|TestLinuxCapability.*|TestLinuxUnattachableHooksMatchConsistencyAllowlist|TestLinuxEventTypeCategoryCoverage|TestWindowsCapability.*|TestWindowsProviderNameForGUIDRoundTrips|TestDarwinCapability.*|TestDarwinNocgoCapabilityReportIsCompleteAndAbsent'
+
+  unit:
+    name: Monitoring unit suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both macOS versions GitHub serves, not just the newest. macos-15
+        # and macos-26 ship different SDKs, and the darwin build is the one
+        # that compiles against EndpointSecurity headers — an SDK difference
+        # shows up here or not at all. macos-latest is deliberately not used:
+        # it moves between versions, so a lane named after it proves whichever
+        # one GitHub happened to point at that day.
+        os: [ubuntu-latest, windows-latest, macos-15, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Kernel and collector unit tests
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          TAGS=""
+          if [ "$RUNNER_OS" = "macOS" ]; then TAGS="-tags nosec"; fi
+          go test $TAGS ./internal/kernel/... ./internal/collector/... -count=1 -timeout 300s
+
+      # Compile the build-tagged integration tests on every OS even where they
+      # cannot run. Without this an integration test can rot undetected for as
+      # long as nobody has a provisioned host to run it on — and the macOS
+      # ones can only run on a provisioned Mac.
+      - name: Compile integration tests
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          TAGS="-tags integration"
+          if [ "$RUNNER_OS" = "macOS" ]; then TAGS="-tags 'integration nosec'"; fi
+          eval go test $TAGS -c -o /dev/null ./internal/kernel/
+
+  linux-integration:
+    name: Integration — Linux eBPF (24 categories, root)
+    runs-on: ubuntu-latest
+    needs: static-consistency
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Prepare Linux eBPF toolchain
+        run: bash scripts/ci/setup_linux_ebpf.sh
+
+      - name: Build and link eBPF objects
+        run: make ebpf ebpf-link
+
+      # Confirm the two prerequisites the tests gate on, so a skipped run is
+      # attributable to the right cause from the log alone.
+      - name: Report kernel prerequisites
+        run: |
+          echo "kernel: $(uname -r)"
+          echo -n "BTF at /sys/kernel/btf/vmlinux: "
+          if [ -r /sys/kernel/btf/vmlinux ]; then echo "present"; else echo "ABSENT — tests will skip"; fi
+          ls -l platform/linux/ebpf/edr.bpf.o
+
+      # GitHub-hosted ubuntu runners are full VMs: the job user has passwordless
+      # sudo and the kernel ships CONFIG_DEBUG_INFO_BTF, so eBPF programs load
+      # and attach here. This is the one platform where CI can prove the whole
+      # path end to end, which is why this job is not allowed to fail silently.
+      #
+      # The tests skip (they do not fail) when root, the BPF object or BTF is
+      # missing, and they skip per category when the capability report says the
+      # hook that category needs is absent from this build or failed to attach
+      # on this kernel, quoting the kernel's own reason.
+      #
+      # EDR_REQUIRE_EBPF=1 makes a load or attach failure a FAILURE rather than
+      # a skip, and it is set here on purpose. Without it this lane was green
+      # for months while every subtest skipped on "eBPF driver failed to
+      # start": the verifier was rejecting capture_argv and tp_dns_sendto, so
+      # no program attached at all and nothing was being proved. A runner with
+      # root and BTF that cannot load an object built from this tree is a
+      # defect in the tree.
+      - name: Linux monitoring integration tests
+        env:
+          CGO_ENABLED: "0"
+          EDR_BPF_OBJECT: platform/linux/ebpf/edr.bpf.o
+        run: |
+          sudo -E env "PATH=$PATH" "EDR_REQUIRE_EBPF=1" \
+            "EDR_BPF_OBJECT=$PWD/platform/linux/ebpf/edr.bpf.o" \
+            go test -tags=integration ./internal/kernel/ -count=1 -v -timeout 900s \
+            -run 'TestLinuxMonitoring'
+
+  windows-integration:
+    name: Integration — Windows ETW (24 categories, elevated)
+    runs-on: windows-latest
+    needs: static-consistency
+    # ETW realtime kernel sessions need SeSystemProfilePrivilege, which an
+    # elevated session holds; hosted windows runners run elevated, so these
+    # execute here. Session and provider availability is still not
+    # contractual — another session may hold a provider, and enable can fail
+    # per provider — and the tests skip with the provider's own enable error
+    # when that happens, so a runner-side ETW problem produces skips rather
+    # than failures. That is what makes continue-on-error unnecessary now, and
+    # it has been removed: with it set, this lane reported success while the
+    # Windows capability tables were crediting an Accept to network_close and
+    # ProcessStart's image name was unreadable.
+    #
+    # Thirteen of the twenty-four categories are provable from the providers
+    # this driver enables; the other eleven skip naming the provider or
+    # capability that is missing. Not covered here at all: the signed-driver
+    # tier (the WDM and minifilter paths need a kernel-mode driver signed with
+    # an EV certificate and cross-signed by Microsoft) and
+    # Microsoft-Windows-Threat-Intelligence, which only a binary Microsoft has
+    # granted the TI ETW capability can enable.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Windows monitoring integration tests
+        env:
+          CGO_ENABLED: "0"
+        run: go test -tags=integration ./internal/kernel/ -count=1 -v -timeout 900s -run "TestWindowsMonitoring"
+
+  macos-integration:
+    name: Integration — macOS ESF (table checked, proofs skip)
+    runs-on: macos-latest
+    needs: static-consistency
+    # These cannot run on any hosted runner and are not expected to. Opening an
+    # Endpoint Security client requires the
+    # com.apple.developer.endpoint-security.client entitlement, which Apple
+    # grants per Developer ID and which must be embedded in a binary signed
+    # with that identity; on recent macOS the containing System Extension must
+    # also be approved interactively. A `go test` binary is ad-hoc signed and
+    # carries no entitlement, so es_new_client returns NOT_PERMITTED.
+    #
+    # The job is still worth running for two things. One, it proves the
+    # per-category proofs skip cleanly with an accurate message rather than
+    # failing or hanging, which is the behaviour anyone running them on a
+    # provisioned Mac depends on. Two,
+    # TestDarwinMonitoringCategoryTableCoversEveryCategory needs no ESF client
+    # and does run here: it asserts every canonical category has a case, and
+    # that each category the table calls unsupported is one the capability
+    # report also reports absent. That is the half of the macOS proof a hosted
+    # runner can carry, and it is what would have caught the report claiming
+    # ES_EVENT_TYPE_NOTIFY_CONNECT, an event type EndpointSecurity does not
+    # define.
+    #
+    # Note this lane uses the cgo build (no nosec tag), because the nosec build
+    # has no ESF bridge at all and would skip for a less interesting reason.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: macOS monitoring integration tests (must skip, not fail)
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          # Do not let go test's exit status end the step: the assertion
+          # below is what matters, and a skip-only run exits zero anyway.
+          # Under sudo so NewESFDriver gets past its root check and the run
+          # reaches the real prerequisite — the entitlement — and prints each
+          # category's own skip reason instead of stopping at "not root".
+          sudo -E env "PATH=$PATH" "CGO_ENABLED=1" \
+            go test -tags=integration ./internal/kernel/ -count=1 -v -timeout 300s \
+            -run 'TestDarwinMonitoring' 2>&1 | tee result.txt || true
+          if grep -q -- "--- FAIL" result.txt; then
+            echo "::error::macOS integration tests failed instead of skipping; the prerequisite gates are wrong"
+            exit 1
+          fi
+          if ! grep -q -- "--- SKIP" result.txt; then
+            echo "::warning::no test skipped — this runner apparently has ESF access, which is unexpected"
+          fi
